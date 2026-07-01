@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+config/.env
+config/google_credentials.json
+config/google_token.json
+logs/*.log
+.DS_Store
+.claude/
+scratchpad
