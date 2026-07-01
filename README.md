@@ -63,8 +63,9 @@ Every tool module is runnable standalone for testing, e.g.:
 | `tasks/morning_brief.py` | Daily 6:00 AM | Fetches weather + next-24h calendar events, has the model write a short "at a glance" summary, assembles a styled HTML email, sends it via Gmail. |
 | `tasks/daily_log.py` | Daily 6:15 AM | Fetches yesterday's Strava activities, has the model (via `run_agent`, tool-calling) log each one to Google Calendar. Deduped by `source_id` (Strava activity id) so re-runs never create duplicates. |
 | `tasks/weekly_learnings.py` | Mondays 5:00 AM | Computes the most recently completed Mon–Sun week, pulls calendar events (categorized by color) + Chrome browsing history + the previous doc entry (for carry-forwards), has the model draft a 4-section retrospective, writes it to the Weekly Learning & Project Log doc. If the doc write fails, emails the draft instead so it's never silently lost. |
+| `tasks/calendar_colorizer.py` | Daily 5:00 PM | Fetches yesterday's calendar events, has the model guess a category per event title (Work/LLC, AARP, Fitness, Meal Prep, Domestic/Chores, Meetings, Travel, Appointments, or Uncategorized) and returns a colorId per event, then patches each event's color. Always re-classifies, even events colored by a previous run or by hand. On failure, emails a notice. |
 
-All three are **fully unattended** — no prompts, no approval steps. This is a
+All four are **fully unattended** — no prompts, no approval steps. This is a
 deliberate difference from the original interactive Claude Code skills these
 were ported from (`ai-memory` / `AgentOS`), which asked clarifying questions
 and waited for approval before writing anywhere. There's nobody to ask at
@@ -121,6 +122,7 @@ mostly useful if the Python process fails to start at all).
    .venv/bin/python -m tasks.morning_brief
    .venv/bin/python -m tasks.daily_log
    .venv/bin/python -m tasks.weekly_learnings
+   .venv/bin/python -m tasks.calendar_colorizer
    ```
 6. Load the launchd plists (see Scheduling section above).
 

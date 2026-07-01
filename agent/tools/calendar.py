@@ -120,10 +120,12 @@ def get_events_in_range(time_min: str, time_max: str) -> dict:
         start = e.get("start", {}).get("dateTime", e.get("start", {}).get("date"))
         end = e.get("end", {}).get("dateTime", e.get("end", {}).get("date"))
         events.append({
+            "id": e.get("id"),
             "summary": e.get("summary", "(no title)"),
             "start": start,
             "end": end,
             "colorId": e.get("colorId"),
+            "status": e.get("status"),
         })
 
     return {"event_count": len(events), "events": events}
@@ -193,6 +195,22 @@ def log_calendar_event(
         return {"error": str(e)}
 
     return {"event_id": created.get("id"), "html_link": created.get("htmlLink")}
+
+
+def set_event_color(event_id: str, color_id: str) -> dict:
+    """Patch just the colorId of an existing event — used by
+    tasks/calendar_colorizer.py to recolor yesterday's events by category."""
+    calendar_id = os.getenv("GOOGLE_CALENDAR_ID", "primary")
+
+    try:
+        service = _service()
+        service.events().patch(
+            calendarId=calendar_id, eventId=event_id, body={"colorId": color_id}
+        ).execute()
+    except Exception as e:
+        return {"error": str(e)}
+
+    return {"event_id": event_id, "color_id": color_id, "updated": True}
 
 
 def main() -> int:
