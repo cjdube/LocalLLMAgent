@@ -36,6 +36,7 @@ from agent.tools.chrome_history import TOOL_SCHEMA as CHROME_SCHEMA, fetch_chrom
 from agent.tools.email import TOOL_SCHEMA as EMAIL_SCHEMA, send_email
 from agent.tools.strava import TOOL_SCHEMA as STRAVA_SCHEMA, fetch_strava
 from agent.tools.weather import TOOL_SCHEMA as WEATHER_SCHEMA, fetch_weather
+from agent.tools.web_search import TOOL_SCHEMA as WEB_SEARCH_SCHEMA, search_web
 from tasks._common import setup_logger
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -62,6 +63,7 @@ TOOLS = [
     EMAIL_SCHEMA,
     STRAVA_SCHEMA,
     WEATHER_SCHEMA,
+    WEB_SEARCH_SCHEMA,
 ]
 DISPATCH = {
     "get_upcoming_events": get_upcoming_events,
@@ -72,6 +74,7 @@ DISPATCH = {
     "send_email": send_email,
     "fetch_strava": fetch_strava,
     "fetch_weather": fetch_weather,
+    "search_web": search_web,
 }
 WRITE_TOOLS = frozenset({"log_calendar_event", "send_email", "recolor_event"})
 
@@ -79,9 +82,10 @@ CHAT_SYSTEM_PROMPT = (
     load_persona("wren_chat.md")
     + "\n\n---\n\n"
     + "You can check the weather, look up Craig's calendar (upcoming, or any "
-    "past or future date range), fetch his recent Strava activities, and "
-    "look up his recent Chrome browsing history — use these when they'd "
-    "help answer the question. You can also send an email, log a calendar "
+    "past or future date range), fetch his recent Strava activities, look up "
+    "his recent Chrome browsing history, and search the web for current "
+    "information you don't already know — use these when they'd help answer "
+    "the question. You can also send an email, log a calendar "
     "event, or recolor an existing event by category on request; the app "
     "pauses those for Craig's confirmation before they execute, so just "
     "explain what you're about to do."

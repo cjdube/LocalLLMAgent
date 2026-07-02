@@ -80,6 +80,7 @@ in — nothing new inherits it automatically.
 | Module | Purpose |
 |---|---|
 | `weather.py` | OpenWeatherMap forecast for `DEFAULT_LOCATION` |
+| `web_search.py` | Web search via Tavily API |
 | `strava.py` | Strava activities via Composio, for a given date |
 | `calendar.py` | Google Calendar read/write (`get_upcoming_events`, `get_events_in_range`, `log_calendar_event` — idempotent via `source_id`) |
 | `email.py` | Send email via Gmail API (plain text or HTML) |
@@ -229,6 +230,7 @@ mostly useful if the Python process fails to start at all).
 3. Copy `config/.env.example` to `config/.env` and fill in:
    - `OPENWEATHERMAP_API_KEY` — [openweathermap.org](https://openweathermap.org/api)
    - `COMPOSIO_API_KEY`, `STRAVA_USER_ID`, `STRAVA_CONNECTED_ACCOUNT_ID` — from your Composio Strava connection
+   - `TAVILY_API_KEY` — [tavily.com](https://tavily.com) (used for web search)
    - `WEEKLY_LOG_DOC_ID` — the Google Doc ID (from its URL) for the Weekly Learning & Project Log
    - `BRIEF_TO_EMAIL`, `DEFAULT_LOCATION` — your own values
    - `WREN_CHAT_TOKEN`, `FLASK_SECRET_KEY` — generate each with
