@@ -98,7 +98,7 @@ Every tool module is runnable standalone for testing, e.g.:
 
 | Task | Schedule | What it does |
 |---|---|---|
-| `tasks/morning_brief.py` | Daily 6:00 AM | Fetches weather + next-24h calendar events, has the model write a short "at a glance" summary, assembles a styled HTML email, sends it via Gmail. |
+| `tasks/morning_brief.py` | Daily 6:00 AM | Fetches weather + next-24h calendar events + latest AI news (via Tavily `search_web`), has the model write a short "at a glance" summary and a one-sentence AI-news intro, assembles a styled HTML email (weather / calendar / AI News sections), sends it via Gmail. The pipeline lives in `build_and_send_brief()`, shared with the chat `send_morning_brief` tool. |
 | `tasks/daily_log.py` | Daily 6:15 AM | Fetches yesterday's Strava activities, has the model (via `run_agent`, tool-calling) log each one to Google Calendar. Deduped by `source_id` (Strava activity id) so re-runs never create duplicates. |
 | `tasks/weekly_learnings.py` | Mondays 5:00 AM | Computes the most recently completed Mon–Sun week, pulls calendar events (categorized by color) + Chrome browsing history + the previous doc entry (for carry-forwards), has the model draft a 4-section retrospective, writes it to the Weekly Learning & Project Log doc. If the doc write fails, emails the draft instead so it's never silently lost. |
 | `tasks/calendar_colorizer.py` | Daily 5:00 PM | Fetches yesterday's calendar events, has the model guess a category per event title (Work/LLC, AARP, Fitness, Meal Prep, Domestic/Chores, Meetings, Travel, Appointments, or Uncategorized) and returns a colorId per event, then patches each event's color. Always re-classifies, even events colored by a previous run or by hand. On failure, emails a notice. |
@@ -124,21 +124,27 @@ chat/
 - **Tools available in chat:** `fetch_weather`, `fetch_strava`,
   `get_upcoming_events`, `get_events_by_date` (any past or future date range,
   including the words `'today'`/`'yesterday'` — resolved in Python so the
-  model never has to guess the current date), `fetch_chrome_history`
-  (read-only, execute immediately), plus `log_calendar_event`, `send_email`,
-  and `recolor_event` (state-changing — see confirmation gate below).
+  model never has to guess the current date), `fetch_chrome_history`, and
+  `search_web` (Tavily web search for current info the model doesn't already
+  know) — all read-only, execute immediately — plus `log_calendar_event`,
+  `send_email`, `recolor_event`, and `send_morning_brief` (state-changing —
+  see confirmation gate below).
   `recolor_event` takes a category name (`agent/tools/calendar.py`'s
   `CATEGORY_COLORS` — the same mapping `calendar_colorizer.py`'s daily job
   uses), not a raw colorId, since that's far more reliable for a small local
-  model. Not yet wired up for chat: reading/writing the Weekly Log doc — those
-  functions don't have a `TOOL_SCHEMA` yet (only ever called directly from
-  Python by `weekly_learnings.py`). Same pattern extends it later if wanted.
-- **Confirmation gate:** before `log_calendar_event`, `send_email`, or
-  `recolor_event` actually runs, the chat UI shows what Wren wants to do and
-  waits for a tap to confirm or cancel — enforced in code (`advance()`'s
-  `confirm_before` set in `agent/loop.py`), not just requested in the prompt,
-  so it doesn't depend on
-  the small local model reliably remembering to ask.
+  model. `send_morning_brief` builds and sends the same polished HTML brief the
+  scheduled task sends (via the shared `build_and_send_brief()`) — chat is told
+  to use it rather than freehand-composing a brief with `send_email`, so the
+  formatting never degrades to raw markdown. Not yet wired up for chat:
+  reading/writing the Weekly Log doc — those functions don't have a
+  `TOOL_SCHEMA` yet (only ever called directly from Python by
+  `weekly_learnings.py`). Same pattern extends it later if wanted.
+- **Confirmation gate:** before `log_calendar_event`, `send_email`,
+  `recolor_event`, or `send_morning_brief` actually runs, the chat UI shows
+  what Wren wants to do and waits for a tap to confirm or cancel — enforced in
+  code (`advance()`'s `confirm_before` set in `agent/loop.py`), not just
+  requested in the prompt, so it doesn't depend on the small local model
+  reliably remembering to ask.
 - **Session memory:** in-memory only, per browser session (a signed cookie
   carries a session id; conversation history lives in a server-side dict
   keyed by it). Fresh conversation on first visit or after tapping "New

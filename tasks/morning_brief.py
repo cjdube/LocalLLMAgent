@@ -1,9 +1,15 @@
 """Compose and send the morning brief email. Non-interactive — run by launchd.
 
-Weather and calendar data are fetched directly (deterministic), the local
-LLM writes a short "at a glance" summary from that data, and the HTML is
-assembled in Python — this keeps the layout/icons reliable regardless of
-how well the small local model follows HTML formatting instructions.
+Weather, calendar, and AI-news data are fetched directly (deterministic), the
+local LLM writes only short blurbs from that data (the "at a glance" line and a
+one-sentence AI-news intro), and the HTML is assembled in Python — this keeps
+the layout/icons reliable regardless of how well the small local model follows
+HTML formatting instructions.
+
+The whole pipeline lives in build_and_send_brief(), which is shared by two
+callers: this scheduled task (main, below) and the chat server's
+send_morning_brief tool (see SEND_BRIEF_TOOL_SCHEMA), so an on-request brief
+from chat produces byte-for-byte the same email the scheduled run sends.
 
 Usage:
     python -m tasks.morning_brief
@@ -17,6 +23,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -108,6 +115,16 @@ def _weather_html(weather: dict) -> str:
     )
 
 
+def _safe_url(url: str) -> str:
+    """Return url only if it's an http(s) link, else "". Guards against
+    javascript:/data: (or other) schemes in externally-sourced URLs —
+    html.escape() alone does not neutralize a dangerous scheme."""
+    try:
+        return url if urlparse(url).scheme in ("http", "https") else ""
+    except (ValueError, AttributeError):
+        return ""
+
+
 def _clean_snippet(text: str, max_len: int = 160) -> str:
     text = re.sub(r"#+\s*", "", text)  # strip markdown heading markers
     text = re.sub(r"\s+", " ", text).strip()  # collapse newlines/whitespace
@@ -124,10 +141,16 @@ def _ai_news_html(articles: list, intro_text: str, error: str = None) -> str:
     items = []
     for a in articles:
         title = html.escape(a.get("title", "(untitled)"))
-        url = html.escape(a.get("url", ""))
+        safe_url = _safe_url(a.get("url", ""))
         snippet = _clean_snippet(a.get("content", ""))
         snippet_html = f" — {html.escape(snippet)}" if snippet else ""
-        items.append(f'<li><a href="{url}">{title}</a>{snippet_html}</li>')
+        # Only link when the scheme is http(s); otherwise show the title as
+        # plain text rather than emit an anchor to an untrusted scheme.
+        if safe_url:
+            title_html = f'<a href="{html.escape(safe_url)}">{title}</a>'
+        else:
+            title_html = title
+        items.append(f"<li>{title_html}{snippet_html}</li>")
     intro_html = f'<p class="intro">{html.escape(intro_text)}</p>' if intro_text else ""
     return intro_html + "<ul>" + "".join(items) + "</ul>"
 

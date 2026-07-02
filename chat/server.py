@@ -69,9 +69,11 @@ TOOLS = [
 ]
 
 
-def _send_morning_brief() -> dict:
+def _send_morning_brief(**_) -> dict:
     # Bound here instead of imported directly so it logs to the "wren"
     # logger below rather than build_and_send_brief()'s default of none.
+    # Accepts/ignores stray kwargs in case the model hallucinates an argument
+    # for this no-parameter tool.
     return build_and_send_brief(logger=logger)
 
 
