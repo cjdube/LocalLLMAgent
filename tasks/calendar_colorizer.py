@@ -14,35 +14,45 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent.loop import complete_text
-from agent.tools.calendar import _local_timezone, get_events_in_range, set_event_color
+from agent.tools.calendar import CATEGORY_COLORS, _local_timezone, get_events_in_range, set_event_color
 from agent.tools.email import send_email
 from tasks._common import setup_logger
 
-VALID_COLOR_IDS = {"1", "9", "4", "10", "5", "3", "7", "6", "11"}
+VALID_COLOR_IDS = {color_id for color_id, _ in CATEGORY_COLORS.values()}
 
-CLASSIFY_SYSTEM_PROMPT = """You are Craig's calendar color-coding assistant. You are given a \
+# Extra classification guidance per category — genuinely prompt-specific, so
+# it stays local rather than living in agent/tools/calendar.py's mapping.
+_CATEGORY_HINTS = {
+    "Meetings": "with others",
+    "Travel": "/ Vacation",
+    "Appointments": "(doctor, dentist, car, etc.)",
+    "Uncategorized": "(only if genuinely unable to tell)",
+}
+
+
+def _classification_table() -> str:
+    rows = ["| Category | Color name | colorId |", "|----------|-----------|---------|"]
+    for category, (color_id, color_name) in CATEGORY_COLORS.items():
+        label = category.replace("/", " / ")
+        if category in _CATEGORY_HINTS:
+            label = f"{label} {_CATEGORY_HINTS[category]}"
+        rows.append(f"| {label} | {color_name} | {color_id} |")
+    return "\n".join(rows)
+
+
+CLASSIFY_SYSTEM_PROMPT = f"""You are Craig's calendar color-coding assistant. You are given a \
 JSON list of yesterday's calendar events, each with an "id" and a "summary" (title). For \
 each event, decide which category it belongs to and return the matching Google Calendar \
 colorId, using EXACTLY this mapping:
 
-| Category | Color name | colorId |
-|----------|-----------|---------|
-| Work / LLC | Lavender | 1 |
-| AARP | Blueberry | 9 |
-| Fitness | Flamingo | 4 |
-| Meal Prep | Basil | 10 |
-| Domestic / Chores | Banana | 5 |
-| Meetings with others | Grape | 3 |
-| Travel / Vacation | Peacock | 7 |
-| Appointments (doctor, dentist, car, etc.) | Tangerine | 6 |
-| Uncategorized (only if genuinely unable to tell) | Tomato | 11 |
+{_classification_table()}
 
 Best-guess every event from its title. Only use colorId "11" when you genuinely cannot tell \
 what category an event belongs to — do not use it as a default.
 
 Output ONLY a single JSON object mapping each event's "id" to its chosen colorId string, \
 nothing else — no preamble, no explanation, no markdown code fences. Example:
-{"abc123": "1", "def456": "6"}
+{{"abc123": "1", "def456": "6"}}
 """
 
 

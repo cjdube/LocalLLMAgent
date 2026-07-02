@@ -1,10 +1,16 @@
 # LocalLLMAgent
 
-A fully local, unattended agent system that runs on this Mac Mini. It performs
-scheduled tasks (Strava-to-calendar logging, a morning brief email, a weekly
-retrospective doc entry) using a **local LLM served by Ollama** — no Anthropic/
-Claude API calls at runtime, and no Claude Code/Cowork-managed scheduling.
-Scheduling is handled entirely by macOS `launchd`.
+A fully local agent system that runs on this Mac Mini, powered by a **local LLM
+served by Ollama** — no Anthropic/Claude API calls at runtime, and no Claude
+Code/Cowork-managed scheduling. The agent has a name: **Wren**. It works two
+ways:
+
+- **Scheduled tasks** (Strava-to-calendar logging, a morning brief email, a
+  weekly retrospective doc entry) — unattended, triggered entirely by macOS
+  `launchd`, no human in the loop.
+- **Ad hoc chat** — a small always-on web app (`chat/server.py`) so Craig can
+  talk to Wren directly and have her take action on request, from anywhere,
+  over Tailscale. See "Wren — ad hoc chat" below.
 
 ## Architecture
 
@@ -25,18 +31,49 @@ swap: `daily_log.py` relies on Ollama's tool-calling protocol (`tools` /
 `tool_calls`), so a model with weak tool-calling support may not drive it
 reliably — the other two tasks only need plain text completion.
 
-### `agent/loop.py` — the two ways tasks talk to the model
+### `agent/loop.py` — how tasks and chat talk to the model
 
-- **`run_agent(...)`** — the full tool-calling loop. Sends messages + tool
-  schemas to Ollama's `/api/chat`, dispatches any `tool_calls` to local Python
-  functions, feeds results back, repeats (capped at 6 iterations) until the
-  model returns a final text answer. Used by `daily_log.py`.
+- **`run_agent(...)`** — the full tool-calling loop for unattended tasks. Sends
+  messages + tool schemas to Ollama's `/api/chat`, dispatches any `tool_calls`
+  to local Python functions immediately, feeds results back, repeats (capped
+  at 6 iterations) until the model returns a final text answer. Used by
+  `daily_log.py`. Internally a thin wrapper over `advance()` (below).
 - **`complete_text(...)`** — a single-turn, tool-free completion. Used when
   the surrounding structure (HTML layout, doc template) is built
   deterministically in Python and the model is only asked to write a
   paragraph of prose to slot in. Used by `morning_brief.py` and
   `weekly_learnings.py` — this is more reliable than trusting a small local
   model to produce well-formed HTML/markdown on its own.
+- **`advance(messages, tools, dispatch, confirm_before=...)`** /
+  **`resolve(messages, call, approved, dispatch)`** — the lower-level,
+  resumable primitive `chat/server.py` uses for ad hoc chat. `advance()` auto-
+  executes any tool call whose name isn't in `confirm_before`, same as
+  `run_agent`; the moment one *is* in that set, it stops and returns the
+  pending call without executing it, so a web request can show the user what's
+  about to happen and come back later (a second HTTP request calling
+  `resolve()` then `advance()` again) to actually run it. `run_agent` calls
+  `advance()` with an empty `confirm_before`, so nothing ever pauses —
+  identical behavior to before this was extracted.
+
+Every system prompt gets two persona layers prepended automatically (via
+`with_identity()`), in order:
+1. **`agent/wren.md`** — Wren's own identity: name, voice, personality traits.
+   Present in *every* call, scheduled or chat, so she's a consistent agent
+   either way.
+2. **`agent/identity.md`** — who Craig is and how he wants things written
+   (direct, concise, no flattery).
+
+Both are hand-maintained, condensed excerpts of `AgentOS/IDENTITY.md` (Part 2
+and Part 1 respectively) — trimmed because the full file includes Claude-Code/
+AgentOS-specific content (diagrams, "System 2 Founder") that doesn't apply to
+a small local model. A third file, **`agent/wren_chat.md`**, holds
+*behavioral* instructions (ask questions when useful, narrate intent before an
+action) that only make sense in an interactive session — it's loaded only by
+`chat/server.py`, not injected into scheduled tasks, since those are
+explicitly told not to ask questions or wait for confirmation (there's nobody
+to ask at 5am). Since every task and the chat server talk to Ollama through
+these functions, this is the only place persona/identity needs to be wired
+in — nothing new inherits it automatically.
 
 ### `agent/tools/` — one module per capability
 
@@ -71,12 +108,96 @@ were ported from (`ai-memory` / `AgentOS`), which asked clarifying questions
 and waited for approval before writing anywhere. There's nobody to ask at
 5am, so these versions infer everything from the data and just act.
 
+## Wren — ad hoc chat
+
+`chat/server.py` is a small always-on Flask app so Craig can talk to Wren
+directly instead of waiting for a scheduled run — check something, ask a
+question, or have her take an action right now.
+
+```
+chat/
+  server.py         # Flask app: auth, conversation state, routes
+  static/index.html # single-page chat UI (vanilla JS, no build step)
+```
+
+- **Tools available in chat:** `fetch_weather`, `fetch_strava`,
+  `get_upcoming_events`, `get_events_by_date` (any past or future date range,
+  including the words `'today'`/`'yesterday'` — resolved in Python so the
+  model never has to guess the current date), `fetch_chrome_history`
+  (read-only, execute immediately), plus `log_calendar_event`, `send_email`,
+  and `recolor_event` (state-changing — see confirmation gate below).
+  `recolor_event` takes a category name (`agent/tools/calendar.py`'s
+  `CATEGORY_COLORS` — the same mapping `calendar_colorizer.py`'s daily job
+  uses), not a raw colorId, since that's far more reliable for a small local
+  model. Not yet wired up for chat: reading/writing the Weekly Log doc — those
+  functions don't have a `TOOL_SCHEMA` yet (only ever called directly from
+  Python by `weekly_learnings.py`). Same pattern extends it later if wanted.
+- **Confirmation gate:** before `log_calendar_event`, `send_email`, or
+  `recolor_event` actually runs, the chat UI shows what Wren wants to do and
+  waits for a tap to confirm or cancel — enforced in code (`advance()`'s
+  `confirm_before` set in `agent/loop.py`), not just requested in the prompt,
+  so it doesn't depend on
+  the small local model reliably remembering to ask.
+- **Session memory:** in-memory only, per browser session (a signed cookie
+  carries a session id; conversation history lives in a server-side dict
+  keyed by it). Fresh conversation on first visit or after tapping "New
+  chat"; lost entirely on server restart — no persistence across sessions.
+- **Auth:** a shared token (`WREN_CHAT_TOKEN` in `config/.env`) gates
+  `POST /login`, checked with a constant-time comparison; a signed session
+  cookie (`FLASK_SECRET_KEY`) remembers you for 30 days after that. This is
+  defense-in-depth — the real security boundary is that the server is only
+  reachable over Tailscale (below), never the open internet.
+- **Transport:** `tailscale serve` terminates HTTPS for the tailnet hostname
+  and reverse-proxies to the plain-HTTP Flask app on `127.0.0.1:8420` — see
+  "Running it" below. The session cookie is `Secure`, so it's only sent over
+  that HTTPS origin; a direct `http://<tailscale-ip>:8420` request will load
+  the login page but won't keep you signed in.
+- **Not a production server:** `chat/server.py` runs Flask's built-in dev
+  server (`app.run(...)`), which is fine here — single user, LAN/Tailscale-
+  only, and `launchd`'s `KeepAlive` already handles the process-supervision
+  job a "real" WSGI server setup would otherwise be for.
+
+### Running it
+
+Unlike the scheduled tasks (`StartCalendarInterval`), this needs to just stay
+running — `launchd/com.craigdube.localllmagent.wren.plist` uses `RunAtLoad` +
+`KeepAlive` instead, so it starts on login and restarts if it crashes. Same
+log convention as the other tasks: `logs/wren.log` (structured) +
+`logs/wren.launchd.log` (raw stdout/stderr).
+
+To reach it from your phone from anywhere (not just home WiFi), install
+[Tailscale](https://tailscale.com) on the Mac Mini and your phone, signed
+into the same account on both — this creates a private encrypted network
+between just your devices, so the chat server never needs to be exposed to
+the public internet or have a router port forwarded.
+
+Tailscale's WireGuard tunnel already encrypts traffic between devices, but
+`tailscale serve` adds a real HTTPS front door on top (auto-issued/renewed
+Let's Encrypt cert for the tailnet hostname, no cert management needed) —
+set up once per machine:
+
+```bash
+# one-time: enable "HTTPS Certificates" for the tailnet at
+# https://login.tailscale.com/admin/dns, then:
+tailscale serve --bg 8420
+tailscale serve status   # confirm it's proxying to the chat server
+```
+
+This persists across reboots (`tailscaled` reapplies it on start) — no
+launchd entry needed. Once both devices are on your tailnet, reach the chat
+at `https://<mac-mini-tailscale-name>/` (port 443, the HTTPS default — no
+`:8420` needed, `tailscale serve` handles the mapping) from anywhere your
+phone has a connection.
+
 ## Scheduling — launchd
 
-Each task has a `.plist` in `launchd/`, copied to `~/Library/LaunchAgents/`
-and loaded with `launchctl load`. `launchd` was chosen over `cron` because it
-survives sleep/wake and is the native macOS mechanism — no Claude Code/Cowork
-involvement in scheduling at all.
+Each task (and the always-on chat server) has a `.plist` in `launchd/`,
+copied to `~/Library/LaunchAgents/` and loaded with `launchctl load`.
+`launchd` was chosen over `cron` because it survives sleep/wake and is the
+native macOS mechanism — no Claude Code/Cowork involvement in scheduling at
+all. The four scheduled tasks use `StartCalendarInterval`; Wren's chat server
+(`com.craigdube.localllmagent.wren.plist`) uses `RunAtLoad` + `KeepAlive`
+instead, since it needs to just stay running rather than fire on a timer.
 
 Useful commands:
 ```bash
@@ -110,6 +231,9 @@ mostly useful if the Python process fails to start at all).
    - `COMPOSIO_API_KEY`, `STRAVA_USER_ID`, `STRAVA_CONNECTED_ACCOUNT_ID` — from your Composio Strava connection
    - `WEEKLY_LOG_DOC_ID` — the Google Doc ID (from its URL) for the Weekly Learning & Project Log
    - `BRIEF_TO_EMAIL`, `DEFAULT_LOCATION` — your own values
+   - `WREN_CHAT_TOKEN`, `FLASK_SECRET_KEY` — generate each with
+     `python -c "import secrets; print(secrets.token_hex(32))"`; leave
+     `WREN_CHAT_PORT` at its default unless it conflicts with something else
 4. Google OAuth setup (Calendar + Gmail + Docs):
    - [console.cloud.google.com](https://console.cloud.google.com/) → create/select a project
    - Enable the **Google Calendar API**, **Gmail API**, and **Google Docs API**
@@ -124,7 +248,18 @@ mostly useful if the Python process fails to start at all).
    .venv/bin/python -m tasks.weekly_learnings
    .venv/bin/python -m tasks.calendar_colorizer
    ```
-6. Load the launchd plists (see Scheduling section above).
+6. Test the chat server manually: `.venv/bin/python -m chat.server`, then
+   visit `http://localhost:8420` and log in with `WREN_CHAT_TOKEN`. (Fine for
+   a quick smoke test since the session cookie is `Secure` — a real browser
+   may not persist login over plain `http://`; use the HTTPS tailnet URL from
+   step 8 for anything beyond a one-off check.)
+7. Load the launchd plists (see Scheduling section above) — this now
+   includes `com.craigdube.localllmagent.wren.plist`, the always-on chat
+   server.
+8. Install [Tailscale](https://tailscale.com) on the Mac Mini and your phone
+   if you want to reach Wren's chat from outside your home WiFi, then run
+   `tailscale serve --bg 8420` (see "Wren — ad hoc chat" above for the
+   one-time HTTPS Certificates setup this needs).
 
 ## Adding a new scheduled skill
 

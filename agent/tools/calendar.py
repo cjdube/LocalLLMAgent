@@ -11,6 +11,7 @@ import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 from googleapiclient.discovery import build
@@ -53,6 +54,56 @@ LOG_TOOL_SCHEMA = {
                 },
             },
             "required": ["summary", "start", "end"],
+        },
+    },
+}
+
+# Single source of truth for category -> (colorId, color name). Also used by
+# tasks/calendar_colorizer.py to build its classification prompt.
+CATEGORY_COLORS = {
+    "Work/LLC": ("1", "Lavender"),
+    "AARP": ("9", "Blueberry"),
+    "Fitness": ("4", "Flamingo"),
+    "Meal Prep": ("10", "Basil"),
+    "Domestic/Chores": ("5", "Banana"),
+    "Meetings": ("3", "Grape"),
+    "Travel": ("7", "Peacock"),
+    "Appointments": ("6", "Tangerine"),
+    "Uncategorized": ("11", "Tomato"),
+}
+
+RECOLOR_TOOL_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "recolor_event",
+        "description": "Recolor an existing Google Calendar event by category.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "event_id": {
+                    "type": "string",
+                    "description": "The event's id, from get_upcoming_events or get_events_by_date.",
+                },
+                "category": {"type": "string", "enum": list(CATEGORY_COLORS.keys())},
+            },
+            "required": ["event_id", "category"],
+        },
+    },
+}
+
+GET_BY_DATE_TOOL_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "get_events_by_date",
+        "description": "Get Google Calendar events (including colorId) between two dates, "
+        "inclusive — for past or future dates, not just what's upcoming.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "start": {"type": "string", "description": "Start date as YYYY-MM-DD, 'today', or 'yesterday'."},
+                "end": {"type": "string", "description": "End date as YYYY-MM-DD, 'today', or 'yesterday'."},
+            },
+            "required": ["start", "end"],
         },
     },
 }
@@ -129,6 +180,23 @@ def get_events_in_range(time_min: str, time_max: str) -> dict:
         })
 
     return {"event_count": len(events), "events": events}
+
+
+def get_events_by_date(start: str, end: str) -> dict:
+    """Chat-friendly wrapper over get_events_in_range() — takes YYYY-MM-DD
+    dates (or the literal words 'today'/'yesterday', resolved here rather
+    than trusting the model to know the current date — same pattern as
+    agent/tools/strava.py's fetch_strava) and builds the full-day ISO 8601
+    range in local time, so the model never has to construct a
+    timezone-aware datetime itself."""
+    tz = ZoneInfo(_local_timezone())
+    today = datetime.now(tz).date()
+    aliases = {"today": today.isoformat(), "yesterday": (today - timedelta(days=1)).isoformat()}
+    start = aliases.get(start, start)
+    end = aliases.get(end, end)
+    start_dt = datetime.fromisoformat(start).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=tz)
+    end_dt = datetime.fromisoformat(end).replace(hour=23, minute=59, second=59, microsecond=999999, tzinfo=tz)
+    return get_events_in_range(start_dt.isoformat(), end_dt.isoformat())
 
 
 def _local_timezone() -> str:
@@ -211,6 +279,16 @@ def set_event_color(event_id: str, color_id: str) -> dict:
         return {"error": str(e)}
 
     return {"event_id": event_id, "color_id": color_id, "updated": True}
+
+
+def recolor_event(event_id: str, category: str) -> dict:
+    """Recolor an existing event by category name (see CATEGORY_COLORS) —
+    the chat-callable counterpart to set_event_color()."""
+    entry = CATEGORY_COLORS.get(category)
+    if entry is None:
+        return {"error": f"unknown category '{category}', must be one of {list(CATEGORY_COLORS)}"}
+    color_id, _ = entry
+    return set_event_color(event_id, color_id)
 
 
 def main() -> int:
