@@ -38,6 +38,7 @@ from agent.tools.strava import TOOL_SCHEMA as STRAVA_SCHEMA, fetch_strava
 from agent.tools.weather import TOOL_SCHEMA as WEATHER_SCHEMA, fetch_weather
 from agent.tools.web_search import TOOL_SCHEMA as WEB_SEARCH_SCHEMA, search_web
 from tasks._common import setup_logger
+from tasks.morning_brief import SEND_BRIEF_TOOL_SCHEMA, build_and_send_brief
 
 _ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(_ROOT / "config" / ".env")
@@ -64,7 +65,16 @@ TOOLS = [
     STRAVA_SCHEMA,
     WEATHER_SCHEMA,
     WEB_SEARCH_SCHEMA,
+    SEND_BRIEF_TOOL_SCHEMA,
 ]
+
+
+def _send_morning_brief() -> dict:
+    # Bound here instead of imported directly so it logs to the "wren"
+    # logger below rather than build_and_send_brief()'s default of none.
+    return build_and_send_brief(logger=logger)
+
+
 DISPATCH = {
     "get_upcoming_events": get_upcoming_events,
     "log_calendar_event": log_calendar_event,
@@ -75,8 +85,9 @@ DISPATCH = {
     "fetch_strava": fetch_strava,
     "fetch_weather": fetch_weather,
     "search_web": search_web,
+    "send_morning_brief": _send_morning_brief,
 }
-WRITE_TOOLS = frozenset({"log_calendar_event", "send_email", "recolor_event"})
+WRITE_TOOLS = frozenset({"log_calendar_event", "send_email", "recolor_event", "send_morning_brief"})
 
 CHAT_SYSTEM_PROMPT = (
     load_persona("wren_chat.md")
@@ -88,7 +99,11 @@ CHAT_SYSTEM_PROMPT = (
     "the question. You can also send an email, log a calendar "
     "event, or recolor an existing event by category on request; the app "
     "pauses those for Craig's confirmation before they execute, so just "
-    "explain what you're about to do."
+    "explain what you're about to do. If Craig asks you to send or resend "
+    "his morning brief, use send_morning_brief rather than composing that "
+    "email yourself with send_email — it builds the same formatted HTML "
+    "brief the scheduled task sends, which you can't reliably reproduce by "
+    "writing the email body freehand."
 )
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -142,6 +157,8 @@ def _describe_call(call: dict) -> str:
     args = call["function"].get("arguments", {})
     if name == "send_email":
         return f'Send an email — subject: "{args.get("subject", "")}"'
+    if name == "send_morning_brief":
+        return "Send the morning brief (weather, calendar, AI news)"
     if name == "log_calendar_event":
         return f'Create calendar event "{args.get("summary", "")}" from {args.get("start", "?")} to {args.get("end", "?")}'
     if name == "recolor_event":
