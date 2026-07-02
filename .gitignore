@@ -4,6 +4,7 @@ __pycache__/
 config/.env
 config/google_credentials.json
 config/google_token.json
+config/github_starred_state.json
 logs/*.log
 .DS_Store
 .claude/

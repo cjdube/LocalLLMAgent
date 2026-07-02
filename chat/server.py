@@ -34,6 +34,7 @@ from agent.tools.calendar import (
 )
 from agent.tools.chrome_history import TOOL_SCHEMA as CHROME_SCHEMA, fetch_chrome_history
 from agent.tools.email import TOOL_SCHEMA as EMAIL_SCHEMA, send_email
+from agent.tools.github_starred import TOOL_SCHEMA as GITHUB_STARRED_SCHEMA, fetch_starred_repos
 from agent.tools.strava import TOOL_SCHEMA as STRAVA_SCHEMA, fetch_strava
 from agent.tools.weather import TOOL_SCHEMA as WEATHER_SCHEMA, fetch_weather
 from agent.tools.web_search import TOOL_SCHEMA as WEB_SEARCH_SCHEMA, search_web
@@ -65,6 +66,7 @@ TOOLS = [
     STRAVA_SCHEMA,
     WEATHER_SCHEMA,
     WEB_SEARCH_SCHEMA,
+    GITHUB_STARRED_SCHEMA,
     SEND_BRIEF_TOOL_SCHEMA,
 ]
 
@@ -87,6 +89,7 @@ DISPATCH = {
     "fetch_strava": fetch_strava,
     "fetch_weather": fetch_weather,
     "search_web": search_web,
+    "fetch_starred_repos": fetch_starred_repos,
     "send_morning_brief": _send_morning_brief,
 }
 WRITE_TOOLS = frozenset({"log_calendar_event", "send_email", "recolor_event", "send_morning_brief"})
@@ -98,9 +101,15 @@ CHAT_SYSTEM_PROMPT = (
     "days out — pass a days argument if Craig asks about more than just "
     "today), look up Craig's calendar (upcoming, or any "
     "past or future date range), fetch his recent Strava activities, look up "
-    "his recent Chrome browsing history, and search the web for current "
-    "information you don't already know — use these when they'd help answer "
-    "the question. You can also send an email, log a calendar "
+    "his recent Chrome browsing history, search the web for current "
+    "information you don't already know, and look up his starred GitHub "
+    "repos (pass days_ago rather than computing a date yourself if he asks "
+    "what's new in the last N days). Each repo's recent_changes field is "
+    "already condensed to what matters — if it ends with a '(+N more "
+    "commits)' or '(+N more releases)' note, that count is important, not a "
+    "footnote to drop: always carry it into your summary (e.g. 'plus 8 more "
+    "commits') so Craig knows the repo had more activity than what's shown. "
+    "Use these tools when they'd help answer the question. You can also send an email, log a calendar "
     "event, or recolor an existing event by category on request; the app "
     "pauses those for Craig's confirmation before they execute, so just "
     "explain what you're about to do. If Craig asks you to send or resend "

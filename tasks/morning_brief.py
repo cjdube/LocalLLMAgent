@@ -16,11 +16,12 @@ Usage:
 """
 
 import html
+import json
 import logging
 import os
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
@@ -32,6 +33,7 @@ from dotenv import load_dotenv
 from agent.loop import complete_text
 from agent.tools.calendar import get_upcoming_events
 from agent.tools.email import send_email
+from agent.tools.github_starred import fetch_starred_repos
 from agent.tools.weather import fetch_weather
 from agent.tools.web_search import search_web
 from tasks._common import setup_logger, today_str
@@ -41,6 +43,7 @@ load_dotenv(_ROOT / "config" / ".env")
 
 DEFAULT_LOCATION = os.getenv("DEFAULT_LOCATION", "Newfields,NH,US")
 AI_NEWS_MAX_STORIES = 4
+STARRED_STATE_PATH = _ROOT / "config" / "github_starred_state.json"
 
 GLANCE_SYSTEM_PROMPT = """You write a single short "Today at a Glance" blurb for a \
 personal morning brief email. Given the day's weather and calendar events as JSON, \
@@ -52,6 +55,23 @@ section of a personal morning brief email. Given a JSON list of today's AI news 
 results (title, url, content snippet), write 1 plain sentence naming the most notable \
 theme or story. No markdown, no links, no quotes around the output — just the sentence \
 itself. Be concise and neutral."""
+
+STARRED_REPOS_SYSTEM_PROMPT = """You write a single short intro sentence for the "Starred \
+Repos" section of a personal morning brief email. Given a JSON list of GitHub repos the \
+user has starred that were pushed to recently (name, description, pushed_at), write 1 \
+plain sentence naming the most notable update. No markdown, no links, no quotes around \
+the output — just the sentence itself. Be concise and neutral."""
+
+
+def _read_starred_state() -> Optional[str]:
+    try:
+        return json.loads(STARRED_STATE_PATH.read_text()).get("last_checked")
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+
+
+def _write_starred_state(last_checked: str) -> None:
+    STARRED_STATE_PATH.write_text(json.dumps({"last_checked": last_checked}))
 
 _STYLE = """
   <style>
@@ -155,8 +175,39 @@ def _ai_news_html(articles: list, intro_text: str, error: str = None) -> str:
     return intro_html + "<ul>" + "".join(items) + "</ul>"
 
 
+def _starred_repos_html(repos: list, intro_text: str, error: str = None) -> str:
+    if error:
+        return f'<span class="empty">Starred repos unavailable: {html.escape(error)}</span>'
+    if not repos:
+        return '<span class="empty">No updates to your starred repos since last check.</span>'
+    items = []
+    for r in repos:
+        name = html.escape(r.get("full_name") or r.get("name", "(unnamed)"))
+        safe_url = _safe_url(r.get("html_url", ""))
+        # Prefer a summary of what actually changed (release notes / recent
+        # commit subjects) over the repo's static description, which is what
+        # Craig asked for — the description alone doesn't say what's new.
+        # recent_changes is already sized (including its "+N more" count
+        # suffix) by the tool, so only the raw description needs cleaning —
+        # re-truncating recent_changes here would chop the suffix mid-word.
+        changes = r.get("recent_changes") or _clean_snippet(r.get("description") or "")
+        changes_html = f" — {html.escape(changes)}" if changes else ""
+        name_html = f'<a href="{html.escape(safe_url)}">{name}</a>' if safe_url else name
+        items.append(f"<li>{name_html}{changes_html}</li>")
+    intro_html = f'<p class="intro">{html.escape(intro_text)}</p>' if intro_text else ""
+    return intro_html + "<ul>" + "".join(items) + "</ul>"
+
+
 def render_brief_html(
-    weather: dict, events: list, glance_text: str, ai_articles: list, ai_intro: str, ai_error: str = None
+    weather: dict,
+    events: list,
+    glance_text: str,
+    ai_articles: list,
+    ai_intro: str,
+    starred_repos: list,
+    starred_intro: str,
+    ai_error: str = None,
+    starred_error: str = None,
 ) -> str:
     date_str = datetime.now().strftime("%A, %B %-d")
     sections = (
@@ -164,6 +215,7 @@ def render_brief_html(
         + _section("\U0001F4C5", "Calendar", _events_html(events))
         + _section("\U0001F324️", "Weather", _weather_html(weather))
         + _section("\U0001F916", "AI News", _ai_news_html(ai_articles, ai_intro, ai_error))
+        + _section("⭐", "Starred Repos", _starred_repos_html(starred_repos, starred_intro, starred_error))
     )
     return f"""<!DOCTYPE html>
 <html>
@@ -243,7 +295,38 @@ def build_and_send_brief(logger: Optional[logging.Logger] = None) -> dict:
             if logger:
                 logger.info(f"ai news intro -> {ai_intro}")
 
-        body_html = render_brief_html(weather, events, glance_text, ai_articles, ai_intro, ai_error)
+        # Capture "now" before the fetch so the window written to state after a
+        # successful send never skips activity that happened during this run.
+        starred_check_time = datetime.now(timezone.utc).isoformat()
+        starred_since = _read_starred_state() or (
+            datetime.now(timezone.utc) - timedelta(hours=24)
+        ).isoformat()
+        starred_result = fetch_starred_repos(since=starred_since)
+        if logger:
+            logger.info(f"fetch_starred_repos(since={starred_since}) -> {starred_result}")
+        starred_error = starred_result.get("error")
+        starred_repos = starred_result.get("repos", [])
+
+        starred_intro = ""
+        if starred_repos and not starred_error:
+            starred_intro = complete_text(
+                system_prompt=STARRED_REPOS_SYSTEM_PROMPT,
+                user_prompt=f"starred_repo_updates: {starred_repos}",
+            )
+            if logger:
+                logger.info(f"starred repos intro -> {starred_intro}")
+
+        body_html = render_brief_html(
+            weather,
+            events,
+            glance_text,
+            ai_articles,
+            ai_intro,
+            starred_repos,
+            starred_intro,
+            ai_error,
+            starred_error,
+        )
         result = send_email(
             subject=f"Morning Brief - {today_str()}",
             body=body_html,
@@ -251,6 +334,11 @@ def build_and_send_brief(logger: Optional[logging.Logger] = None) -> dict:
         )
         if logger:
             logger.info(f"send_email -> {result}")
+
+        if "error" not in result and not starred_error:
+            _write_starred_state(starred_check_time)
+
+        if logger:
             logger.info("Morning brief run complete")
         return result
     except Exception as e:

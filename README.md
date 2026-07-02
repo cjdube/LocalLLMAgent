@@ -81,6 +81,7 @@ in — nothing new inherits it automatically.
 |---|---|
 | `weather.py` | OpenWeatherMap forecast for `DEFAULT_LOCATION` |
 | `web_search.py` | Web search via Tavily API |
+| `github_starred.py` | List starred GitHub repos, optionally filtered to those pushed to since a given timestamp, with a `recent_changes` summary (release notes or recent commit subjects) per matched repo |
 | `strava.py` | Strava activities via Composio, for a given date |
 | `calendar.py` | Google Calendar read/write (`get_upcoming_events`, `get_events_in_range`, `log_calendar_event` — idempotent via `source_id`) |
 | `email.py` | Send email via Gmail API (plain text or HTML) |
@@ -98,7 +99,7 @@ Every tool module is runnable standalone for testing, e.g.:
 
 | Task | Schedule | What it does |
 |---|---|---|
-| `tasks/morning_brief.py` | Daily 6:00 AM | Fetches weather + next-24h calendar events + latest AI news (via Tavily `search_web`), has the model write a short "at a glance" summary and a one-sentence AI-news intro, assembles a styled HTML email (weather / calendar / AI News sections), sends it via Gmail. The pipeline lives in `build_and_send_brief()`, shared with the chat `send_morning_brief` tool. |
+| `tasks/morning_brief.py` | Daily 6:00 AM | Fetches weather + next-24h calendar events + latest AI news (via Tavily `search_web`) + starred GitHub repos pushed to since the last brief (via `github_starred.fetch_starred_repos`, cursor persisted in `config/github_starred_state.json`), has the model write a short "at a glance" summary and one-sentence intros for the AI-news and starred-repos sections, assembles a styled HTML email (weather / calendar / AI News / Starred Repos sections), sends it via Gmail. The pipeline lives in `build_and_send_brief()`, shared with the chat `send_morning_brief` tool. |
 | `tasks/daily_log.py` | Daily 6:15 AM | Fetches yesterday's Strava activities, has the model (via `run_agent`, tool-calling) log each one to Google Calendar. Deduped by `source_id` (Strava activity id) so re-runs never create duplicates. |
 | `tasks/weekly_learnings.py` | Mondays 5:00 AM | Computes the most recently completed Mon–Sun week, pulls calendar events (categorized by color) + Chrome browsing history + the previous doc entry (for carry-forwards), has the model draft a 4-section retrospective, writes it to the Weekly Learning & Project Log doc. If the doc write fails, emails the draft instead so it's never silently lost. |
 | `tasks/calendar_colorizer.py` | Daily 5:00 PM | Fetches yesterday's calendar events, has the model guess a category per event title (Work/LLC, AARP, Fitness, Meal Prep, Domestic/Chores, Meetings, Travel, Appointments, or Uncategorized) and returns a colorId per event, then patches each event's color. Always re-classifies, even events colored by a previous run or by hand. On failure, emails a notice. |
@@ -124,9 +125,15 @@ chat/
 - **Tools available in chat:** `fetch_weather`, `fetch_strava`,
   `get_upcoming_events`, `get_events_by_date` (any past or future date range,
   including the words `'today'`/`'yesterday'` — resolved in Python so the
-  model never has to guess the current date), `fetch_chrome_history`, and
+  model never has to guess the current date), `fetch_chrome_history`,
   `search_web` (Tavily web search for current info the model doesn't already
-  know) — all read-only, execute immediately — plus `log_calendar_event`,
+  know), and `fetch_starred_repos` (list starred GitHub repos, optionally only
+  those pushed to in the last N days — a `days_ago` integer the model passes
+  through rather than computing a date itself, same reasoning as
+  `get_events_by_date`'s `'today'`/`'yesterday'` resolution — each matching
+  repo also comes back with a `recent_changes` one-to-two-line summary from
+  its latest release notes or recent commit subjects) — all read-only,
+  execute immediately — plus `log_calendar_event`,
   `send_email`, `recolor_event`, and `send_morning_brief` (state-changing —
   see confirmation gate below).
   `recolor_event` takes a category name (`agent/tools/calendar.py`'s
@@ -237,6 +244,12 @@ mostly useful if the Python process fails to start at all).
    - `OPENWEATHERMAP_API_KEY` — [openweathermap.org](https://openweathermap.org/api)
    - `COMPOSIO_API_KEY`, `STRAVA_USER_ID`, `STRAVA_CONNECTED_ACCOUNT_ID` — from your Composio Strava connection
    - `TAVILY_API_KEY` — [tavily.com](https://tavily.com) (used for web search)
+   - `GITHUB_TOKEN` — a GitHub personal access token, used to list starred repos.
+     [Fine-grained](https://github.com/settings/personal-access-tokens/new) with
+     just the **Starring: Read-only** account permission is the least-privilege
+     option; a scopeless [classic](https://github.com/settings/tokens/new) token
+     also works for public stars (add the `repo` scope only if you star private
+     repos too).
    - `WEEKLY_LOG_DOC_ID` — the Google Doc ID (from its URL) for the Weekly Learning & Project Log
    - `BRIEF_TO_EMAIL`, `DEFAULT_LOCATION` — your own values
    - `WREN_CHAT_TOKEN`, `FLASK_SECRET_KEY` — generate each with
@@ -288,5 +301,5 @@ mostly useful if the Python process fails to start at all).
   Claude Code was only used to *write* this code — it has no runtime role.
   Deleting Claude Code from this machine would not affect these tasks.
 - `config/.env`, `config/google_credentials.json`, `config/google_token.json`,
-  and `logs/*.log` are gitignored — they contain secrets/tokens and
-  machine-specific state.
+  `config/github_starred_state.json`, and `logs/*.log` are gitignored — they
+  contain secrets/tokens and machine-specific state.
