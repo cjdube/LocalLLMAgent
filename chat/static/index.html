@@ -149,12 +149,29 @@ function addTyping() {
 function addConfirm(summary, onDecide) {
   const div = document.createElement("div");
   div.className = "confirm";
-  div.innerHTML = `<div>${summary}</div><div class="actions">
-    <button class="yes">Confirm</button>
-    <button class="no">Cancel</button>
-  </div>`;
-  div.querySelector(".yes").onclick = () => { onDecide(true); div.remove(); };
-  div.querySelector(".no").onclick = () => { onDecide(false); div.remove(); };
+
+  // summary is model-derived (email subjects, event titles Wren reads from
+  // your data), so assign it as text — never innerHTML — to avoid an
+  // HTML/script injection sink.
+  const summaryEl = document.createElement("div");
+  summaryEl.textContent = summary;
+
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  const yes = document.createElement("button");
+  yes.className = "yes";
+  yes.textContent = "Confirm";
+  const no = document.createElement("button");
+  no.className = "no";
+  no.textContent = "Cancel";
+  actions.appendChild(yes);
+  actions.appendChild(no);
+
+  div.appendChild(summaryEl);
+  div.appendChild(actions);
+
+  yes.onclick = () => { onDecide(true); div.remove(); };
+  no.onclick = () => { onDecide(false); div.remove(); };
   messagesEl.appendChild(div);
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }

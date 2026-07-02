@@ -40,6 +40,40 @@ def with_identity(system_prompt: str) -> str:
     return "\n\n---\n\n".join(parts)
 
 
+def _ollama_chat(
+    messages: list[dict],
+    model: str = None,
+    host: str = None,
+    tools: Optional[list[dict]] = None,
+) -> dict:
+    """POST a single chat completion to Ollama and return the response
+    `message` dict. Centralizes model/host env defaulting and the request
+    timeout so advance() and complete_text() stay in sync."""
+    model = model or os.getenv("OLLAMA_MODEL", "gemma4")
+    host = host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
+
+    payload = {"model": model, "messages": messages, "stream": False}
+    if tools is not None:
+        payload["tools"] = tools
+
+    resp = requests.post(f"{host}/api/chat", json=payload, timeout=120)
+    resp.raise_for_status()
+    return resp.json()["message"]
+
+
+# Argument keys that may carry secrets — redacted before they reach the logs.
+_SENSITIVE_ARG_KEYS = ("api_key", "token", "secret", "password", "credential")
+
+
+def _redact_args(args) -> dict:
+    if not isinstance(args, dict):
+        return args
+    return {
+        k: ("***" if any(s in k.lower() for s in _SENSITIVE_ARG_KEYS) else v)
+        for k, v in args.items()
+    }
+
+
 def _execute_tool_call(
     call: dict,
     dispatch: dict[str, Callable[..., dict]],
@@ -57,7 +91,7 @@ def _execute_tool_call(
         except Exception as e:
             result = {"error": f"tool '{fn_name}' raised: {e}"}
     if logger:
-        logger.info(f"tool_call {fn_name}({fn_args}) -> {json.dumps(result)}")
+        logger.info(f"tool_call {fn_name}({_redact_args(fn_args)}) -> {json.dumps(result)}")
     messages.append({"role": "tool", "content": json.dumps(result)})
 
 
@@ -88,17 +122,8 @@ def advance(
     resolved, consistent with how this model calls tools one at a time in
     practice.)
     """
-    model = model or os.getenv("OLLAMA_MODEL", "gemma4")
-    host = host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
-
     for _ in range(MAX_TOOL_ITERATIONS):
-        resp = requests.post(
-            f"{host}/api/chat",
-            json={"model": model, "messages": messages, "tools": tools, "stream": False},
-            timeout=120,
-        )
-        resp.raise_for_status()
-        message = resp.json()["message"]
+        message = _ollama_chat(messages, model=model, host=host, tools=tools)
         messages.append(message)
 
         tool_calls = message.get("tool_calls") or []
@@ -165,20 +190,12 @@ def complete_text(
     """Single-turn, tool-free completion — for tasks like writing a short
     summary paragraph where the caller assembles the surrounding structure
     itself rather than trusting the model to produce it."""
-    model = model or os.getenv("OLLAMA_MODEL", "gemma4")
-    host = host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
-
-    resp = requests.post(
-        f"{host}/api/chat",
-        json={
-            "model": model,
-            "messages": [
-                {"role": "system", "content": with_identity(system_prompt)},
-                {"role": "user", "content": user_prompt},
-            ],
-            "stream": False,
-        },
-        timeout=120,
+    message = _ollama_chat(
+        [
+            {"role": "system", "content": with_identity(system_prompt)},
+            {"role": "user", "content": user_prompt},
+        ],
+        model=model,
+        host=host,
     )
-    resp.raise_for_status()
-    return resp.json()["message"].get("content", "").strip()
+    return message.get("content", "").strip()

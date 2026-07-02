@@ -37,6 +37,17 @@ TOOL_SCHEMA = {
 }
 
 
+_SERVICE = None
+
+
+def _service():
+    # Built once per process; the underlying credentials refresh themselves.
+    global _SERVICE
+    if _SERVICE is None:
+        _SERVICE = build("gmail", "v1", credentials=get_credentials())
+    return _SERVICE
+
+
 def send_email(subject: str, body: str, to: str = None, html: bool = False) -> dict:
     to = to or os.getenv("BRIEF_TO_EMAIL")
     if not to:
@@ -48,9 +59,7 @@ def send_email(subject: str, body: str, to: str = None, html: bool = False) -> d
     raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
 
     try:
-        creds = get_credentials()
-        service = build("gmail", "v1", credentials=creds)
-        sent = service.users().messages().send(userId="me", body={"raw": raw}).execute()
+        sent = _service().users().messages().send(userId="me", body={"raw": raw}).execute()
     except Exception as e:
         return {"error": str(e)}
 

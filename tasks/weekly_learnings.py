@@ -116,7 +116,6 @@ def main() -> int:
 
     try:
         monday, sunday = _week_range()
-        tz = ZoneInfo(_local_timezone())
         time_min = monday.isoformat()
         time_max = sunday.isoformat()
         logger.info(f"Week range: {monday.date()} to {sunday.date()}")

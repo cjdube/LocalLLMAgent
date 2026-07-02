@@ -3,6 +3,7 @@
 import logging
 import sys
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -20,7 +21,8 @@ def setup_logger(task_name: str) -> logging.Logger:
 
     fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
 
-    file_handler = logging.FileHandler(log_path)
+    # Rotate so the always-on chat server's log can't grow without bound.
+    file_handler = RotatingFileHandler(log_path, maxBytes=2_000_000, backupCount=3)
     file_handler.setFormatter(fmt)
     logger.addHandler(file_handler)
 

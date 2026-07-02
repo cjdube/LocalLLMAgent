@@ -31,13 +31,21 @@ SCOPES = [
     "https://www.googleapis.com/auth/documents",
 ]
 
+# Cached for the life of the process so the always-on chat server and
+# multi-call tasks don't re-read/parse the token file on every tool call.
+_CACHED_CREDS: Credentials | None = None
+
 
 def get_credentials() -> Credentials:
+    global _CACHED_CREDS
+    if _CACHED_CREDS and _CACHED_CREDS.valid:
+        return _CACHED_CREDS
+
     creds_path = _ROOT / os.getenv("GOOGLE_CREDENTIALS_PATH", "config/google_credentials.json")
     token_path = _ROOT / os.getenv("GOOGLE_TOKEN_PATH", "config/google_token.json")
 
-    creds = None
-    if token_path.exists():
+    creds = _CACHED_CREDS
+    if creds is None and token_path.exists():
         creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
 
     if not creds or not creds.valid:
@@ -52,7 +60,10 @@ def get_credentials() -> Credentials:
             flow = InstalledAppFlow.from_client_secrets_file(str(creds_path), SCOPES)
             creds = flow.run_local_server(port=0)
         token_path.write_text(creds.to_json())
+        # Contains a refresh token — keep it readable only by the owner.
+        os.chmod(token_path, 0o600)
 
+    _CACHED_CREDS = creds
     return creds
 
 

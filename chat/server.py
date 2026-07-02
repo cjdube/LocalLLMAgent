@@ -44,6 +44,7 @@ load_dotenv(_ROOT / "config" / ".env")
 WREN_CHAT_TOKEN = os.getenv("WREN_CHAT_TOKEN")
 FLASK_SECRET_KEY = os.getenv("FLASK_SECRET_KEY")
 WREN_CHAT_PORT = int(os.getenv("WREN_CHAT_PORT", "8420"))
+MAX_MESSAGE_CHARS = 8000
 
 if not WREN_CHAT_TOKEN or not FLASK_SECRET_KEY:
     raise RuntimeError(
@@ -91,6 +92,8 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 app = Flask(__name__)
 app.secret_key = FLASK_SECRET_KEY
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
+# Reject oversized request bodies outright (a chat turn is small).
+app.config["MAX_CONTENT_LENGTH"] = 256 * 1024
 # Reached only via the HTTPS URL tailscale serve provides (see README) — the
 # session cookie is now rejected by the browser over a plain http:// origin.
 app.config["SESSION_COOKIE_SECURE"] = True
@@ -180,16 +183,28 @@ def chat():
     user_message = (request.get_json() or {}).get("message", "").strip()
     if not user_message:
         return jsonify({"error": "empty message"}), 400
+    if len(user_message) > MAX_MESSAGE_CHARS:
+        return jsonify({"error": "message too long"}), 400
 
     sid = _session_id()
     history = conversations.setdefault(sid, [])
+
+    # If a write action was awaiting confirmation and the user sent a new
+    # message instead of answering, treat it as declining that action —
+    # otherwise its unanswered tool_call would leave the history malformed.
+    pending = pending_confirmations.pop(sid, None)
+    if pending is not None:
+        resolve(history, pending, False, DISPATCH, logger=logger)
+
     if not history:
         history.append({"role": "system", "content": with_identity(CHAT_SYSTEM_PROMPT)})
-    history.append({"role": "user", "content": user_message})
 
+    checkpoint = len(history)
+    history.append({"role": "user", "content": user_message})
     try:
         result = advance(history, TOOLS, DISPATCH, confirm_before=WRITE_TOOLS, logger=logger)
     except Exception as e:
+        del history[checkpoint:]  # roll back this failed turn so the next one starts clean
         logger.exception(f"chat turn failed: {e}")
         return jsonify({"error": str(e)}), 500
 
@@ -210,11 +225,15 @@ def chat_confirm():
         return jsonify({"error": "no pending action"}), 400
 
     history = conversations.setdefault(sid, [])
+    # Resolve first (this answers the paused tool_call), then checkpoint — so a
+    # rollback below never strips the tool result and re-orphans that call.
     resolve(history, call, approved, DISPATCH, logger=logger)
 
+    checkpoint = len(history)
     try:
         result = advance(history, TOOLS, DISPATCH, confirm_before=WRITE_TOOLS, logger=logger)
     except Exception as e:
+        del history[checkpoint:]  # roll back the failed continuation, keep the resolved call
         logger.exception(f"chat turn failed after confirmation: {e}")
         return jsonify({"error": str(e)}), 500
 

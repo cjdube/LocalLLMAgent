@@ -9,7 +9,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -109,16 +109,22 @@ GET_BY_DATE_TOOL_SCHEMA = {
 }
 
 
+_SERVICE = None
+
+
 def _service():
-    creds = get_credentials()
-    return build("calendar", "v3", credentials=creds)
+    # Built once per process; the underlying credentials refresh themselves.
+    global _SERVICE
+    if _SERVICE is None:
+        _SERVICE = build("calendar", "v3", credentials=get_credentials())
+    return _SERVICE
 
 
 def get_upcoming_events(hours_ahead: int = 24) -> dict:
     calendar_id = os.getenv("GOOGLE_CALENDAR_ID", "primary")
-    now = datetime.utcnow()
-    time_min = now.isoformat() + "Z"
-    time_max = (now + timedelta(hours=hours_ahead)).isoformat() + "Z"
+    now = datetime.now(timezone.utc)
+    time_min = now.isoformat().replace("+00:00", "Z")
+    time_max = (now + timedelta(hours=hours_ahead)).isoformat().replace("+00:00", "Z")
 
     try:
         service = _service()

@@ -28,9 +28,15 @@ ANCHOR_TEXT = "<insert new entries after this line>"
 SECTION_HEADING = "Strategic Weekly Review"
 
 
+_SERVICE = None
+
+
 def _service():
-    creds = get_credentials()
-    return build("docs", "v1", credentials=creds)
+    # Built once per process; the underlying credentials refresh themselves.
+    global _SERVICE
+    if _SERVICE is None:
+        _SERVICE = build("docs", "v1", credentials=get_credentials())
+    return _SERVICE
 
 
 def _doc_id() -> str:
