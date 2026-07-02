@@ -1,12 +1,14 @@
 """Fetch OpenWeatherMap forecast for a given location.
 
-Calls the 5-day / 3-hour forecast endpoint with cnt=8 (next 24 hours)
-and parses it into a flat JSON blob.
+Calls the 5-day / 3-hour forecast endpoint, using cnt to pull back just the
+next 24 hours (the default) or, if a longer range is requested, up to the
+full 5 days the free tier covers. Parses it into a flat JSON blob.
 
 Usage:
     python -m agent.tools.weather
     python -m agent.tools.weather --location "Boston,MA,US"
     python -m agent.tools.weather --location "London,GB" --units metric
+    python -m agent.tools.weather --location "Montreal,QC,CA" --days 4
 
 Key resolution order: --api-key arg > config/.env file > OPENWEATHERMAP_API_KEY env var
 """
@@ -15,7 +17,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import urlopen
@@ -27,12 +29,13 @@ _ENV_PATH = Path(__file__).resolve().parent.parent.parent / "config" / ".env"
 load_dotenv(_ENV_PATH)
 
 FORECAST_URL = "https://api.openweathermap.org/data/2.5/forecast"
+MAX_DAYS = 5  # ceiling of OpenWeatherMap's free 5-day/3-hour forecast endpoint
 
 TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "fetch_weather",
-        "description": "Get the current weather and 24-hour forecast for a location.",
+        "description": "Get the current weather and forecast (up to 5 days ahead) for a location.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -44,44 +47,63 @@ TOOL_SCHEMA = {
                     "type": "string",
                     "enum": ["imperial", "metric"],
                 },
+                "days": {
+                    "type": "integer",
+                    "description": "How many days ahead to forecast, 1-5 (default 1, meaning just the next 24 hours). OpenWeatherMap's free forecast only covers 5 days ahead.",
+                },
             },
         },
     },
 }
 
 
-def fetch_forecast(location: str, units: str, api_key: str) -> dict:
-    params = {"q": location, "appid": api_key, "units": units, "cnt": 8}
+def _clamp_days(days: int) -> int:
+    return max(1, min(int(days), MAX_DAYS))
+
+
+def fetch_forecast(location: str, units: str, days: int, api_key: str) -> dict:
+    params = {"q": location, "appid": api_key, "units": units, "cnt": _clamp_days(days) * 8}
     url = f"{FORECAST_URL}?{urlencode(params)}"
     with urlopen(url, timeout=10) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def parse(raw: dict) -> dict:
-    entries = raw.get("list", [])
-    if not entries:
-        raise ValueError("forecast list empty")
-
-    current = entries[0]
+def _day_summary(entries: list) -> dict:
     temps = [e["main"]["temp"] for e in entries]
     pops = [e.get("pop", 0) for e in entries]
     any_precip = any(("rain" in e) or ("snow" in e) for e in entries)
-
     high = round(max(temps))
     low = round(min(temps))
     max_pop_pct = round(max(pops) * 100)
-    desc = current["weather"][0]["description"]
+    desc = entries[0]["weather"][0]["description"]
 
     summary_parts = [f"{desc.capitalize()}."]
     if any_precip and max_pop_pct > 0:
         summary_parts.append(f"Up to {max_pop_pct}% chance of precipitation.")
     summary_parts.append(f"High {high}, low {low}.")
-    summary = " ".join(summary_parts)
+
+    return {
+        "high_f": high,
+        "low_f": low,
+        "max_precip_pct": max_pop_pct,
+        "any_precip": any_precip,
+        "summary": " ".join(summary_parts),
+    }
+
+
+def parse(raw: dict, days: int = 1) -> dict:
+    entries = raw.get("list", [])
+    if not entries:
+        raise ValueError("forecast list empty")
+
+    current = entries[0]
+    next_24h = _day_summary(entries[:8])
+    desc = current["weather"][0]["description"]
 
     city = raw.get("city", {})
     location_str = ", ".join(p for p in [city.get("name"), city.get("country")] if p)
 
-    return {
+    result = {
         "location": location_str,
         "as_of": datetime.fromtimestamp(current["dt"]).isoformat(),
         "current": {
@@ -91,14 +113,23 @@ def parse(raw: dict) -> dict:
             "humidity_pct": current["main"].get("humidity"),
             "wind_mph": round(current.get("wind", {}).get("speed", 0)),
         },
-        "next_24h": {
-            "high_f": high,
-            "low_f": low,
-            "max_precip_pct": max_pop_pct,
-            "any_precip": any_precip,
-            "summary": summary,
-        },
+        "next_24h": next_24h,
     }
+
+    if days > 1:
+        # Bucket by the location's own calendar date, not the host machine's
+        # local timezone — otherwise day boundaries are wrong for any
+        # location that isn't in the same timezone as the server.
+        tz = timezone(timedelta(seconds=city.get("timezone", 0)))
+        buckets: dict[str, list] = {}
+        for e in entries:
+            local_date = datetime.fromtimestamp(e["dt"], tz=tz).date().isoformat()
+            buckets.setdefault(local_date, []).append(e)
+        result["daily_forecast"] = [
+            {"date": date, **_day_summary(day_entries)} for date, day_entries in buckets.items()
+        ]
+
+    return result
 
 
 def _normalize_location(location: str) -> str:
@@ -111,7 +142,7 @@ def _normalize_location(location: str) -> str:
     return ",".join(parts)
 
 
-def fetch_weather(location: str = None, units: str = "imperial", api_key: str = None) -> dict:
+def fetch_weather(location: str = None, units: str = "imperial", days: int = 1, api_key: str = None) -> dict:
     """Callable entrypoint used by the agent loop's tool dispatcher."""
     api_key = api_key or os.getenv("OPENWEATHERMAP_API_KEY")
     if not api_key:
@@ -119,9 +150,10 @@ def fetch_weather(location: str = None, units: str = "imperial", api_key: str = 
 
     location = location or os.getenv("DEFAULT_LOCATION", "Newfields,NH,US")
     location = _normalize_location(location)
+    days = _clamp_days(days)
 
     try:
-        raw = fetch_forecast(location, units, api_key)
+        raw = fetch_forecast(location, units, days, api_key)
     except HTTPError as e:
         return {"error": f"HTTP {e.code}: {e.reason}"}
     except URLError as e:
@@ -130,7 +162,7 @@ def fetch_weather(location: str = None, units: str = "imperial", api_key: str = 
         return {"error": f"fetch error: {e}"}
 
     try:
-        return parse(raw)
+        return parse(raw, days)
     except Exception as e:
         return {"error": f"parse error: {e}"}
 
@@ -139,10 +171,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--location", default="Newfields,NH,US")
     parser.add_argument("--units", default="imperial")
+    parser.add_argument("--days", type=int, default=1)
     parser.add_argument("--api-key", dest="api_key", default=None)
     args = parser.parse_args()
 
-    result = fetch_weather(args.location, args.units, args.api_key)
+    result = fetch_weather(args.location, args.units, args.days, args.api_key)
     print(json.dumps(result, indent=2))
     return 1 if "error" in result else 0
 

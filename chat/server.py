@@ -94,7 +94,9 @@ WRITE_TOOLS = frozenset({"log_calendar_event", "send_email", "recolor_event", "s
 CHAT_SYSTEM_PROMPT = (
     load_persona("wren_chat.md")
     + "\n\n---\n\n"
-    + "You can check the weather, look up Craig's calendar (upcoming, or any "
+    + "You can check the weather (current conditions plus a forecast up to 5 "
+    "days out — pass a days argument if Craig asks about more than just "
+    "today), look up Craig's calendar (upcoming, or any "
     "past or future date range), fetch his recent Strava activities, look up "
     "his recent Chrome browsing history, and search the web for current "
     "information you don't already know — use these when they'd help answer "
