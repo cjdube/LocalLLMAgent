@@ -203,6 +203,50 @@ at `https://<mac-mini-tailscale-name>/` (port 443, the HTTPS default — no
 `:8420` needed, `tailscale serve` handles the mapping) from anywhere your
 phone has a connection.
 
+## Dashboard
+
+The same always-on chat server also serves a dashboard at
+`http://127.0.0.1:8420/dashboard` (or the Tailscale HTTPS URL) — one place to
+see what's scheduled, whether it's working, what Wren can do, and to talk to
+her. It reuses the chat server's token auth, so no separate login.
+
+```
+chat/
+  insights.py         # read/parse layer: plists -> schedules, logs -> runs,
+                      # tool schemas -> capabilities, plus the run-now manager
+  static/dashboard.html  # single-page dashboard UI (vanilla JS, no build step)
+```
+
+Four tabs:
+
+- **Overview** — a card per scheduled task showing its schedule, next run,
+  last-run status (✓/✗/running), duration, a dot-strip of recent runs, and a
+  **Run now** button. Nothing new is persisted: schedules are read live from
+  `launchd/*.plist` and run history is parsed from `logs/<task>.log` (rotated
+  backups included) using the loggers' own `Starting … run` /
+  `… run complete` / `… run failed` markers. The always-on chat server appears
+  as a status card.
+- **Task detail** — drill into a task's run history, then into a single run to
+  see its tool-call timeline (`name → args → result`) and the final response or
+  the error/traceback.
+- **Capabilities** — auto-generated from the chat tools' `TOOL_SCHEMA`s, grouped
+  into read-only (Wren runs them itself) vs. the confirmation-gated write tools.
+  Always in sync with what's actually registered — no separate docs to maintain.
+- **Chat** — the same chat UI as `/`, embedded, using the existing
+  `/chat` endpoints.
+
+**Run now runs the real task, side effects and all** — `morning_brief` sends the
+actual email, `daily_log`/`calendar_colorizer` write real calendar events —
+exactly what the schedule does, just now. The button asks for a click-through
+confirm and refuses a second concurrent run of the same task. It's a read-only
+window otherwise: schedules are still edited by hand in the `.plist` files
+(see below), not from the UI.
+
+New dashboard routes on the chat server, all behind the same auth:
+`GET /dashboard`, `GET /api/schedules`, `GET /api/runs/<task>`,
+`GET /api/runs/<task>/<run_id>`, `GET /api/capabilities`,
+`POST /api/run/<task>`, `GET /api/run/<task>/status`.
+
 ## Scheduling — launchd
 
 Each task (and the always-on chat server) has a `.plist` in `launchd/`,

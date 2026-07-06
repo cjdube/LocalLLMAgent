@@ -22,6 +22,15 @@ from dotenv import load_dotenv
 from flask import Flask, jsonify, request, send_from_directory, session
 
 from agent.loop import advance, load_persona, resolve, with_identity
+from chat.insights import (
+    RunManager,
+    describe_tools,
+    discover_tasks,
+    next_run,
+    parse_run_detail,
+    parse_runs,
+    task_by_key,
+)
 from agent.tools.calendar import (
     GET_BY_DATE_TOOL_SCHEMA as CALENDAR_BY_DATE_SCHEMA,
     LIST_TOOL_SCHEMA as CALENDAR_LIST_SCHEMA,
@@ -154,6 +163,9 @@ logger.setLevel(logging.INFO)
 # In-memory only, per the "fresh session" design — lost on server restart.
 conversations: dict[str, list[dict]] = {}
 pending_confirmations: dict[str, dict] = {}
+
+# Triggers scheduled tasks on demand for the dashboard's "Run now" button.
+run_manager = RunManager()
 
 LOGIN_PAGE = """<!DOCTYPE html>
 <html><head><title>Wren</title><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -301,6 +313,92 @@ def chat_new():
     conversations.pop(sid, None)
     pending_confirmations.pop(sid, None)
     return jsonify({"ok": True})
+
+
+@app.route("/dashboard", methods=["GET"])
+def dashboard():
+    if not _authenticated():
+        return LOGIN_PAGE.format(error="")
+    return send_from_directory(STATIC_DIR, "dashboard.html")
+
+
+def _run_summary(run: dict | None) -> dict | None:
+    """The slice of a run the Overview needs — omits the heavy tool_calls/error."""
+    if run is None:
+        return None
+    return {k: run[k] for k in ("id", "start", "end", "duration_s", "status", "summary")}
+
+
+@app.route("/api/schedules", methods=["GET"])
+def api_schedules():
+    if not _authenticated():
+        return jsonify({"error": "not authenticated"}), 401
+    out = []
+    for task in discover_tasks():
+        runs = [] if task["is_daemon"] else parse_runs(task["log_path"], limit=10)
+        out.append({
+            "key": task["key"],
+            "display_name": task["display_name"],
+            "human_schedule": task["human_schedule"],
+            "is_daemon": task["is_daemon"],
+            "next_run": next_run(task["schedule"]),
+            "last_run": _run_summary(runs[0] if runs else None),
+            "recent_statuses": [r["status"] for r in runs],
+        })
+    return jsonify({"tasks": out})
+
+
+@app.route("/api/runs/<task_key>", methods=["GET"])
+def api_runs(task_key: str):
+    if not _authenticated():
+        return jsonify({"error": "not authenticated"}), 401
+    task = task_by_key(task_key)
+    if task is None:
+        return jsonify({"error": "unknown task"}), 404
+    runs = parse_runs(task["log_path"], limit=50)
+    return jsonify({
+        "task": {"key": task["key"], "display_name": task["display_name"],
+                 "human_schedule": task["human_schedule"], "is_daemon": task["is_daemon"]},
+        "runs": [_run_summary(r) for r in runs],
+    })
+
+
+@app.route("/api/runs/<task_key>/<run_id>", methods=["GET"])
+def api_run_detail(task_key: str, run_id: str):
+    if not _authenticated():
+        return jsonify({"error": "not authenticated"}), 401
+    task = task_by_key(task_key)
+    if task is None:
+        return jsonify({"error": "unknown task"}), 404
+    run = parse_run_detail(task["log_path"], run_id)
+    if run is None:
+        return jsonify({"error": "unknown run"}), 404
+    return jsonify(run)
+
+
+@app.route("/api/capabilities", methods=["GET"])
+def api_capabilities():
+    if not _authenticated():
+        return jsonify({"error": "not authenticated"}), 401
+    return jsonify({"tools": describe_tools(TOOLS, WRITE_TOOLS)})
+
+
+@app.route("/api/run/<task_key>", methods=["POST"])
+def api_run(task_key: str):
+    if not _authenticated():
+        return jsonify({"error": "not authenticated"}), 401
+    result = run_manager.start(task_key)
+    logger.info(f"dashboard run-now {task_key} -> {result}")
+    return jsonify(result), (200 if result.get("ok") else 409)
+
+
+@app.route("/api/run/<task_key>/status", methods=["GET"])
+def api_run_status(task_key: str):
+    if not _authenticated():
+        return jsonify({"error": "not authenticated"}), 401
+    if task_by_key(task_key) is None:
+        return jsonify({"error": "unknown task"}), 404
+    return jsonify(run_manager.status(task_key))
 
 
 def main():
