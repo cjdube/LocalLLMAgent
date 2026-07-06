@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from googleapiclient.discovery import build
 
+from agent.dates import DATE_ARG_GUIDANCE, resolve_date
 from agent.tools.google_auth import get_credentials
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
@@ -100,8 +101,8 @@ GET_BY_DATE_TOOL_SCHEMA = {
         "parameters": {
             "type": "object",
             "properties": {
-                "start": {"type": "string", "description": "Start date as YYYY-MM-DD, 'today', or 'yesterday'."},
-                "end": {"type": "string", "description": "End date as YYYY-MM-DD, 'today', or 'yesterday'."},
+                "start": {"type": "string", "description": "Start date. " + DATE_ARG_GUIDANCE},
+                "end": {"type": "string", "description": "End date. " + DATE_ARG_GUIDANCE},
             },
             "required": ["start", "end"],
         },
@@ -189,17 +190,15 @@ def get_events_in_range(time_min: str, time_max: str) -> dict:
 
 
 def get_events_by_date(start: str, end: str) -> dict:
-    """Chat-friendly wrapper over get_events_in_range() — takes YYYY-MM-DD
-    dates (or the literal words 'today'/'yesterday', resolved here rather
-    than trusting the model to know the current date — same pattern as
-    agent/tools/strava.py's fetch_strava) and builds the full-day ISO 8601
-    range in local time, so the model never has to construct a
+    """Chat-friendly wrapper over get_events_in_range() — takes dates in any
+    form agent.dates.resolve_date() accepts ('today'/'yesterday', a bare
+    'MM-DD', or a full 'YYYY-MM-DD') and builds the full-day ISO 8601 range in
+    local time, so the model never has to know the current year or construct a
     timezone-aware datetime itself."""
     tz = ZoneInfo(_local_timezone())
     today = datetime.now(tz).date()
-    aliases = {"today": today.isoformat(), "yesterday": (today - timedelta(days=1)).isoformat()}
-    start = aliases.get(start, start)
-    end = aliases.get(end, end)
+    start = resolve_date(start, today=today)
+    end = resolve_date(end, today=today)
     start_dt = datetime.fromisoformat(start).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=tz)
     end_dt = datetime.fromisoformat(end).replace(hour=23, minute=59, second=59, microsecond=999999, tzinfo=tz)
     return get_events_in_range(start_dt.isoformat(), end_dt.isoformat())
