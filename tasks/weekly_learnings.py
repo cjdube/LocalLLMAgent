@@ -94,6 +94,25 @@ def _week_range() -> tuple[datetime, datetime]:
     return last_monday, last_sunday.replace(hour=23, minute=59, second=59)
 
 
+# Cap on how many browsing sites to feed the model. The prompt's prefill cost
+# scales with this (a full week can be 100+ sites ≈ 10-12K tokens ≈ ~50s of
+# prefill on the local 12B model), and the sites are visit-ranked, so the long
+# tail is mostly noise the model is told to ignore. Keeping the top slice keeps
+# the genuinely-engaged sites while bounding the prompt.
+MAX_CHROME_SITES = 40
+
+
+def _compact_sites(sites: list) -> list:
+    """Trim browsing history to the top visited sites and drop the full `url`
+    (redundant with `domain` and often long) before embedding in the prompt —
+    smaller prompt, faster prefill, less noise for the model to wade through."""
+    top = sorted(sites, key=lambda s: s.get("visits", 0), reverse=True)[:MAX_CHROME_SITES]
+    return [
+        {"domain": s.get("domain"), "title": s.get("title"), "visits": s.get("visits")}
+        for s in top
+    ]
+
+
 def _categorize(events: list) -> dict:
     work, meetings, appointments, aarp = [], [], [], []
     for e in events:
@@ -127,7 +146,9 @@ def main() -> int:
 
         chrome_result = fetch_chrome_history(monday.strftime("%Y-%m-%d"), sunday.strftime("%Y-%m-%d"))
         logger.info(f"fetch_chrome_history -> {chrome_result}")
-        chrome_sites = chrome_result.get("sites", [])
+        chrome_sites = _compact_sites(chrome_result.get("sites", []))
+        logger.info(f"compacted chrome_sites to {len(chrome_sites)} of "
+                    f"{chrome_result.get('total_meaningful_visits', 0)} for the prompt")
 
         carry_forward = get_previous_entry_text()
         logger.info(f"carry_forward -> {carry_forward[:200]!r}")

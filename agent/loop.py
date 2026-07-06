@@ -45,18 +45,28 @@ def _ollama_chat(
     model: str = None,
     host: str = None,
     tools: Optional[list[dict]] = None,
+    timeout: float = None,
 ) -> dict:
     """POST a single chat completion to Ollama and return the response
-    `message` dict. Centralizes model/host env defaulting and the request
-    timeout so advance() and complete_text() stay in sync."""
+    `message` dict. Centralizes model/host/timeout env defaulting so
+    advance() and complete_text() stay in sync.
+
+    The read timeout covers prompt prefill + full generation, not just
+    connect. For a local 12B model a large prompt can spend ~50s in prefill
+    alone before the first token, so the default is generous (and overridable
+    via OLLAMA_TIMEOUT, or per-call via `timeout`) — batch tasks that draft
+    long documents unattended need the headroom; 120s was too tight and left
+    the weekly log timing out right at the edge on busy weeks / cold loads."""
     model = model or os.getenv("OLLAMA_MODEL", "gemma4")
     host = host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    if timeout is None:
+        timeout = float(os.getenv("OLLAMA_TIMEOUT", "300"))
 
     payload = {"model": model, "messages": messages, "stream": False}
     if tools is not None:
         payload["tools"] = tools
 
-    resp = requests.post(f"{host}/api/chat", json=payload, timeout=120)
+    resp = requests.post(f"{host}/api/chat", json=payload, timeout=timeout)
     resp.raise_for_status()
     return resp.json()["message"]
 
@@ -186,6 +196,7 @@ def complete_text(
     user_prompt: str,
     model: str = None,
     host: str = None,
+    timeout: float = None,
 ) -> str:
     """Single-turn, tool-free completion — for tasks like writing a short
     summary paragraph where the caller assembles the surrounding structure
@@ -197,5 +208,6 @@ def complete_text(
         ],
         model=model,
         host=host,
+        timeout=timeout,
     )
     return message.get("content", "").strip()
