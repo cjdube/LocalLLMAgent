@@ -169,6 +169,8 @@ run_manager = RunManager()
 
 LOGIN_PAGE = """<!DOCTYPE html>
 <html><head><title>Wren</title><meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <style>
 body {{ font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 400px; margin: 100px auto; padding: 0 24px; color: #1f2328; }}
 h2 {{ margin-bottom: 4px; }}

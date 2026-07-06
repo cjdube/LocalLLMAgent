@@ -215,25 +215,29 @@ chat/
   insights.py         # read/parse layer: plists -> schedules, logs -> runs,
                       # tool schemas -> capabilities, plus the run-now manager
   static/dashboard.html  # single-page dashboard UI (vanilla JS, no build step)
+  static/favicon.svg  # Wren mark (cream wren on terracotta) — header logo + favicon
+  static/{favicon-32,apple-touch-icon,icon-512}.png  # raster fallbacks
 ```
 
-Four tabs:
+It's a single page (no tabs) — a scrollable left column with the chat docked
+on the right so you can talk to Wren while watching a run:
 
-- **Overview** — a card per scheduled task showing its schedule, next run,
-  last-run status (✓/✗/running), duration, a dot-strip of recent runs, and a
-  **Run now** button. Nothing new is persisted: schedules are read live from
-  `launchd/*.plist` and run history is parsed from `logs/<task>.log` (rotated
-  backups included) using the loggers' own `Starting … run` /
-  `… run complete` / `… run failed` markers. The always-on chat server appears
-  as a status card.
-- **Task detail** — drill into a task's run history, then into a single run to
-  see its tool-call timeline (`name → args → result`) and the final response or
-  the error/traceback.
-- **Capabilities** — auto-generated from the chat tools' `TOOL_SCHEMA`s, grouped
-  into read-only (Wren runs them itself) vs. the confirmation-gated write tools.
-  Always in sync with what's actually registered — no separate docs to maintain.
-- **Chat** — the same chat UI as `/`, embedded, using the existing
-  `/chat` endpoints.
+- **Capabilities** (top of the left column) — auto-generated from the chat
+  tools' `TOOL_SCHEMA`s as chips, grouped read-only (Wren runs them itself) vs.
+  the confirmation-gated write tools. Click a chip to see its parameters. Always
+  in sync with what's actually registered — no separate docs to maintain.
+- **Scheduled tasks** (below it) — a table, one row per task: name, schedule,
+  next run, last-run status (✓/✗/running) with a dot-strip of recent runs, and
+  **Run now** / **See runs**. Nothing new is persisted: schedules are read live
+  from `launchd/*.plist` and run history is parsed from `logs/<task>.log`
+  (rotated backups included) using the loggers' own `Starting … run` /
+  `… run complete` / `… run failed` markers. The always-on chat server is a
+  muted last row (no Run now).
+- **Run detail** — clicking a row (or **See runs**) opens a right-side
+  slide-over with the task's run history; click a run for its tool-call timeline
+  (`name → args → result`) and the final response or the error/traceback.
+- **Chat dock** — the same chat UI as `/`, always visible on the right, using
+  the existing `/chat` endpoints (confirmation prompts appear inline in the dock).
 
 **Run now runs the real task, side effects and all** — `morning_brief` sends the
 actual email, `daily_log`/`calendar_colorizer` write real calendar events —
