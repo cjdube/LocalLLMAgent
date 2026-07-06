@@ -44,7 +44,13 @@ TOOL_SCHEMA = {
             "properties": {
                 "date": {
                     "type": "string",
-                    "description": "Date as YYYY-MM-DD, 'today', or 'yesterday'.",
+                    "description": (
+                        "The day to look up. Use 'today' or 'yesterday' for those; "
+                        "if Craig names a month and day WITHOUT a year (e.g. 'July 2nd'), "
+                        "pass just the month and day as 'MM-DD' (e.g. '07-02') and the "
+                        "correct year is filled in automatically (the most recent past "
+                        "occurrence). Only use full 'YYYY-MM-DD' when Craig states a year."
+                    ),
                 },
             },
             "required": ["date"],
@@ -135,6 +141,40 @@ def _get_activities(
     return formatted_activities
 
 
+def _resolve_date(date_str: str) -> str:
+    """Map a user-supplied date onto a concrete YYYY-MM-DD, resolving the year
+    in Python rather than trusting the model to know the current date.
+
+    - 'today' / 'yesterday'        -> relative to the current date
+    - 'YYYY-MM-DD'                 -> honored as-is (an explicit year wins)
+    - 'MM-DD' / 'M-D' (also '/')   -> the most recent past occurrence: the
+      current year, or the previous year if that month/day hasn't happened yet
+      this year. Lets Craig say "July 2nd" without ever specifying the year.
+
+    Anything unparseable is returned unchanged (the downstream filter simply
+    won't match it), so this never raises on odd model input.
+    """
+    today = datetime.now().date()
+    if date_str == "today":
+        return today.isoformat()
+    if date_str == "yesterday":
+        return (today - timedelta(days=1)).isoformat()
+
+    parts = date_str.strip().replace("/", "-").split("-")
+    try:
+        if len(parts) == 3:
+            return datetime(int(parts[0]), int(parts[1]), int(parts[2])).date().isoformat()
+        if len(parts) == 2:
+            month, day = int(parts[0]), int(parts[1])
+            candidate = datetime(today.year, month, day).date()
+            if candidate > today:
+                candidate = datetime(today.year - 1, month, day).date()
+            return candidate.isoformat()
+    except ValueError:
+        pass
+    return date_str
+
+
 def fetch_strava(
     date: str = "yesterday",
     strava_client_id: str = None,
@@ -142,11 +182,7 @@ def fetch_strava(
     strava_refresh_token: str = None,
 ) -> dict:
     """Callable entrypoint used by the agent loop's tool dispatcher."""
-    target_date = date
-    if target_date == "today":
-        target_date = datetime.now().strftime("%Y-%m-%d")
-    elif target_date == "yesterday":
-        target_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    target_date = _resolve_date(date)
 
     try:
         activities = _get_activities(strava_client_id, strava_client_secret, strava_refresh_token)

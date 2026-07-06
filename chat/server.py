@@ -13,7 +13,7 @@ import logging
 import os
 import sys
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -118,6 +118,23 @@ CHAT_SYSTEM_PROMPT = (
     "brief the scheduled task sends, which you can't reliably reproduce by "
     "writing the email body freehand."
 )
+
+def _system_message_content() -> str:
+    """Build the chat system prompt with today's date baked in. The local
+    model doesn't know the current date, so without this it resolves a bare
+    "July 2nd" to a default year (e.g. 2024) and tools like fetch_strava come
+    back empty. Computed per conversation rather than at import time because
+    the server is long-running under launchd and would otherwise go stale
+    after midnight."""
+    today = datetime.now().strftime("%A, %B %-d, %Y")
+    dated = (
+        CHAT_SYSTEM_PROMPT
+        + f"\n\nToday's date is {today}. When Craig names a date without a year "
+        "(e.g. 'July 2nd') or a relative day, resolve it against today's date — "
+        "never guess the year."
+    )
+    return with_identity(dated)
+
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -231,7 +248,7 @@ def chat():
         resolve(history, pending, False, DISPATCH, logger=logger)
 
     if not history:
-        history.append({"role": "system", "content": with_identity(CHAT_SYSTEM_PROMPT)})
+        history.append({"role": "system", "content": _system_message_content()})
 
     checkpoint = len(history)
     history.append({"role": "user", "content": user_message})
