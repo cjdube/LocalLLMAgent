@@ -82,7 +82,7 @@ in — nothing new inherits it automatically.
 | `weather.py` | OpenWeatherMap forecast for `DEFAULT_LOCATION` |
 | `web_search.py` | Web search via Tavily API |
 | `github_starred.py` | List starred GitHub repos, optionally filtered to those pushed to since a given timestamp, with a `recent_changes` summary (release notes or recent commit subjects) per matched repo |
-| `strava.py` | Strava activities via Composio, for a given date |
+| `strava.py` | Strava activities via the Strava API (own OAuth app), for a given date. Run `--authorize` once to mint a refresh token |
 | `calendar.py` | Google Calendar read/write (`get_upcoming_events`, `get_events_in_range`, `log_calendar_event` — idempotent via `source_id`) |
 | `email.py` | Send email via Gmail API (plain text or HTML) |
 | `docs.py` | Read/write the Weekly Learning & Project Log Google Doc |
@@ -235,14 +235,20 @@ mostly useful if the Python process fails to start at all).
 
 1. Install [Ollama](https://ollama.com) and pull a tool-calling-capable model
    (e.g. `ollama pull gemma4`). Verify it's running: `ollama list`.
-2. Create the venv (needs Python 3.10+, composio requires it):
+2. Create the venv (needs Python 3.10+):
    ```bash
    python3.12 -m venv .venv
    .venv/bin/pip install -r requirements.txt
    ```
 3. Copy `config/.env.example` to `config/.env` and fill in:
    - `OPENWEATHERMAP_API_KEY` — [openweathermap.org](https://openweathermap.org/api)
-   - `COMPOSIO_API_KEY`, `STRAVA_USER_ID`, `STRAVA_CONNECTED_ACCOUNT_ID` — from your Composio Strava connection
+   - `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `STRAVA_REFRESH_TOKEN` — create a
+     Strava API application at [strava.com/settings/api](https://www.strava.com/settings/api)
+     (set the Authorization Callback Domain to `localhost`); the owning account must
+     have an active Strava subscription or the API returns "Application Inactive". Then
+     run `python -m agent.tools.strava --authorize` once and follow the prompts to mint
+     the refresh token (requests the `activity:read_all` scope so private activities are
+     included).
    - `TAVILY_API_KEY` — [tavily.com](https://tavily.com) (used for web search)
    - `GITHUB_TOKEN` — a GitHub personal access token, used to list starred repos.
      [Fine-grained](https://github.com/settings/personal-access-tokens/new) with
