@@ -22,6 +22,7 @@ import os
 import re
 import sys
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
@@ -43,6 +44,9 @@ load_dotenv(_ROOT / "config" / ".env")
 
 DEFAULT_LOCATION = os.getenv("DEFAULT_LOCATION", "Newfields,NH,US")
 AI_NEWS_MAX_STORIES = 4
+# The brief runs daily, so only pull genuinely fresh headlines — without this,
+# Tavily ranks by relevance and the same evergreen stories resurface for days.
+AI_NEWS_LOOKBACK_DAYS = 1
 STARRED_STATE_PATH = _ROOT / "config" / "github_starred_state.json"
 
 GLANCE_SYSTEM_PROMPT = """You write a single short "Today at a Glance" blurb for a \
@@ -89,6 +93,7 @@ _STYLE = """
     li { margin-bottom: 6px; }
     .empty { color: #9ca3af; font-style: italic; }
     .intro { margin: 0 0 8px; }
+    .news-date { color: #9ca3af; font-size: 12px; font-weight: 600; margin-right: 2px; }
     a { color: #2563eb; text-decoration: none; }
   </style>
 """
@@ -153,6 +158,29 @@ def _clean_snippet(text: str, max_len: int = 160) -> str:
     return text
 
 
+def _parse_pub_date(raw: str):
+    """Parse Tavily's RFC-2822 published_date (e.g. 'Tue, 07 Jul 2026 …GMT');
+    return None if it's missing or unparseable so callers can sort it last."""
+    if not raw:
+        return None
+    try:
+        return parsedate_to_datetime(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _sort_by_recency(articles: list) -> list:
+    """Newest first; anything without a parseable date sinks to the bottom.
+    A safety net on top of the API's `days` window — the search ranks by
+    relevance, not date, so we re-order to surface the freshest story first."""
+    oldest = datetime.min.replace(tzinfo=timezone.utc)
+    return sorted(
+        articles,
+        key=lambda a: _parse_pub_date(a.get("published_date", "")) or oldest,
+        reverse=True,
+    )
+
+
 def _ai_news_html(articles: list, intro_text: str, error: str = None) -> str:
     if error:
         return f'<span class="empty">AI news unavailable: {html.escape(error)}</span>'
@@ -170,7 +198,10 @@ def _ai_news_html(articles: list, intro_text: str, error: str = None) -> str:
             title_html = f'<a href="{html.escape(safe_url)}">{title}</a>'
         else:
             title_html = title
-        items.append(f"<li>{title_html}{snippet_html}</li>")
+        # Surface each story's publish date so staleness is visible at a glance.
+        pub = _parse_pub_date(a.get("published_date", ""))
+        date_html = f'<span class="news-date">{pub.strftime("%b %-d")}</span> ' if pub else ""
+        items.append(f"<li>{date_html}{title_html}{snippet_html}</li>")
     intro_html = f'<p class="intro">{html.escape(intro_text)}</p>' if intro_text else ""
     return intro_html + "<ul>" + "".join(items) + "</ul>"
 
@@ -280,11 +311,12 @@ def build_and_send_brief(logger: Optional[logging.Logger] = None) -> dict:
             query="latest AI and machine learning news",
             topic="news",
             max_results=AI_NEWS_MAX_STORIES,
+            days=AI_NEWS_LOOKBACK_DAYS,
         )
         if logger:
             logger.info(f"search_web(ai news) -> {news_result}")
         ai_error = news_result.get("error")
-        ai_articles = news_result.get("results", [])
+        ai_articles = _sort_by_recency(news_result.get("results", []))
 
         ai_intro = ""
         if ai_articles and not ai_error:
