@@ -1,0 +1,3 @@
+# Dev-only dependencies (not needed by the running app / launchd tasks).
+# Install with: .venv/bin/pip install -r requirements-dev.txt
+pytest>=8.0

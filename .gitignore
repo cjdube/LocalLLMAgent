@@ -1,6 +1,7 @@
 .venv/
 __pycache__/
 *.pyc
+.pytest_cache/
 config/.env
 config/google_credentials.json
 config/google_token.json
