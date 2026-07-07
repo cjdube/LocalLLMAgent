@@ -250,3 +250,52 @@ def test_describe_tools_flattens_and_flags_mutations():
     assert to_param == {"name": "to", "type": "string", "description": "recipient", "required": True}
     # Read tools sort before write (mutating) tools.
     assert out[0]["name"] == "fetch_weather"
+
+
+# --------------------------------------------------------------------------- #
+# parse_runs caching (signature-keyed; invalidates on file change)
+# --------------------------------------------------------------------------- #
+
+def _one_run(day):
+    return [
+        f"2026-07-0{day} 06:00:00,000 [INFO] Starting task run",
+        f"2026-07-0{day} 06:00:01,000 [INFO] task run complete",
+    ]
+
+
+def test_parse_runs_returns_fresh_list_each_call(tmp_path):
+    log = tmp_path / "fresh.log"
+    _write_log(log, _one_run(1))
+    a = insights.parse_runs(log)
+    b = insights.parse_runs(log)
+    assert a == b
+    assert a is not b  # a mutation of one result can't corrupt the cached copy
+    a.clear()
+    assert len(insights.parse_runs(log)) == 1
+
+
+def test_parse_runs_reuses_cache_when_unchanged(tmp_path, monkeypatch):
+    log = tmp_path / "cached.log"
+    _write_log(log, _one_run(1))
+    calls = {"n": 0}
+    real = insights._parse_runs_uncached
+
+    def counting(path):
+        calls["n"] += 1
+        return real(path)
+
+    monkeypatch.setattr(insights, "_parse_runs_uncached", counting)
+    insights.parse_runs(log)
+    insights.parse_runs(log)
+    insights.parse_runs(log, limit=1)
+    assert calls["n"] == 1  # parsed once, then served from cache
+
+
+def test_parse_runs_invalidates_when_log_changes(tmp_path):
+    log = tmp_path / "changing.log"
+    _write_log(log, _one_run(1))
+    assert len(insights.parse_runs(log)) == 1
+    # Appending a second run grows the file, so the signature changes and the
+    # cache is bypassed on the next call.
+    _write_log(log, _one_run(1) + _one_run(2))
+    assert len(insights.parse_runs(log)) == 2

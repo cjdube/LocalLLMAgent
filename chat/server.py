@@ -12,6 +12,8 @@ import json
 import logging
 import os
 import sys
+import threading
+import time
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -190,6 +192,72 @@ button {{ width: 100%; padding: 12px; font-size: 16px; background: #1f2328; colo
 </form></body></html>"""
 
 
+class LoginThrottle:
+    """Per-client failed-login limiter — defense-in-depth on the one
+    internet-adjacent surface. The 256-bit token is the real defense (brute
+    force is infeasible), so this only aims to blunt automated guessing, not to
+    lock the box down. After MAX_FAILURES failures inside WINDOW_S a client is
+    locked out for a backoff that doubles on repeat offenses (capped at
+    MAX_LOCKOUT_S), then the counter resets — short enough that the single
+    legitimate user fat-fingering the token isn't durably self-DoSed.
+
+    Keyed by caller identity (see _client_ip): behind `tailscale serve` most
+    requests arrive from loopback, so this is coarse, but it still slows a
+    proxied guessing loop. `clock` is injectable for tests."""
+
+    MAX_FAILURES = 5
+    WINDOW_S = 300
+    BASE_LOCKOUT_S = 30
+    MAX_LOCKOUT_S = 900
+
+    def __init__(self, clock=time.monotonic):
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._state: dict[str, dict] = {}
+
+    def retry_after(self, key: str) -> float:
+        """Seconds the caller must still wait, or 0 if an attempt is allowed now."""
+        now = self._clock()
+        with self._lock:
+            entry = self._state.get(key)
+            if not entry:
+                return 0.0
+            return max(0.0, entry["locked_until"] - now)
+
+    def record_failure(self, key: str) -> None:
+        now = self._clock()
+        with self._lock:
+            entry = self._state.get(key)
+            if not entry or now - entry["window_start"] > self.WINDOW_S:
+                entry = {"failures": 0, "window_start": now, "lockouts": 0, "locked_until": 0.0}
+            entry["failures"] += 1
+            if entry["failures"] >= self.MAX_FAILURES:
+                entry["lockouts"] += 1
+                backoff = min(self.BASE_LOCKOUT_S * 2 ** (entry["lockouts"] - 1), self.MAX_LOCKOUT_S)
+                entry["locked_until"] = now + backoff
+                entry["failures"] = 0
+                entry["window_start"] = now
+            self._state[key] = entry
+
+    def record_success(self, key: str) -> None:
+        with self._lock:
+            self._state.pop(key, None)
+
+
+def _client_ip() -> str:
+    # `tailscale serve` reverse-proxies from loopback, so remote_addr is
+    # 127.0.0.1 for real users; prefer the first hop it records in
+    # X-Forwarded-For when that header is present.
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.remote_addr or "unknown"
+
+
+# Rate-limits failed /login attempts per client (defense-in-depth; see class).
+login_throttle = LoginThrottle()
+
+
 def _authenticated() -> bool:
     return bool(session.get("authenticated"))
 
@@ -235,12 +303,21 @@ def index():
 
 @app.route("/login", methods=["POST"])
 def login():
+    client = _client_ip()
+    wait = login_throttle.retry_after(client)
+    if wait > 0:
+        logger.warning(f"login throttled for {client}, retry after {int(wait)}s")
+        page = LOGIN_PAGE.format(error='<p class="error">Too many attempts. Try again shortly.</p>')
+        return page, 429, {"Retry-After": str(int(wait) + 1)}
+
     token = request.form.get("token", "")
     if hmac.compare_digest(token, WREN_CHAT_TOKEN):
+        login_throttle.record_success(client)
         session.permanent = True
         session["authenticated"] = True
         _session_id()
         return index()
+    login_throttle.record_failure(client)
     return LOGIN_PAGE.format(error='<p class="error">Wrong token.</p>'), 401
 
 

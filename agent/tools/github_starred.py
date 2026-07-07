@@ -12,6 +12,7 @@ Key resolution order: --api-key arg > config/.env file > GITHUB_TOKEN env var
 import argparse
 import re
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -237,8 +238,17 @@ def fetch_starred_repos(since: str = None, days_ago: int = None, api_key: str = 
 
     if since_dt is not None:
         headers = {"Authorization": f"token {api_key}", "Accept": "application/vnd.github+json"}
-        for repo in repos[:MAX_ENRICH]:
-            repo["recent_changes"] = _repo_changes(repo["full_name"], since_dt, headers)
+        to_enrich = repos[:MAX_ENRICH]
+        # _repo_changes makes up to 2 sequential HTTP round-trips per repo and
+        # never raises, so fanning the (bounded) enrich loop out over a small
+        # pool cuts wall-clock on a busy day off the morning-brief critical path
+        # without changing behaviour. map() preserves order and each summary
+        # lands back on its own repo. Small pool: courteous to GitHub's rate
+        # limiter and plenty for MAX_ENRICH repos.
+        with ThreadPoolExecutor(max_workers=5) as pool:
+            summaries = pool.map(lambda r: _repo_changes(r["full_name"], since_dt, headers), to_enrich)
+        for repo, summary in zip(to_enrich, summaries):
+            repo["recent_changes"] = summary
 
     return {"repos": repos, "total_starred": len(raw), "since": since}
 

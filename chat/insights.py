@@ -164,6 +164,26 @@ def _read_lines(log_path: Path) -> list[str]:
     return lines
 
 
+# parse_runs re-reads and re-parses every rotated log file on each call, and the
+# dashboard hits it once per task on every /api/schedules poll. Cache the parsed
+# runs keyed by the log files and their (mtime, size); the entry invalidates for
+# free the moment a task appends a new line or a file rotates. Guarded by a lock
+# because the chat server runs Flask with threaded=True.
+_RUNS_CACHE: dict[str, tuple] = {}
+_RUNS_CACHE_LOCK = threading.Lock()
+
+
+def _log_signature(paths: list[Path]) -> tuple:
+    sig = []
+    for path in paths:
+        try:
+            st = path.stat()
+        except OSError:
+            continue
+        sig.append((str(path), st.st_mtime_ns, st.st_size))
+    return tuple(sig)
+
+
 def _parse_ts(ts: str) -> datetime | None:
     try:
         return datetime.strptime(ts, _TS_FMT)
@@ -211,8 +231,25 @@ def parse_runs(log_path, limit: int | None = None) -> list[dict]:
     A run = {id, start, end, duration_s, status, label, summary,
              tool_calls: [...], final_text, error}. status is one of
     "success" | "failure" | "running".
+
+    Backed by a signature-keyed cache (see _RUNS_CACHE) so repeated dashboard
+    polls of an unchanged log don't re-read and re-parse it. Always returns a
+    fresh list so callers can't mutate the cached copy.
     """
     log_path = Path(log_path)
+    key = str(log_path)
+    signature = _log_signature(_rotated_log_paths(log_path))
+    with _RUNS_CACHE_LOCK:
+        cached = _RUNS_CACHE.get(key)
+        if cached is not None and cached[0] == signature:
+            runs = cached[1]
+        else:
+            runs = _parse_runs_uncached(log_path)
+            _RUNS_CACHE[key] = (signature, runs)
+    return list(runs[:limit]) if limit else list(runs)
+
+
+def _parse_runs_uncached(log_path: Path) -> list[dict]:
     runs: list[dict] = []
     current: dict | None = None
 
@@ -279,7 +316,7 @@ def parse_runs(log_path, limit: int | None = None) -> list[dict]:
     runs.reverse()  # most-recent first
     for run in runs:
         run["error"] = (run.get("error") or "").strip()
-    return runs[:limit] if limit else runs
+    return runs  # caller (parse_runs) applies any limit against the cached copy
 
 
 def _set_duration(run: dict) -> None:

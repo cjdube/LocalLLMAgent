@@ -358,8 +358,11 @@ worth stating explicitly.
 `WREN_CHAT_HOST`). `tailscale serve` reverse-proxies to that loopback address,
 so nothing needs to listen on the LAN. Access is gated by a 256-bit hex token
 (`WREN_CHAT_TOKEN`) compared in constant time; the token cookie is the only
-credential. There is no login rate-limiting — the token's entropy makes
-brute-force infeasible, so this is an accepted trade-off, not an oversight.
+credential. The token's entropy already makes brute-force infeasible, but
+`/login` also applies a per-client failed-attempt throttle (`LoginThrottle` in
+`chat/server.py`) as defense-in-depth — a handful of wrong guesses trigger a
+short, backing-off lockout. The tuning stays lenient enough that a legitimate
+mistyped token doesn't durably lock the single user out.
 
 **Prompt injection.** Untrusted external text flows into model prompts from
 several tools: Tavily search results, GitHub `recent_changes`, Chrome history
