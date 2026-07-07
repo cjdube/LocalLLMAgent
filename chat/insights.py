@@ -354,13 +354,15 @@ class RunManager:
                 return {"ok": False, "error": "already running"}
 
             launchd_log = LOGS_DIR / f"{task_key}.launchd.log"
-            out = open(launchd_log, "a")  # noqa: SIM115 — handed to the child, closed on its exit
-            proc = subprocess.Popen(
-                [str(VENV_PYTHON), "-m", task["module"]],
-                cwd=str(_ROOT),
-                stdout=out,
-                stderr=subprocess.STDOUT,
-            )
+            # The child gets its own dup of this fd at fork; close the parent's
+            # copy right after Popen so it isn't left dangling in this process.
+            with open(launchd_log, "a") as out:
+                proc = subprocess.Popen(
+                    [str(VENV_PYTHON), "-m", task["module"]],
+                    cwd=str(_ROOT),
+                    stdout=out,
+                    stderr=subprocess.STDOUT,
+                )
             self._procs[task_key] = proc
         return {"ok": True, "running": True}
 

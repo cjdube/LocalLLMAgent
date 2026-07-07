@@ -10,18 +10,15 @@ Key resolution order: --api-key arg > config/.env file > GITHUB_TOKEN env var
 """
 
 import argparse
-import json
-import os
 import re
 import sys
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import requests
-from dotenv import load_dotenv
 
-_ENV_PATH = Path(__file__).resolve().parent.parent.parent / "config" / ".env"
-load_dotenv(_ENV_PATH)
+from agent.tools._http import http_error, load_env, missing_key_error, print_result, resolve_key
+
+load_env()
 
 STARRED_URL = "https://api.github.com/user/starred"
 API_ROOT = "https://api.github.com"
@@ -207,9 +204,9 @@ def fetch_starred_repos(since: str = None, days_ago: int = None, api_key: str = 
     fetch_strava. 'since' (an exact ISO 8601 timestamp) stays available for
     direct Python callers like tasks/morning_brief.py, which compute it
     themselves and don't go through the model at all."""
-    api_key = api_key or os.getenv("GITHUB_TOKEN")
+    api_key = resolve_key("GITHUB_TOKEN", api_key)
     if not api_key:
-        return {"error": "GITHUB_TOKEN not set (checked arg, config/.env, env var)"}
+        return missing_key_error("GITHUB_TOKEN")
 
     if days_ago is not None:
         since = (datetime.now(timezone.utc) - timedelta(days=int(days_ago))).isoformat()
@@ -229,11 +226,9 @@ def fetch_starred_repos(since: str = None, days_ago: int = None, api_key: str = 
             reset = e.response.headers.get("X-RateLimit-Reset")
             reset_str = datetime.fromtimestamp(int(reset), tz=timezone.utc).isoformat() if reset else "unknown"
             return {"error": f"GitHub API rate limit exceeded, resets at {reset_str}"}
-        return {"error": f"HTTP {status}: {e}"}
-    except requests.exceptions.RequestException as e:
-        return {"error": f"network error: {e}"}
+        return http_error(e)
     except Exception as e:
-        return {"error": f"fetch error: {e}"}
+        return http_error(e)
 
     try:
         repos = _parse(raw, since_dt)
@@ -256,8 +251,7 @@ def main() -> int:
     args = parser.parse_args()
 
     result = fetch_starred_repos(args.since, args.days_ago, args.api_key)
-    print(json.dumps(result, indent=2))
-    return 1 if "error" in result else 0
+    return print_result(result)
 
 
 if __name__ == "__main__":

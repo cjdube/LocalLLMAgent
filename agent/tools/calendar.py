@@ -14,10 +14,9 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
-from googleapiclient.discovery import build
 
 from agent.dates import DATE_ARG_GUIDANCE, resolve_date
-from agent.tools.google_auth import get_credentials
+from agent.tools.google_auth import build_service
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(_ROOT / "config" / ".env")
@@ -110,45 +109,22 @@ GET_BY_DATE_TOOL_SCHEMA = {
 }
 
 
-_SERVICE = None
-
-
-def _service():
-    # Built once per process; the underlying credentials refresh themselves.
-    global _SERVICE
-    if _SERVICE is None:
-        _SERVICE = build("calendar", "v3", credentials=get_credentials())
-    return _SERVICE
-
-
 def get_upcoming_events(hours_ahead: int = 24) -> dict:
-    calendar_id = os.getenv("GOOGLE_CALENDAR_ID", "primary")
     now = datetime.now(timezone.utc)
     time_min = now.isoformat().replace("+00:00", "Z")
     time_max = (now + timedelta(hours=hours_ahead)).isoformat().replace("+00:00", "Z")
 
-    try:
-        service = _service()
-        result = (
-            service.events()
-            .list(
-                calendarId=calendar_id,
-                timeMin=time_min,
-                timeMax=time_max,
-                singleEvents=True,
-                orderBy="startTime",
-            )
-            .execute()
-        )
-    except Exception as e:
-        return {"error": str(e)}
+    # Delegates to get_events_in_range() and projects down to this tool's
+    # narrower schema (just summary/start/end) — the underlying events().list
+    # call is identical.
+    result = get_events_in_range(time_min, time_max)
+    if "error" in result:
+        return result
 
-    events = []
-    for e in result.get("items", []):
-        start = e.get("start", {}).get("dateTime", e.get("start", {}).get("date"))
-        end = e.get("end", {}).get("dateTime", e.get("end", {}).get("date"))
-        events.append({"summary": e.get("summary", "(no title)"), "start": start, "end": end})
-
+    events = [
+        {"summary": e["summary"], "start": e["start"], "end": e["end"]}
+        for e in result["events"]
+    ]
     return {"event_count": len(events), "events": events}
 
 
@@ -158,7 +134,7 @@ def get_events_in_range(time_min: str, time_max: str) -> dict:
     calendar_id = os.getenv("GOOGLE_CALENDAR_ID", "primary")
 
     try:
-        service = _service()
+        service = build_service("calendar", "v3")
         result = (
             service.events()
             .list(
@@ -237,7 +213,7 @@ def log_calendar_event(
     tz = _local_timezone()
 
     try:
-        service = _service()
+        service = build_service("calendar", "v3")
 
         if source_id:
             existing = (
@@ -281,7 +257,7 @@ def set_event_color(event_id: str, color_id: str) -> dict:
     calendar_id = os.getenv("GOOGLE_CALENDAR_ID", "primary")
 
     try:
-        service = _service()
+        service = build_service("calendar", "v3")
         service.events().patch(
             calendarId=calendar_id, eventId=event_id, body={"colorId": color_id}
         ).execute()

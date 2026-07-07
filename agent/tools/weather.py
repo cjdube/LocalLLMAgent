@@ -18,15 +18,13 @@ import json
 import os
 import sys
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import urlopen
 from urllib.error import URLError, HTTPError
 
-from dotenv import load_dotenv
+from agent.tools._http import load_env, missing_key_error, print_result, resolve_key
 
-_ENV_PATH = Path(__file__).resolve().parent.parent.parent / "config" / ".env"
-load_dotenv(_ENV_PATH)
+load_env()
 
 FORECAST_URL = "https://api.openweathermap.org/data/2.5/forecast"
 MAX_DAYS = 5  # ceiling of OpenWeatherMap's free 5-day/3-hour forecast endpoint
@@ -144,9 +142,9 @@ def _normalize_location(location: str) -> str:
 
 def fetch_weather(location: str = None, units: str = "imperial", days: int = 1, api_key: str = None) -> dict:
     """Callable entrypoint used by the agent loop's tool dispatcher."""
-    api_key = api_key or os.getenv("OPENWEATHERMAP_API_KEY")
+    api_key = resolve_key("OPENWEATHERMAP_API_KEY", api_key)
     if not api_key:
-        return {"error": "OPENWEATHERMAP_API_KEY not set (checked arg, config/.env, env var)"}
+        return missing_key_error("OPENWEATHERMAP_API_KEY")
 
     location = location or os.getenv("DEFAULT_LOCATION", "Newfields,NH,US")
     location = _normalize_location(location)
@@ -176,8 +174,7 @@ def main() -> int:
     args = parser.parse_args()
 
     result = fetch_weather(args.location, args.units, args.days, args.api_key)
-    print(json.dumps(result, indent=2))
-    return 1 if "error" in result else 0
+    return print_result(result)
 
 
 if __name__ == "__main__":

@@ -13,9 +13,8 @@ from email.mime.text import MIMEText
 from pathlib import Path
 
 from dotenv import load_dotenv
-from googleapiclient.discovery import build
 
-from agent.tools.google_auth import get_credentials
+from agent.tools.google_auth import build_service
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(_ROOT / "config" / ".env")
@@ -37,17 +36,6 @@ TOOL_SCHEMA = {
 }
 
 
-_SERVICE = None
-
-
-def _service():
-    # Built once per process; the underlying credentials refresh themselves.
-    global _SERVICE
-    if _SERVICE is None:
-        _SERVICE = build("gmail", "v1", credentials=get_credentials())
-    return _SERVICE
-
-
 def send_email(subject: str, body: str, to: str = None, html: bool = False) -> dict:
     to = to or os.getenv("BRIEF_TO_EMAIL")
     if not to:
@@ -59,7 +47,7 @@ def send_email(subject: str, body: str, to: str = None, html: bool = False) -> d
     raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
 
     try:
-        sent = _service().users().messages().send(userId="me", body={"raw": raw}).execute()
+        sent = build_service("gmail", "v1").users().messages().send(userId="me", body={"raw": raw}).execute()
     except Exception as e:
         return {"error": str(e)}
 

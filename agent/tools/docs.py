@@ -17,26 +17,14 @@ import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
-from googleapiclient.discovery import build
 
-from agent.tools.google_auth import get_credentials
+from agent.tools.google_auth import build_service
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(_ROOT / "config" / ".env")
 
 ANCHOR_TEXT = "<insert new entries after this line>"
 SECTION_HEADING = "Strategic Weekly Review"
-
-
-_SERVICE = None
-
-
-def _service():
-    # Built once per process; the underlying credentials refresh themselves.
-    global _SERVICE
-    if _SERVICE is None:
-        _SERVICE = build("docs", "v1", credentials=get_credentials())
-    return _SERVICE
 
 
 def _doc_id() -> str:
@@ -57,7 +45,7 @@ def get_previous_entry_text(max_chars: int = 4000) -> str:
     """Return the text of the most recent '## Strategic Weekly Review' block,
     for carry-forward context. Returns '' if the doc/section can't be read."""
     try:
-        service = _service()
+        service = build_service("docs", "v1")
         doc = service.documents().get(documentId=_doc_id()).execute()
     except Exception:
         return ""
@@ -141,7 +129,7 @@ def _parse_blocks(raw_content: str):
 
 def insert_weekly_entry(content: str) -> dict:
     try:
-        service = _service()
+        service = build_service("docs", "v1")
         doc_id = _doc_id()
         insert_index = _find_insertion_index(service, doc_id)
         blocks = _parse_blocks(content)

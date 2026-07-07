@@ -9,16 +9,13 @@ Key resolution order: --api-key arg > config/.env file > TAVILY_API_KEY env var
 """
 
 import argparse
-import json
-import os
 import sys
-from pathlib import Path
 
 import requests
-from dotenv import load_dotenv
 
-_ENV_PATH = Path(__file__).resolve().parent.parent.parent / "config" / ".env"
-load_dotenv(_ENV_PATH)
+from agent.tools._http import http_error, load_env, missing_key_error, print_result, resolve_key
+
+load_env()
 
 SEARCH_URL = "https://api.tavily.com/search"
 
@@ -108,9 +105,9 @@ def search_web(
     days: int = None,
 ) -> dict:
     """Callable entrypoint used by the agent loop's tool dispatcher."""
-    api_key = api_key or os.getenv("TAVILY_API_KEY")
+    api_key = resolve_key("TAVILY_API_KEY", api_key)
     if not api_key:
-        return {"error": "TAVILY_API_KEY not set (checked arg, config/.env, env var)"}
+        return missing_key_error("TAVILY_API_KEY")
 
     if not query or not query.strip():
         return {"error": "query must not be empty"}
@@ -121,13 +118,8 @@ def search_web(
 
     try:
         raw = _search(query.strip(), topic, max_results, api_key, days=days)
-    except requests.exceptions.HTTPError as e:
-        status = e.response.status_code if e.response is not None else "?"
-        return {"error": f"HTTP {status}: {e}"}
-    except requests.exceptions.RequestException as e:
-        return {"error": f"network error: {e}"}
     except Exception as e:
-        return {"error": f"fetch error: {e}"}
+        return http_error(e)
 
     try:
         return _parse(raw)
@@ -146,8 +138,7 @@ def main() -> int:
     args = parser.parse_args()
 
     result = search_web(args.query, args.topic, args.max_results, args.api_key, days=args.days)
-    print(json.dumps(result, indent=2))
-    return 1 if "error" in result else 0
+    return print_result(result)
 
 
 if __name__ == "__main__":

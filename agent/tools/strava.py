@@ -14,21 +14,18 @@ Key resolution order: --arg > config/.env file > env var
 """
 
 import argparse
-import json
 import os
 import sys
 import urllib.parse
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Optional
 
 import requests
-from dotenv import load_dotenv
 
 from agent.dates import DATE_ARG_GUIDANCE, resolve_date
+from agent.tools._http import load_env, print_result, resolve_key
 
-_ENV_PATH = Path(__file__).resolve().parent.parent.parent / "config" / ".env"
-load_dotenv(_ENV_PATH)
+load_env()
 
 _TOKEN_URL = "https://www.strava.com/oauth/token"
 _AUTHORIZE_URL = "https://www.strava.com/oauth/authorize"
@@ -78,9 +75,9 @@ def _get_activities(
     strava_refresh_token: Optional[str],
     days_back: int = 30,
 ) -> list:
-    client_id = strava_client_id or os.getenv("STRAVA_CLIENT_ID")
-    client_secret = strava_client_secret or os.getenv("STRAVA_CLIENT_SECRET")
-    refresh_token = strava_refresh_token or os.getenv("STRAVA_REFRESH_TOKEN")
+    client_id = resolve_key("STRAVA_CLIENT_ID", strava_client_id)
+    client_secret = resolve_key("STRAVA_CLIENT_SECRET", strava_client_secret)
+    refresh_token = resolve_key("STRAVA_REFRESH_TOKEN", strava_refresh_token)
 
     if not (client_id and client_secret and refresh_token):
         raise RuntimeError(
@@ -238,8 +235,7 @@ def main() -> int:
     result = fetch_strava(
         args.date, args.strava_client_id, args.strava_client_secret, args.strava_refresh_token
     )
-    print(json.dumps(result, indent=2))
-    return 1 if "error" in result else 0
+    return print_result(result)
 
 
 if __name__ == "__main__":
