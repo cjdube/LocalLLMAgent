@@ -348,6 +348,44 @@ mostly useful if the Python process fails to start at all).
 4. Run the task manually first and check `logs/<name>.log` before relying on
    the schedule.
 
+## Security model / trust boundaries
+
+The threat model here is deliberately small: a single user, a Tailscale-only
+network surface, and a local model with no outbound API. Two boundaries are
+worth stating explicitly.
+
+**Network.** The chat/dashboard server binds to `127.0.0.1` (override with
+`WREN_CHAT_HOST`). `tailscale serve` reverse-proxies to that loopback address,
+so nothing needs to listen on the LAN. Access is gated by a 256-bit hex token
+(`WREN_CHAT_TOKEN`) compared in constant time; the token cookie is the only
+credential. There is no login rate-limiting — the token's entropy makes
+brute-force infeasible, so this is an accepted trade-off, not an oversight.
+
+**Prompt injection.** Untrusted external text flows into model prompts from
+several tools: Tavily search results, GitHub `recent_changes`, Chrome history
+titles, and Strava activity names. Any of these could contain text crafted to
+steer the model. The blast radius is contained by design:
+
+- **Chat** is the only place the model drives tool-calling freely, and every
+  write tool there is confirmation-gated in code (`confirm_before` in
+  `agent/loop.py`) — the model cannot send an email, create a calendar event,
+  etc. without an explicit user "yes".
+- **`morning_brief`, `weekly_learnings`, and `calendar_colorizer`** use the
+  tool-free `complete_text` path — the model only writes narrative prose, it
+  never calls a tool, so injected instructions have nothing to actuate.
+- All model output rendered to HTML is `html.escape`d and any URL is
+  scheme-validated (`_safe_url`) before it reaches the page, so injected output
+  can't smuggle scripts or `javascript:`/`data:` links into the dashboard.
+
+The one place model-driven tool-calling meets an **un-gated** write is
+`tasks/daily_log.py`: it runs `run_agent` and can call `log_calendar_event`,
+fed by Strava activity *names*. This is an accepted risk — an attacker would
+need to control the user's own Strava account to influence it, and the only
+action is creating a calendar event (idempotent via `source_id`). If the trust
+assumptions here ever change (e.g. a shared Strava, or new un-gated write tools
+reachable from a scheduled task), revisit this boundary. See also the
+`web-content-untrusted-input` note in memory.
+
 ## What's NOT here
 
 - No Anthropic/Claude API usage anywhere in this codebase (verified: no

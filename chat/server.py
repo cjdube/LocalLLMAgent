@@ -56,6 +56,10 @@ load_dotenv(_ROOT / "config" / ".env")
 WREN_CHAT_TOKEN = os.getenv("WREN_CHAT_TOKEN")
 FLASK_SECRET_KEY = os.getenv("FLASK_SECRET_KEY")
 WREN_CHAT_PORT = int(os.getenv("WREN_CHAT_PORT", "8420"))
+# Bind to loopback by default: `tailscale serve` reverse-proxies to 127.0.0.1,
+# so binding 0.0.0.0 gains nothing and needlessly exposes the login page to the
+# local LAN. Override with WREN_CHAT_HOST only if you know you need a wider bind.
+WREN_CHAT_HOST = os.getenv("WREN_CHAT_HOST", "127.0.0.1")
 MAX_MESSAGE_CHARS = 8000
 
 if not WREN_CHAT_TOKEN or not FLASK_SECRET_KEY:
@@ -404,8 +408,8 @@ def api_run_status(task_key: str):
 
 
 def main():
-    logger.info(f"Starting Wren chat server on port {WREN_CHAT_PORT}")
-    app.run(host="0.0.0.0", port=WREN_CHAT_PORT, threaded=True, debug=False)
+    logger.info(f"Starting Wren chat server on {WREN_CHAT_HOST}:{WREN_CHAT_PORT}")
+    app.run(host=WREN_CHAT_HOST, port=WREN_CHAT_PORT, threaded=True, debug=False)
 
 
 if __name__ == "__main__":
