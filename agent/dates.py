@@ -18,20 +18,59 @@ from typing import Optional
 DATE_ARG_GUIDANCE = (
     "Use 'today' or 'yesterday' for those. If a month and day are given "
     "WITHOUT a year (e.g. 'July 2nd'), pass just the month and day as 'MM-DD' "
-    "(e.g. '07-02') and the correct year is filled in automatically (the most "
-    "recent past occurrence). Only use a full 'YYYY-MM-DD' when a specific "
-    "year is stated."
+    "(e.g. '07-02') and the correct year is filled in automatically. Only use "
+    "a full 'YYYY-MM-DD' when a specific year is stated."
 )
 
 
-def resolve_date(date_str: str, *, today: Optional[date] = None) -> str:
+def _resolve_bare_month_day(month: int, day: int, today: date, prefer: str) -> date:
+    """Pick the year for a bare MM-DD according to `prefer`.
+
+    - "past"    -> the most recent past occurrence (this year, else last year).
+                   Right for backward-looking lookups (Strava, Chrome history).
+    - "future"  -> the next occurrence (this year, else next year). For
+                   forward-looking asks where the year is unambiguously ahead.
+    - "nearest" -> whichever occurrence is closest to `today` in either
+                   direction. Right for calendars, where "July 10th" asked on
+                   July 7th means *this* year's, not last year's.
+
+    Feb-29 in a non-leap year raises ValueError for that candidate year; such
+    years are simply skipped rather than crashing the whole resolution.
+    """
+    def candidate(year: int) -> Optional[date]:
+        try:
+            return date(year, month, day)
+        except ValueError:
+            return None
+
+    if prefer == "future":
+        this_year = candidate(today.year)
+        if this_year is None or this_year < today:
+            return candidate(today.year + 1) or date(today.year, month, day)
+        return this_year
+
+    if prefer == "nearest":
+        options = [c for c in (candidate(today.year - 1), candidate(today.year), candidate(today.year + 1)) if c]
+        return min(options, key=lambda c: abs((c - today).days))
+
+    # "past" (default): this year, unless it hasn't happened yet.
+    this_year = candidate(today.year)
+    if this_year is None or this_year > today:
+        return candidate(today.year - 1) or date(today.year, month, day)
+    return this_year
+
+
+def resolve_date(date_str: str, *, today: Optional[date] = None, prefer: str = "past") -> str:
     """Map a user-supplied date onto a concrete 'YYYY-MM-DD' string.
 
     - 'today' / 'yesterday'        -> relative to `today` (defaults to now)
     - 'YYYY-MM-DD'                 -> honored as-is (an explicit year wins)
-    - 'MM-DD' / 'M-D' (also '/')   -> the most recent past occurrence: the
-      current year, or the previous year if that month/day hasn't happened yet
-      this year. Lets the user say "July 2nd" without ever specifying a year.
+    - 'MM-DD' / 'M-D' (also '/')   -> a bare month/day, with the year filled in
+      per `prefer` ("past" | "future" | "nearest"; see
+      _resolve_bare_month_day). Lets the user say "July 2nd" without ever
+      specifying a year. Defaults to "past" so existing backward-looking
+      callers (Strava, Chrome history) are unchanged; the calendar passes
+      "nearest" so a near-future day resolves to this year, not last.
 
     Anything unparseable is returned unchanged, so callers never crash on odd
     model input — their downstream lookup simply won't match it.
@@ -53,10 +92,7 @@ def resolve_date(date_str: str, *, today: Optional[date] = None) -> str:
             return date(int(parts[0]), int(parts[1]), int(parts[2])).isoformat()
         if len(parts) == 2:
             month, day = int(parts[0]), int(parts[1])
-            candidate = date(today.year, month, day)
-            if candidate > today:
-                candidate = date(today.year - 1, month, day)
-            return candidate.isoformat()
+            return _resolve_bare_month_day(month, day, today, prefer).isoformat()
     except ValueError:
         pass
     return date_str

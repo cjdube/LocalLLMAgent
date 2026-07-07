@@ -140,6 +140,23 @@ def advance(
         if not tool_calls:
             return {"type": "final", "text": message.get("content", "")}
 
+        # This loop pauses at the first confirm-gated call and returns; any
+        # calls after it in the same batch are dropped (they aren't replayed
+        # once the write resolves). Harmless while the model emits one call at
+        # a time, but a stronger tool-caller could batch, so make the drop
+        # visible rather than silent — see advance()'s docstring caveat.
+        if logger and len(tool_calls) > 1 and any(
+            c["function"]["name"] in confirm_before for c in tool_calls
+        ):
+            names = [c["function"]["name"] for c in tool_calls]
+            logger.warning(
+                "advance() got %d tool calls in one turn including a "
+                "confirm-gated call; only the first confirm-gated call is "
+                "acted on and later calls in this batch are dropped: %s",
+                len(tool_calls),
+                names,
+            )
+
         for call in tool_calls:
             if call["function"]["name"] in confirm_before:
                 return {"type": "confirm", "call": call}

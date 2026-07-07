@@ -72,3 +72,47 @@ def test_impossible_calendar_date_is_returned_unchanged():
 
 def test_impossible_month_is_returned_unchanged():
     assert resolve_date("13-01", today=TODAY) == "13-01"
+
+
+# --- prefer= behavior (1.1) ---------------------------------------------------
+
+
+def test_prefer_defaults_to_past():
+    # Explicit "past" matches the default and the original behavior.
+    assert resolve_date("07-10", today=TODAY, prefer="past") == "2025-07-10"
+
+
+def test_prefer_nearest_keeps_this_year_for_near_future():
+    # The calendar's case: July 10th asked on July 7th stays in the current
+    # year rather than rolling back to last year (the old silent-miss bug).
+    assert resolve_date("07-10", today=TODAY, prefer="nearest") == "2026-07-10"
+
+
+def test_prefer_nearest_keeps_this_year_for_near_past():
+    assert resolve_date("07-05", today=TODAY, prefer="nearest") == "2026-07-05"
+
+
+def test_prefer_nearest_rolls_back_when_last_year_is_closer():
+    # Late June asked in early July: last year's is 12 days back, this year's
+    # was ~9 days ago too — pick the truly nearest. Here this-year June 28th is
+    # 9 days back; last year is 374 back. This year wins.
+    assert resolve_date("06-28", today=TODAY, prefer="nearest") == "2026-06-28"
+
+
+def test_prefer_nearest_rolls_forward_when_next_year_is_closer():
+    # January 1st asked on December 1st: next year's Jan 1 (31 days ahead) is
+    # nearer than this year's Jan 1 (~334 days back).
+    assert resolve_date("01-01", today=date(2026, 12, 1), prefer="nearest") == "2027-01-01"
+
+
+def test_prefer_future_rolls_forward_for_past_day():
+    # A day already gone this year resolves to next year under "future".
+    assert resolve_date("07-05", today=TODAY, prefer="future") == "2027-07-05"
+
+
+def test_prefer_future_keeps_this_year_for_upcoming_day():
+    assert resolve_date("07-10", today=TODAY, prefer="future") == "2026-07-10"
+
+
+def test_prefer_nearest_still_passes_through_impossible_date():
+    assert resolve_date("02-30", today=TODAY, prefer="nearest") == "02-30"

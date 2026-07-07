@@ -194,11 +194,16 @@ def get_events_by_date(start: str, end: str) -> dict:
     form agent.dates.resolve_date() accepts ('today'/'yesterday', a bare
     'MM-DD', or a full 'YYYY-MM-DD') and builds the full-day ISO 8601 range in
     local time, so the model never has to know the current year or construct a
-    timezone-aware datetime itself."""
+    timezone-aware datetime itself.
+
+    Uses prefer="nearest" for bare month/day input: calendars are queried
+    forward at least as often as backward, so "July 10th" asked on July 7th
+    must resolve to *this* year's July 10th, not last year's (which would
+    silently return no events)."""
     tz = ZoneInfo(_local_timezone())
     today = datetime.now(tz).date()
-    start = resolve_date(start, today=today)
-    end = resolve_date(end, today=today)
+    start = resolve_date(start, today=today, prefer="nearest")
+    end = resolve_date(end, today=today, prefer="nearest")
     start_dt = datetime.fromisoformat(start).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=tz)
     end_dt = datetime.fromisoformat(end).replace(hour=23, minute=59, second=59, microsecond=999999, tzinfo=tz)
     return get_events_in_range(start_dt.isoformat(), end_dt.isoformat())
