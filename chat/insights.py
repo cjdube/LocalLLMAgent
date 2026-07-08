@@ -54,8 +54,44 @@ def _log_key_from_stdout(std_out_path: str) -> str:
     return name[: -len(".launchd.log")] if name.endswith(".launchd.log") else Path(name).stem
 
 
+# discover_tasks() re-globs and re-parses every launchd plist on each call, and
+# task_by_key() calls it in full to find a single task — so one dashboard poll
+# can parse the plists several times. Cache the parsed list keyed by the plist
+# directory's (name, mtime_ns) signature; it invalidates for free the moment a
+# plist is added, removed, or edited. Guarded by a lock (Flask runs threaded).
+_TASKS_CACHE: dict[str, tuple] = {}
+_TASKS_CACHE_LOCK = threading.Lock()
+
+
+def _launchd_signature() -> tuple:
+    sig = []
+    for path in sorted(LAUNCHD_DIR.glob("*.plist")):
+        try:
+            st = path.stat()
+        except OSError:
+            continue
+        sig.append((path.name, st.st_mtime_ns))
+    return tuple(sig)
+
+
 def discover_tasks() -> list[dict]:
-    """One entry per launchd plist, sorted daemons-last then by schedule time."""
+    """One entry per launchd plist, sorted daemons-last then by schedule time.
+
+    Backed by a signature-keyed cache (see _TASKS_CACHE) so repeated calls in a
+    single dashboard poll don't re-parse unchanged plists. Returns a fresh list
+    each call so callers can't mutate the cached copy."""
+    signature = _launchd_signature()
+    with _TASKS_CACHE_LOCK:
+        cached = _TASKS_CACHE.get("entry")
+        if cached is not None and cached[0] == signature:
+            tasks = cached[1]
+        else:
+            tasks = _discover_tasks_uncached()
+            _TASKS_CACHE["entry"] = (signature, tasks)
+    return list(tasks)
+
+
+def _discover_tasks_uncached() -> list[dict]:
     tasks = []
     for plist_path in sorted(LAUNCHD_DIR.glob("*.plist")):
         with plist_path.open("rb") as fh:

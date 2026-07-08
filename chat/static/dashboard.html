@@ -103,6 +103,7 @@
   .msg.typing .d:nth-child(3) { animation-delay: 0.3s; }
   @keyframes bounce { 0%,60%,100% { opacity: 0.3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
   .confirm { align-self: flex-start; max-width: 92%; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 14px; padding: 11px 13px; font-size: 14px; }
+  .confirm .detail { margin-top: 8px; padding: 8px 10px; background: #fff; border: 1px solid #fed7aa; border-radius: 8px; font-size: 13px; color: #6b7280; white-space: pre-wrap; max-height: 160px; overflow-y: auto; }
   .confirm .row { margin-top: 9px; display: flex; gap: 8px; }
   .confirm button { flex: 1; padding: 7px; border-radius: 8px; border: none; font-size: 13px; cursor: pointer; }
   .confirm .yes { background: #16a34a; color: white; }
@@ -439,9 +440,10 @@ function addTyping() {
   messagesEl.scrollTop = messagesEl.scrollHeight;
   return div;
 }
-function addConfirm(summary, onDecide) {
+function addConfirm(summary, detail, onDecide) {
   const div = el("div", "confirm");
   div.appendChild(el("div", null, summary));  // model-derived text -> textContent
+  if (detail) div.appendChild(el("div", "detail", detail));  // e.g. email body; textContent
   const row = el("div", "row");
   const yes = el("button", "yes", "Confirm");
   const no = el("button", "no", "Cancel");
@@ -459,7 +461,7 @@ function handleResult(result, typingEl) {
   if (result.error) { addMessage("system", "Error: " + result.error); setBusy(false); return; }
   if (result.type === "final") { addMessage("wren", result.text); setBusy(false); }
   else if (result.type === "confirm") {
-    addConfirm(result.summary, async (approved) => {
+    addConfirm(result.summary, result.detail, async (approved) => {
       setBusy(true);
       const t = addTyping();
       const resp = await fetch("/chat/confirm", {

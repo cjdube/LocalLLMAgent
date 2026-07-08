@@ -5,6 +5,7 @@ _is_run_success, run grouping (success/failure/running), and rotated-file
 chronological ordering. `now` is pinned so next_run is deterministic.
 """
 
+import plistlib
 from datetime import datetime
 
 from chat import insights
@@ -299,3 +300,56 @@ def test_parse_runs_invalidates_when_log_changes(tmp_path):
     # cache is bypassed on the next call.
     _write_log(log, _one_run(1) + _one_run(2))
     assert len(insights.parse_runs(log)) == 2
+
+
+# --------------------------------------------------------------------------- #
+# discover_tasks caching (signature-keyed on the plist directory)
+# --------------------------------------------------------------------------- #
+
+def _write_plist(path, sci):
+    data = {
+        "Label": f"com.test.{path.stem}",
+        "ProgramArguments": ["python", "-m", f"tasks.{path.stem}"],
+        "StandardOutPath": str(path.parent / f"{path.stem}.launchd.log"),
+        "StartCalendarInterval": sci,
+    }
+    with open(path, "wb") as fh:
+        plistlib.dump(data, fh)
+
+
+def test_discover_tasks_reuses_cache_and_invalidates(tmp_path, monkeypatch):
+    monkeypatch.setattr(insights, "LAUNCHD_DIR", tmp_path)
+    insights._TASKS_CACHE.clear()
+    _write_plist(tmp_path / "foo.plist", {"Hour": 6, "Minute": 0})
+
+    calls = {"n": 0}
+    real = insights._discover_tasks_uncached
+
+    def counting():
+        calls["n"] += 1
+        return real()
+
+    monkeypatch.setattr(insights, "_discover_tasks_uncached", counting)
+
+    assert len(insights.discover_tasks()) == 1
+    insights.discover_tasks()
+    insights.discover_tasks()
+    assert calls["n"] == 1  # parsed once, then served from cache
+
+    # Adding a plist changes the directory signature -> cache is bypassed.
+    _write_plist(tmp_path / "bar.plist", {"Hour": 7, "Minute": 0})
+    assert len(insights.discover_tasks()) == 2
+    assert calls["n"] == 2
+
+
+def test_discover_tasks_returns_fresh_list(tmp_path, monkeypatch):
+    monkeypatch.setattr(insights, "LAUNCHD_DIR", tmp_path)
+    insights._TASKS_CACHE.clear()
+    _write_plist(tmp_path / "foo.plist", {"Hour": 6, "Minute": 0})
+
+    a = insights.discover_tasks()
+    b = insights.discover_tasks()
+    assert a == b
+    assert a is not b  # mutating one caller's result can't corrupt the cache
+    a.clear()
+    assert len(insights.discover_tasks()) == 1

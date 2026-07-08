@@ -348,6 +348,22 @@ mostly useful if the Python process fails to start at all).
 4. Run the task manually first and check `logs/<name>.log` before relying on
    the schedule.
 
+## Development / tests
+
+Dev-only dependencies live in `requirements-dev.txt` (currently just `pytest`);
+install them into the venv with `.venv/bin/pip install -r requirements-dev.txt`.
+Run the suite from the repo root:
+
+```bash
+.venv/bin/pytest        # or: .venv/bin/pytest -q
+```
+
+The tests are pure/offline — they mock the model and network, so no Ollama or
+API keys are needed. They cover the date resolver, run-history parsing and
+caching, the login throttle, the morning-brief rendering helpers, and the chat
+server's auth + confirm/rollback flow. After editing the always-on chat server,
+restart it (it runs under launchd) so the changes take effect.
+
 ## Security model / trust boundaries
 
 The threat model here is deliberately small: a single user, a Tailscale-only
@@ -362,7 +378,11 @@ credential. The token's entropy already makes brute-force infeasible, but
 `/login` also applies a per-client failed-attempt throttle (`LoginThrottle` in
 `chat/server.py`) as defense-in-depth — a handful of wrong guesses trigger a
 short, backing-off lockout. The tuning stays lenient enough that a legitimate
-mistyped token doesn't durably lock the single user out.
+mistyped token doesn't durably lock the single user out. Every response also
+carries a set of hardening headers (`Content-Security-Policy`,
+`X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
+`Referrer-Policy: no-referrer`) as defense-in-depth against clickjacking and
+any future markup slip — see `_security_headers` in `chat/server.py`.
 
 **Prompt injection.** Untrusted external text flows into model prompts from
 several tools: Tavily search results, GitHub `recent_changes`, Chrome history
@@ -372,7 +392,10 @@ steer the model. The blast radius is contained by design:
 - **Chat** is the only place the model drives tool-calling freely, and every
   write tool there is confirmation-gated in code (`confirm_before` in
   `agent/loop.py`) — the model cannot send an email, create a calendar event,
-  etc. without an explicit user "yes".
+  etc. without an explicit user "yes". The confirmation card also shows the
+  substance of the pending action, including a preview of the email *body*
+  (not just the subject), so an injected or hallucinated message can't be
+  approved sight-unseen.
 - **`morning_brief`, `weekly_learnings`, and `calendar_colorizer`** use the
   tool-free `complete_text` path — the model only writes narrative prose, it
   never calls a tool, so injected instructions have nothing to actuate.

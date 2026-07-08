@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
-from agent.dates import DATE_ARG_GUIDANCE, resolve_date
+from agent.dates import DATE_ARG_GUIDANCE, local_timezone as _local_timezone, resolve_date
 from agent.tools.google_auth import build_service
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
@@ -183,22 +183,6 @@ def get_events_by_date(start: str, end: str) -> dict:
     start_dt = datetime.fromisoformat(start).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=tz)
     end_dt = datetime.fromisoformat(end).replace(hour=23, minute=59, second=59, microsecond=999999, tzinfo=tz)
     return get_events_in_range(start_dt.isoformat(), end_dt.isoformat())
-
-
-def _local_timezone() -> str:
-    """Resolve the system's IANA timezone name (e.g. 'America/New_York').
-    Google Calendar rejects abbreviations like 'EDT', so we read the real
-    zoneinfo path via /etc/localtime rather than relying on tzinfo.__str__."""
-    override = os.getenv("TIMEZONE")
-    if override:
-        return override
-    try:
-        resolved = Path("/etc/localtime").resolve()
-        parts = resolved.parts
-        idx = parts.index("zoneinfo")
-        return "/".join(parts[idx + 1 :])
-    except (OSError, ValueError):
-        return "UTC"
 
 
 def log_calendar_event(

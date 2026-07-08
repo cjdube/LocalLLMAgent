@@ -9,7 +9,9 @@ drop `DATE_ARG_GUIDANCE` into the tool's JSON schema so the model is told how
 to pass the argument.
 """
 
+import os
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Optional
 
 # Reusable JSON-schema description for a "which day" tool argument. Append it
@@ -21,6 +23,28 @@ DATE_ARG_GUIDANCE = (
     "(e.g. '07-02') and the correct year is filled in automatically. Only use "
     "a full 'YYYY-MM-DD' when a specific year is stated."
 )
+
+
+def local_timezone() -> str:
+    """Resolve the system's IANA timezone name (e.g. 'America/New_York').
+
+    Kept here (rather than in a single tool) because several tools and tasks
+    need the same local zone to interpret day boundaries consistently — the
+    calendar, the Chrome-history lookup, and the weekly/colorizer tasks all
+    resolve day ranges in local time, not UTC. Google Calendar also rejects
+    abbreviations like 'EDT', so we read the real zoneinfo path via
+    /etc/localtime rather than relying on tzinfo.__str__. Overridable with the
+    TIMEZONE env var; falls back to 'UTC' if the path can't be resolved."""
+    override = os.getenv("TIMEZONE")
+    if override:
+        return override
+    try:
+        resolved = Path("/etc/localtime").resolve()
+        parts = resolved.parts
+        idx = parts.index("zoneinfo")
+        return "/".join(parts[idx + 1:])
+    except (OSError, ValueError):
+        return "UTC"
 
 
 def _resolve_bare_month_day(month: int, day: int, today: date, prefer: str) -> date:

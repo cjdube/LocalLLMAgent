@@ -3,7 +3,10 @@
 Opens Chrome's SQLite History database in read-only immutable mode (works
 while Chrome is running) and returns meaningful site visits as JSON.
 
+Day boundaries are interpreted in the system's local timezone (not UTC).
+
 Usage:
+    python -m agent.tools.chrome_history --days-ago 7
     python -m agent.tools.chrome_history --start 2026-06-22 --end 2026-06-28
 """
 
@@ -12,9 +15,12 @@ import json
 import platform
 import sqlite3
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
+
+from agent.dates import DATE_ARG_GUIDANCE, local_timezone, resolve_date
 
 if platform.system() == "Darwin":
     HISTORY_PATH = Path.home() / "Library/Application Support/Google/Chrome/Default/History"
@@ -39,14 +45,27 @@ TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "fetch_chrome_history",
-        "description": "Get meaningful (non-noise) Chrome browsing history sites for a date range.",
+        "description": (
+            "Get meaningful (non-noise) Chrome browsing history sites. Pass "
+            "'days_ago' for a recent window (e.g. 7 for the last week) — the "
+            "date is resolved in Python, so don't compute one yourself. Or pass "
+            "an explicit 'start'/'end' range for a specific span. Day boundaries "
+            "are interpreted in Craig's local timezone."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
-                "start": {"type": "string", "description": "Start date YYYY-MM-DD"},
-                "end": {"type": "string", "description": "End date YYYY-MM-DD"},
+                "days_ago": {
+                    "type": "integer",
+                    "description": (
+                        "How many days back to look, e.g. 7 for 'the last week'. "
+                        "Resolved from the current time in Python. Use this rather "
+                        "than computing a date yourself; omit if giving start/end."
+                    ),
+                },
+                "start": {"type": "string", "description": "Start date (use with 'end' for an explicit range). " + DATE_ARG_GUIDANCE},
+                "end": {"type": "string", "description": "End date. " + DATE_ARG_GUIDANCE},
             },
-            "required": ["start", "end"],
         },
     },
 }
@@ -108,11 +127,32 @@ def _filter_and_group(rows: list) -> list:
     return sorted(by_domain.values(), key=lambda x: x["visits"], reverse=True)
 
 
-def fetch_chrome_history(start: str, end: str) -> dict:
-    """Callable entrypoint used by the agent loop's tool dispatcher."""
+def fetch_chrome_history(start: str = None, end: str = None, days_ago: int = None) -> dict:
+    """Callable entrypoint used by the agent loop's tool dispatcher.
+
+    Day boundaries are interpreted in the system's local timezone, not UTC, so
+    "June 22" means local June 22 rather than a window shifted by the UTC
+    offset. Days are resolved in Python (via agent.dates) rather than trusting
+    the model to compute a date — same pattern as fetch_strava /
+    fetch_starred_repos. Pass either `days_ago` (a recent window) or an
+    explicit `start`/`end` range."""
+    tz = ZoneInfo(local_timezone())
+    today = datetime.now(tz).date()
+
+    if days_ago is not None:
+        start_date = (today - timedelta(days=int(days_ago))).isoformat()
+        end_date = today.isoformat()
+    elif start and end:
+        # prefer="past": browsing history only looks backward, so a bare "07-02"
+        # resolves to the most recent occurrence, never a future one.
+        start_date = resolve_date(start, today=today, prefer="past")
+        end_date = resolve_date(end, today=today, prefer="past")
+    else:
+        return {"error": "provide either days_ago, or both start and end"}
+
     try:
-        start_dt = datetime.fromisoformat(start).replace(hour=0, minute=0, second=0, tzinfo=timezone.utc)
-        end_dt = datetime.fromisoformat(end).replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
+        start_dt = datetime.fromisoformat(start_date).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=tz)
+        end_dt = datetime.fromisoformat(end_date).replace(hour=23, minute=59, second=59, microsecond=999999, tzinfo=tz)
     except ValueError as e:
         return {"error": f"invalid date format: {e}"}
 
@@ -124,16 +164,18 @@ def fetch_chrome_history(start: str, end: str) -> dict:
         return {"error": f"sqlite error: {e}"}
 
     sites = _filter_and_group(rows)
-    return {"week": f"{start} to {end}", "sites": sites, "total_meaningful_visits": len(sites)}
+    return {"range": f"{start_date} to {end_date}", "sites": sites, "total_meaningful_visits": len(sites)}
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--start", required=True)
-    parser.add_argument("--end", required=True)
+    parser.add_argument("--start", default=None)
+    parser.add_argument("--end", default=None)
+    parser.add_argument("--days-ago", dest="days_ago", type=int, default=None,
+                        help="Recent window instead of an explicit --start/--end range.")
     args = parser.parse_args()
 
-    result = fetch_chrome_history(args.start, args.end)
+    result = fetch_chrome_history(args.start, args.end, args.days_ago)
     print(json.dumps(result, indent=2))
     return 1 if "error" in result else 0
 

@@ -1,0 +1,197 @@
+"""Tests for chat.server's stateful, security-relevant HTTP paths.
+
+Covers auth gating on every endpoint, the login throttle's 429, the
+email-body-preview surfaced in confirmations, and the two subtle flows that
+keep conversation history well-formed: declining a pending write when the user
+sends a new message instead of answering, and rolling back a failed turn.
+
+The model and network are never touched — chat.server.advance / resolve are
+monkeypatched. Importing chat.server runs its module-level secret check, so the
+two required secrets are stubbed into the environment before the import.
+"""
+
+import os
+
+os.environ.setdefault("WREN_CHAT_TOKEN", "test-token")
+os.environ.setdefault("FLASK_SECRET_KEY", "test-secret")
+
+import pytest
+
+from chat import server as srv
+
+
+@pytest.fixture
+def client():
+    srv.app.config["TESTING"] = True
+    srv.conversations.clear()
+    srv.pending_confirmations.clear()
+    with srv.app.test_client() as c:
+        yield c
+
+
+@pytest.fixture
+def auth_client(client):
+    """A client with an authenticated session pinned to a known sid, so tests
+    can read/seed chat.server.conversations[SID] directly."""
+    with client.session_transaction() as sess:
+        sess["authenticated"] = True
+        sess["sid"] = "test-sid"
+    return client
+
+
+SID = "test-sid"
+EMAIL_CALL = {"function": {"name": "send_email", "arguments": {"subject": "Hi", "body": "the body"}}}
+
+
+# --------------------------------------------------------------------------- #
+# Auth gating
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("method,path,kwargs", [
+    ("post", "/chat", {"json": {"message": "hi"}}),
+    ("post", "/chat/confirm", {"json": {"approved": True}}),
+    ("post", "/chat/new", {}),
+    ("get", "/api/schedules", {}),
+    ("get", "/api/runs/morning_brief", {}),
+    ("get", "/api/runs/morning_brief/someid", {}),
+    ("get", "/api/capabilities", {}),
+    ("post", "/api/run/morning_brief", {}),
+    ("get", "/api/run/morning_brief/status", {}),
+])
+def test_endpoints_require_auth(client, method, path, kwargs):
+    resp = getattr(client, method)(path, **kwargs)
+    assert resp.status_code == 401
+    assert resp.get_json()["error"] == "not authenticated"
+
+
+def test_security_headers_present(client):
+    resp = client.get("/")
+    assert resp.headers["X-Frame-Options"] == "DENY"
+    assert resp.headers["X-Content-Type-Options"] == "nosniff"
+    assert resp.headers["Referrer-Policy"] == "no-referrer"
+    assert "frame-ancestors 'none'" in resp.headers["Content-Security-Policy"]
+
+
+# --------------------------------------------------------------------------- #
+# Login throttle (integration through /login)
+# --------------------------------------------------------------------------- #
+
+def test_login_throttle_returns_429_after_repeated_failures(client):
+    ip = {"X-Forwarded-For": "203.0.113.7"}  # unique key, isolated from other tests
+    for _ in range(srv.LoginThrottle.MAX_FAILURES):
+        resp = client.post("/login", data={"token": "wrong"}, headers=ip)
+        assert resp.status_code == 401
+    resp = client.post("/login", data={"token": "wrong"}, headers=ip)
+    assert resp.status_code == 429
+    assert "Retry-After" in resp.headers
+
+
+# --------------------------------------------------------------------------- #
+# Email body preview in confirmations
+# --------------------------------------------------------------------------- #
+
+def test_email_confirmation_includes_body_preview():
+    call = {"function": {"name": "send_email",
+                         "arguments": {"subject": "Hi", "body": "First line\n<b>bold</b> and more"}}}
+    detail = srv._describe_detail(call)
+    assert "First line" in detail and "bold" in detail
+    assert "<b>" not in detail  # stray tags stripped defensively
+
+
+def test_body_preview_is_truncated():
+    call = {"function": {"name": "send_email", "arguments": {"body": "word " * 200}}}
+    detail = srv._describe_detail(call)
+    assert len(detail) <= srv.BODY_PREVIEW_CHARS + 1  # +1 for the ellipsis
+    assert detail.endswith("…")
+
+
+def test_non_email_write_has_no_detail():
+    call = {"function": {"name": "log_calendar_event", "arguments": {"summary": "x"}}}
+    assert srv._describe_detail(call) is None
+
+
+def test_call_response_confirm_carries_summary_and_detail():
+    resp = srv._call_response({"type": "confirm", "call": EMAIL_CALL})
+    assert resp["type"] == "confirm"
+    assert resp["summary"].startswith("Send an email")
+    assert resp["detail"] == "the body"
+
+
+# --------------------------------------------------------------------------- #
+# /chat — pending-confirmation decline + rollback
+# --------------------------------------------------------------------------- #
+
+def test_new_message_declines_pending_confirmation(auth_client, monkeypatch):
+    # A write was awaiting confirmation; the user types a new message instead of
+    # answering. That must be treated as declining the pending action so its
+    # unanswered tool_call doesn't leave the history malformed.
+    srv.conversations[SID] = [
+        {"role": "system", "content": "s"},
+        {"role": "user", "content": "send it"},
+        {"role": "assistant", "content": "", "tool_calls": [EMAIL_CALL]},
+    ]
+    srv.pending_confirmations[SID] = EMAIL_CALL
+
+    resolved = {}
+
+    def fake_resolve(messages, call, approved, dispatch, logger=None):
+        resolved["approved"] = approved
+        messages.append({"role": "tool", "content": "declined"})
+
+    def fake_advance(messages, tools, dispatch, confirm_before=frozenset(), logger=None):
+        return {"type": "final", "text": "ok, cancelled"}
+
+    monkeypatch.setattr(srv, "resolve", fake_resolve)
+    monkeypatch.setattr(srv, "advance", fake_advance)
+
+    resp = auth_client.post("/chat", json={"message": "never mind"})
+    assert resp.status_code == 200
+    assert resp.get_json() == {"type": "final", "text": "ok, cancelled"}
+    assert resolved["approved"] is False  # declined, not executed
+    assert SID not in srv.pending_confirmations
+
+
+def test_chat_rolls_back_history_when_advance_raises(auth_client, monkeypatch):
+    def boom(messages, tools, dispatch, confirm_before=frozenset(), logger=None):
+        raise RuntimeError("model exploded")
+
+    monkeypatch.setattr(srv, "advance", boom)
+
+    resp = auth_client.post("/chat", json={"message": "hi"})
+    assert resp.status_code == 500
+    # The failed turn's user message is rolled back; only the seeded system
+    # prompt remains, so the next turn starts from a clean, valid history.
+    history = srv.conversations[SID]
+    assert len(history) == 1
+    assert history[0]["role"] == "system"
+
+
+def test_chat_confirm_keeps_resolved_result_on_failed_continuation(auth_client, monkeypatch):
+    srv.conversations[SID] = [
+        {"role": "system", "content": "s"},
+        {"role": "user", "content": "send it"},
+        {"role": "assistant", "content": "", "tool_calls": [EMAIL_CALL]},
+    ]
+    srv.pending_confirmations[SID] = EMAIL_CALL
+
+    def fake_resolve(messages, call, approved, dispatch, logger=None):
+        messages.append({"role": "tool", "content": "sent"})
+
+    def boom(messages, tools, dispatch, confirm_before=frozenset(), logger=None):
+        raise RuntimeError("continuation exploded")
+
+    monkeypatch.setattr(srv, "resolve", fake_resolve)
+    monkeypatch.setattr(srv, "advance", boom)
+
+    resp = auth_client.post("/chat/confirm", json={"approved": True})
+    assert resp.status_code == 500
+    # The rollback must not strip the resolved tool result — that would orphan
+    # the approved tool_call. It stays; only the failed continuation is removed.
+    history = srv.conversations[SID]
+    assert history[-1] == {"role": "tool", "content": "sent"}
+
+
+def test_chat_confirm_without_pending_is_400(auth_client):
+    resp = auth_client.post("/chat/confirm", json={"approved": True})
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == "no pending action"

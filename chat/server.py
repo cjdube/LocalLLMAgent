@@ -11,6 +11,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import sys
 import threading
 import time
@@ -163,6 +164,30 @@ app.config["MAX_CONTENT_LENGTH"] = 256 * 1024
 app.config["SESSION_COOKIE_SECURE"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
+@app.after_request
+def _security_headers(resp):
+    """Defense-in-depth response headers on the one network-adjacent surface.
+    The pages are already XSS-safe by construction (all model/log-derived text
+    is assigned via textContent, never innerHTML), but these harden against
+    clickjacking, MIME sniffing, referrer leakage, and any future markup slip.
+
+    The CSP still allows 'unsafe-inline' for style/script because the chat and
+    dashboard pages carry their logic in inline <style>/<script> blocks; the
+    'self' + inline policy plus frame-ancestors 'none' is the meaningful win.
+    Tightening to nonces/hashes would mean moving that JS into /static — a
+    larger change deferred for now."""
+    resp.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
+        "script-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; "
+        "form-action 'self'",
+    )
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    return resp
+
+
 logger = setup_logger("wren")
 logger.setLevel(logging.INFO)
 
@@ -282,6 +307,33 @@ def _describe_call(call: dict) -> str:
     return f"{name}({json.dumps(args)})"
 
 
+# How much of an email body to surface in the confirmation card. Long enough to
+# see what's being sent, short enough to keep the card compact.
+BODY_PREVIEW_CHARS = 240
+
+
+def _describe_detail(call: dict) -> str | None:
+    """A secondary preview line for the confirmation card. For send_email this
+    is the message body, so the human approving the send actually sees what
+    will go out — not just the subject. Returns None when there's nothing extra
+    to show (the summary alone suffices)."""
+    name = call["function"]["name"]
+    args = call["function"].get("arguments", {})
+    if name == "send_email":
+        body = (args.get("body") or "").strip()
+        if not body:
+            return None
+        # Chat-composed bodies are plain text; strip any stray tags defensively
+        # (in case the model emitted HTML) and collapse whitespace so the
+        # preview stays readable, then truncate.
+        text = re.sub(r"<[^>]+>", "", body)
+        text = re.sub(r"\s+", " ", text).strip()
+        if len(text) > BODY_PREVIEW_CHARS:
+            text = text[:BODY_PREVIEW_CHARS].rsplit(" ", 1)[0] + "…"
+        return text
+    return None
+
+
 def _call_response(result: dict) -> dict:
     if result["type"] == "final":
         return {"type": "final", "text": result["text"]}
@@ -291,6 +343,7 @@ def _call_response(result: dict) -> dict:
         "tool": call["function"]["name"],
         "args": call["function"].get("arguments", {}),
         "summary": _describe_call(call),
+        "detail": _describe_detail(call),
     }
 
 
