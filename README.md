@@ -88,6 +88,7 @@ in — nothing new inherits it automatically.
 | `docs.py` | Read/write the Weekly Learning & Project Log Google Doc |
 | `google_tasks.py` | Google Tasks read/write (`get_tasks`, `get_tasks_due_soon`, `create_task`, `update_task_due_date`, `complete_task`) |
 | `chrome_history.py` | Read Chrome's local history DB for a date range |
+| `memory.py` | Persistent long-term memory in two tiers — `remember` (archival, search-only), `pin` (active, injected into every system prompt), `recall` (search either tier, optionally by category), `archive` (demote active→archival), `forget` (delete). Stored in `config/wren_memory.json`; archival facts track an `access_count` |
 | `google_auth.py` | Shared OAuth helper — one cached token for Calendar, Gmail, Docs, and Tasks scopes |
 
 Every tool module is runnable standalone for testing, e.g.:
@@ -143,12 +144,21 @@ chat/
   model. `send_morning_brief` builds and sends the same polished HTML brief the
   scheduled task sends (via the shared `build_and_send_brief()`) — chat is told
   to use it rather than freehand-composing a brief with `send_email`, so the
-  formatting never degrades to raw markdown. Not yet wired up for chat:
+  formatting never degrades to raw markdown. Wren also has a long-term memory in
+  two tiers: `remember` saves a fact to searchable archival storage, while `pin`
+  keeps a durable preference or routine always-on. Only *active* (pinned) facts
+  are injected into every system prompt (via `with_identity()` →
+  `memory.render_memory_block()`), so the prompt stays small as the archive grows;
+  scheduled tasks see the active set too. `recall` searches either tier (optionally
+  by category) and bumps each archival fact's `access_count`; `archive` demotes an
+  active fact back to search-only. All execute immediately except `forget` (delete
+  by id), which is confirmation-gated. See the memory tool in the tools table
+  above. Not yet wired up for chat:
   reading/writing the Weekly Log doc — those functions don't have a
   `TOOL_SCHEMA` yet (only ever called directly from Python by
   `weekly_learnings.py`). Same pattern extends it later if wanted.
 - **Confirmation gate:** before `log_calendar_event`, `send_email`,
-  `recolor_event`, or `send_morning_brief` actually runs, the chat UI shows
+  `recolor_event`, `send_morning_brief`, or `forget` actually runs, the chat UI shows
   what Wren wants to do and waits for a tap to confirm or cancel — enforced in
   code (`advance()`'s `confirm_before` set in `agent/loop.py`), not just
   requested in the prompt, so it doesn't depend on the small local model
@@ -408,6 +418,13 @@ steer the model. The blast radius is contained by design:
 - All model output rendered to HTML is `html.escape`d and any URL is
   scheme-validated (`_safe_url`) before it reaches the page, so injected output
   can't smuggle scripts or `javascript:`/`data:` links into the dashboard.
+- **Long-term memory** is a *persistence* vector: a fact saved from untrusted
+  text (e.g. "remember what that page said") is injected into every future
+  system prompt. It's rendered under a heading that frames saved items as
+  reference facts to recall, *not* instructions to act on
+  (`memory.render_memory_block()`), and capture is explicit (Craig-initiated,
+  never a background scrape). `forget` is confirmation-gated so a poisoned
+  memory can't be silently pruned to cover tracks.
 
 The one place model-driven tool-calling meets an **un-gated** write is
 `tasks/daily_log.py`: it runs `run_agent` and can call `log_calendar_event`,

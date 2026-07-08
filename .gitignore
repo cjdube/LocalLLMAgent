@@ -6,6 +6,7 @@ config/.env
 config/google_credentials.json
 config/google_token.json
 config/github_starred_state.json
+config/wren_memory.json
 logs/*.log
 .DS_Store
 .claude/

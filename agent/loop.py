@@ -36,7 +36,11 @@ CRAIG_CONTEXT = load_persona("identity.md")
 
 
 def with_identity(system_prompt: str) -> str:
-    parts = [p for p in (WREN_CORE, CRAIG_CONTEXT, system_prompt) if p]
+    # Memories are rendered at call time (not import) so a fact saved mid-session
+    # is present in the next conversation's system prompt.
+    from agent.tools.memory import render_memory_block
+
+    parts = [p for p in (WREN_CORE, CRAIG_CONTEXT, render_memory_block(), system_prompt) if p]
     return "\n\n---\n\n".join(parts)
 
 
