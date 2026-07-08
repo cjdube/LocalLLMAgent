@@ -47,6 +47,18 @@ from agent.tools.calendar import (
 from agent.tools.chrome_history import TOOL_SCHEMA as CHROME_SCHEMA, fetch_chrome_history
 from agent.tools.email import TOOL_SCHEMA as EMAIL_SCHEMA, send_email
 from agent.tools.github_starred import TOOL_SCHEMA as GITHUB_STARRED_SCHEMA, fetch_starred_repos
+from agent.tools.google_tasks import (
+    COMPLETE_TASK_TOOL_SCHEMA,
+    CREATE_TASK_TOOL_SCHEMA,
+    GET_TASKS_DUE_SOON_TOOL_SCHEMA,
+    GET_TASKS_TOOL_SCHEMA,
+    UPDATE_TASK_DUE_DATE_TOOL_SCHEMA,
+    complete_task,
+    create_task,
+    get_tasks,
+    get_tasks_due_soon,
+    update_task_due_date,
+)
 from agent.tools.strava import TOOL_SCHEMA as STRAVA_SCHEMA, fetch_strava
 from agent.tools.weather import TOOL_SCHEMA as WEATHER_SCHEMA, fetch_weather
 from agent.tools.web_search import TOOL_SCHEMA as WEB_SEARCH_SCHEMA, search_web
@@ -84,6 +96,11 @@ TOOLS = [
     WEB_SEARCH_SCHEMA,
     GITHUB_STARRED_SCHEMA,
     SEND_BRIEF_TOOL_SCHEMA,
+    GET_TASKS_TOOL_SCHEMA,
+    GET_TASKS_DUE_SOON_TOOL_SCHEMA,
+    CREATE_TASK_TOOL_SCHEMA,
+    UPDATE_TASK_DUE_DATE_TOOL_SCHEMA,
+    COMPLETE_TASK_TOOL_SCHEMA,
 ]
 
 
@@ -107,8 +124,16 @@ DISPATCH = {
     "search_web": search_web,
     "fetch_starred_repos": fetch_starred_repos,
     "send_morning_brief": _send_morning_brief,
+    "get_tasks": get_tasks,
+    "get_tasks_due_soon": get_tasks_due_soon,
+    "create_task": create_task,
+    "update_task_due_date": update_task_due_date,
+    "complete_task": complete_task,
 }
-WRITE_TOOLS = frozenset({"log_calendar_event", "send_email", "recolor_event", "send_morning_brief"})
+WRITE_TOOLS = frozenset({
+    "log_calendar_event", "send_email", "recolor_event", "send_morning_brief",
+    "create_task", "update_task_due_date", "complete_task",
+})
 
 CHAT_SYSTEM_PROMPT = (
     load_persona("wren_chat.md")
@@ -132,7 +157,15 @@ CHAT_SYSTEM_PROMPT = (
     "his morning brief, use send_morning_brief rather than composing that "
     "email yourself with send_email — it builds the same formatted HTML "
     "brief the scheduled task sends, which you can't reliably reproduce by "
-    "writing the email body freehand."
+    "writing the email body freehand. You can also look up Craig's Google "
+    "Tasks (get_tasks for everything open, get_tasks_due_soon for what's "
+    "overdue or due soon — these span all of his task lists, e.g. Domestic, "
+    "Travel, AARP, and each result says which list a task is in), create a "
+    "new task, change a task's due date, or mark one complete — creating, "
+    "rescheduling, or completing a task pauses for confirmation just like "
+    "the other write actions. To change or complete a task you need its "
+    "tasklist_id as well as its id, both of which come from a prior "
+    "get_tasks/get_tasks_due_soon call."
 )
 
 def _system_message_content() -> str:
@@ -299,11 +332,20 @@ def _describe_call(call: dict) -> str:
     if name == "send_email":
         return f'Send an email — subject: "{args.get("subject", "")}"'
     if name == "send_morning_brief":
-        return "Send the morning brief (weather, calendar, AI news)"
+        return "Send the morning brief (weather, calendar, tasks due soon, AI news)"
     if name == "log_calendar_event":
         return f'Create calendar event "{args.get("summary", "")}" from {args.get("start", "?")} to {args.get("end", "?")}'
     if name == "recolor_event":
         return f'Recolor calendar event to "{args.get("category", "")}"'
+    if name == "create_task":
+        due = args.get("due")
+        return f'Create task "{args.get("title", "")}"' + (f" (due {due})" if due else "")
+    if name == "update_task_due_date":
+        label = args.get("task_title") or args.get("task_id", "")
+        return f'Change due date of "{label}" to {args.get("due", "?")}'
+    if name == "complete_task":
+        label = args.get("task_title") or args.get("task_id", "")
+        return f'Mark "{label}" complete'
     return f"{name}({json.dumps(args)})"
 
 

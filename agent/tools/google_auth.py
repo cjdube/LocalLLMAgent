@@ -6,11 +6,16 @@ silently — no browser interaction required after the first authorization.
 
 Setup (one-time, manual):
   1. https://console.cloud.google.com/ -> create/select a project
-  2. Enable "Google Calendar API" and "Gmail API"
+  2. Enable "Google Calendar API", "Gmail API", "Google Docs API", and
+     "Google Tasks API"
   3. OAuth consent screen -> External -> add your own email as a test user
   4. Credentials -> Create Credentials -> OAuth client ID -> Desktop app
   5. Download the JSON, save it as config/google_credentials.json
   6. Run: python -m agent.tools.google_auth   (opens browser once, caches token)
+
+Adding a new scope to SCOPES below requires deleting the cached
+config/google_token.json and re-running this module once — a cached token is
+locked to the scopes it was originally consented to.
 """
 
 import os
@@ -31,6 +36,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/documents",
+    "https://www.googleapis.com/auth/tasks",
 ]
 
 # Cached for the life of the process so the always-on chat server and

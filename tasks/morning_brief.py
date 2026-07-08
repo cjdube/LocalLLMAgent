@@ -21,20 +21,23 @@ import logging
 import os
 import re
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dotenv import load_dotenv
 
+from agent.dates import local_timezone
 from agent.loop import complete_text
 from agent.tools.calendar import get_upcoming_events
 from agent.tools.email import send_email
 from agent.tools.github_starred import fetch_starred_repos
+from agent.tools.google_tasks import get_tasks_due_soon
 from agent.tools.weather import fetch_weather
 from agent.tools.web_search import search_web
 from tasks._common import setup_logger, today_str
@@ -92,6 +95,7 @@ _STYLE = """
     ul { margin: 0; padding-left: 20px; }
     li { margin-bottom: 6px; }
     .empty { color: #9ca3af; font-style: italic; }
+    .overdue { color: #b91c1c; }
     .intro { margin: 0 0 8px; }
     .news-date { color: #9ca3af; font-size: 12px; font-weight: 600; margin-right: 2px; }
     a { color: #2563eb; text-decoration: none; }
@@ -119,6 +123,36 @@ def _events_html(events: list) -> str:
             time_str = start
         summary = html.escape(e.get("summary", "(no title)"))
         items.append(f"<li><strong>{time_str}</strong> — {summary}</li>")
+    return "<ul>" + "".join(items) + "</ul>"
+
+
+def _tasks_html(tasks: list, error: str = None, today: date = None) -> str:
+    if error:
+        return f'<span class="empty">Tasks unavailable: {html.escape(error)}</span>'
+    if not tasks:
+        return '<span class="empty">Nothing past due or due soon.</span>'
+    today = today or datetime.now(ZoneInfo(local_timezone())).date()
+    items = []
+    for t in tasks:
+        due_str = t.get("due") or ""
+        try:
+            due_date = datetime.fromisoformat(due_str.replace("Z", "+00:00")).date()
+        except ValueError:
+            due_date = None
+        if due_date is None:
+            label_html = ""
+        else:
+            if due_date < today:
+                label_class, label_text = ' class="overdue"', "Overdue"
+            elif due_date == today:
+                label_class, label_text = "", "Today"
+            else:
+                label_class, label_text = "", due_date.strftime("%a %b %-d")
+            label_html = f"<strong{label_class}>{html.escape(label_text)}</strong> — "
+        title = html.escape(t.get("title", "(no title)"))
+        list_name = t.get("list")
+        list_html = f' <span style="color:#9ca3af;">({html.escape(list_name)})</span>' if list_name else ""
+        items.append(f"<li>{label_html}{title}{list_html}</li>")
     return "<ul>" + "".join(items) + "</ul>"
 
 
@@ -232,6 +266,7 @@ def _starred_repos_html(repos: list, intro_text: str, error: str = None) -> str:
 def render_brief_html(
     weather: dict,
     events: list,
+    tasks: list,
     glance_text: str,
     ai_articles: list,
     ai_intro: str,
@@ -239,11 +274,13 @@ def render_brief_html(
     starred_intro: str,
     ai_error: str = None,
     starred_error: str = None,
+    tasks_error: str = None,
 ) -> str:
     date_str = datetime.now().strftime("%A, %B %-d")
     sections = (
         _section("☀️", "Today at a Glance", html.escape(glance_text) or "No summary available.")
         + _section("\U0001F4C5", "Calendar", _events_html(events))
+        + _section("✅", "Tasks Due Soon", _tasks_html(tasks, tasks_error))
         + _section("\U0001F324️", "Weather", _weather_html(weather))
         + _section("\U0001F916", "AI News", _ai_news_html(ai_articles, ai_intro, ai_error))
         + _section("⭐", "Starred Repos", _starred_repos_html(starred_repos, starred_intro, starred_error))
@@ -273,10 +310,11 @@ SEND_BRIEF_TOOL_SCHEMA = {
         "name": "send_morning_brief",
         "description": (
             "Build and send Craig's morning brief email right now (weather, "
-            "calendar, AI news), using the same polished HTML layout as the "
-            "scheduled morning brief. Use this whenever Craig asks to send or "
-            "resend the morning brief — do NOT compose that email yourself "
-            "with send_email, since freehand text loses the formatting."
+            "calendar, tasks due soon, AI news), using the same polished HTML "
+            "layout as the scheduled morning brief. Use this whenever Craig "
+            "asks to send or resend the morning brief — do NOT compose that "
+            "email yourself with send_email, since freehand text loses the "
+            "formatting."
         ),
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
@@ -299,6 +337,12 @@ def build_and_send_brief(logger: Optional[logging.Logger] = None) -> dict:
         if logger:
             logger.info(f"get_upcoming_events -> {events_result}")
         events = events_result.get("events", [])
+
+        tasks_result = get_tasks_due_soon(hours_ahead=48)
+        if logger:
+            logger.info(f"get_tasks_due_soon -> {tasks_result}")
+        tasks_error = tasks_result.get("error")
+        tasks = [] if tasks_error else tasks_result.get("tasks", [])
 
         glance_text = complete_text(
             system_prompt=GLANCE_SYSTEM_PROMPT,
@@ -351,6 +395,7 @@ def build_and_send_brief(logger: Optional[logging.Logger] = None) -> dict:
         body_html = render_brief_html(
             weather,
             events,
+            tasks,
             glance_text,
             ai_articles,
             ai_intro,
@@ -358,6 +403,7 @@ def build_and_send_brief(logger: Optional[logging.Logger] = None) -> dict:
             starred_intro,
             ai_error,
             starred_error,
+            tasks_error,
         )
         result = send_email(
             subject=f"Morning Brief - {today_str()}",

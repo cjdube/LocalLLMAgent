@@ -86,8 +86,9 @@ in — nothing new inherits it automatically.
 | `calendar.py` | Google Calendar read/write (`get_upcoming_events`, `get_events_in_range`, `log_calendar_event` — idempotent via `source_id`) |
 | `email.py` | Send email via Gmail API (plain text or HTML) |
 | `docs.py` | Read/write the Weekly Learning & Project Log Google Doc |
+| `google_tasks.py` | Google Tasks read/write (`get_tasks`, `get_tasks_due_soon`, `create_task`, `update_task_due_date`, `complete_task`) |
 | `chrome_history.py` | Read Chrome's local history DB for a date range |
-| `google_auth.py` | Shared OAuth helper — one cached token for Calendar, Gmail, and Docs scopes |
+| `google_auth.py` | Shared OAuth helper — one cached token for Calendar, Gmail, Docs, and Tasks scopes |
 
 Every tool module is runnable standalone for testing, e.g.:
 ```bash
@@ -99,7 +100,7 @@ Every tool module is runnable standalone for testing, e.g.:
 
 | Task | Schedule | What it does |
 |---|---|---|
-| `tasks/morning_brief.py` | Daily 6:00 AM | Fetches weather + next-24h calendar events + latest AI news (via Tavily `search_web`) + starred GitHub repos pushed to since the last brief (via `github_starred.fetch_starred_repos`, cursor persisted in `config/github_starred_state.json`), has the model write a short "at a glance" summary and one-sentence intros for the AI-news and starred-repos sections, assembles a styled HTML email (weather / calendar / AI News / Starred Repos sections), sends it via Gmail. The pipeline lives in `build_and_send_brief()`, shared with the chat `send_morning_brief` tool. |
+| `tasks/morning_brief.py` | Daily 6:00 AM | Fetches weather + next-24h calendar events + Google Tasks past due or due within 48h (via `google_tasks.get_tasks_due_soon`) + latest AI news (via Tavily `search_web`) + starred GitHub repos pushed to since the last brief (via `github_starred.fetch_starred_repos`, cursor persisted in `config/github_starred_state.json`), has the model write a short "at a glance" summary and one-sentence intros for the AI-news and starred-repos sections, assembles a styled HTML email (weather / calendar / tasks due soon / AI News / Starred Repos sections), sends it via Gmail. The pipeline lives in `build_and_send_brief()`, shared with the chat `send_morning_brief` tool. |
 | `tasks/daily_log.py` | Daily 6:15 AM | Fetches yesterday's Strava activities, has the model (via `run_agent`, tool-calling) log each one to Google Calendar. Deduped by `source_id` (Strava activity id) so re-runs never create duplicates. |
 | `tasks/weekly_learnings.py` | Mondays 5:00 AM | Computes the most recently completed Mon–Sun week, pulls calendar events (categorized by color) + Chrome browsing history + the previous doc entry (for carry-forwards), has the model draft a 4-section retrospective, writes it to the Weekly Learning & Project Log doc. If the doc write fails, emails the draft instead so it's never silently lost. |
 | `tasks/calendar_colorizer.py` | Daily 5:00 PM | Fetches yesterday's calendar events, has the model guess a category per event title (Work/LLC, AARP, Fitness, Meal Prep, Domestic/Chores, Meetings, Travel, Appointments, or Uncategorized) and returns a colorId per event, then patches each event's color. Always re-classifies, even events colored by a previous run or by hand. On failure, emails a notice. |
@@ -305,13 +306,18 @@ mostly useful if the Python process fails to start at all).
      also works for public stars (add the `repo` scope only if you star private
      repos too).
    - `WEEKLY_LOG_DOC_ID` — the Google Doc ID (from its URL) for the Weekly Learning & Project Log
+   - `GOOGLE_TASKLIST_ID` — optional. By default `get_tasks`/`get_tasks_due_soon`
+     read across every Google Tasks list on the account (tasks are commonly split
+     across several named lists); set this to a specific list id to scope reads
+     — and the default list new tasks land in — to just that one list
    - `BRIEF_TO_EMAIL`, `DEFAULT_LOCATION` — your own values
    - `WREN_CHAT_TOKEN`, `FLASK_SECRET_KEY` — generate each with
      `python -c "import secrets; print(secrets.token_hex(32))"`; leave
      `WREN_CHAT_PORT` at its default unless it conflicts with something else
-4. Google OAuth setup (Calendar + Gmail + Docs):
+4. Google OAuth setup (Calendar + Gmail + Docs + Tasks):
    - [console.cloud.google.com](https://console.cloud.google.com/) → create/select a project
-   - Enable the **Google Calendar API**, **Gmail API**, and **Google Docs API**
+   - Enable the **Google Calendar API**, **Gmail API**, **Google Docs API**, and
+     **Google Tasks API**
    - OAuth consent screen → External → add yourself as a test user
    - Credentials → Create Credentials → OAuth client ID → **Desktop app**
    - Download the JSON as `config/google_credentials.json`
