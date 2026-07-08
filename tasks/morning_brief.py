@@ -118,7 +118,8 @@ def _events_html(events: list) -> str:
     for e in events:
         start = e.get("start", "")
         try:
-            time_str = datetime.fromisoformat(start).strftime("%-I:%M %p")
+            dt = datetime.fromisoformat(start)
+            time_str = f"{dt.strftime('%b %-d')}, {dt.strftime('%-I:%M %p')}"
         except ValueError:
             time_str = start
         summary = html.escape(e.get("summary", "(no title)"))
