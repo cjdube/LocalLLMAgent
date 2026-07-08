@@ -262,6 +262,17 @@ New dashboard routes on the chat server, all behind the same auth:
 `GET /api/runs/<task>/<run_id>`, `GET /api/capabilities`,
 `POST /api/run/<task>`, `GET /api/run/<task>/status`.
 
+### Memories
+
+`http://127.0.0.1:8420/memories` is a read-only view of `memory.py`'s store
+(same auth as the dashboard): an **active** table (pinned facts always in the
+system prompt) and an **archival** table (search-only facts), each with
+category and created date. Archival is sorted by `access_count` descending —
+the facts that actually get recalled float to the top. Managing memories
+(pin/archive/forget) is still chat-only; this page is just for seeing what's
+there. Backed by `GET /api/memories`, which calls `memory.recall()` with no
+query so viewing the page never bumps any access counts.
+
 ## Scheduling — launchd
 
 Each task (and the always-on chat server) has a `.plist` in `launchd/`,

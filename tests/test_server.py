@@ -17,6 +17,7 @@ os.environ.setdefault("FLASK_SECRET_KEY", "test-secret")
 
 import pytest
 
+from agent.tools import memory
 from chat import server as srv
 
 
@@ -57,6 +58,7 @@ EMAIL_CALL = {"function": {"name": "send_email", "arguments": {"subject": "Hi", 
     ("get", "/api/capabilities", {}),
     ("post", "/api/run/morning_brief", {}),
     ("get", "/api/run/morning_brief/status", {}),
+    ("get", "/api/memories", {}),
 ])
 def test_endpoints_require_auth(client, method, path, kwargs):
     resp = getattr(client, method)(path, **kwargs)
@@ -195,3 +197,24 @@ def test_chat_confirm_without_pending_is_400(auth_client):
     resp = auth_client.post("/chat/confirm", json={"approved": True})
     assert resp.status_code == 400
     assert resp.get_json()["error"] == "no pending action"
+
+
+# --------------------------------------------------------------------------- #
+# /api/memories
+# --------------------------------------------------------------------------- #
+
+def test_api_memories_splits_scope_and_sorts_archival_by_access_count(auth_client, tmp_path, monkeypatch):
+    monkeypatch.setattr(memory, "_STORE_PATH", tmp_path / "wren_memory.json")
+    memory.pin("Craig prefers metric units", category="preference")
+    memory.remember("Crows can recognize human faces", category="trivia")
+    memory.remember("Owls can rotate their heads 270 degrees", category="trivia")
+    memory.recall(query="owls")  # bumps owls' access_count to 1; crows stays at 0
+
+    resp = auth_client.get("/api/memories")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert [m["text"] for m in data["active"]] == ["Craig prefers metric units"]
+    assert [m["text"] for m in data["archival"]] == [
+        "Owls can rotate their heads 270 degrees",
+        "Crows can recognize human faces",
+    ]

@@ -534,6 +534,13 @@ def dashboard():
     return send_from_directory(STATIC_DIR, "dashboard.html")
 
 
+@app.route("/memories", methods=["GET"])
+def memories_page():
+    if not _authenticated():
+        return LOGIN_PAGE.format(error="")
+    return send_from_directory(STATIC_DIR, "memories.html")
+
+
 def _run_summary(run: dict | None) -> dict | None:
     """The slice of a run the Overview needs — omits the heavy tool_calls/error."""
     if run is None:
@@ -593,6 +600,17 @@ def api_capabilities():
     if not _authenticated():
         return jsonify({"error": "not authenticated"}), 401
     return jsonify({"tools": describe_tools(TOOLS, WRITE_TOOLS)})
+
+
+@app.route("/api/memories", methods=["GET"])
+def api_memories():
+    if not _authenticated():
+        return jsonify({"error": "not authenticated"}), 401
+    data = recall()
+    active = [m for m in data["memories"] if m.get("scope", "active") == "active"]
+    archival = [m for m in data["memories"] if m.get("scope", "active") == "archival"]
+    archival.sort(key=lambda m: m.get("access_count", 0), reverse=True)
+    return jsonify({"active": active, "archival": archival})
 
 
 @app.route("/api/run/<task_key>", methods=["POST"])
