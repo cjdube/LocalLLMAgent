@@ -100,6 +100,7 @@ in — nothing new inherits it automatically.
 | `google_tasks.py` | Google Tasks read/write (`get_tasks`, `get_tasks_due_soon`, `create_task`, `update_task_due_date`, `complete_task`) |
 | `chrome_history.py` | Read Chrome's local history DB for a date range |
 | `memory.py` | Persistent long-term memory in two tiers — `remember` (archival, search-only), `pin` (active, injected into every system prompt), `recall` (search either tier, optionally by category), `archive` (demote active→archival), `forget` (delete). Stored in `config/wren_memory.json`; archival facts track an `access_count` |
+| `skills.py` | Procedural memory (chat-only) — reusable how-to procedures composing the other tools: `list_skills`, `read_skill`, `write_skill` (create/overwrite), `delete_skill`. One Markdown file per skill under `skills/` (override with `WREN_SKILLS_DIR`); a capped title+one-line index is injected into the chat prompt so Wren knows what procedures exist, reading a body on demand. Writes are confirmation-gated |
 | `google_auth.py` | Shared OAuth helper — one cached token for Calendar, Gmail, and Tasks scopes |
 
 Every tool module is runnable standalone for testing, e.g.:
@@ -171,7 +172,14 @@ chat/
   answer and cite them — and `list_weekly_reviews`/`read_weekly_review` fall
   back to the raw weekly reviews for a week not yet summarized into the wiki. All
   read-only; they return an error (rather than raise) if the vault drive isn't
-  mounted. Not yet wired up for chat:
+  mounted. Beyond facts (memory) and external notes (wiki), Wren keeps
+  **skills** — reusable *procedures* for multi-step tasks, composed from the
+  other tools (e.g. "trip prep → calendar range + weather + packing notes").
+  Each is a Markdown file under `skills/`; a capped title+one-line index is
+  injected into the chat prompt (chat-only, like the wiki tools, to protect the
+  small `num_ctx`), and Wren opens a body on demand with `read_skill` before
+  following it. `write_skill` (create or overwrite) and `delete_skill` are
+  confirmation-gated; capture is Craig-initiated, mirroring memory. Not yet wired up for chat:
   reading/writing the Weekly Log doc — those functions don't have a
   `TOOL_SCHEMA` yet (only ever called directly from Python by
   `weekly_learnings.py`). Same pattern extends it later if wanted.
