@@ -1,12 +1,12 @@
-"""Compose and write the weekly Strategic Weekly Review entry to the
-Weekly Learning & Project Log Google Doc. Non-interactive — run by launchd
-every Monday morning, covering the week that just ended (Mon-Sun).
+"""Compose and write the weekly Strategic Weekly Review as a standalone
+Markdown file in Craig's Obsidian vault (one file per week). Non-interactive —
+run by launchd every Monday morning, covering the week that just ended (Mon-Sun).
 
 Ported from ai-memory's weekly-learnings skill. The original is interactive
 (confirms the week, asks Craig one question, waits for approval before
 writing) — since this runs unattended with nobody to ask, this version
 infers everything from calendar + Chrome history and writes directly,
-falling back to emailing the draft if the doc write fails (never lose the
+falling back to emailing the draft if the file write fails (never lose the
 entry silently, matching the original skill's boundary).
 
 Usage:
@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from agent.loop import complete_text
 from agent.tools.calendar import _local_timezone, get_events_in_range
 from agent.tools.chrome_history import fetch_chrome_history
-from agent.tools.docs import get_previous_entry_text, insert_weekly_entry
+from agent.tools.learnings_file import get_previous_entry_text, write_weekly_entry
 from agent.tools.email import send_email
 from tasks._common import setup_logger
 
@@ -35,7 +35,7 @@ so infer everything from the data given and write your best draft.
 Use EXACTLY this template, filling in the bracketed parts (do not add extra sections,
 do not include the literal brackets):
 
-## Strategic Weekly Review: Week Ending [Day, Month Date, Year]
+## Strategic Weekly Review: Week Ending [Month Date, Year]
 
 ### Project Milestones & Strategic Vision
 - **[Project Name]:** [What progressed and why it matters strategically]
@@ -154,7 +154,7 @@ def main() -> int:
         logger.info(f"carry_forward -> {carry_forward[:200]!r}")
 
         user_prompt = (
-            f"week_ending: {sunday.strftime('%A, %B %-d, %Y')}\n"
+            f"week_ending: {sunday.strftime('%B %-d, %Y')}\n"
             f"work_events: {buckets['work']}\n"
             f"meeting_events: {buckets['meetings']}\n"
             f"appointment_events: {buckets['appointments']}\n"
@@ -166,11 +166,11 @@ def main() -> int:
         entry_text = complete_text(system_prompt=DRAFT_SYSTEM_PROMPT, user_prompt=user_prompt)
         logger.info(f"Drafted entry:\n{entry_text}")
 
-        write_result = insert_weekly_entry(entry_text)
-        logger.info(f"insert_weekly_entry -> {write_result}")
+        write_result = write_weekly_entry(entry_text, sunday)
+        logger.info(f"write_weekly_entry -> {write_result}")
 
         if "error" in write_result:
-            logger.warning("Doc write failed — emailing the draft so it isn't lost")
+            logger.warning("File write failed — emailing the draft so it isn't lost")
             send_email(
                 subject=f"Weekly Log (needs manual paste) - week ending {sunday.strftime('%Y-%m-%d')}",
                 body=entry_text,

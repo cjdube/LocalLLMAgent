@@ -6,8 +6,7 @@ silently — no browser interaction required after the first authorization.
 
 Setup (one-time, manual):
   1. https://console.cloud.google.com/ -> create/select a project
-  2. Enable "Google Calendar API", "Gmail API", "Google Docs API", and
-     "Google Tasks API"
+  2. Enable "Google Calendar API", "Gmail API", and "Google Tasks API"
   3. OAuth consent screen -> External -> add your own email as a test user
   4. Credentials -> Create Credentials -> OAuth client ID -> Desktop app
   5. Download the JSON, save it as config/google_credentials.json
@@ -35,7 +34,6 @@ load_dotenv(_ENV_PATH)
 SCOPES = [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/gmail.send",
-    "https://www.googleapis.com/auth/documents",
     "https://www.googleapis.com/auth/tasks",
 ]
 
@@ -89,7 +87,7 @@ def get_credentials() -> Credentials:
 
 def build_service(api: str, version: str):
     """Build (and cache per (api, version)) a Google API client. Shared by the
-    calendar, gmail and docs tools so each no longer carries an identical
+    calendar, gmail and tasks tools so each no longer carries an identical
     _SERVICE singleton. Built once per process; the underlying credentials
     refresh themselves. get_credentials() is called outside the service lock so
     the two locks never nest."""
