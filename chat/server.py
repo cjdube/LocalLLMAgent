@@ -74,6 +74,14 @@ from agent.tools.google_tasks import (
 from agent.tools.strava import TOOL_SCHEMA as STRAVA_SCHEMA, fetch_strava
 from agent.tools.weather import TOOL_SCHEMA as WEATHER_SCHEMA, fetch_weather
 from agent.tools.web_search import TOOL_SCHEMA as WEB_SEARCH_SCHEMA, search_web
+from agent.tools.wiki import (
+    WIKI_TOOL_SCHEMAS,
+    list_weekly_reviews,
+    list_wiki_pages,
+    read_weekly_review,
+    read_wiki_index,
+    read_wiki_page,
+)
 from tasks._common import setup_logger
 from tasks.morning_brief import SEND_BRIEF_TOOL_SCHEMA, build_and_send_brief
 
@@ -118,6 +126,7 @@ TOOLS = [
     RECALL_TOOL_SCHEMA,
     ARCHIVE_TOOL_SCHEMA,
     FORGET_TOOL_SCHEMA,
+    *WIKI_TOOL_SCHEMAS,
 ]
 
 
@@ -151,6 +160,11 @@ DISPATCH = {
     "recall": recall,
     "archive": archive,
     "forget": forget,
+    "read_wiki_index": read_wiki_index,
+    "list_wiki_pages": list_wiki_pages,
+    "read_wiki_page": read_wiki_page,
+    "list_weekly_reviews": list_weekly_reviews,
+    "read_weekly_review": read_weekly_review,
 }
 WRITE_TOOLS = frozenset({
     "log_calendar_event", "send_email", "recolor_event", "send_morning_brief",
@@ -199,7 +213,15 @@ CHAT_SYSTEM_PROMPT = (
     "what you remember or to find a fact's id; pass a category to narrow it. Use "
     "archive to move a pinned fact back to search-only when Craig wants to "
     "declutter, and forget to delete one for good; forgetting pauses for "
-    "confirmation like the other write actions."
+    "confirmation like the other write actions. You can also search Craig's "
+    "personal learnings wiki — his weekly reviews and the concept pages built "
+    "from them — to answer what he's been working on or decided about a topic. "
+    "Start with read_wiki_index to see what topics exist, then read only the one "
+    "or two most relevant pages with read_wiki_page and answer, citing the page "
+    "names you drew from — don't read every page or keep digging once you can "
+    "answer. Only fall back to list_weekly_reviews / read_weekly_review if the "
+    "wiki index has no page for what Craig asked (e.g. a very recent week not "
+    "summarized yet)."
 )
 
 def _system_message_content() -> str:

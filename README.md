@@ -36,7 +36,7 @@ reliably — the other two tasks only need plain text completion.
 - **`run_agent(...)`** — the full tool-calling loop for unattended tasks. Sends
   messages + tool schemas to Ollama's `/api/chat`, dispatches any `tool_calls`
   to local Python functions immediately, feeds results back, repeats (capped
-  at 6 iterations) until the model returns a final text answer. Used by
+  at `MAX_TOOL_ITERATIONS`) until the model returns a final text answer. Used by
   `daily_log.py`. Internally a thin wrapper over `advance()` (below).
 - **`complete_text(...)`** — a single-turn, tool-free completion. Used when
   the surrounding structure (HTML layout, doc template) is built
@@ -86,6 +86,7 @@ in — nothing new inherits it automatically.
 | `calendar.py` | Google Calendar read/write (`get_upcoming_events`, `get_events_in_range`, `log_calendar_event` — idempotent via `source_id`) |
 | `email.py` | Send email via Gmail API (plain text or HTML) |
 | `learnings_file.py` | Write the weekly review to a Markdown file in the Obsidian vault (`LEARNINGS_DIR`) and read the most recent one back for carry-forward |
+| `wiki.py` | Read-only search of the learnings wiki (`WIKI_VAULT_PATH`) so Wren can answer "what did I decide about X" — `read_wiki_index`, `list_wiki_pages`, `read_wiki_page` over the concept pages built by ObsidianWikiAgent, plus `list_weekly_reviews`/`read_weekly_review` over the raw weeks. Requires the vault drive mounted |
 | `google_tasks.py` | Google Tasks read/write (`get_tasks`, `get_tasks_due_soon`, `create_task`, `update_task_due_date`, `complete_task`) |
 | `chrome_history.py` | Read Chrome's local history DB for a date range |
 | `memory.py` | Persistent long-term memory in two tiers — `remember` (archival, search-only), `pin` (active, injected into every system prompt), `recall` (search either tier, optionally by category), `archive` (demote active→archival), `forget` (delete). Stored in `config/wren_memory.json`; archival facts track an `access_count` |
@@ -153,7 +154,14 @@ chat/
   by category) and bumps each archival fact's `access_count`; `archive` demotes an
   active fact back to search-only. All execute immediately except `forget` (delete
   by id), which is confirmation-gated. See the memory tool in the tools table
-  above. Not yet wired up for chat:
+  above. Wren can also search Craig's **learnings wiki** (`WIKI_VAULT_PATH`, the
+  Obsidian vault ObsidianWikiAgent maintains): `read_wiki_index`,
+  `list_wiki_pages`, `read_wiki_page` navigate the concept pages the way that
+  project's own query CLI does — read the index, open the relevant page(s),
+  answer and cite them — and `list_weekly_reviews`/`read_weekly_review` fall
+  back to the raw weekly reviews for a week not yet summarized into the wiki. All
+  read-only; they return an error (rather than raise) if the vault drive isn't
+  mounted. Not yet wired up for chat:
   reading/writing the Weekly Log doc — those functions don't have a
   `TOOL_SCHEMA` yet (only ever called directly from Python by
   `weekly_learnings.py`). Same pattern extends it later if wanted.
@@ -328,6 +336,9 @@ mostly useful if the Python process fails to start at all).
      repos too).
    - `LEARNINGS_DIR` — directory the weekly review Markdown files are written to
      (defaults to `/Volumes/T7/Obsidian/learnings/raw`)
+   - `WIKI_VAULT_PATH` — root of the Obsidian vault Wren reads to answer "what did
+     I decide about X" via the `wiki.py` tools (defaults to
+     `/Volumes/T7/Obsidian/learnings`; the wiki itself is built by ObsidianWikiAgent)
    - `GOOGLE_TASKLIST_ID` — optional. By default `get_tasks`/`get_tasks_due_soon`
      read across every Google Tasks list on the account (tasks are commonly split
      across several named lists); set this to a specific list id to scope reads
