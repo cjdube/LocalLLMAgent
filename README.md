@@ -31,6 +31,12 @@ swap: `daily_log.py` relies on Ollama's tool-calling protocol (`tools` /
 `tool_calls`), so a model with weak tool-calling support may not drive it
 reliably — the other two tasks only need plain text completion.
 
+Every chat call sets the context window explicitly via `OLLAMA_NUM_CTX`
+(default 8192) rather than leaving it to Ollama's small default, which would
+silently truncate the front of the prompt (where the system prompt lives). Each
+call also logs the effective `num_ctx` and the actual prompt token count
+(`prompt_tokens`) so you can watch how close a session runs to the ceiling.
+
 ### `agent/loop.py` — how tasks and chat talk to the model
 
 - **`run_agent(...)`** — the full tool-calling loop for unattended tasks. Sends

@@ -54,6 +54,7 @@ def _ollama_chat(
     host: str = None,
     tools: Optional[list[dict]] = None,
     timeout: float = None,
+    logger: Optional[logging.Logger] = None,
 ) -> dict:
     """POST a single chat completion to Ollama and return the response
     `message` dict. Centralizes model/host/timeout env defaulting so
@@ -69,14 +70,38 @@ def _ollama_chat(
     host = host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
     if timeout is None:
         timeout = float(os.getenv("OLLAMA_TIMEOUT", "300"))
+    # Set num_ctx explicitly — otherwise Ollama falls back to a small default
+    # (~4096) and silently truncates the FRONT of the prompt, where Wren's
+    # system prompt (identity + tool-use rules) lives.
+    num_ctx = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
 
-    payload = {"model": model, "messages": messages, "stream": False}
+    payload = {
+        "model": model,
+        "messages": messages,
+        "stream": False,
+        "options": {"num_ctx": num_ctx},
+    }
     if tools is not None:
         payload["tools"] = tools
 
     resp = requests.post(f"{host}/api/chat", json=payload, timeout=timeout)
     resp.raise_for_status()
-    return resp.json()["message"]
+    data = resp.json()
+    if logger:
+        # prompt_eval_count is the actual prompt size Ollama processed; compare
+        # it to num_ctx to catch (and flag) likely front-truncation.
+        prompt_tokens = data.get("prompt_eval_count")
+        logger.info(
+            "ollama_chat model=%s num_ctx=%d prompt_tokens=%s eval_tokens=%s",
+            model, num_ctx, prompt_tokens, data.get("eval_count"),
+        )
+        if isinstance(prompt_tokens, int) and prompt_tokens >= num_ctx:
+            logger.warning(
+                "ollama prompt (%d tokens) reached num_ctx=%d — the front of "
+                "the conversation (system prompt) was likely truncated",
+                prompt_tokens, num_ctx,
+            )
+    return data["message"]
 
 
 # Argument keys that may carry secrets — redacted before they reach the logs.
@@ -141,7 +166,7 @@ def advance(
     practice.)
     """
     for _ in range(MAX_TOOL_ITERATIONS):
-        message = _ollama_chat(messages, model=model, host=host, tools=tools)
+        message = _ollama_chat(messages, model=model, host=host, tools=tools, logger=logger)
         messages.append(message)
 
         tool_calls = message.get("tool_calls") or []
@@ -222,6 +247,7 @@ def complete_text(
     model: str = None,
     host: str = None,
     timeout: float = None,
+    logger: Optional[logging.Logger] = None,
 ) -> str:
     """Single-turn, tool-free completion — for tasks like writing a short
     summary paragraph where the caller assembles the surrounding structure
@@ -234,5 +260,6 @@ def complete_text(
         model=model,
         host=host,
         timeout=timeout,
+        logger=logger,
     )
     return message.get("content", "").strip()
