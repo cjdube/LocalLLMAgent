@@ -1,10 +1,9 @@
 """Compose and send the morning brief email. Non-interactive — run by launchd.
 
-Weather, calendar, and AI-news data are fetched directly (deterministic), the
-local LLM writes only short blurbs from that data (the "at a glance" line and a
-one-sentence AI-news intro), and the HTML is assembled in Python — this keeps
-the layout/icons reliable regardless of how well the small local model follows
-HTML formatting instructions.
+Weather and calendar data are fetched directly (deterministic), the local LLM
+writes only short blurbs from that data (e.g. the "at a glance" line), and the
+HTML is assembled in Python — this keeps the layout/icons reliable regardless
+of how well the small local model follows HTML formatting instructions.
 
 The whole pipeline lives in build_and_send_brief(), which is shared by two
 callers: this scheduled task (main, below) and the chat server's
@@ -22,7 +21,6 @@ import os
 import re
 import sys
 from datetime import date, datetime, timedelta, timezone
-from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
@@ -39,29 +37,18 @@ from agent.tools.email import send_email
 from agent.tools.github_starred import fetch_starred_repos
 from agent.tools.google_tasks import get_tasks_due_soon
 from agent.tools.weather import fetch_weather
-from agent.tools.web_search import search_web
 from tasks._common import setup_logger, today_str
 
 _ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(_ROOT / "config" / ".env")
 
 DEFAULT_LOCATION = os.getenv("DEFAULT_LOCATION", "Newfields,NH,US")
-AI_NEWS_MAX_STORIES = 4
-# The brief runs daily, so only pull genuinely fresh headlines — without this,
-# Tavily ranks by relevance and the same evergreen stories resurface for days.
-AI_NEWS_LOOKBACK_DAYS = 1
 STARRED_STATE_PATH = _ROOT / "config" / "github_starred_state.json"
 
 GLANCE_SYSTEM_PROMPT = """You write a single short "Today at a Glance" blurb for a \
 personal morning brief email. Given the day's weather and calendar events as JSON, \
 write 1-2 plain sentences summarizing the day. No markdown, no headers, no quotes \
 around the output — just the sentences themselves. Be concise and friendly."""
-
-AI_NEWS_SYSTEM_PROMPT = """You write a single short intro sentence for the "AI News" \
-section of a personal morning brief email. Given a JSON list of today's AI news search \
-results (title, url, content snippet), write 1 plain sentence naming the most notable \
-theme or story. No markdown, no links, no quotes around the output — just the sentence \
-itself. Be concise and neutral."""
 
 STARRED_REPOS_SYSTEM_PROMPT = """You write a single short intro sentence for the "Starred \
 Repos" section of a personal morning brief email. Given a JSON list of GitHub repos the \
@@ -97,7 +84,6 @@ _STYLE = """
     .empty { color: #9ca3af; font-style: italic; }
     .overdue { color: #b91c1c; }
     .intro { margin: 0 0 8px; }
-    .news-date { color: #9ca3af; font-size: 12px; font-weight: 600; margin-right: 2px; }
     a { color: #2563eb; text-decoration: none; }
   </style>
 """
@@ -193,54 +179,6 @@ def _clean_snippet(text: str, max_len: int = 160) -> str:
     return text
 
 
-def _parse_pub_date(raw: str):
-    """Parse Tavily's RFC-2822 published_date (e.g. 'Tue, 07 Jul 2026 …GMT');
-    return None if it's missing or unparseable so callers can sort it last."""
-    if not raw:
-        return None
-    try:
-        return parsedate_to_datetime(raw)
-    except (TypeError, ValueError):
-        return None
-
-
-def _sort_by_recency(articles: list) -> list:
-    """Newest first; anything without a parseable date sinks to the bottom.
-    A safety net on top of the API's `days` window — the search ranks by
-    relevance, not date, so we re-order to surface the freshest story first."""
-    oldest = datetime.min.replace(tzinfo=timezone.utc)
-    return sorted(
-        articles,
-        key=lambda a: _parse_pub_date(a.get("published_date", "")) or oldest,
-        reverse=True,
-    )
-
-
-def _ai_news_html(articles: list, intro_text: str, error: str = None) -> str:
-    if error:
-        return f'<span class="empty">AI news unavailable: {html.escape(error)}</span>'
-    if not articles:
-        return '<span class="empty">No AI news found today.</span>'
-    items = []
-    for a in articles:
-        title = html.escape(a.get("title", "(untitled)"))
-        safe_url = _safe_url(a.get("url", ""))
-        snippet = _clean_snippet(a.get("content", ""))
-        snippet_html = f" — {html.escape(snippet)}" if snippet else ""
-        # Only link when the scheme is http(s); otherwise show the title as
-        # plain text rather than emit an anchor to an untrusted scheme.
-        if safe_url:
-            title_html = f'<a href="{html.escape(safe_url)}">{title}</a>'
-        else:
-            title_html = title
-        # Surface each story's publish date so staleness is visible at a glance.
-        pub = _parse_pub_date(a.get("published_date", ""))
-        date_html = f'<span class="news-date">{pub.strftime("%b %-d")}</span> ' if pub else ""
-        items.append(f"<li>{date_html}{title_html}{snippet_html}</li>")
-    intro_html = f'<p class="intro">{html.escape(intro_text)}</p>' if intro_text else ""
-    return intro_html + "<ul>" + "".join(items) + "</ul>"
-
-
 def _starred_repos_html(repos: list, intro_text: str, error: str = None) -> str:
     if error:
         return f'<span class="empty">Starred repos unavailable: {html.escape(error)}</span>'
@@ -269,11 +207,8 @@ def render_brief_html(
     events: list,
     tasks: list,
     glance_text: str,
-    ai_articles: list,
-    ai_intro: str,
     starred_repos: list,
     starred_intro: str,
-    ai_error: str = None,
     starred_error: str = None,
     tasks_error: str = None,
 ) -> str:
@@ -283,7 +218,6 @@ def render_brief_html(
         + _section("\U0001F4C5", "Calendar", _events_html(events))
         + _section("✅", "Tasks Due Soon", _tasks_html(tasks, tasks_error))
         + _section("\U0001F324️", "Weather", _weather_html(weather))
-        + _section("\U0001F916", "AI News", _ai_news_html(ai_articles, ai_intro, ai_error))
         + _section("⭐", "Starred Repos", _starred_repos_html(starred_repos, starred_intro, starred_error))
     )
     return f"""<!DOCTYPE html>
@@ -311,11 +245,11 @@ SEND_BRIEF_TOOL_SCHEMA = {
         "name": "send_morning_brief",
         "description": (
             "Build and send Craig's morning brief email right now (weather, "
-            "calendar, tasks due soon, AI news), using the same polished HTML "
-            "layout as the scheduled morning brief. Use this whenever Craig "
-            "asks to send or resend the morning brief — do NOT compose that "
-            "email yourself with send_email, since freehand text loses the "
-            "formatting."
+            "calendar, tasks due soon, starred repo updates), using the same "
+            "polished HTML layout as the scheduled morning brief. Use this "
+            "whenever Craig asks to send or resend the morning brief — do NOT "
+            "compose that email yourself with send_email, since freehand text "
+            "loses the formatting."
         ),
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
@@ -323,9 +257,9 @@ SEND_BRIEF_TOOL_SCHEMA = {
 
 
 def build_and_send_brief(logger: Optional[logging.Logger] = None) -> dict:
-    """Fetch weather/calendar/AI news, render the HTML brief, and send it.
-    Shared by the scheduled task (main, below) and the chat agent's
-    send_morning_brief tool so both paths produce identical output."""
+    """Fetch weather/calendar/tasks/starred-repo data, render the HTML brief,
+    and send it. Shared by the scheduled task (main, below) and the chat
+    agent's send_morning_brief tool so both paths produce identical output."""
     if logger:
         logger.info("Starting morning brief run")
 
@@ -351,26 +285,6 @@ def build_and_send_brief(logger: Optional[logging.Logger] = None) -> dict:
         )
         if logger:
             logger.info(f"glance summary -> {glance_text}")
-
-        news_result = search_web(
-            query="latest AI and machine learning news",
-            topic="news",
-            max_results=AI_NEWS_MAX_STORIES,
-            days=AI_NEWS_LOOKBACK_DAYS,
-        )
-        if logger:
-            logger.info(f"search_web(ai news) -> {news_result}")
-        ai_error = news_result.get("error")
-        ai_articles = _sort_by_recency(news_result.get("results", []))
-
-        ai_intro = ""
-        if ai_articles and not ai_error:
-            ai_intro = complete_text(
-                system_prompt=AI_NEWS_SYSTEM_PROMPT,
-                user_prompt=f"ai_news_results: {ai_articles}",
-            )
-            if logger:
-                logger.info(f"ai news intro -> {ai_intro}")
 
         # Capture "now" before the fetch so the window written to state after a
         # successful send never skips activity that happened during this run.
@@ -398,11 +312,8 @@ def build_and_send_brief(logger: Optional[logging.Logger] = None) -> dict:
             events,
             tasks,
             glance_text,
-            ai_articles,
-            ai_intro,
             starred_repos,
             starred_intro,
-            ai_error,
             starred_error,
             tasks_error,
         )

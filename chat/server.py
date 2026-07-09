@@ -366,7 +366,7 @@ def _describe_call(call: dict) -> str:
     if name == "send_email":
         return f'Send an email — subject: "{args.get("subject", "")}"'
     if name == "send_morning_brief":
-        return "Send the morning brief (weather, calendar, tasks due soon, AI news)"
+        return "Send the morning brief (weather, calendar, tasks due soon, starred repos)"
     if name == "log_calendar_event":
         return f'Create calendar event "{args.get("summary", "")}" from {args.get("start", "?")} to {args.get("end", "?")}'
     if name == "recolor_event":
