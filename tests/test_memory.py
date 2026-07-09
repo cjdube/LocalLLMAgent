@@ -4,6 +4,9 @@ Each test points the store at a fresh tmp file via monkeypatch so nothing
 touches the real config/wren_memory.json.
 """
 
+import threading
+import time
+
 import pytest
 
 from agent.tools import memory
@@ -217,3 +220,42 @@ def test_legacy_entry_without_scope_is_treated_as_active():
     # recall with a query must not crash on the missing access_count.
     got = memory.recall(query="yoga")
     assert got["count"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# concurrency: atomic writes + lock (Flask runs threaded=True)
+# --------------------------------------------------------------------------- #
+
+def test_save_leaves_no_temp_files():
+    memory.remember("Craig prefers metric units", category="preference")
+    memory.remember("Crows can recognize human faces", category="trivia")
+    memory.recall(query="crows")  # a write on the read path too
+
+    leftovers = list(memory._STORE_PATH.parent.glob("*.tmp"))
+    assert leftovers == []
+
+
+def test_concurrent_remembers_do_not_lose_writes(monkeypatch):
+    # Widen the read-modify-write window so an unlocked store would reliably
+    # clobber: sleep briefly after each _load(). With _LOCK held across
+    # load->save, every write must still land.
+    real_load = memory._load
+
+    def slow_load():
+        data = real_load()
+        time.sleep(0.005)
+        return data
+
+    monkeypatch.setattr(memory, "_load", slow_load)
+
+    n = 20
+    threads = [
+        threading.Thread(target=memory.remember, args=(f"fact number {i}",))
+        for i in range(n)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert memory.recall()["count"] == n

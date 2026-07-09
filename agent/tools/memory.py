@@ -28,13 +28,21 @@ Usage:
 
 import argparse
 import json
+import os
 import sys
+import tempfile
+import threading
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
 _STORE_PATH = _ROOT / "config" / "wren_memory.json"
+
+# Serializes the read-modify-write in the mutating handlers below. The chat
+# server runs Flask with threaded=True, so two concurrent calls could otherwise
+# interleave _load() -> mutate -> _save() and lose the loser's update.
+_LOCK = threading.Lock()
 
 # Closed set of category tags. Advertised to the model via the tool schemas so
 # it tags consistently; handlers store whatever is passed (a stray value just
@@ -188,7 +196,18 @@ def _load() -> dict:
 
 
 def _save(data: dict) -> None:
-    _STORE_PATH.write_text(json.dumps(data, indent=2))
+    # Atomic write: serialize to a temp file in the same directory, then
+    # os.replace() (atomic on the same filesystem) so any reader — including
+    # separate batch-job processes reading via render_memory_block() — sees a
+    # complete file, never a half-written one.
+    fd, tmp = tempfile.mkstemp(dir=_STORE_PATH.parent, prefix=".wren_memory.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp, _STORE_PATH)
+    except BaseException:
+        os.unlink(tmp)
+        raise
 
 
 def _save_fact(text: str, category: str, scope: str) -> dict:
@@ -199,26 +218,27 @@ def _save_fact(text: str, category: str, scope: str) -> dict:
     if not text:
         return {"error": "nothing to remember — text was empty"}
 
-    data = _load()
-    for m in data["memories"]:
-        if m["text"].strip().lower() == text.lower():
-            if scope == "active" and m.get("scope", "active") != "active":
-                m["scope"] = "active"
-                _save(data)
-                return {"id": m["id"], "text": m["text"], "promoted": True}
-            return {"id": m["id"], "text": m["text"], "already_known": True}
+    with _LOCK:
+        data = _load()
+        for m in data["memories"]:
+            if m["text"].strip().lower() == text.lower():
+                if scope == "active" and m.get("scope", "active") != "active":
+                    m["scope"] = "active"
+                    _save(data)
+                    return {"id": m["id"], "text": m["text"], "promoted": True}
+                return {"id": m["id"], "text": m["text"], "already_known": True}
 
-    memory = {
-        "id": uuid4().hex[:8],
-        "text": text,
-        "category": (category or "").strip().lower() or None,
-        "scope": scope,
-        "access_count": 0,
-        "created": datetime.now().isoformat(timespec="seconds"),
-    }
-    data["memories"].append(memory)
-    _save(data)
-    return {"id": memory["id"], "text": memory["text"], "scope": scope}
+        memory = {
+            "id": uuid4().hex[:8],
+            "text": text,
+            "category": (category or "").strip().lower() or None,
+            "scope": scope,
+            "access_count": 0,
+            "created": datetime.now().isoformat(timespec="seconds"),
+        }
+        data["memories"].append(memory)
+        _save(data)
+        return {"id": memory["id"], "text": memory["text"], "scope": scope}
 
 
 def remember(text: str, category: str = None) -> dict:
@@ -230,47 +250,50 @@ def pin(text: str, category: str = None) -> dict:
 
 
 def recall(query: str = None, category: str = None) -> dict:
-    data = _load()
-    memories = data["memories"]
-    if category:
-        c = category.strip().lower()
-        memories = [m for m in memories if (m.get("category") or "").lower() == c]
-    if query:
-        q = query.strip().lower()
-        memories = [
-            m for m in memories
-            if q in m["text"].lower() or q in (m.get("category") or "").lower()
-        ]
-        # A targeted lookup counts as an access for archival facts (a bare
-        # listing does not — that's browsing, not retrieval).
-        touched = False
-        for m in memories:
-            if m.get("scope", "active") == "archival":
-                m["access_count"] = m.get("access_count", 0) + 1
-                touched = True
-        if touched:
-            _save(data)
-    return {"count": len(memories), "memories": memories}
+    with _LOCK:
+        data = _load()
+        memories = data["memories"]
+        if category:
+            c = category.strip().lower()
+            memories = [m for m in memories if (m.get("category") or "").lower() == c]
+        if query:
+            q = query.strip().lower()
+            memories = [
+                m for m in memories
+                if q in m["text"].lower() or q in (m.get("category") or "").lower()
+            ]
+            # A targeted lookup counts as an access for archival facts (a bare
+            # listing does not — that's browsing, not retrieval).
+            touched = False
+            for m in memories:
+                if m.get("scope", "active") == "archival":
+                    m["access_count"] = m.get("access_count", 0) + 1
+                    touched = True
+            if touched:
+                _save(data)
+        return {"count": len(memories), "memories": memories}
 
 
 def archive(memory_id: str, memory_text: str = "") -> dict:
-    data = _load()
-    for m in data["memories"]:
-        if m["id"] == memory_id:
-            m["scope"] = "archival"
-            _save(data)
-            return {"archived": True, "id": memory_id}
-    return {"archived": False, "error": f"no remembered fact with id {memory_id!r}"}
+    with _LOCK:
+        data = _load()
+        for m in data["memories"]:
+            if m["id"] == memory_id:
+                m["scope"] = "archival"
+                _save(data)
+                return {"archived": True, "id": memory_id}
+        return {"archived": False, "error": f"no remembered fact with id {memory_id!r}"}
 
 
 def forget(memory_id: str, memory_text: str = "") -> dict:
-    data = _load()
-    kept = [m for m in data["memories"] if m["id"] != memory_id]
-    if len(kept) == len(data["memories"]):
-        return {"removed": False, "error": f"no remembered fact with id {memory_id!r}"}
-    data["memories"] = kept
-    _save(data)
-    return {"removed": True, "id": memory_id}
+    with _LOCK:
+        data = _load()
+        kept = [m for m in data["memories"] if m["id"] != memory_id]
+        if len(kept) == len(data["memories"]):
+            return {"removed": False, "error": f"no remembered fact with id {memory_id!r}"}
+        data["memories"] = kept
+        _save(data)
+        return {"removed": True, "id": memory_id}
 
 
 def render_memory_block() -> str:
