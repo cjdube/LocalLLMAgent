@@ -71,6 +71,14 @@ from agent.tools.google_tasks import (
     get_tasks_due_soon,
     update_task_due_date,
 )
+from agent.tools.skills import (
+    SKILL_TOOL_SCHEMAS,
+    delete_skill,
+    list_skills,
+    read_skill,
+    render_skills_index,
+    write_skill,
+)
 from agent.tools.strava import TOOL_SCHEMA as STRAVA_SCHEMA, fetch_strava
 from agent.tools.weather import TOOL_SCHEMA as WEATHER_SCHEMA, fetch_weather
 from agent.tools.web_search import TOOL_SCHEMA as WEB_SEARCH_SCHEMA, search_web
@@ -127,6 +135,7 @@ TOOLS = [
     ARCHIVE_TOOL_SCHEMA,
     FORGET_TOOL_SCHEMA,
     *WIKI_TOOL_SCHEMAS,
+    *SKILL_TOOL_SCHEMAS,
 ]
 
 
@@ -165,10 +174,15 @@ DISPATCH = {
     "read_wiki_page": read_wiki_page,
     "list_weekly_reviews": list_weekly_reviews,
     "read_weekly_review": read_weekly_review,
+    "list_skills": list_skills,
+    "read_skill": read_skill,
+    "write_skill": write_skill,
+    "delete_skill": delete_skill,
 }
 WRITE_TOOLS = frozenset({
     "log_calendar_event", "send_email", "recolor_event", "send_morning_brief",
     "create_task", "update_task_due_date", "complete_task", "forget",
+    "write_skill", "delete_skill",
 })
 
 CHAT_SYSTEM_PROMPT = (
@@ -221,7 +235,15 @@ CHAT_SYSTEM_PROMPT = (
     "names you drew from — don't read every page or keep digging once you can "
     "answer. Only fall back to list_weekly_reviews / read_weekly_review if the "
     "wiki index has no page for what Craig asked (e.g. a very recent week not "
-    "summarized yet)."
+    "summarized yet). Finally, you keep a set of skills — reusable procedures "
+    "for multi-step tasks you've worked out before. The skills index (names and "
+    "one-line descriptions) is shown to you each turn; when a task matches one, "
+    "read_skill to get its steps before following it rather than improvising. "
+    "Use write_skill when Craig asks you to remember HOW to do something — the "
+    "sequence of steps and tools, not a plain fact (facts go to remember/pin). "
+    "Saving over an existing skill name overwrites it, so include the full "
+    "updated body. Use delete_skill to drop a stale one; write_skill and "
+    "delete_skill pause for confirmation like the other write actions."
 )
 
 def _system_message_content() -> str:
@@ -238,6 +260,12 @@ def _system_message_content() -> str:
         "(e.g. 'July 2nd') or a relative day, resolve it against today's date — "
         "never guess the year."
     )
+    # Skills are chat-only (like the wiki tools), so the index lives here rather
+    # than in with_identity() where the scheduled tasks would also carry it.
+    # Rendered per conversation so a skill saved mid-session shows up next turn.
+    skills_index = render_skills_index()
+    if skills_index:
+        dated += "\n\n" + skills_index
     return with_identity(dated)
 
 
@@ -402,6 +430,10 @@ def _describe_call(call: dict) -> str:
     if name == "complete_task":
         label = args.get("task_title") or args.get("task_id", "")
         return f'Mark "{label}" complete'
+    if name == "write_skill":
+        return f'Save skill "{args.get("name", "")}"'
+    if name == "delete_skill":
+        return f'Delete skill "{args.get("name", "")}"'
     return f"{name}({json.dumps(args)})"
 
 
