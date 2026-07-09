@@ -122,3 +122,16 @@ def test_tasks_html_omits_list_suffix_when_absent():
     tasks = [{"title": "No list info", "due": "2026-07-07T00:00:00.000Z"}]
     out = mb._tasks_html(tasks, today=TODAY)
     assert "(" not in out
+
+
+# --------------------------------------------------------------------------- #
+# starred-repo state: atomic write
+# --------------------------------------------------------------------------- #
+
+def test_starred_state_round_trips_and_leaves_no_temp_files(tmp_path, monkeypatch):
+    monkeypatch.setattr(mb, "STARRED_STATE_PATH", tmp_path / "github_starred_state.json")
+
+    mb._write_starred_state("2026-07-07T12:00:00+00:00")
+
+    assert mb._read_starred_state() == "2026-07-07T12:00:00+00:00"
+    assert list(tmp_path.glob("*.tmp")) == []

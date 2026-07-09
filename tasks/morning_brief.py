@@ -20,6 +20,7 @@ import logging
 import os
 import re
 import sys
+import tempfile
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -65,7 +66,16 @@ def _read_starred_state() -> Optional[str]:
 
 
 def _write_starred_state(last_checked: str) -> None:
-    STARRED_STATE_PATH.write_text(json.dumps({"last_checked": last_checked}))
+    # Atomic write: temp file in the same dir, then os.replace() — so a crash
+    # mid-write can't leave a truncated state file behind.
+    fd, tmp = tempfile.mkstemp(dir=STARRED_STATE_PATH.parent, prefix=".github_starred_state.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump({"last_checked": last_checked}, f)
+        os.replace(tmp, STARRED_STATE_PATH)
+    except BaseException:
+        os.unlink(tmp)
+        raise
 
 _STYLE = """
   <style>
