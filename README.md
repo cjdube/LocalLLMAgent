@@ -27,9 +27,10 @@ launchd (per-task .plist, timed)
 **The model is swappable.** Nothing in this codebase is Gemma-specific — the
 model name is just `OLLAMA_MODEL` in `config/.env`. Swap models with
 `ollama pull <model>` + edit that one line. The one thing to verify after a
-swap: `daily_log.py` relies on Ollama's tool-calling protocol (`tools` /
+swap: the **chat server** relies on Ollama's tool-calling protocol (`tools` /
 `tool_calls`), so a model with weak tool-calling support may not drive it
-reliably — the other two tasks only need plain text completion.
+reliably — the scheduled tasks only need plain text completion (or, for
+`daily_log`, no model at all).
 
 Every chat call sets the context window explicitly via `OLLAMA_NUM_CTX`
 (default 8192) rather than leaving it to Ollama's small default, which would
@@ -42,8 +43,11 @@ call also logs the effective `num_ctx` and the actual prompt token count
 - **`run_agent(...)`** — the full tool-calling loop for unattended tasks. Sends
   messages + tool schemas to Ollama's `/api/chat`, dispatches any `tool_calls`
   to local Python functions immediately, feeds results back, repeats (capped
-  at `MAX_TOOL_ITERATIONS`) until the model returns a final text answer. Used by
-  `daily_log.py`. Internally a thin wrapper over `advance()` (below).
+  at `MAX_TOOL_ITERATIONS`) until the model returns a final text answer.
+  Retained as the entrypoint for a future genuinely model-driven task; it
+  currently has no caller (`daily_log` was converted to deterministic Python —
+  see the scheduled-tasks table). Internally a thin wrapper over `advance()`
+  (below).
 - **`complete_text(...)`** — a single-turn, tool-free completion. Used when
   the surrounding structure (HTML layout, doc template) is built
   deterministically in Python and the model is only asked to write a
@@ -109,7 +113,7 @@ Every tool module is runnable standalone for testing, e.g.:
 | Task | Schedule | What it does |
 |---|---|---|
 | `tasks/morning_brief.py` | Daily 6:00 AM | Fetches weather + next-24h calendar events + Google Tasks past due or due within 48h (via `google_tasks.get_tasks_due_soon`) + starred GitHub repos pushed to since the last brief (via `github_starred.fetch_starred_repos`, cursor persisted in `config/github_starred_state.json`), has the model write a short "at a glance" summary and a one-sentence intro for the starred-repos section, assembles a styled HTML email (weather / calendar / tasks due soon / Starred Repos sections), sends it via Gmail. The pipeline lives in `build_and_send_brief()`, shared with the chat `send_morning_brief` tool. |
-| `tasks/daily_log.py` | Daily 6:15 AM | Fetches yesterday's Strava activities, has the model (via `run_agent`, tool-calling) log each one to Google Calendar. Deduped by `source_id` (Strava activity id) so re-runs never create duplicates. |
+| `tasks/daily_log.py` | Daily 6:15 AM | Fetches yesterday's Strava activities and maps each one onto a Google Calendar event in plain Python — no model, since it's a pure field mapping with no natural-language step. Deduped by `source_id` (Strava activity id) so re-runs never create duplicates. |
 | `tasks/weekly_learnings.py` | Mondays 5:00 AM | Computes the most recently completed Mon–Sun week, pulls calendar events (categorized by color) + Chrome browsing history + the previous week's file (for carry-forwards), has the model draft a 4-section retrospective, writes it as `Strategic-Weekly-Review-<week-ending>.md` in `LEARNINGS_DIR` (Obsidian vault, one file per week). If the write fails — e.g. the external drive isn't mounted — it emails the draft instead so it's never silently lost. |
 | `tasks/calendar_colorizer.py` | Daily 5:00 PM | Fetches yesterday's calendar events, has the model guess a category per event title (Work/LLC, AARP, Fitness, Meal Prep, Domestic/Chores, Meetings, Travel, Appointments, or Uncategorized) and returns a colorId per event, then patches each event's color. Always re-classifies, even events colored by a previous run or by hand. On failure, emails a notice. |
 
@@ -443,6 +447,9 @@ steer the model. The blast radius is contained by design:
 - **`morning_brief`, `weekly_learnings`, and `calendar_colorizer`** use the
   tool-free `complete_text` path — the model only writes narrative prose, it
   never calls a tool, so injected instructions have nothing to actuate.
+  **`daily_log`** goes further and uses no model at all: it's a deterministic
+  Python field-map from Strava activity to calendar event, so there's no prompt
+  for injected activity text to hijack.
 - All model output rendered to HTML is `html.escape`d and any URL is
   scheme-validated (`_safe_url`) before it reaches the page, so injected output
   can't smuggle scripts or `javascript:`/`data:` links into the dashboard.
@@ -454,14 +461,17 @@ steer the model. The blast radius is contained by design:
   never a background scrape). `forget` is confirmation-gated so a poisoned
   memory can't be silently pruned to cover tracks.
 
-The one place model-driven tool-calling meets an **un-gated** write is
-`tasks/daily_log.py`: it runs `run_agent` and can call `log_calendar_event`,
-fed by Strava activity *names*. This is an accepted risk — an attacker would
-need to control the user's own Strava account to influence it, and the only
-action is creating a calendar event (idempotent via `source_id`). If the trust
-assumptions here ever change (e.g. a shared Strava, or new un-gated write tools
-reachable from a scheduled task), revisit this boundary. See also the
-`web-content-untrusted-input` note in memory.
+There is now **no un-gated model→write path** in the codebase. Every place the
+model can actuate a write is either confirmation-gated (the chat server's
+`advance()`/`confirm_before`) or the model isn't in the write path at all (the
+scheduled tasks: `complete_text` for prose, and `daily_log`'s deterministic
+Python mapping). `daily_log` previously ran `run_agent` and let the model call
+`log_calendar_event` fed by Strava activity *names*; that path was removed in
+favor of the field-map, which is both more reliable and leaves nothing for
+injected activity text to steer. If a new scheduled task ever wires a model to
+a write tool (via `run_agent`, which is retained but currently has no caller),
+re-establish this boundary — keep the write confirmation-gated or keep the
+model out of it. See also the `web-content-untrusted-input` note in memory.
 
 ## What's NOT here
 

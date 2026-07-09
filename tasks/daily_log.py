@@ -1,37 +1,74 @@
 """Fetch yesterday's Strava activities and log them to Google Calendar.
 Non-interactive — run by launchd.
 
+This is a deterministic field-map: fetch_strava returns activities as dicts,
+and each one maps directly onto a calendar event. There's no natural-language
+composition here, so no model is involved — that keeps the task reliable (no
+dropped activities or mangled datetimes) and leaves no un-gated model->write
+path. Mirrors the fetch -> iterate -> write -> summarize shape of the sibling
+task tasks/calendar_colorizer.py.
+
 Usage:
     python -m tasks.daily_log
 """
 
+import json
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent.loop import run_agent
-from agent.tools.calendar import LOG_TOOL_SCHEMA as CALENDAR_LOG_SCHEMA, log_calendar_event
-from agent.tools.strava import TOOL_SCHEMA as STRAVA_SCHEMA, fetch_strava
+from agent.tools.calendar import CATEGORY_COLORS, log_calendar_event
+from agent.tools.strava import fetch_strava
 from tasks._common import setup_logger
 
-SYSTEM_PROMPT = """You are Craig's Strava-to-calendar logging assistant, running \
-unattended with no human available to answer questions.
+# All Strava activities are logged as Fitness (Flamingo) — reuse the single
+# source of truth in agent/tools/calendar.py rather than a bare "4".
+FITNESS_COLOR_ID = CATEGORY_COLORS["Fitness"][0]
 
-1. Call fetch_strava with date="yesterday".
-2. For every activity returned, call log_calendar_event once per activity using:
-   - summary: the activity name
-   - start / end: build ISO 8601 datetimes from the activity's date + start_time/end_time
-   - description: include distance_km, duration_minutes, and elevation_gain_m
-   - color_id: "4" (Flamingo — all Strava activities use this)
-   - source_id: the activity's strava_id field, always — this prevents duplicate \
-     calendar events if this task ever runs more than once for the same day
-3. If fetch_strava returns zero activities, do not call log_calendar_event at all — \
-   just report that there was nothing to log.
 
-Do not ask any questions. Do not wait for confirmation. If a tool call errors, note it \
-and continue with any remaining activities.
-"""
+def _log_activity(activity: dict, logger) -> bool:
+    """Map one Strava activity onto a calendar event and create it. Returns
+    True if logged (or already present), False if skipped/errored."""
+    date = activity.get("date")
+    start_time = activity.get("start_time")
+    end_time = activity.get("end_time")
+    if not (date and start_time and end_time):
+        logger.warning(
+            f"Skipping activity {activity.get('strava_id')} "
+            f"({activity.get('name')!r}): missing date/start_time/end_time"
+        )
+        return False
+
+    start_iso = f"{date}T{start_time}:00"
+    # An activity that crosses midnight has end_time (HH:MM) earlier than
+    # start_time; roll the end date forward a day so end > start.
+    end_date = date
+    if end_time < start_time:
+        end_date = (datetime.fromisoformat(date) + timedelta(days=1)).date().isoformat()
+    end_iso = f"{end_date}T{end_time}:00"
+
+    description = (
+        f"Distance: {activity.get('distance_km')} km\n"
+        f"Duration: {activity.get('duration_minutes')} min\n"
+        f"Elevation gain: {activity.get('elevation_gain_m')} m"
+    )
+    source_id = str(activity.get("strava_id"))
+
+    result = log_calendar_event(
+        summary=activity.get("name"),
+        start=start_iso,
+        end=end_iso,
+        description=description,
+        color_id=FITNESS_COLOR_ID,
+        source_id=source_id,
+    )
+    logger.info(
+        f"log_calendar_event(summary={activity.get('name')!r}, source_id={source_id}) "
+        f"-> {json.dumps(result)}"
+    )
+    return "error" not in result
 
 
 def main() -> int:
@@ -39,17 +76,23 @@ def main() -> int:
     logger.info("Starting daily log run")
 
     try:
-        result = run_agent(
-            system_prompt=SYSTEM_PROMPT,
-            user_prompt="Log yesterday's Strava activities to the calendar.",
-            tools=[STRAVA_SCHEMA, CALENDAR_LOG_SCHEMA],
-            dispatch={
-                "fetch_strava": fetch_strava,
-                "log_calendar_event": log_calendar_event,
-            },
-            logger=logger,
-        )
-        logger.info(f"Agent final response: {result}")
+        result = fetch_strava(date="yesterday")
+        logger.info(f"fetch_strava(date=yesterday) -> {json.dumps(result)}")
+        if result.get("error"):
+            raise RuntimeError(f"fetch_strava failed: {result['error']}")
+
+        activities = result.get("activities", [])
+        if not activities:
+            logger.info("No Strava activities yesterday — nothing to log")
+            logger.info("Daily log run complete")
+            return 0
+
+        logged = 0
+        for activity in activities:
+            if _log_activity(activity, logger):
+                logged += 1
+
+        logger.info(f"Logged {logged} of {len(activities)} activities")
         logger.info("Daily log run complete")
         return 0
     except Exception as e:
