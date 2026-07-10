@@ -6,7 +6,8 @@ silently — no browser interaction required after the first authorization.
 
 Setup (one-time, manual):
   1. https://console.cloud.google.com/ -> create/select a project
-  2. Enable "Google Calendar API", "Gmail API", and "Google Tasks API"
+  2. Enable "Google Calendar API", "Gmail API", "Google Tasks API", and
+     "YouTube Data API v3"
   3. OAuth consent screen -> External -> add your own email as a test user
   4. Credentials -> Create Credentials -> OAuth client ID -> Desktop app
   5. Download the JSON, save it as config/google_credentials.json
@@ -35,6 +36,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/tasks",
+    "https://www.googleapis.com/auth/youtube.readonly",
 ]
 
 # Cached for the life of the process so the always-on chat server and
@@ -76,7 +78,13 @@ def get_credentials() -> Credentials:
                         "Google Cloud Console and save it there — see agent/tools/google_auth.py docstring."
                     )
                 flow = InstalledAppFlow.from_client_secrets_file(str(creds_path), SCOPES)
-                creds = flow.run_local_server(port=0)
+                # Force the account chooser (prompt=select_account) so consent
+                # can't silently bind to whatever account the browser happens to
+                # be defaulted to — the youtube.readonly scope only works on the
+                # account that owns the target channel, and a wrong default is
+                # what triggers Google's "service isn't available for your
+                # account" error.
+                creds = flow.run_local_server(port=0, prompt="select_account")
             token_path.write_text(creds.to_json())
             # Contains a refresh token — keep it readable only by the owner.
             os.chmod(token_path, 0o600)

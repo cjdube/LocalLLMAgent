@@ -25,6 +25,7 @@ from agent.tools.calendar import _local_timezone, get_events_in_range
 from agent.tools.chrome_history import fetch_chrome_history
 from agent.tools.learnings_file import get_previous_entry_text, write_weekly_entry
 from agent.tools.email import send_email
+from agent.tools.youtube import fetch_liked_videos
 from tasks._common import setup_logger
 
 DRAFT_SYSTEM_PROMPT = """You are Craig's personal executive assistant. You write a \
@@ -59,6 +60,10 @@ Source data you'll receive:
 - chrome_sites: browsing history for the week — draft "Technical Evolution & Tooling" and \
   "Industry Insights & Core Learning" from any technical/developer/AI/product sites (tools, \
   APIs, platforms, documentation, frameworks). Ignore anything not genuinely technical.
+- youtube_videos: AI/technical videos Craig deliberately Liked this week (title, channel, \
+  description) — the STRONGEST signal for "Technical Evolution & Tooling" and "Industry \
+  Insights & Core Learning". Prefer these over chrome_sites, which only shows what he loaded, \
+  not what he engaged with. Name the specific tool/concept the video covers, not the video.
 - carry_forward: unresolved items from last week's entry — mention briefly at the top of \
   Project Milestones if still relevant, otherwise ignore.
 
@@ -113,6 +118,26 @@ def _compact_sites(sites: list) -> list:
     ]
 
 
+# Same prefill-bounding rationale as MAX_CHROME_SITES: cap the video count and
+# truncate each description, which can run long with link dumps and timestamps.
+MAX_YOUTUBE_VIDEOS = 25
+MAX_YOUTUBE_DESC_CHARS = 500
+
+
+def _compact_videos(videos: list) -> list:
+    """Keep only the fields the model needs from each liked video and truncate
+    the description, bounding the prompt the same way _compact_sites does."""
+    return [
+        {
+            "title": v.get("title"),
+            "channel": v.get("channel"),
+            "description": (v.get("description") or "")[:MAX_YOUTUBE_DESC_CHARS],
+            "url": v.get("url"),
+        }
+        for v in videos[:MAX_YOUTUBE_VIDEOS]
+    ]
+
+
 def _categorize(events: list) -> dict:
     work, meetings, appointments, aarp = [], [], [], []
     for e in events:
@@ -150,6 +175,13 @@ def main() -> int:
         logger.info(f"compacted chrome_sites to {len(chrome_sites)} of "
                     f"{chrome_result.get('total_meaningful_visits', 0)} for the prompt")
 
+        youtube_result = fetch_liked_videos(monday.strftime("%Y-%m-%d"), sunday.strftime("%Y-%m-%d"))
+        logger.info(f"fetch_liked_videos -> {youtube_result}")
+        # An {"error": ...} result degrades to [] here, so a YouTube failure
+        # never breaks the run — the review is just drafted without it.
+        youtube_videos = _compact_videos(youtube_result.get("videos", []))
+        logger.info(f"compacted youtube_videos to {len(youtube_videos)} for the prompt")
+
         carry_forward = get_previous_entry_text()
         logger.info(f"carry_forward -> {carry_forward[:200]!r}")
 
@@ -160,6 +192,7 @@ def main() -> int:
             f"appointment_events: {buckets['appointments']}\n"
             f"aarp_events: {buckets['aarp']}\n"
             f"chrome_sites: {chrome_sites}\n"
+            f"youtube_videos: {youtube_videos}\n"
             f"carry_forward: {carry_forward or '(none)'}\n"
         )
 

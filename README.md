@@ -99,9 +99,10 @@ in — nothing new inherits it automatically.
 | `wiki.py` | Read-only search of the learnings wiki (`WIKI_VAULT_PATH`) so Wren can answer "what did I decide about X" — `read_wiki_index`, `list_wiki_pages`, `read_wiki_page` over the concept pages built by ObsidianWikiAgent, plus `list_weekly_reviews`/`read_weekly_review` over the raw weeks. Requires the vault drive mounted |
 | `google_tasks.py` | Google Tasks read/write (`get_tasks`, `get_tasks_due_soon`, `create_task`, `update_task_due_date`, `complete_task`) |
 | `chrome_history.py` | Read Chrome's local history DB for a date range |
+| `youtube.py` | List videos Liked on the authorized YouTube channel in a date range (`fetch_liked_videos`) — title, channel, and description per video, via the YouTube Data API v3 and the shared Google OAuth token |
 | `memory.py` | Persistent long-term memory in two tiers — `remember` (archival, search-only), `pin` (active, injected into every system prompt), `recall` (search either tier, optionally by category), `archive` (demote active→archival), `forget` (delete). Stored in `config/wren_memory.json`; archival facts track an `access_count` |
 | `skills.py` | Procedural memory (chat-only) — reusable how-to procedures composing the other tools: `list_skills`, `read_skill`, `write_skill` (create/overwrite), `delete_skill`. One Markdown file per skill under `skills/` (override with `WREN_SKILLS_DIR`); a capped title+one-line index is injected into the chat prompt so Wren knows what procedures exist, reading a body on demand. Writes are confirmation-gated |
-| `google_auth.py` | Shared OAuth helper — one cached token for Calendar, Gmail, and Tasks scopes |
+| `google_auth.py` | Shared OAuth helper — one cached token for Calendar, Gmail, Tasks, and YouTube (read-only) scopes |
 
 Every tool module is runnable standalone for testing, e.g.:
 ```bash
@@ -115,7 +116,7 @@ Every tool module is runnable standalone for testing, e.g.:
 |---|---|---|
 | `tasks/morning_brief.py` | Daily 6:00 AM | Fetches weather + next-24h calendar events + Google Tasks past due or due within 48h (via `google_tasks.get_tasks_due_soon`) + starred GitHub repos pushed to since the last brief (via `github_starred.fetch_starred_repos`, cursor persisted in `config/github_starred_state.json`), has the model write a short "at a glance" summary and a one-sentence intro for the starred-repos section, assembles a styled HTML email (weather / calendar / tasks due soon / Starred Repos sections), sends it via Gmail. The pipeline lives in `build_and_send_brief()`, shared with the chat `send_morning_brief` tool. |
 | `tasks/daily_log.py` | Daily 6:15 AM | Fetches yesterday's Strava activities and maps each one onto a Google Calendar event in plain Python — no model, since it's a pure field mapping with no natural-language step. Deduped by `source_id` (Strava activity id) so re-runs never create duplicates. |
-| `tasks/weekly_learnings.py` | Mondays 5:00 AM | Computes the most recently completed Mon–Sun week, pulls calendar events (categorized by color) + Chrome browsing history + the previous week's file (for carry-forwards), has the model draft a 4-section retrospective, writes it as `Strategic-Weekly-Review-<week-ending>.md` in `LEARNINGS_DIR` (Obsidian vault, one file per week). If the write fails — e.g. the external drive isn't mounted — it emails the draft instead so it's never silently lost. |
+| `tasks/weekly_learnings.py` | Mondays 5:00 AM | Computes the most recently completed Mon–Sun week, pulls calendar events (categorized by color) + Chrome browsing history + YouTube liked videos (the strongest learning signal, since Craig deliberately Liked them) + the previous week's file (for carry-forwards), has the model draft a 4-section retrospective, writes it as `Strategic-Weekly-Review-<week-ending>.md` in `LEARNINGS_DIR` (Obsidian vault, one file per week). If the write fails — e.g. the external drive isn't mounted — it emails the draft instead so it's never silently lost. |
 | `tasks/calendar_colorizer.py` | Daily 5:00 PM | Fetches yesterday's calendar events, has the model guess a category per event title (Work/LLC, AARP, Fitness, Meal Prep, Domestic/Chores, Meetings, Travel, Appointments, or Uncategorized) and returns a colorId per event, then patches each event's color. Always re-classifies, even events colored by a previous run or by hand. On failure, emails a notice. |
 
 All four are **fully unattended** — no prompts, no approval steps. This is a
@@ -365,13 +366,13 @@ mostly useful if the Python process fails to start at all).
    - `WREN_CHAT_TOKEN`, `FLASK_SECRET_KEY` — generate each with
      `python -c "import secrets; print(secrets.token_hex(32))"`; leave
      `WREN_CHAT_PORT` at its default unless it conflicts with something else
-4. Google OAuth setup (Calendar + Gmail + Tasks):
+4. Google OAuth setup (Calendar + Gmail + Tasks + YouTube):
    - [console.cloud.google.com](https://console.cloud.google.com/) → create/select a project
-   - Enable the **Google Calendar API**, **Gmail API**, and **Google Tasks API**
+   - Enable the **Google Calendar API**, **Gmail API**, **Google Tasks API**, and **YouTube Data API v3**
    - OAuth consent screen → External → add yourself as a test user
    - Credentials → Create Credentials → OAuth client ID → **Desktop app**
    - Download the JSON as `config/google_credentials.json`
-   - Run `.venv/bin/python -m agent.tools.google_auth` — opens a browser once, caches `config/google_token.json`
+   - Run `.venv/bin/python -m agent.tools.google_auth` — opens a browser once, caches `config/google_token.json`. If the account has multiple YouTube channels, **pick the one whose Likes you want at the consent picker** — the API reads whichever channel you select. Note: some YouTube **brand** accounts are blocked from third-party API access (the flow dead-ends at `accounts.google.com/info/servicerestricted`), so you may have to use a personal channel. (Adding the YouTube scope later means deleting `config/google_token.json` and re-running this to re-consent.)
 5. Test each task manually before trusting the schedule:
    ```bash
    .venv/bin/python -m tasks.morning_brief
@@ -442,7 +443,8 @@ any future markup slip — see `_security_headers` in `chat/server.py`.
 
 **Prompt injection.** Untrusted external text flows into model prompts from
 several tools: Tavily search results, GitHub `recent_changes`, Chrome history
-titles, and Strava activity names. Any of these could contain text crafted to
+titles, Strava activity names, and YouTube video titles/descriptions. Any of
+these could contain text crafted to
 steer the model. The blast radius is contained by design:
 
 - **Chat** is the only place the model drives tool-calling freely, and every
