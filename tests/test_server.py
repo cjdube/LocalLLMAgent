@@ -11,6 +11,7 @@ two required secrets are stubbed into the environment before the import.
 """
 
 import os
+import threading
 
 os.environ.setdefault("WREN_CHAT_TOKEN", "test-token")
 os.environ.setdefault("FLASK_SECRET_KEY", "test-secret")
@@ -26,6 +27,7 @@ def client():
     srv.app.config["TESTING"] = True
     srv.conversations.clear()
     srv.pending_confirmations.clear()
+    srv.cancel_events.clear()
     with srv.app.test_client() as c:
         yield c
 
@@ -51,6 +53,7 @@ EMAIL_CALL = {"function": {"name": "send_email", "arguments": {"subject": "Hi", 
 @pytest.mark.parametrize("method,path,kwargs", [
     ("post", "/chat", {"json": {"message": "hi"}}),
     ("post", "/chat/confirm", {"json": {"approved": True}}),
+    ("post", "/chat/cancel", {}),
     ("post", "/chat/new", {}),
     ("get", "/api/schedules", {}),
     ("get", "/api/runs/morning_brief", {}),
@@ -141,7 +144,8 @@ def test_new_message_declines_pending_confirmation(auth_client, monkeypatch):
         resolved["approved"] = approved
         messages.append({"role": "tool", "content": "declined"})
 
-    def fake_advance(messages, tools, dispatch, confirm_before=frozenset(), logger=None):
+    def fake_advance(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
+                     should_cancel=None):
         return {"type": "final", "text": "ok, cancelled"}
 
     monkeypatch.setattr(srv, "resolve", fake_resolve)
@@ -155,7 +159,8 @@ def test_new_message_declines_pending_confirmation(auth_client, monkeypatch):
 
 
 def test_chat_rolls_back_history_when_advance_raises(auth_client, monkeypatch):
-    def boom(messages, tools, dispatch, confirm_before=frozenset(), logger=None):
+    def boom(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
+             should_cancel=None):
         raise RuntimeError("model exploded")
 
     monkeypatch.setattr(srv, "advance", boom)
@@ -180,7 +185,8 @@ def test_chat_confirm_keeps_resolved_result_on_failed_continuation(auth_client, 
     def fake_resolve(messages, call, approved, dispatch, logger=None):
         messages.append({"role": "tool", "content": "sent"})
 
-    def boom(messages, tools, dispatch, confirm_before=frozenset(), logger=None):
+    def boom(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
+             should_cancel=None):
         raise RuntimeError("continuation exploded")
 
     monkeypatch.setattr(srv, "resolve", fake_resolve)
@@ -192,6 +198,38 @@ def test_chat_confirm_keeps_resolved_result_on_failed_continuation(auth_client, 
     # the approved tool_call. It stays; only the failed continuation is removed.
     history = srv.conversations[SID]
     assert history[-1] == {"role": "tool", "content": "sent"}
+
+
+def test_chat_cancelled_returns_stopped_and_rolls_back(auth_client, monkeypatch):
+    # A cancel raised mid-turn is reported as stopped (200), and the partial
+    # turn is rolled back so history stays clean for the next message.
+    def cancelled(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
+                  should_cancel=None):
+        raise srv.TurnCancelled()
+
+    monkeypatch.setattr(srv, "advance", cancelled)
+
+    resp = auth_client.post("/chat", json={"message": "hi"})
+    assert resp.status_code == 200
+    assert resp.get_json() == {"type": "cancelled"}
+    history = srv.conversations[SID]
+    assert len(history) == 1 and history[0]["role"] == "system"
+    assert SID not in srv.cancel_events  # the turn's event was cleaned up
+
+
+def test_chat_cancel_sets_active_turns_event(auth_client):
+    # /chat/cancel signals the event the running turn is watching.
+    event = srv.cancel_events[SID] = threading.Event()
+    resp = auth_client.post("/chat/cancel")
+    assert resp.status_code == 200
+    assert resp.get_json()["cancelling"] is True
+    assert event.is_set()
+
+
+def test_chat_cancel_with_no_active_turn_is_noop(auth_client):
+    resp = auth_client.post("/chat/cancel")
+    assert resp.status_code == 200
+    assert resp.get_json()["cancelling"] is False
 
 
 def test_chat_confirm_without_pending_is_400(auth_client):

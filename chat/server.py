@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request, send_from_directory, session
 
-from agent.loop import advance, load_persona, resolve, with_identity
+from agent.loop import TurnCancelled, advance, load_persona, resolve, with_identity
 from chat.insights import (
     RunManager,
     describe_tools,
@@ -214,6 +214,12 @@ logger.setLevel(logging.INFO)
 # In-memory only, per the "fresh session" design — lost on server restart.
 conversations: dict[str, list[dict]] = {}
 pending_confirmations: dict[str, dict] = {}
+# A per-session cancel signal for the turn currently running in another request
+# thread. /chat and /chat/confirm register a fresh Event before advancing and
+# hand advance() its .is_set; /chat/cancel sets it. Keyed by sid, cleared when
+# the turn ends. (Flask runs with threaded=True, so the cancelling request and
+# the blocked turn are different threads sharing this dict.)
+cancel_events: dict[str, threading.Event] = {}
 
 # Triggers scheduled tasks on demand for the dashboard's "Run now" button.
 run_manager = RunManager()
@@ -433,12 +439,20 @@ def chat():
 
     checkpoint = len(history)
     history.append({"role": "user", "content": user_message})
+    cancel = cancel_events[sid] = threading.Event()
     try:
-        result = advance(history, TOOLS, DISPATCH, confirm_before=WRITE_TOOLS, logger=logger)
+        result = advance(history, TOOLS, DISPATCH, confirm_before=WRITE_TOOLS,
+                         logger=logger, should_cancel=cancel.is_set)
+    except TurnCancelled:
+        del history[checkpoint:]  # discard the stopped turn so the next one starts clean
+        logger.info("chat turn cancelled by user")
+        return jsonify({"type": "cancelled"})
     except Exception as e:
         del history[checkpoint:]  # roll back this failed turn so the next one starts clean
         logger.exception(f"chat turn failed: {e}")
         return jsonify({"error": str(e)}), 500
+    finally:
+        cancel_events.pop(sid, None)
 
     if result["type"] == "confirm":
         pending_confirmations[sid] = result["call"]
@@ -462,16 +476,38 @@ def chat_confirm():
     resolve(history, call, approved, DISPATCH, logger=logger)
 
     checkpoint = len(history)
+    cancel = cancel_events[sid] = threading.Event()
     try:
-        result = advance(history, TOOLS, DISPATCH, confirm_before=WRITE_TOOLS, logger=logger)
+        result = advance(history, TOOLS, DISPATCH, confirm_before=WRITE_TOOLS,
+                         logger=logger, should_cancel=cancel.is_set)
+    except TurnCancelled:
+        del history[checkpoint:]  # discard the stopped continuation, keep the resolved call
+        logger.info("chat continuation cancelled by user")
+        return jsonify({"type": "cancelled"})
     except Exception as e:
         del history[checkpoint:]  # roll back the failed continuation, keep the resolved call
         logger.exception(f"chat turn failed after confirmation: {e}")
         return jsonify({"error": str(e)}), 500
+    finally:
+        cancel_events.pop(sid, None)
 
     if result["type"] == "confirm":
         pending_confirmations[sid] = result["call"]
     return jsonify(_call_response(result))
+
+
+@app.route("/chat/cancel", methods=["POST"])
+def chat_cancel():
+    """Stop the turn currently running for this session. Sets the session's
+    cancel Event; the turn's advance() sees it between model chunks, raises
+    TurnCancelled, and its handler returns {"type": "cancelled"}. A no-op if
+    nothing is running. `cancelling` is False when there was no active turn."""
+    if not _authenticated():
+        return jsonify({"error": "not authenticated"}), 401
+    event = cancel_events.get(_session_id())
+    if event is not None:
+        event.set()
+    return jsonify({"cancelling": event is not None})
 
 
 @app.route("/chat/new", methods=["POST"])

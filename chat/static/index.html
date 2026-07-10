@@ -122,6 +122,7 @@
     font-size: 15px;
   }
   #send:disabled { opacity: 0.5; }
+  #send.stop { background: #b42318; }
 </style>
 </head>
 <body>
@@ -201,9 +202,14 @@ function addConfirm(summary, detail, onDecide) {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
-function setBusy(busy) {
-  input.disabled = busy;
-  sendBtn.disabled = busy;
+// While a turn is running the Send button becomes a Stop button (it stays
+// enabled so it can cancel); the input is disabled until the turn ends.
+let busy = false;
+function setBusy(b) {
+  busy = b;
+  input.disabled = b;
+  sendBtn.textContent = b ? "Stop" : "Send";
+  sendBtn.classList.toggle("stop", b);
 }
 
 function handleResult(result, typingEl) {
@@ -215,6 +221,9 @@ function handleResult(result, typingEl) {
   }
   if (result.type === "final") {
     addMessage("wren", result.text);
+    setBusy(false);
+  } else if (result.type === "cancelled") {
+    addMessage("system", "Stopped.");
     setBusy(false);
   } else if (result.type === "confirm") {
     addConfirm(result.summary, result.detail, async (approved) => {
@@ -233,6 +242,10 @@ function handleResult(result, typingEl) {
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
+  if (busy) {  // the button is showing "Stop" — cancel the running turn
+    await fetch("/chat/cancel", { method: "POST" });
+    return;
+  }
   const message = input.value.trim();
   if (!message) return;
   addMessage("user", message);

@@ -24,6 +24,21 @@ load_dotenv(_ROOT / "config" / ".env")
 # more reads, so allow more headroom before giving up.
 MAX_TOOL_ITERATIONS = 10
 
+# Cap the size of a single tool result before it's appended to the conversation.
+# One oversized result (e.g. a web search dumping page after page of listings)
+# can otherwise push the prompt past num_ctx, at which point Ollama silently
+# truncates the FRONT of the conversation (dropping the system prompt) and the
+# model tends to run away in a repetition loop. Trimming the result keeps the
+# window intact. ~8000 chars is roughly 2000 tokens — big enough for a useful
+# result, small enough that a few of them still fit a 16k window.
+MAX_TOOL_RESULT_CHARS = int(os.getenv("OLLAMA_MAX_TOOL_RESULT_CHARS", "8000"))
+
+
+class TurnCancelled(Exception):
+    """Raised inside advance()/_ollama_chat when the caller's should_cancel()
+    reports the running turn was cancelled. The caller rolls back the partial
+    turn and reports it as stopped (see chat/server.py's /chat handlers)."""
+
 
 def load_persona(filename: str) -> str:
     """Load a persona/context markdown file from agent/, stripping HTML
@@ -55,17 +70,25 @@ def _ollama_chat(
     tools: Optional[list[dict]] = None,
     timeout: float = None,
     logger: Optional[logging.Logger] = None,
+    should_cancel: Optional[Callable[[], bool]] = None,
 ) -> dict:
-    """POST a single chat completion to Ollama and return the response
-    `message` dict. Centralizes model/host/timeout env defaulting so
-    advance() and complete_text() stay in sync.
+    """POST a chat completion to Ollama and return the reassembled response
+    `message` dict. Centralizes model/host/timeout env defaulting so advance()
+    and complete_text() stay in sync.
 
-    The read timeout covers prompt prefill + full generation, not just
-    connect. For a local 12B model a large prompt can spend ~50s in prefill
-    alone before the first token, so the default is generous (and overridable
-    via OLLAMA_TIMEOUT, or per-call via `timeout`) — batch tasks that draft
-    long documents unattended need the headroom; 120s was too tight and left
-    the weekly log timing out right at the edge on busy weeks / cold loads."""
+    Streams (`stream=True`) so a runaway generation can be interrupted: after
+    each chunk we consult `should_cancel` and, if it fires, close the stream
+    (which tells Ollama to stop generating) and raise TurnCancelled. This model
+    emits a chunk roughly per token, so a cancel lands within a token of being
+    requested. The response is reassembled from the streamed chunks — content
+    concatenated, tool_calls collected — so callers see the same shape as a
+    non-streamed reply.
+
+    With streaming, `timeout` is the read timeout *between* chunks, not a cap on
+    total generation: a healthy stream keeps the socket fed, while a wedged
+    runner (no bytes at all) still trips it. Overridable via OLLAMA_TIMEOUT or
+    per-call `timeout` — a large prompt can spend tens of seconds in prefill
+    before the first chunk, so the default stays generous."""
     model = model or os.getenv("OLLAMA_MODEL", "gemma4")
     host = host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
     if timeout is None:
@@ -78,22 +101,43 @@ def _ollama_chat(
     payload = {
         "model": model,
         "messages": messages,
-        "stream": False,
+        "stream": True,
         "options": {"num_ctx": num_ctx},
     }
     if tools is not None:
         payload["tools"] = tools
 
-    resp = requests.post(f"{host}/api/chat", json=payload, timeout=timeout)
-    resp.raise_for_status()
-    data = resp.json()
+    content_parts: list[str] = []
+    tool_calls: list[dict] = []
+    prompt_tokens = eval_tokens = None
+    with requests.post(f"{host}/api/chat", json=payload, timeout=timeout, stream=True) as resp:
+        resp.raise_for_status()
+        for line in resp.iter_lines():
+            if should_cancel is not None and should_cancel():
+                raise TurnCancelled()
+            if not line:
+                continue
+            chunk = json.loads(line)
+            msg = chunk.get("message") or {}
+            if msg.get("content"):
+                content_parts.append(msg["content"])
+            if msg.get("tool_calls"):
+                tool_calls.extend(msg["tool_calls"])
+            if chunk.get("done"):
+                # The terminal chunk carries the token accounting.
+                prompt_tokens = chunk.get("prompt_eval_count")
+                eval_tokens = chunk.get("eval_count")
+
+    message: dict = {"role": "assistant", "content": "".join(content_parts)}
+    if tool_calls:
+        message["tool_calls"] = tool_calls
+
     if logger:
         # prompt_eval_count is the actual prompt size Ollama processed; compare
         # it to num_ctx to catch (and flag) likely front-truncation.
-        prompt_tokens = data.get("prompt_eval_count")
         logger.info(
             "ollama_chat model=%s num_ctx=%d prompt_tokens=%s eval_tokens=%s",
-            model, num_ctx, prompt_tokens, data.get("eval_count"),
+            model, num_ctx, prompt_tokens, eval_tokens,
         )
         if isinstance(prompt_tokens, int) and prompt_tokens >= num_ctx:
             logger.warning(
@@ -101,7 +145,7 @@ def _ollama_chat(
                 "the conversation (system prompt) was likely truncated",
                 prompt_tokens, num_ctx,
             )
-    return data["message"]
+    return message
 
 
 # Argument keys that may carry secrets — redacted before they reach the logs.
@@ -133,9 +177,18 @@ def _execute_tool_call(
             result = fn(**fn_args)
         except Exception as e:
             result = {"error": f"tool '{fn_name}' raised: {e}"}
+    content = json.dumps(result)
+    if len(content) > MAX_TOOL_RESULT_CHARS:
+        dropped = len(content) - MAX_TOOL_RESULT_CHARS
+        content = content[:MAX_TOOL_RESULT_CHARS] + f"... [truncated {dropped} chars to fit the context window]"
+        if logger:
+            logger.warning(
+                "tool_call %s result trimmed: %d chars over the %d cap",
+                fn_name, dropped, MAX_TOOL_RESULT_CHARS,
+            )
     if logger:
-        logger.info(f"tool_call {fn_name}({_redact_args(fn_args)}) -> {json.dumps(result)}")
-    messages.append({"role": "tool", "content": json.dumps(result)})
+        logger.info(f"tool_call {fn_name}({_redact_args(fn_args)}) -> {content}")
+    messages.append({"role": "tool", "content": content})
 
 
 def advance(
@@ -146,6 +199,7 @@ def advance(
     host: str = None,
     logger: Optional[logging.Logger] = None,
     confirm_before: frozenset[str] = frozenset(),
+    should_cancel: Optional[Callable[[], bool]] = None,
 ) -> dict:
     """Advance a tool-calling conversation already seeded in `messages`
     (system + user turns, and any prior assistant/tool turns).
@@ -166,7 +220,12 @@ def advance(
     practice.)
     """
     for _ in range(MAX_TOOL_ITERATIONS):
-        message = _ollama_chat(messages, model=model, host=host, tools=tools, logger=logger)
+        if should_cancel is not None and should_cancel():
+            raise TurnCancelled()
+        message = _ollama_chat(
+            messages, model=model, host=host, tools=tools, logger=logger,
+            should_cancel=should_cancel,
+        )
         messages.append(message)
 
         tool_calls = message.get("tool_calls") or []

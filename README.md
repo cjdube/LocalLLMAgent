@@ -36,7 +36,12 @@ Every chat call sets the context window explicitly via `OLLAMA_NUM_CTX`
 (default 8192) rather than leaving it to Ollama's small default, which would
 silently truncate the front of the prompt (where the system prompt lives). Each
 call also logs the effective `num_ctx` and the actual prompt token count
-(`prompt_tokens`) so you can watch how close a session runs to the ceiling.
+(`prompt_tokens`) so you can watch how close a session runs to the ceiling. To
+keep a single large tool result (e.g. a web search dumping page after page of
+listings) from blowing past `num_ctx` — which triggers exactly that front-
+truncation and, with the system prompt gone, a runaway repetition loop — each
+tool result is capped at `OLLAMA_MAX_TOOL_RESULT_CHARS` (default 8000 chars,
+~2000 tokens) before it's appended to the conversation.
 
 ### `agent/loop.py` — how tasks and chat talk to the model
 
@@ -64,6 +69,17 @@ call also logs the effective `num_ctx` and the actual prompt token count
   `resolve()` then `advance()` again) to actually run it. `run_agent` calls
   `advance()` with an empty `confirm_before`, so nothing ever pauses —
   identical behavior to before this was extracted.
+
+The model call (`_ollama_chat`) **streams** from Ollama and reassembles the
+reply, which gives `advance()` an interruption point: it takes an optional
+`should_cancel` callback and, between chunks, raises `TurnCancelled` if it
+fires. The chat server uses this for a **Stop button** — while a turn is
+running the Send button becomes "Stop", which hits `POST /chat/cancel`; that
+sets a per-session `threading.Event` the running turn is watching, so the
+in-flight turn unwinds promptly (returning `{"type": "cancelled"}`) instead of
+having to wait out a runaway generation or the read timeout. The partial turn
+is rolled back so history stays clean. (Scheduled/background runs pass no
+`should_cancel`, so they're unaffected.)
 
 Every system prompt gets two persona layers prepended automatically (via
 `with_identity()`), in order:
