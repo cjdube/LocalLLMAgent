@@ -594,9 +594,16 @@ steer the model. The blast radius is contained by design:
   write tool there is confirmation-gated in code (`confirm_before` in
   `agent/loop.py`) — the model cannot send an email, create a calendar event,
   etc. without an explicit user "yes". The confirmation card also shows the
-  substance of the pending action, including a preview of the email *body*
-  (not just the subject), so an injected or hallucinated message can't be
-  approved sight-unseen.
+  substance of the pending action, including the email's *recipient* and a
+  preview of its *body* (not just the subject), so an injected or hallucinated
+  message can't be approved sight-unseen. The recipient isn't the model's to
+  choose anyway: the model-facing `send_email` accepts only what its schema
+  declares (subject, body) and pins the recipient to `BRIEF_TO_EMAIL`
+  (`email.send_email_tool`), so an injected `to=` argument is dropped rather
+  than silently honored — the loop's `fn(**fn_args)` dispatch would otherwise
+  forward it. Chat card and background approval push render through the same
+  describers (`toolset.describe_call`/`describe_call_detail`), so the two
+  surfaces can't drift on what they disclose.
 - **`morning_brief`, `weekly_learnings`, and `calendar_colorizer`** use the
   tool-free `complete_text` path — the model only writes narrative prose, it
   never calls a tool, so injected instructions have nothing to actuate.

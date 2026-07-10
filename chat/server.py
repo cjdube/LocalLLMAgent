@@ -8,10 +8,8 @@ Usage:
 """
 
 import hmac
-import json
 import logging
 import os
-import re
 import sys
 import threading
 import time
@@ -35,7 +33,13 @@ from chat.insights import (
     system_map,
     task_by_key,
 )
-from agent.toolset import DISPATCH as _BASE_DISPATCH, TOOLS, WRITE_TOOLS
+from agent.toolset import (
+    DISPATCH as _BASE_DISPATCH,
+    TOOLS,
+    WRITE_TOOLS,
+    describe_call,
+    describe_call_detail,
+)
 from agent.tools import background
 from agent.tools.memory import recall
 from agent.tools.notify import notify
@@ -319,60 +323,6 @@ def _session_id() -> str:
     return session["sid"]
 
 
-def _describe_call(call: dict) -> str:
-    name = call["function"]["name"]
-    args = call["function"].get("arguments", {})
-    if name == "send_email":
-        return f'Send an email — subject: "{args.get("subject", "")}"'
-    if name == "send_morning_brief":
-        return "Send the morning brief (weather, calendar, tasks due soon, starred repos)"
-    if name == "log_calendar_event":
-        return f'Create calendar event "{args.get("summary", "")}" from {args.get("start", "?")} to {args.get("end", "?")}'
-    if name == "recolor_event":
-        return f'Recolor calendar event to "{args.get("category", "")}"'
-    if name == "create_task":
-        due = args.get("due")
-        return f'Create task "{args.get("title", "")}"' + (f" (due {due})" if due else "")
-    if name == "update_task_due_date":
-        label = args.get("task_title") or args.get("task_id", "")
-        return f'Change due date of "{label}" to {args.get("due", "?")}'
-    if name == "complete_task":
-        label = args.get("task_title") or args.get("task_id", "")
-        return f'Mark "{label}" complete'
-    if name == "write_skill":
-        return f'Save skill "{args.get("name", "")}"'
-    if name == "delete_skill":
-        return f'Delete skill "{args.get("name", "")}"'
-    return f"{name}({json.dumps(args)})"
-
-
-# How much of an email body to surface in the confirmation card. Long enough to
-# see what's being sent, short enough to keep the card compact.
-BODY_PREVIEW_CHARS = 240
-
-
-def _describe_detail(call: dict) -> str | None:
-    """A secondary preview line for the confirmation card. For send_email this
-    is the message body, so the human approving the send actually sees what
-    will go out — not just the subject. Returns None when there's nothing extra
-    to show (the summary alone suffices)."""
-    name = call["function"]["name"]
-    args = call["function"].get("arguments", {})
-    if name == "send_email":
-        body = (args.get("body") or "").strip()
-        if not body:
-            return None
-        # Chat-composed bodies are plain text; strip any stray tags defensively
-        # (in case the model emitted HTML) and collapse whitespace so the
-        # preview stays readable, then truncate.
-        text = re.sub(r"<[^>]+>", "", body)
-        text = re.sub(r"\s+", " ", text).strip()
-        if len(text) > BODY_PREVIEW_CHARS:
-            text = text[:BODY_PREVIEW_CHARS].rsplit(" ", 1)[0] + "…"
-        return text
-    return None
-
-
 def _call_response(result: dict) -> dict:
     if result["type"] == "final":
         return {"type": "final", "text": result["text"]}
@@ -381,8 +331,10 @@ def _call_response(result: dict) -> dict:
         "type": "confirm",
         "tool": call["function"]["name"],
         "args": call["function"].get("arguments", {}),
-        "summary": _describe_call(call),
-        "detail": _describe_detail(call),
+        # Shared with the background worker's approval push (agent/toolset.py)
+        # so the two confirmation surfaces describe a call identically.
+        "summary": describe_call(call),
+        "detail": describe_call_detail(call),
     }
 
 

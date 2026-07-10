@@ -93,28 +93,8 @@ def test_login_throttle_returns_429_after_repeated_failures(client):
 
 
 # --------------------------------------------------------------------------- #
-# Email body preview in confirmations
+# Confirmation payload (describers themselves are covered in test_toolset.py)
 # --------------------------------------------------------------------------- #
-
-def test_email_confirmation_includes_body_preview():
-    call = {"function": {"name": "send_email",
-                         "arguments": {"subject": "Hi", "body": "First line\n<b>bold</b> and more"}}}
-    detail = srv._describe_detail(call)
-    assert "First line" in detail and "bold" in detail
-    assert "<b>" not in detail  # stray tags stripped defensively
-
-
-def test_body_preview_is_truncated():
-    call = {"function": {"name": "send_email", "arguments": {"body": "word " * 200}}}
-    detail = srv._describe_detail(call)
-    assert len(detail) <= srv.BODY_PREVIEW_CHARS + 1  # +1 for the ellipsis
-    assert detail.endswith("…")
-
-
-def test_non_email_write_has_no_detail():
-    call = {"function": {"name": "log_calendar_event", "arguments": {"summary": "x"}}}
-    assert srv._describe_detail(call) is None
-
 
 def test_call_response_confirm_carries_summary_and_detail():
     resp = srv._call_response({"type": "confirm", "call": EMAIL_CALL})

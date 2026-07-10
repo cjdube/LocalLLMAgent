@@ -13,6 +13,10 @@ that keeps a launchd task from having to import the web server.
   plan for the rationale.
 """
 
+import json
+import os
+import re
+
 from agent.tools.background import (
     GET_JOB_RESULT_TOOL_SCHEMA,
     LIST_BG_JOBS_TOOL_SCHEMA,
@@ -32,7 +36,7 @@ from agent.tools.calendar import (
     recolor_event,
 )
 from agent.tools.chrome_history import TOOL_SCHEMA as CHROME_SCHEMA, fetch_chrome_history
-from agent.tools.email import TOOL_SCHEMA as EMAIL_SCHEMA, send_email
+from agent.tools.email import TOOL_SCHEMA as EMAIL_SCHEMA, send_email_tool
 from agent.tools.github_starred import TOOL_SCHEMA as GITHUB_STARRED_SCHEMA, fetch_starred_repos
 from agent.tools.google_tasks import (
     COMPLETE_TASK_TOOL_SCHEMA,
@@ -132,7 +136,9 @@ DISPATCH = {
     "get_events_by_date": get_events_by_date,
     "recolor_event": recolor_event,
     "fetch_chrome_history": fetch_chrome_history,
-    "send_email": send_email,
+    # The wrapper, not send_email itself: it drops model-supplied arguments the
+    # schema doesn't declare (to, html), pinning the recipient to BRIEF_TO_EMAIL.
+    "send_email": send_email_tool,
     "fetch_strava": fetch_strava,
     "fetch_weather": fetch_weather,
     "search_web": search_web,
@@ -199,3 +205,75 @@ UNATTENDED_EXCLUDED_TOOLS = frozenset({
     "remember", "pin", "archive", "forget",
     "write_skill", "delete_skill",
 })
+
+
+# --------------------------------------------------------------------------- #
+# Human-readable descriptions of a pending confirm-gated call. Shared by the
+# chat confirmation card (chat/server.py) and the background worker's approval
+# push (tasks/bg_worker.py) so the two surfaces can't drift apart — they once
+# did, on whether the email recipient was shown.
+# --------------------------------------------------------------------------- #
+
+# How much of an email body to surface in a confirmation. Long enough to see
+# what's being sent, short enough to keep the card/push compact.
+BODY_PREVIEW_CHARS = 240
+
+
+def _email_recipient() -> str:
+    # The model-facing send_email pins the recipient (see send_email_tool), so
+    # the effective recipient is always BRIEF_TO_EMAIL — show it anyway: the
+    # human approving a send should see where it goes, not infer it.
+    return os.getenv("BRIEF_TO_EMAIL") or "(BRIEF_TO_EMAIL unset)"
+
+
+def describe_call(call: dict) -> str:
+    """One human line summarizing a tool call awaiting confirmation."""
+    name = call["function"]["name"]
+    args = call["function"].get("arguments", {}) or {}
+    if name == "send_email":
+        return f'Send an email to {_email_recipient()} — subject: "{args.get("subject", "")}"'
+    if name == "send_morning_brief":
+        return "Send the morning brief (weather, calendar, tasks due soon, starred repos)"
+    if name == "log_calendar_event":
+        return f'Create calendar event "{args.get("summary", "")}" from {args.get("start", "?")} to {args.get("end", "?")}'
+    if name == "recolor_event":
+        return f'Recolor calendar event to "{args.get("category", "")}"'
+    if name == "create_task":
+        due = args.get("due")
+        return f'Create task "{args.get("title", "")}"' + (f" (due {due})" if due else "")
+    if name == "update_task_due_date":
+        label = args.get("task_title") or args.get("task_id", "")
+        return f'Change due date of "{label}" to {args.get("due", "?")}'
+    if name == "complete_task":
+        label = args.get("task_title") or args.get("task_id", "")
+        return f'Mark "{label}" complete'
+    if name == "forget":
+        label = args.get("memory_text") or args.get("memory_id", "?")
+        return f'Delete memory "{label}"'
+    if name == "write_skill":
+        return f'Save skill "{args.get("name", "")}"'
+    if name == "delete_skill":
+        return f'Delete skill "{args.get("name", "")}"'
+    return f"{name}({json.dumps(args)})"
+
+
+def describe_call_detail(call: dict) -> str | None:
+    """A secondary preview line for a confirmation. For send_email this is the
+    message body, so the human approving the send actually sees what will go
+    out — not just the subject. Returns None when there's nothing extra to show
+    (the summary alone suffices)."""
+    name = call["function"]["name"]
+    args = call["function"].get("arguments", {}) or {}
+    if name == "send_email":
+        body = (args.get("body") or "").strip()
+        if not body:
+            return None
+        # Chat-composed bodies are plain text; strip any stray tags defensively
+        # (in case the model emitted HTML) and collapse whitespace so the
+        # preview stays readable, then truncate.
+        text = re.sub(r"<[^>]+>", "", body)
+        text = re.sub(r"\s+", " ", text).strip()
+        if len(text) > BODY_PREVIEW_CHARS:
+            text = text[:BODY_PREVIEW_CHARS].rsplit(" ", 1)[0] + "…"
+        return text
+    return None

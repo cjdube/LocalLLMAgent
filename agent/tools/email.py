@@ -36,6 +36,20 @@ TOOL_SCHEMA = {
 }
 
 
+def send_email_tool(subject: str, body: str, **ignored) -> dict:
+    """The model-facing send_email (what DISPATCH maps the tool name to).
+
+    Accepts exactly what TOOL_SCHEMA declares — subject and body — and pins the
+    recipient to BRIEF_TO_EMAIL and the format to plain text. The agent loop
+    forwards whatever arguments the model emits (fn(**fn_args)), so without
+    this wrapper a hallucinated — or prompt-injected — `to`/`html` argument
+    would be silently honored while the confirmation card showed only subject
+    and body. Stray arguments are dropped here; the full send_email() below
+    stays available to programmatic callers (morning brief, task fallbacks)
+    that legitimately set to/html from code, not from model output."""
+    return send_email(subject, body)
+
+
 def send_email(subject: str, body: str, to: str = None, html: bool = False) -> dict:
     to = to or os.getenv("BRIEF_TO_EMAIL")
     if not to:

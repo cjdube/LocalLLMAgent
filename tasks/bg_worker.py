@@ -59,19 +59,16 @@ def _bg_tools_and_dispatch(logger):
     return tools, dispatch
 
 
-def _describe_call(call: dict) -> str:
-    """A short human line for the approval push describing the pending action."""
-    name = call["function"]["name"]
-    args = call["function"].get("arguments", {}) or {}
-    if name == "send_email":
-        return f"Send email to {args.get('to') or 'Craig'}: {args.get('subject', '(no subject)')}"
-    if name == "send_morning_brief":
-        return "Send the morning brief email"
-    if name == "forget":
-        return f"Delete memory {args.get('memory_id', '?')}"
-    if name == "delete_skill":
-        return f"Delete skill {args.get('name', '?')}"
-    return f"{name}({', '.join(f'{k}={v}' for k, v in args.items())})"
+def _approval_message(call: dict) -> str:
+    """The approval push's text: the same summary line the chat confirmation
+    card shows (agent/toolset.py — the recipient included for send_email), plus
+    the body preview when there is one, so a phone-only approval sees what will
+    actually go out."""
+    lines = [f"{toolset.describe_call(call)} — approve?"]
+    detail = toolset.describe_call_detail(call)
+    if detail:
+        lines.append(f'"{detail}"')
+    return "\n\n".join(lines)
 
 
 def _seed_messages(task_text: str) -> list:
@@ -100,7 +97,7 @@ def _run_job(job: dict, tools, dispatch, logger) -> None:
         background.save_awaiting(job["id"], messages, call)
         logger.info(f"job {job['id']} awaiting approval for {call['function']['name']}")
         notify(
-            message=f"{_describe_call(call)} — approve?",
+            message=_approval_message(call),
             title="Wren needs approval",
             priority="high",
             actions=background.approval_actions(job["id"]),
