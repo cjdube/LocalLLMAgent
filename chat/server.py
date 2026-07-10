@@ -32,6 +32,7 @@ from chat.insights import (
     next_run,
     parse_run_detail,
     parse_runs,
+    system_map,
     task_by_key,
 )
 from agent.tools.calendar import (
@@ -595,6 +596,13 @@ def memories_page():
     return send_from_directory(STATIC_DIR, "memories.html")
 
 
+@app.route("/map", methods=["GET"])
+def map_page():
+    if not _authenticated():
+        return LOGIN_PAGE.format(error="")
+    return send_from_directory(STATIC_DIR, "map.html")
+
+
 def _run_summary(run: dict | None) -> dict | None:
     """The slice of a run the Overview needs — omits the heavy tool_calls/error."""
     if run is None:
@@ -654,6 +662,13 @@ def api_capabilities():
     if not _authenticated():
         return jsonify({"error": "not authenticated"}), 401
     return jsonify({"tools": describe_tools(TOOLS, WRITE_TOOLS)})
+
+
+@app.route("/api/system_map", methods=["GET"])
+def api_system_map():
+    if not _authenticated():
+        return jsonify({"error": "not authenticated"}), 401
+    return jsonify(system_map(TOOLS, WRITE_TOOLS))
 
 
 @app.route("/api/memories", methods=["GET"])

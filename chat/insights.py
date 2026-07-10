@@ -12,15 +12,23 @@ Three sources:
   - logs/<name>.log  -> run history, parsed from the task loggers' own markers
   - tool schemas     -> Wren's capabilities (describe_tools, given the lists
                         server.py already assembles)
+
+system_map() additionally pulls the memory store, wiki page names, and saved
+skills (via their agent.tools modules) to feed the /map visualization.
 """
 
 import json
+import os
 import plistlib
 import re
 import subprocess
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
+
+from agent.tools.memory import recall
+from agent.tools.skills import list_skills, read_skill
+from agent.tools.wiki import list_wiki_pages
 
 _ROOT = Path(__file__).resolve().parent.parent
 LAUNCHD_DIR = _ROOT / "launchd"
@@ -399,6 +407,121 @@ def describe_tools(tools: list[dict], write_tools) -> list[dict]:
         })
     out.sort(key=lambda t: (t["mutates"], t["name"]))
     return out
+
+
+# --------------------------------------------------------------------------- #
+# System map (/map)
+# --------------------------------------------------------------------------- #
+
+# The /map page's grouping of chat tools by the external service each one talks
+# to. Tool registration in chat/server.py is already a manual list, so this
+# parallel map follows the same maintenance model: update it when registering a
+# new tool. A drift-guard test asserts every registered tool name appears here;
+# any unmapped tool still shows up on the map under "other".
+TOOL_SERVICES = {
+    "google_calendar": ("Google Calendar", ["get_upcoming_events", "log_calendar_event",
+                                            "get_events_by_date", "recolor_event"]),
+    "gmail": ("Gmail", ["send_email"]),
+    "google_tasks": ("Google Tasks", ["get_tasks", "get_tasks_due_soon", "create_task",
+                                      "update_task_due_date", "complete_task"]),
+    "chrome": ("Chrome History", ["fetch_chrome_history"]),
+    "strava": ("Strava", ["fetch_strava"]),
+    "weather": ("OpenWeatherMap", ["fetch_weather"]),
+    "web_search": ("Tavily Search", ["search_web"]),
+    "github": ("GitHub", ["fetch_starred_repos"]),
+    "youtube": ("YouTube", []),  # weekly_learnings-only; no chat tool
+    "brief": ("Morning Brief", ["send_morning_brief"]),
+    "memory": ("Memory", ["remember", "pin", "recall", "archive", "forget"]),
+    "wiki": ("Obsidian Wiki", ["read_wiki_index", "list_wiki_pages", "read_wiki_page",
+                               "list_weekly_reviews", "read_weekly_review"]),
+    "skills": ("Skills", ["list_skills", "read_skill", "write_skill", "delete_skill"]),
+}
+
+# Which services each scheduled routine touches (mirrors the tasks' agent.tools
+# imports) — drawn as edges on the map. Update alongside TOOL_SERVICES when a
+# task gains or loses an integration.
+ROUTINE_USES = {
+    "morning_brief": ["google_calendar", "gmail", "github", "google_tasks", "weather"],
+    "daily_log": ["google_calendar", "strava"],
+    "calendar_colorizer": ["google_calendar", "gmail"],
+    "weekly_learnings": ["google_calendar", "chrome", "gmail", "youtube", "wiki"],
+}
+
+# Keep the payload bounded: memory texts are truncated for the map (the detail
+# panel links to /memories for the full store) and the wiki band is capped.
+_MEMORY_TEXT_MAX = 300
+_WIKI_PAGES_MAX = 150
+
+
+def _tool_summary(tool: dict) -> dict:
+    return {k: tool[k] for k in ("name", "description", "mutates")}
+
+
+def system_map(tools: list[dict], write_tools) -> dict:
+    """Everything the /map page draws, in one payload: chat tools grouped by
+    external service, scheduled routines with last-run status and the services
+    they touch, the memory store plus wiki page names, and the saved skills
+    (bodies included — they're small, and it saves a second endpoint)."""
+    by_name = {t["name"]: t for t in describe_tools(tools, write_tools)}
+
+    services, placed = [], set()
+    for key, (label, names) in TOOL_SERVICES.items():
+        members = [_tool_summary(by_name[n]) for n in names if n in by_name]
+        placed.update(n for n in names if n in by_name)
+        services.append({"key": key, "label": label, "tools": members})
+    leftover = sorted(set(by_name) - placed)
+    if leftover:
+        services.append({"key": "other", "label": "Other",
+                         "tools": [_tool_summary(by_name[n]) for n in leftover]})
+
+    routines = []
+    for task in discover_tasks():
+        if task["is_daemon"]:
+            continue
+        runs = parse_runs(task["log_path"], limit=1)
+        last = runs[0] if runs else None
+        routines.append({
+            "key": task["key"],
+            "display_name": task["display_name"],
+            "human_schedule": task["human_schedule"],
+            "next_run": next_run(task["schedule"]),
+            "last_run": None if last is None else {
+                "status": last["status"], "start": last["start"],
+                "duration_s": last["duration_s"]},
+            "uses": ROUTINE_USES.get(task["key"], []),
+        })
+
+    entries = []
+    for m in recall()["memories"]:
+        text = m.get("text", "")
+        if len(text) > _MEMORY_TEXT_MAX:
+            text = text[:_MEMORY_TEXT_MAX] + "…"
+        entries.append({
+            "id": m.get("id"),
+            "text": text,
+            "category": m.get("category"),
+            "scope": m.get("scope", "active"),
+            "created": m.get("created"),
+        })
+    # The vault lives on an external drive; list_wiki_pages() returns an error
+    # dict when it isn't mounted — the map just shows an empty wiki band.
+    wiki = list_wiki_pages()
+    pages = [] if "error" in wiki else wiki.get("pages", [])
+    wiki_pages = [p[:-3] if p.endswith(".md") else p for p in pages[:_WIKI_PAGES_MAX]]
+
+    skills = []
+    for s in list_skills()["skills"]:
+        detail = read_skill(s["name"])
+        skills.append({"name": s["name"], "description": s["description"],
+                       "body": detail.get("body", "")})
+
+    return {
+        "identity": {"name": "Wren", "model": os.getenv("OLLAMA_MODEL", "")},
+        "services": services,
+        "routines": routines,
+        "memory": {"entries": entries, "wiki_pages": wiki_pages},
+        "skills": skills,
+    }
 
 
 # --------------------------------------------------------------------------- #

@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wren Map</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="alternate icon" type="image/png" href="/static/favicon-32.png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    color: #c8cdd8;
+    background: #05060e;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    background: rgba(10, 12, 24, 0.85);
+    border-bottom: 1px solid #171b2e;
+  }
+  header img.logo { height: 38px; width: 38px; border-radius: 9px; display: block; }
+  header h1 { font-size: 17px; margin: 0; color: #e8eaf2; }
+  header .sub { font-size: 13px; color: #565d75; }
+  header .spacer { flex: 1; }
+  header a.nav { font-size: 13px; color: #7c86a3; text-decoration: none; margin-left: 14px; }
+  header a.nav:hover { color: #e8eaf2; }
+
+  main { flex: 1; display: flex; min-height: 0; position: relative; }
+  #stage {
+    flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(circle at 50% 46%, #10142a 0%, #0a0d1d 45%, #05060e 78%);
+  }
+  #stage svg { width: 100%; height: 100%; max-width: 1000px; max-height: 100%; display: block; }
+
+  /* --- SVG node states --- */
+  g.node { cursor: pointer; }
+  svg.dimmed g.node { opacity: 0.15; transition: opacity 0.25s; }
+  svg.dimmed g.node.focus { opacity: 1; }
+  svg.dimmed g.node.focus g.node { opacity: 1; }  /* tool satellites inside a focused service */
+  g.node { transition: opacity 0.25s; }
+  .edge { fill: none; stroke: #e3b341; stroke-width: 1.3; opacity: 0; transition: opacity 0.25s; pointer-events: none; }
+  .edge.lit { opacity: 0.75; }
+
+  .ring-title { fill: #6a7391; font-size: 15px; letter-spacing: 0.38em; font-weight: 600; text-anchor: middle; }
+  .ring-title.apps { fill: #6f8fd9; }
+  .ring-title.routines { fill: #c9a34a; }
+  .ring-title.memory { fill: #9a86c9; }
+  .ring-title.skills { fill: #d98d4a; }
+  .cat-label { font-size: 11px; letter-spacing: 0.18em; font-weight: 600; text-anchor: middle; }
+  .node-label { fill: #aab1c7; font-size: 11.5px; text-anchor: middle; }
+  .node-sublabel { fill: #565d75; font-size: 10px; text-anchor: middle; }
+
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  .skills-orbit { animation: spin 150s linear infinite; transform-origin: 600px 600px; }
+  @keyframes pulse { 0%, 100% { opacity: 0.30; } 50% { opacity: 0.75; } }
+  .center-halo { animation: pulse 5s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) {
+    .skills-orbit { animation: none; }
+    .center-halo { animation: none; }
+  }
+
+  /* --- detail panel --- */
+  aside {
+    width: 320px; flex-shrink: 0; overflow-y: auto;
+    background: rgba(10, 13, 26, 0.92);
+    border-left: 1px solid #171b2e;
+    padding: 18px 18px 26px;
+  }
+  aside .kind {
+    display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 0.14em;
+    text-transform: uppercase; padding: 3px 9px; border-radius: 20px;
+    background: #171b2e; color: #7c86a3; margin-bottom: 10px;
+  }
+  aside h2 { margin: 0 0 6px; font-size: 17px; color: #e8eaf2; font-weight: 650; }
+  aside .meta { font-size: 12px; color: #565d75; margin-bottom: 12px; }
+  aside p.desc { font-size: 13px; line-height: 1.55; color: #aab1c7; margin: 0 0 12px; white-space: pre-wrap; }
+  aside pre {
+    font-size: 12px; line-height: 1.5; color: #aab1c7; background: #0b0e1e;
+    border: 1px solid #171b2e; border-radius: 8px; padding: 10px 12px;
+    white-space: pre-wrap; word-break: break-word; margin: 0 0 12px;
+  }
+  aside ul.tool-list { list-style: none; margin: 0 0 12px; padding: 0; }
+  aside ul.tool-list li { padding: 7px 0; border-bottom: 1px solid #12162a; font-size: 13px; }
+  aside ul.tool-list li .tname { color: #cdd3e2; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  aside .wbadge {
+    display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
+    padding: 1px 7px; border-radius: 10px; margin-left: 7px;
+    background: #3a2a12; color: #e3b341;
+  }
+  aside .status-ok { color: #4ade80; }
+  aside .status-bad { color: #f87171; }
+  aside a.goto { font-size: 12.5px; color: #6f8fd9; text-decoration: none; }
+  aside a.goto:hover { text-decoration: underline; }
+  aside .hint { font-size: 13px; line-height: 1.6; color: #565d75; }
+  aside .counts { list-style: none; margin: 14px 0 0; padding: 0; font-size: 13px; color: #aab1c7; }
+  aside .counts li { padding: 6px 0; border-bottom: 1px solid #12162a; display: flex; justify-content: space-between; }
+  aside .counts li b { color: #e8eaf2; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  @media (max-width: 700px) {
+    main { flex-direction: column; }
+    aside {
+      width: 100%; border-left: none; border-top: 1px solid #171b2e;
+      max-height: 42%; flex-shrink: 0;
+    }
+  }
+</style>
+</head>
+<body>
+  <header>
+    <img class="logo" src="/static/favicon.svg" alt="Wren">
+    <h1>Wren</h1>
+    <span class="sub">system map</span>
+    <span class="spacer"></span>
+    <a class="nav" href="/">chat</a>
+    <a class="nav" href="/dashboard">dashboard</a>
+    <a class="nav" href="/memories">memories</a>
+  </header>
+
+  <main>
+    <div id="stage"></div>
+    <aside id="panel"></aside>
+  </main>
+
+<script>
+"use strict";
+const SVG_NS = "http://www.w3.org/2000/svg";
+const C = 600;                       // viewBox center
+const TOP = -Math.PI / 2;            // angles start at 12 o'clock
+const R = {
+  center: 62,
+  skills: 130,
+  memIn: 185, memRowStep: 26, memRows: 4,   // memory annulus 185..263
+  catLabel: 306,
+  routines: 360,
+  satellites: 438,
+  apps: 470,
+  appLabel: 504,
+};
+const MEM_COLORS = {
+  preference: "#2dd4bf", person: "#f472b6", schedule: "#eab308",
+  project: "#60a5fa", health: "#4ade80", place: "#a78bfa",
+  trivia: "#94a3b8", other: "#8b93ab", uncategorized: "#8b93ab",
+  wiki: "#22d3ee",
+};
+
+async function api(path) { return (await fetch(path)).json(); }
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;  // textContent only — never innerHTML
+  return e;
+}
+function svgEl(tag, attrs) {
+  const e = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v);
+  return e;
+}
+function svgText(attrs, text) {
+  const t = svgEl("text", attrs);
+  t.textContent = text;
+  return t;
+}
+function polar(r, a) { return [C + r * Math.cos(a), C + r * Math.sin(a)]; }
+function fmtTs(ts) {
+  if (!ts) return "—";
+  const d = new Date(ts.replace(",", "."));
+  if (isNaN(d)) return ts;
+  return d.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+const panel = document.getElementById("panel");
+let svg, edges = [];
+const serviceGroups = new Map(), routineGroups = new Map(), serviceAngles = new Map();
+let routineUses = {}, serviceRoutines = {};   // key -> connected keys
+
+// ---------------------------------------------------------------- highlight
+function setFocus(routineKeys, serviceKeys) {
+  svg.classList.add("dimmed");
+  edges.forEach(e => e.classList.toggle("lit",
+    routineKeys.has(e.dataset.r) && serviceKeys.has(e.dataset.s)));
+  routineGroups.forEach((g, k) => g.classList.toggle("focus", routineKeys.has(k)));
+  serviceGroups.forEach((g, k) => g.classList.toggle("focus", serviceKeys.has(k)));
+}
+function clearFocus() {
+  svg.classList.remove("dimmed");
+  edges.forEach(e => e.classList.remove("lit"));
+  routineGroups.forEach(g => g.classList.remove("focus"));
+  serviceGroups.forEach(g => g.classList.remove("focus"));
+}
+function hoverRoutine(key) { setFocus(new Set([key]), new Set(routineUses[key] || [])); }
+function hoverService(key) { setFocus(new Set(serviceRoutines[key] || []), new Set([key])); }
+
+// ---------------------------------------------------------------- detail panel
+function showPanel(kind, title, build) {
+  panel.textContent = "";
+  panel.appendChild(el("span", "kind", kind));
+  panel.appendChild(el("h2", null, title));
+  build(panel);
+}
+function gotoLink(href, label) {
+  const a = el("a", "goto", label);
+  a.href = href;
+  return a;
+}
+function showOverview(data) {
+  showPanel("system map", "Wren", (p) => {
+    p.appendChild(el("p", "hint",
+      "An explorable map of everything Wren is made of. Hover a routine or " +
+      "application to light up what talks to what; click any node for detail."));
+    const counts = el("ul", "counts");
+    const toolCount = data.services.reduce((n, s) => n + s.tools.length, 0);
+    [["Applications", data.services.length],
+     ["Chat tools", toolCount],
+     ["Routines", data.routines.length],
+     ["Memories", data.memory.entries.length],
+     ["Wiki pages", data.memory.wiki_pages.length],
+     ["Skills", data.skills.length],
+    ].forEach(([label, n]) => {
+      const li = el("li", null, label);
+      li.appendChild(el("b", null, String(n)));
+      counts.appendChild(li);
+    });
+    p.appendChild(counts);
+  });
+}
+function showIdentity(data) {
+  showPanel("identity", "Wren", (p) => {
+    p.appendChild(el("div", "meta", data.identity.model ? `model: ${data.identity.model}` : ""));
+    p.appendChild(el("p", "desc",
+      "A local, personal agent. The rings around this node are what she's made " +
+      "of: the skills she's written down, what she remembers, the routines that " +
+      "run on schedule, and the applications she can reach."));
+  });
+}
+function showService(svc) {
+  showPanel("application", svc.label, (p) => {
+    if (!svc.tools.length) {
+      p.appendChild(el("p", "desc", "Used by scheduled routines only — no chat tools."));
+    }
+    const ul = el("ul", "tool-list");
+    svc.tools.forEach(t => {
+      const li = el("li");
+      li.appendChild(el("span", "tname", t.name));
+      if (t.mutates) li.appendChild(el("span", "wbadge", "write"));
+      ul.appendChild(li);
+    });
+    if (svc.tools.length) p.appendChild(ul);
+    const linked = serviceRoutines[svc.key] || [];
+    if (linked.length) p.appendChild(el("div", "meta", "used by: " + linked.join(", ")));
+  });
+}
+function showTool(svc, tool) {
+  showPanel("tool", tool.name, (p) => {
+    p.appendChild(el("div", "meta", svc.label + (tool.mutates ? " · write action (confirmation-gated)" : " · read-only")));
+    p.appendChild(el("p", "desc", tool.description));
+  });
+}
+function showRoutine(rt) {
+  showPanel("routine", rt.display_name, (p) => {
+    p.appendChild(el("div", "meta", rt.human_schedule + (rt.next_run ? ` · next ${fmtTs(rt.next_run)}` : "")));
+    const d = el("p", "desc");
+    if (rt.last_run) {
+      d.appendChild(document.createTextNode("Last run " + fmtTs(rt.last_run.start) + " — "));
+      d.appendChild(el("span", rt.last_run.status === "success" ? "status-ok" : "status-bad", rt.last_run.status));
+      if (rt.last_run.duration_s != null) d.appendChild(document.createTextNode(` in ${rt.last_run.duration_s}s`));
+    } else {
+      d.textContent = "No runs recorded yet.";
+    }
+    p.appendChild(d);
+    if (rt.uses.length) p.appendChild(el("div", "meta", "talks to: " + rt.uses.join(", ")));
+    p.appendChild(gotoLink("/dashboard", "Open in dashboard →"));
+  });
+}
+function showMemory(m) {
+  showPanel("memory", m.category || "memory", (p) => {
+    p.appendChild(el("div", "meta", `${m.scope} · saved ${fmtTs(m.created)}`));
+    p.appendChild(el("p", "desc", m.text));
+    p.appendChild(gotoLink("/memories", "Open memories →"));
+  });
+}
+function showWikiPage(name) {
+  showPanel("wiki page", name, (p) => {
+    p.appendChild(el("p", "desc",
+      "A concept page in the learnings wiki (Obsidian vault), distilled from " +
+      "weekly reviews. Wren reads these to answer questions about what you've " +
+      "been learning and deciding."));
+  });
+}
+function showSkill(s) {
+  showPanel("skill", s.name, (p) => {
+    if (s.description) p.appendChild(el("p", "desc", s.description));
+    const pre = el("pre", null, s.body);
+    p.appendChild(pre);
+  });
+}
+
+// ---------------------------------------------------------------- builders
+function nodeGroup(cls) {
+  const g = svgEl("g", { class: "node" + (cls ? " " + cls : "") });
+  return g;
+}
+
+function buildDefs() {
+  const defs = svgEl("defs");
+  const filt = svgEl("filter", { id: "glow", x: "-80%", y: "-80%", width: "260%", height: "260%" });
+  filt.appendChild(svgEl("feGaussianBlur", { stdDeviation: "3.2", result: "b" }));
+  const merge = svgEl("feMerge");
+  merge.appendChild(svgEl("feMergeNode", { in: "b" }));
+  merge.appendChild(svgEl("feMergeNode", { in: "SourceGraphic" }));
+  filt.appendChild(merge);
+  defs.appendChild(filt);
+  return defs;
+}
+
+function buildRingsAndTitles() {
+  const g = svgEl("g");
+  g.appendChild(svgEl("circle", { cx: C, cy: C, r: R.apps, fill: "none", stroke: "#3b6fd4", "stroke-width": 1, opacity: 0.45 }));
+  g.appendChild(svgEl("circle", { cx: C, cy: C, r: R.routines, fill: "none", stroke: "#c9a34a", "stroke-width": 1, opacity: 0.4 }));
+  const orbit = svgEl("g", { class: "skills-orbit" });
+  orbit.appendChild(svgEl("circle", { cx: C, cy: C, r: R.skills, fill: "none", stroke: "#d98d4a", "stroke-width": 1.6, opacity: 0.5, "stroke-dasharray": "2 8" }));
+  orbit.appendChild(svgEl("circle", { cx: C, cy: C, r: R.skills - 14, fill: "none", stroke: "#d98d4a", "stroke-width": 1.2, opacity: 0.3, "stroke-dasharray": "2 10" }));
+  g.appendChild(orbit);
+  g.appendChild(svgText({ class: "ring-title apps", x: C, y: C - R.apps - 32 }, "APPLICATIONS"));
+  g.appendChild(svgText({ class: "ring-title routines", x: C, y: C - R.routines - 20 }, "ROUTINES"));
+  g.appendChild(svgText({ class: "ring-title memory", x: C, y: C - R.memIn - (R.memRows - 1) * R.memRowStep - 26 }, "MEMORY"));
+  g.appendChild(svgText({ class: "ring-title skills", x: C, y: C - R.skills - 22 }, "SKILLS"));
+  return g;
+}
+
+function buildCenter(data) {
+  const g = nodeGroup("focus");
+  g.appendChild(svgEl("circle", { class: "center-halo", cx: C, cy: C, r: R.center + 12, fill: "#6f8fd9", opacity: 0.3, filter: "url(#glow)" }));
+  g.appendChild(svgEl("circle", { cx: C, cy: C, r: R.center, fill: "#12162e", stroke: "#6f8fd9", "stroke-width": 1.4 }));
+  const t = svgText({ x: C, y: C + 1, fill: "#e8eaf2", "font-size": "18", "font-weight": "700", "letter-spacing": "0.22em", "text-anchor": "middle" }, "WREN");
+  g.appendChild(t);
+  if (data.identity.model) {
+    g.appendChild(svgText({ x: C, y: C + 22, class: "node-sublabel" }, data.identity.model));
+  }
+  g.addEventListener("click", () => showIdentity(data));
+  return g;
+}
+
+function buildSkills(skills) {
+  const g = svgEl("g");
+  const n = skills.length;
+  skills.forEach((s, i) => {
+    const a = TOP + (i * 2 * Math.PI) / Math.max(n, 1);
+    const [x, y] = polar(R.skills, a);
+    const node = nodeGroup();
+    node.appendChild(svgEl("circle", { cx: x, cy: y, r: 7, fill: "#e8853a", filter: "url(#glow)" }));
+    node.appendChild(svgText({ class: "node-label", x, y: y + 22 }, s.name));
+    node.addEventListener("click", () => showSkill(s));
+    g.appendChild(node);
+  });
+  return g;
+}
+
+function buildMemory(memory) {
+  const g = svgEl("g");
+  // Group entries by category, then append the wiki band.
+  const groups = new Map();
+  memory.entries.forEach(m => {
+    const key = m.category || "uncategorized";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ kind: "memory", item: m });
+  });
+  if (memory.wiki_pages.length) {
+    groups.set("wiki", memory.wiki_pages.map(p => ({ kind: "wiki", item: p })));
+  }
+  if (!groups.size) return g;
+
+  const total = [...groups.values()].reduce((n, v) => n + v.length, 0);
+  const GAP = 0.06;                                  // radians between segments
+  let shares = [...groups.entries()].map(([key, items]) =>
+    [key, items, Math.max(items.length / total, 0.055)]);
+  const shareSum = shares.reduce((n, s) => n + s[2], 0);
+  const usable = 2 * Math.PI - GAP * shares.length;
+  // Start a little past 12 o'clock so the first category label clears the
+  // MEMORY ring title.
+  let angle = TOP + 0.35 + GAP / 2;
+  shares.forEach(([key, items, share]) => {
+    const span = (share / shareSum) * usable;
+    const color = MEM_COLORS[key] || MEM_COLORS.other;
+    items.forEach((entry, k) => {
+      const a = angle + ((k + 0.5) * span) / items.length;
+      const r = R.memIn + (k % R.memRows) * R.memRowStep;
+      const [x, y] = polar(r, a);
+      const node = nodeGroup();
+      const dot = svgEl("circle", {
+        cx: x, cy: y,
+        r: entry.kind === "wiki" ? 3 : 4.5,
+        fill: color,
+        opacity: entry.kind === "wiki" ? 0.55 : 0.95,
+        filter: "url(#glow)",
+      });
+      node.appendChild(dot);
+      node.addEventListener("click", () =>
+        entry.kind === "wiki" ? showWikiPage(entry.item) : showMemory(entry.item));
+      g.appendChild(node);
+    });
+    const mid = angle + span / 2;
+    const [lx, ly] = polar(R.catLabel, mid);
+    g.appendChild(svgText({ class: "cat-label", x: lx, y: ly, fill: MEM_COLORS[key] || MEM_COLORS.other },
+      key.toUpperCase()));
+    angle += span + GAP;
+  });
+  return g;
+}
+
+function buildRoutines(routines) {
+  const g = svgEl("g");
+  const n = routines.length;
+  routines.forEach((rt, i) => {
+    // Offset by half a step so no node sits under the ROUTINES title at 12 o'clock.
+    const a = TOP + ((i + 0.5) * 2 * Math.PI) / Math.max(n, 1);
+    const [x, y] = polar(R.routines, a);
+    const node = nodeGroup();
+    node.appendChild(svgEl("circle", { cx: x, cy: y, r: 9, fill: "#e3b341", filter: "url(#glow)" }));
+    const status = rt.last_run ? rt.last_run.status : null;
+    node.appendChild(svgEl("circle", {
+      cx: x + 10, cy: y - 10, r: 3.2,
+      fill: status === "success" ? "#4ade80" : status ? "#f87171" : "#565d75",
+    }));
+    node.appendChild(svgText({ class: "node-label", x, y: y + 25 }, rt.display_name));
+    node.appendChild(svgText({ class: "node-sublabel", x, y: y + 39 }, rt.human_schedule));
+    node.addEventListener("click", () => showRoutine(rt));
+    node.addEventListener("mouseenter", () => hoverRoutine(rt.key));
+    node.addEventListener("mouseleave", clearFocus);
+    routineGroups.set(rt.key, node);
+    g.appendChild(node);
+  });
+  return g;
+}
+
+function hexPoints(x, y, r) {
+  const pts = [];
+  for (let i = 0; i < 6; i++) {
+    const a = -Math.PI / 2 + (i * Math.PI) / 3;
+    pts.push(`${x + r * Math.cos(a)},${y + r * Math.sin(a)}`);
+  }
+  return pts.join(" ");
+}
+
+function buildApplications(services) {
+  const g = svgEl("g");
+  const n = services.length;
+  services.forEach((svc, i) => {
+    const a = TOP + ((i + 0.5) * 2 * Math.PI) / Math.max(n, 1);
+    serviceAngles.set(svc.key, a);
+    const [x, y] = polar(R.apps, a);
+    const node = nodeGroup();
+    node.appendChild(svgEl("polygon", {
+      points: hexPoints(x, y, 17),
+      fill: "#101a38", stroke: "#4d7fe3", "stroke-width": 1.4, filter: "url(#glow)",
+    }));
+    node.appendChild(svgText({
+      x, y: y + 4.5, fill: "#8fb0f0", "font-size": "12", "font-weight": "700", "text-anchor": "middle",
+    }, svc.label.slice(0, 1)));
+    const [lx, ly] = polar(R.appLabel, a);
+    node.appendChild(svgText({ class: "node-label", x: lx, y: ly + 4 }, svc.label));
+    // Tool satellites fan out just inside the ring; write tools are hollow diamonds.
+    const fan = 0.052;
+    svc.tools.forEach((tool, j) => {
+      const ta = a + (j - (svc.tools.length - 1) / 2) * fan;
+      const [tx, ty] = polar(R.satellites, ta);
+      let dot;
+      if (tool.mutates) {
+        dot = svgEl("rect", {
+          x: tx - 3.4, y: ty - 3.4, width: 6.8, height: 6.8,
+          transform: `rotate(45 ${tx} ${ty})`,
+          fill: "none", stroke: "#8fb0f0", "stroke-width": 1.3,
+        });
+      } else {
+        dot = svgEl("circle", { cx: tx, cy: ty, r: 3.4, fill: "#4d7fe3", opacity: 0.9 });
+      }
+      const tnode = nodeGroup();
+      tnode.appendChild(dot);
+      tnode.addEventListener("click", (ev) => { ev.stopPropagation(); showTool(svc, tool); });
+      node.appendChild(tnode);
+    });
+    node.addEventListener("click", () => showService(svc));
+    node.addEventListener("mouseenter", () => hoverService(svc.key));
+    node.addEventListener("mouseleave", clearFocus);
+    serviceGroups.set(svc.key, node);
+    g.appendChild(node);
+  });
+  return g;
+}
+
+function buildEdges(routines, routineAngles) {
+  const g = svgEl("g");
+  routines.forEach(rt => {
+    const a1 = routineAngles.get(rt.key);
+    const [x1, y1] = polar(R.routines, a1);
+    rt.uses.forEach(skey => {
+      const a2 = serviceAngles.get(skey);
+      if (a2 === undefined) return;
+      const [x2, y2] = polar(R.apps, a2);
+      // Control point at the angular midpoint (shortest way around), pushed
+      // outward so the edge arcs gently between the two rings.
+      let da = a2 - a1;
+      if (da > Math.PI) da -= 2 * Math.PI;
+      if (da < -Math.PI) da += 2 * Math.PI;
+      const [cx, cy] = polar(R.apps - 30, a1 + da / 2);
+      const path = svgEl("path", {
+        class: "edge",
+        d: `M ${x1} ${y1} Q ${cx} ${cy} ${x2} ${y2}`,
+      });
+      path.dataset.r = rt.key;
+      path.dataset.s = skey;
+      edges.push(path);
+      g.appendChild(path);
+    });
+  });
+  return g;
+}
+
+// ---------------------------------------------------------------- assembly
+async function load() {
+  const data = await api("/api/system_map");
+  if (data.error) {
+    panel.appendChild(el("p", "hint", "Could not load the map: " + data.error));
+    return;
+  }
+  routineUses = {};
+  serviceRoutines = {};
+  data.routines.forEach(rt => {
+    routineUses[rt.key] = rt.uses;
+    rt.uses.forEach(s => {
+      (serviceRoutines[s] = serviceRoutines[s] || []).push(rt.key);
+    });
+  });
+
+  svg = svgEl("svg", { viewBox: "0 0 1200 1200" });
+  svg.appendChild(buildDefs());
+  svg.appendChild(buildRingsAndTitles());
+
+  const routineAngles = new Map();
+  data.routines.forEach((rt, i) => {
+    routineAngles.set(rt.key, TOP + ((i + 0.5) * 2 * Math.PI) / Math.max(data.routines.length, 1));
+  });
+
+  svg.appendChild(buildApplications(data.services));
+  svg.appendChild(buildEdges(data.routines, routineAngles));  // edges above hexes, below routine nodes
+  svg.appendChild(buildRoutines(data.routines));
+  svg.appendChild(buildMemory(data.memory));
+  svg.appendChild(buildSkills(data.skills));
+  svg.appendChild(buildCenter(data));
+
+  document.getElementById("stage").appendChild(svg);
+  showOverview(data);
+}
+
+load();
+</script>
+</body>
+</html>

@@ -342,6 +342,103 @@ def test_discover_tasks_reuses_cache_and_invalidates(tmp_path, monkeypatch):
     assert calls["n"] == 2
 
 
+# --------------------------------------------------------------------------- #
+# system_map
+# --------------------------------------------------------------------------- #
+
+def _isolate_map_sources(tmp_path, monkeypatch):
+    """Point every system_map source at empty tmp locations so the tests never
+    read the real memory store, skills dir, vault, plists, or logs."""
+    from agent.tools import memory
+    monkeypatch.setattr(memory, "_STORE_PATH", tmp_path / "wren_memory.json")
+    monkeypatch.setenv("WREN_SKILLS_DIR", str(tmp_path / "skills"))
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path / "no-vault"))
+    monkeypatch.setattr(insights, "LAUNCHD_DIR", tmp_path)
+    monkeypatch.setattr(insights, "LOGS_DIR", tmp_path)
+    insights._TASKS_CACHE.clear()
+
+
+SAMPLE_TOOLS = [
+    {"function": {"name": "send_email", "description": "Send an email",
+                  "parameters": {"type": "object", "properties": {}}}},
+    {"function": {"name": "fetch_weather", "description": "Read weather",
+                  "parameters": {"type": "object", "properties": {}}}},
+    {"function": {"name": "totally_new_tool", "description": "Not mapped yet",
+                  "parameters": {"type": "object", "properties": {}}}},
+]
+
+
+def test_system_map_groups_tools_by_service(tmp_path, monkeypatch):
+    _isolate_map_sources(tmp_path, monkeypatch)
+    out = insights.system_map(SAMPLE_TOOLS, write_tools=["send_email"])
+    by_key = {s["key"]: s for s in out["services"]}
+    assert [t["name"] for t in by_key["gmail"]["tools"]] == ["send_email"]
+    assert by_key["gmail"]["tools"][0]["mutates"] is True
+    assert [t["name"] for t in by_key["weather"]["tools"]] == ["fetch_weather"]
+    assert by_key["weather"]["tools"][0]["mutates"] is False
+    # An unmapped tool falls into "other" rather than disappearing.
+    assert [t["name"] for t in by_key["other"]["tools"]] == ["totally_new_tool"]
+
+
+def test_system_map_no_other_bucket_when_all_mapped(tmp_path, monkeypatch):
+    _isolate_map_sources(tmp_path, monkeypatch)
+    out = insights.system_map(SAMPLE_TOOLS[:2], write_tools=[])
+    assert "other" not in {s["key"] for s in out["services"]}
+
+
+def test_routine_uses_reference_defined_services():
+    for task_key, services in insights.ROUTINE_USES.items():
+        for key in services:
+            assert key in insights.TOOL_SERVICES, f"{task_key} uses unknown service {key!r}"
+
+
+def test_every_registered_chat_tool_is_mapped_to_a_service():
+    # Drift guard for the hard-coded TOOL_SERVICES map: registering a new tool
+    # in chat/server.py without mapping it here should fail loudly, not let the
+    # tool silently pile up in the map's "other" bucket.
+    import os
+    os.environ.setdefault("WREN_CHAT_TOKEN", "test-token")
+    os.environ.setdefault("FLASK_SECRET_KEY", "test-secret")
+    from chat import server as srv
+    mapped = {name for _, names in insights.TOOL_SERVICES.values() for name in names}
+    registered = {t["function"]["name"] for t in srv.TOOLS}
+    assert registered <= mapped, f"unmapped tools: {sorted(registered - mapped)}"
+
+
+def test_system_map_routines_exclude_daemons(tmp_path, monkeypatch):
+    _isolate_map_sources(tmp_path, monkeypatch)
+    _write_plist(tmp_path / "foo.plist", {"Hour": 6, "Minute": 0})
+    daemon = {
+        "Label": "com.test.daemon",
+        "ProgramArguments": ["python", "-m", "chat.server"],
+        "StandardOutPath": str(tmp_path / "wren.launchd.log"),
+        "KeepAlive": True,
+    }
+    with open(tmp_path / "daemon.plist", "wb") as fh:
+        plistlib.dump(daemon, fh)
+
+    out = insights.system_map(SAMPLE_TOOLS, write_tools=[])
+    assert [rt["key"] for rt in out["routines"]] == ["foo"]
+    rt = out["routines"][0]
+    assert rt["human_schedule"] == "Daily 6:00 AM"
+    assert rt["last_run"] is None  # no log written
+    assert rt["uses"] == []        # not in ROUTINE_USES
+
+
+def test_system_map_memory_and_wiki_degrade_gracefully(tmp_path, monkeypatch):
+    _isolate_map_sources(tmp_path, monkeypatch)
+    from agent.tools import memory
+    memory.remember("x" * 500, category="trivia")
+    out = insights.system_map(SAMPLE_TOOLS, write_tools=[])
+    entry = out["memory"]["entries"][0]
+    assert len(entry["text"]) == insights._MEMORY_TEXT_MAX + 1  # truncated + ellipsis
+    assert entry["text"].endswith("…")
+    assert entry["scope"] == "archival"
+    # Vault dir doesn't exist -> empty wiki band, not an error payload.
+    assert out["memory"]["wiki_pages"] == []
+    assert out["skills"] == []
+
+
 def test_discover_tasks_returns_fresh_list(tmp_path, monkeypatch):
     monkeypatch.setattr(insights, "LAUNCHD_DIR", tmp_path)
     insights._TASKS_CACHE.clear()

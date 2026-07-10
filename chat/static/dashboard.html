@@ -30,6 +30,8 @@
   header h1 { font-size: 17px; margin: 0; }
   header .sub { font-size: 13px; color: #9ca3af; }
   header .spacer { flex: 1; }
+  header a.nav { font-size: 13px; color: #6b7280; text-decoration: none; }
+  header a.nav:hover { color: #1f2328; }
   .pill {
     display: inline-flex; align-items: center; gap: 6px;
     font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 20px;
@@ -145,6 +147,7 @@
     <h1>Wren</h1>
     <span class="sub">dashboard</span>
     <span class="spacer"></span>
+    <a class="nav" href="/map">map</a>
     <span id="serverPill" class="pill"><span class="glow"></span>server running</span>
   </header>
 

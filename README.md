@@ -300,6 +300,31 @@ the facts that actually get recalled float to the top. Managing memories
 there. Backed by `GET /api/memories`, which calls `memory.recall()` with no
 query so viewing the page never bumps any access counts.
 
+### System map
+
+`http://127.0.0.1:8420/map` is an explorable radial visualization of the whole
+agent (same auth as the dashboard) — Wren at the center, then concentric rings
+working outward:
+
+- **Skills** — one node per `skills/*.md` procedure, on a slowly rotating
+  dotted ring; click for the full step-by-step body.
+- **Memory** — a dot field grouped and color-coded by memory category, plus a
+  dimmer band of learnings-wiki page names (empty if the vault drive isn't
+  mounted); click a dot for the fact.
+- **Routines** — the scheduled tasks, each with its schedule and a last-run
+  status dot; hovering one lights up gold edges to the applications it talks to.
+- **Applications** — hexagons for the external services the chat tools are
+  grouped under, with a satellite dot per tool (hollow diamonds mark
+  confirmation-gated write tools).
+
+Clicking any node fills the detail panel (tool descriptions, memory text,
+skill bodies, routine last-run status) with links into `/dashboard` and
+`/memories`. Backed by `GET /api/system_map`, aggregated in
+`chat/insights.py:system_map()`. Two hard-coded maps there need a one-line
+update when the agent grows: `TOOL_SERVICES` (tool → service grouping; a
+drift-guard test fails if a registered tool is unmapped) and `ROUTINE_USES`
+(routine → services edges).
+
 ## Scheduling — launchd
 
 Each task (and the always-on chat server) has a `.plist` in `launchd/`,

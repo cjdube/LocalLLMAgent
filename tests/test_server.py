@@ -59,6 +59,7 @@ EMAIL_CALL = {"function": {"name": "send_email", "arguments": {"subject": "Hi", 
     ("post", "/api/run/morning_brief", {}),
     ("get", "/api/run/morning_brief/status", {}),
     ("get", "/api/memories", {}),
+    ("get", "/api/system_map", {}),
 ])
 def test_endpoints_require_auth(client, method, path, kwargs):
     resp = getattr(client, method)(path, **kwargs)
@@ -218,3 +219,42 @@ def test_api_memories_splits_scope_and_sorts_archival_by_access_count(auth_clien
         "Owls can rotate their heads 270 degrees",
         "Crows can recognize human faces",
     ]
+
+
+# --------------------------------------------------------------------------- #
+# /map + /api/system_map
+# --------------------------------------------------------------------------- #
+
+def test_map_page_shows_login_when_unauthenticated(client):
+    resp = client.get("/map")
+    assert resp.status_code == 200
+    assert b"Access token" in resp.data
+
+
+def test_map_page_serves_map_when_authenticated(auth_client):
+    resp = auth_client.get("/map")
+    assert resp.status_code == 200
+    assert b"system map" in resp.data
+
+
+def test_api_system_map_shape(auth_client, tmp_path, monkeypatch):
+    monkeypatch.setattr(memory, "_STORE_PATH", tmp_path / "wren_memory.json")
+    memory.remember("Crows can recognize human faces", category="trivia")
+    monkeypatch.setenv("WREN_SKILLS_DIR", str(tmp_path / "skills"))
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path / "no-vault"))
+
+    resp = auth_client.get("/api/system_map")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert set(data) == {"identity", "services", "routines", "memory", "skills"}
+    assert data["identity"]["name"] == "Wren"
+    # Every registered chat tool lands in exactly one service group.
+    grouped = [t["name"] for s in data["services"] for t in s["tools"]]
+    registered = [t["function"]["name"] for t in srv.TOOLS]
+    assert sorted(grouped) == sorted(registered)
+    # The unmounted vault degrades to an empty wiki band, never an error.
+    assert data["memory"]["wiki_pages"] == []
+    assert [m["text"] for m in data["memory"]["entries"]] == ["Crows can recognize human faces"]
+    assert data["skills"] == []
+    for rt in data["routines"]:
+        assert set(rt) == {"key", "display_name", "human_schedule", "next_run", "last_run", "uses"}
