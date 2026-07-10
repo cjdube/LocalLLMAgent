@@ -2,11 +2,14 @@
 runs it on a short StartInterval (launchd never runs two copies of the same job
 at once, so a long job just delays the next poll rather than overlapping).
 
-Execution posture "A + push-to-approve": the job runs the agent tool loop over
-the full read/write tool set, but any tool in toolset.CONSEQUENTIAL_TOOLS pauses
-the run — the job is saved as awaiting_approval and Craig gets a tap-to-approve
-push. The next poll resumes it once he's decided. Everything else (reads,
-reversible internal writes) runs unattended.
+Execution posture "A + push-to-approve": the job runs the agent tool loop, but
+any tool in toolset.CONSEQUENTIAL_TOOLS pauses the run — the job is saved as
+awaiting_approval and Craig gets a tap-to-approve push. The next poll resumes
+it once he's decided. Tools in toolset.UNATTENDED_EXCLUDED_TOOLS (memory/skill
+writers — prompt-visible state — and the bg-management tools) are stripped from
+the toolset entirely, so injected text in content fetched mid-job can't plant a
+durable instruction. Everything else (reads, reversible internal writes) runs
+unattended.
 
 Reuses agent.loop.advance()/resolve() exactly as chat/server.py does; the only
 difference is the decision arrives via a persisted approval, not a live web tap.
@@ -33,9 +36,9 @@ from agent.tools.notify import notify
 from tasks._common import notify_failure, setup_logger
 from tasks.morning_brief import build_and_send_brief
 
-# The background-management tools themselves aren't useful inside a background
-# run (and run_in_background would let a job spawn more jobs) — keep them out.
-BG_EXCLUDE = {"run_in_background", "list_background_jobs", "get_job_result"}
+# Tools an unattended run must not carry — bg-management tools plus everything
+# that writes prompt-visible state. Policy and rationale live in toolset.py.
+BG_EXCLUDE = toolset.UNATTENDED_EXCLUDED_TOOLS
 
 BG_SYSTEM_PROMPT = (
     "You are completing a task Craig handed off to run in the background, "

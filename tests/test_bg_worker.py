@@ -37,6 +37,23 @@ def test_send_email_is_gated_but_reversible_writes_are_not():
         assert reversible not in toolset.CONSEQUENTIAL_TOOLS
 
 
+def test_prompt_state_writers_are_excluded_from_unattended_runs():
+    # A background run ingests untrusted content (web pages, search results);
+    # pinned memories and skills are rendered into future system prompts, so
+    # the tools that write them must not exist in the unattended toolset at
+    # all — otherwise injected text could plant a durable instruction.
+    prompt_state_writers = {"remember", "pin", "archive", "forget",
+                            "write_skill", "delete_skill"}
+    assert prompt_state_writers <= toolset.UNATTENDED_EXCLUDED_TOOLS
+
+    tools, dispatch = bg_worker._bg_tools_and_dispatch(logger=None)
+    offered = {t["function"]["name"] for t in tools}
+    assert not (toolset.UNATTENDED_EXCLUDED_TOOLS & offered)
+    assert not (toolset.UNATTENDED_EXCLUDED_TOOLS & set(dispatch))
+    # The read side of memory/skills stays available to background runs.
+    assert {"recall", "list_skills", "read_skill"} <= offered
+
+
 def test_readonly_job_completes_and_pushes_summary(monkeypatch):
     calls = _capture_notify(monkeypatch)
     monkeypatch.setattr(bg_worker, "advance", lambda *a, **k: {"type": "final", "text": "found it"})

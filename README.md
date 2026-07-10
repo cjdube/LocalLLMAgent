@@ -616,14 +616,20 @@ steer the model. The blast radius is contained by design:
 - **Background tasks** (`run_in_background` → `bg_worker`) run detached, with no
   one present to confirm — so they follow an **"A + push-to-approve"** posture
   (`toolset.CONSEQUENTIAL_TOOLS`). The worker reads/researches/drafts freely, but
-  any external/irreversible action (`send_email`, `send_morning_brief`, `forget`,
-  `delete_skill`) *pauses* the job and is pushed to Craig's phone for a
+  any external/irreversible action (`send_email`, `send_morning_brief`) *pauses*
+  the job and is pushed to Craig's phone for a
   tap-to-approve decision before it runs (the tap gets an immediate confirming
   push — "Approved" / "Denied" — since the ntfy buttons have no selected state
   of their own). So untrusted content pulled mid-task
   can never trigger an unattended irreversible action — the "no human in the
   loop" leg of the injection trifecta (untrusted input × consequential action ×
-  no confirmation) is removed for exactly those actions. Starting a background
+  no confirmation) is removed for exactly those actions. Going further, the
+  tools that write **prompt-visible state** — `remember`/`pin`/`archive`/`forget`
+  and `write_skill`/`delete_skill` — aren't in a background run's toolset at all
+  (`toolset.UNATTENDED_EXCLUDED_TOOLS`): pinned memories and skills feed future
+  system prompts, so a poisoned page read mid-job must not be able to plant a
+  durable instruction that outlives the job, even behind an approval tap. The
+  read side (`recall`, `read_skill`) stays available. Starting a background
   task is itself confirmation-gated in chat, so a job only runs because Craig
   said to.
 
@@ -635,9 +641,11 @@ deterministic Python field-map, which replaced an earlier `run_agent` path fed
 by Strava activity *names*). The one place the model actuates a write
 *unattended* is a background task performing a **reversible, internal** write to
 Craig's own account (e.g. creating a task or recoloring an event) — a
-deliberate, bounded exception, not a general autonomy grant. That line is a
-single editable set (`CONSEQUENTIAL_TOOLS`): move a tool into it to require
-approval, out of it to allow unattended. If new work ever wires the model to a
+deliberate, bounded exception, not a general autonomy grant. That line is two
+editable sets in `toolset.py`: `CONSEQUENTIAL_TOOLS` (move a tool into it to
+require approval, out of it to allow unattended) and `UNATTENDED_EXCLUDED_TOOLS`
+(tools a background run doesn't get at all — the memory/skill writers, because
+they feed future system prompts). If new work ever wires the model to a
 write tool, hold this boundary — gate the consequential ones, or keep the model
 out. See also the `web-content-untrusted-input` note in memory.
 

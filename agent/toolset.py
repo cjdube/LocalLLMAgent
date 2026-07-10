@@ -175,7 +175,27 @@ WRITE_TOOLS = frozenset({
 # The subset a background run must get phone approval for: external/irreversible
 # only. Reversible internal writes (calendar/tasks/reminders on Craig's own
 # account) auto-execute unattended. This is the one line to move to tighten the
-# policy (e.g. add calendar writes).
+# policy (e.g. add calendar writes). forget/delete_skill stay listed even though
+# UNATTENDED_EXCLUDED_TOOLS below keeps them out of background runs entirely —
+# belt-and-braces if that exclusion ever loosens.
 CONSEQUENTIAL_TOOLS = frozenset({
     "send_email", "send_morning_brief", "forget", "delete_skill",
+})
+
+# Tools an unattended (background) run must not have AT ALL — removed from its
+# toolset rather than approval-gated. Background jobs ingest untrusted content
+# (web pages, search results, calendar text); tools that write prompt-visible
+# state — pinned memories and skills are rendered into every future system
+# prompt / steer future procedures — would let injected text plant a durable
+# instruction that outlives the job. Approval-gating them would be the wrong
+# shape too: a push asking to approve "save this fact" is noise, and background
+# tasks have no legitimate need to write memories or skills (the job's summary
+# reaches Craig, who can ask chat-Wren to remember things deliberately). The
+# read side (recall, list_skills, read_skill) stays available. Also excludes
+# the bg-management tools themselves: a job spawning or polling jobs is never
+# useful, and run_in_background would let a job replicate.
+UNATTENDED_EXCLUDED_TOOLS = frozenset({
+    "run_in_background", "list_background_jobs", "get_job_result",
+    "remember", "pin", "archive", "forget",
+    "write_skill", "delete_skill",
 })
