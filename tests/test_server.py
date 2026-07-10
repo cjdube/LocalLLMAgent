@@ -258,3 +258,62 @@ def test_api_system_map_shape(auth_client, tmp_path, monkeypatch):
     assert data["skills"] == []
     for rt in data["routines"]:
         assert set(rt) == {"key", "display_name", "human_schedule", "next_run", "last_run", "uses"}
+
+
+# --------------------------------------------------------------------------- #
+# Background-approval endpoint (token-authed, NOT session-authed)
+# --------------------------------------------------------------------------- #
+
+def _seed_awaiting_job(monkeypatch, tmp_path):
+    from agent.tools import background
+    monkeypatch.setattr(background, "_STORE_PATH", tmp_path / "bg.json")
+    jid = background.run_in_background("x")["id"]
+    background.save_awaiting(jid, [], {"function": {"name": "send_email", "arguments": {}}})
+    return background, jid
+
+
+def _capture_ack(monkeypatch):
+    """Stub the server's notify() so the endpoint's ack push never hits the real
+    ntfy server; return the list of captured ack titles."""
+    acks = []
+    monkeypatch.setattr(srv, "notify",
+                        lambda title=None, message=None, **k: acks.append(title) or {"ok": True})
+    return acks
+
+
+def test_bg_resolve_rejects_bad_token(client, monkeypatch):
+    acks = _capture_ack(monkeypatch)
+    resp = client.post("/api/bg/resolve?token=garbage")
+    assert resp.status_code == 403
+    assert acks == []  # no ack on a rejected token
+
+
+def test_bg_resolve_applies_valid_token_and_acks(client, monkeypatch, tmp_path):
+    acks = _capture_ack(monkeypatch)
+    background, jid = _seed_awaiting_job(monkeypatch, tmp_path)
+    token = background.make_approval_token(jid, "approve")
+    resp = client.post(f"/api/bg/resolve?token={token}")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["ok"] is True and body["decision"] == "approve"
+    assert background.get_job_result(jid)["status"] == "approved"
+    assert acks == ["Approved"]  # exactly one ack, on the real transition
+
+
+def test_bg_resolve_token_is_single_use_and_acks_once(client, monkeypatch, tmp_path):
+    acks = _capture_ack(monkeypatch)
+    background, jid = _seed_awaiting_job(monkeypatch, tmp_path)
+    token = background.make_approval_token(jid, "approve")
+    assert client.post(f"/api/bg/resolve?token={token}").get_json()["ok"] is True
+    # Replay: the job is no longer awaiting, so the same token is inert.
+    assert client.post(f"/api/bg/resolve?token={token}").get_json()["ok"] is False
+    assert acks == ["Approved"]  # only the first tap acks, not the replay
+
+
+def test_bg_resolve_deny_acks_denied(client, monkeypatch, tmp_path):
+    acks = _capture_ack(monkeypatch)
+    background, jid = _seed_awaiting_job(monkeypatch, tmp_path)
+    token = background.make_approval_token(jid, "deny")
+    assert client.post(f"/api/bg/resolve?token={token}").get_json()["ok"] is True
+    assert background.get_job_result(jid)["status"] == "denied"
+    assert acks == ["Denied"]

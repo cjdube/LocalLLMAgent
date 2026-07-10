@@ -103,6 +103,7 @@ in — nothing new inherits it automatically.
 | `memory.py` | Persistent long-term memory in two tiers — `remember` (archival, search-only), `pin` (active, injected into every system prompt), `recall` (search either tier, optionally by category), `archive` (demote active→archival), `forget` (delete). Stored in `config/wren_memory.json`; archival facts track an `access_count` |
 | `skills.py` | Procedural memory (chat-only) — reusable how-to procedures composing the other tools: `list_skills`, `read_skill`, `write_skill` (create/overwrite), `delete_skill`. One Markdown file per skill under `skills/` (override with `WREN_SKILLS_DIR`); a capped title+one-line index is injected into the chat prompt so Wren knows what procedures exist, reading a body on demand. Writes are confirmation-gated |
 | `reminders.py` | Scheduled reminders — `set_reminder` (parses the time in Python via `dates.resolve_reminder_time`, not the model), `list_reminders`, `cancel_reminder`. Stored in `config/reminders.json`; the `reminder_sweep` task fires each due one as an `ntfy` phone push, then clears it. Set/cancel are confirmation-gated |
+| `background.py` | Background tasks — `run_in_background` (hand off a multi-step task that runs detached and pushes a summary when done), `list_background_jobs`, `get_job_result`. Jobs live in `config/bg_jobs.json`; the `bg_worker` task runs them. Posture is "read/draft freely, tap-to-approve consequential actions" — see the background-tasks section below. Also owns the HMAC-signed approval tokens |
 | `google_auth.py` | Shared OAuth helper — one cached token for Calendar, Gmail, Tasks, and YouTube (read-only) scopes |
 
 Every tool module is runnable standalone for testing, e.g.:
@@ -199,13 +200,16 @@ chat/
   `dates.resolve_reminder_time`, never by the model) plus a message, and the
   `reminder_sweep` task pushes it to his phone via `ntfy` when it comes due, then
   clears it. `list_reminders`/`cancel_reminder` manage pending ones; set and
-  cancel are confirmation-gated. Not yet wired up for chat:
+  cancel are confirmation-gated. Wren can also **hand a task off to run in the
+  background** with `run_in_background` — a multi-step job that outlives the chat
+  turn and pushes Craig a summary when done (see **Background tasks** below).
+  `list_background_jobs`/`get_job_result` report on them. Not yet wired up for chat:
   reading/writing the Weekly Log doc — those functions don't have a
   `TOOL_SCHEMA` yet (only ever called directly from Python by
   `weekly_learnings.py`). Same pattern extends it later if wanted.
 - **Confirmation gate:** before `log_calendar_event`, `send_email`,
-  `recolor_event`, `send_morning_brief`, `forget`, `set_reminder`, or
-  `cancel_reminder` actually runs, the chat UI shows
+  `recolor_event`, `send_morning_brief`, `forget`, `set_reminder`,
+  `cancel_reminder`, or `run_in_background` actually runs, the chat UI shows
   what Wren wants to do and waits for a tap to confirm or cancel — enforced in
   code (`advance()`'s `confirm_before` set in `agent/loop.py`), not just
   requested in the prompt, so it doesn't depend on the small local model
@@ -356,7 +360,11 @@ all. The four scheduled tasks use `StartCalendarInterval`; Wren's chat server
 instead, since it needs to just stay running rather than fire on a timer. The
 reminder sweep (`com.craigdube.localllmagent.remindersweep.plist`) uses a
 60-second `StartInterval` — a short-lived poll that fires any due reminders and
-exits, so a reminder lands within about a minute of its time.
+exits, so a reminder lands within about a minute of its time. The background
+worker (`com.craigdube.localllmagent.bgworker.plist`) likewise uses a 30-second
+`StartInterval`, running at most one queued background job per poll; launchd
+never runs two copies of the same job at once, so a long job just delays the
+next poll rather than overlapping.
 
 Useful commands:
 ```bash
@@ -420,6 +428,11 @@ mostly useful if the Python process fails to start at all).
    - `WREN_CHAT_TOKEN`, `FLASK_SECRET_KEY` — generate each with
      `python -c "import secrets; print(secrets.token_hex(32))"`; leave
      `WREN_CHAT_PORT` at its default unless it conflicts with something else
+   - `WREN_PUBLIC_URL` — optional; the chat server's public HTTPS base over
+     Tailscale (from `tailscale serve`, e.g.
+     `https://<mac-mini-tailscale-name>.ts.net`). Used to build the
+     tap-to-approve buttons on background-task approval pushes. If unset, those
+     pushes still arrive but without buttons
 4. Google OAuth setup (Calendar + Gmail + Tasks + YouTube):
    - [console.cloud.google.com](https://console.cloud.google.com/) → create/select a project
    - Enable the **Google Calendar API**, **Gmail API**, **Google Tasks API**, and **YouTube Data API v3**
@@ -548,6 +561,13 @@ carries a set of hardening headers (`Content-Security-Policy`,
 `Referrer-Policy: no-referrer`) as defense-in-depth against clickjacking and
 any future markup slip — see `_security_headers` in `chat/server.py`.
 
+One endpoint is exempt from the session cookie: `POST /api/bg/resolve`, which a
+background-task approval button on the phone calls directly. It's authenticated
+instead by an HMAC-signed, ~1h-expiry, effectively single-use token
+(`background.make_approval_token`, signed with `FLASK_SECRET_KEY`), and it does
+exactly one thing — flip one already-model-proposed job to approved/denied — so
+even a leaked token has a bounded blast radius. Every hit is logged.
+
 **Prompt injection.** Untrusted external text flows into model prompts from
 several tools: Tavily search results, GitHub `recent_changes`, Chrome history
 titles, Strava activity names, and YouTube video titles/descriptions. Any of
@@ -577,18 +597,33 @@ steer the model. The blast radius is contained by design:
   (`memory.render_memory_block()`), and capture is explicit (Craig-initiated,
   never a background scrape). `forget` is confirmation-gated so a poisoned
   memory can't be silently pruned to cover tracks.
+- **Background tasks** (`run_in_background` → `bg_worker`) run detached, with no
+  one present to confirm — so they follow an **"A + push-to-approve"** posture
+  (`toolset.CONSEQUENTIAL_TOOLS`). The worker reads/researches/drafts freely, but
+  any external/irreversible action (`send_email`, `send_morning_brief`, `forget`,
+  `delete_skill`) *pauses* the job and is pushed to Craig's phone for a
+  tap-to-approve decision before it runs (the tap gets an immediate confirming
+  push — "Approved" / "Denied" — since the ntfy buttons have no selected state
+  of their own). So untrusted content pulled mid-task
+  can never trigger an unattended irreversible action — the "no human in the
+  loop" leg of the injection trifecta (untrusted input × consequential action ×
+  no confirmation) is removed for exactly those actions. Starting a background
+  task is itself confirmation-gated in chat, so a job only runs because Craig
+  said to.
 
-There is now **no un-gated model→write path** in the codebase. Every place the
-model can actuate a write is either confirmation-gated (the chat server's
-`advance()`/`confirm_before`) or the model isn't in the write path at all (the
-scheduled tasks: `complete_text` for prose, and `daily_log`'s deterministic
-Python mapping). `daily_log` previously ran `run_agent` and let the model call
-`log_calendar_event` fed by Strava activity *names*; that path was removed in
-favor of the field-map, which is both more reliable and leaves nothing for
-injected activity text to steer. If a new scheduled task ever wires a model to
-a write tool (via `run_agent`, which is retained but currently has no caller),
-re-establish this boundary — keep the write confirmation-gated or keep the
-model out of it. See also the `web-content-untrusted-input` note in memory.
+The model can actuate a **consequential** write only with an explicit human
+"yes": a tap in chat (`advance()`/`confirm_before`), or a phone approval for a
+background task's external/irreversible action. The prose scheduled tasks keep
+the model out of the write path entirely (`complete_text`; `daily_log`'s
+deterministic Python field-map, which replaced an earlier `run_agent` path fed
+by Strava activity *names*). The one place the model actuates a write
+*unattended* is a background task performing a **reversible, internal** write to
+Craig's own account (e.g. creating a task or recoloring an event) — a
+deliberate, bounded exception, not a general autonomy grant. That line is a
+single editable set (`CONSEQUENTIAL_TOOLS`): move a tool into it to require
+approval, out of it to allow unattended. If new work ever wires the model to a
+write tool, hold this boundary — gate the consequential ones, or keep the model
+out. See also the `web-content-untrusted-input` note in memory.
 
 ## What's NOT here
 

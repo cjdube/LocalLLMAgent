@@ -35,72 +35,13 @@ from chat.insights import (
     system_map,
     task_by_key,
 )
-from agent.tools.calendar import (
-    GET_BY_DATE_TOOL_SCHEMA as CALENDAR_BY_DATE_SCHEMA,
-    LIST_TOOL_SCHEMA as CALENDAR_LIST_SCHEMA,
-    LOG_TOOL_SCHEMA as CALENDAR_LOG_SCHEMA,
-    RECOLOR_TOOL_SCHEMA as CALENDAR_RECOLOR_SCHEMA,
-    get_events_by_date,
-    get_upcoming_events,
-    log_calendar_event,
-    recolor_event,
-)
-from agent.tools.chrome_history import TOOL_SCHEMA as CHROME_SCHEMA, fetch_chrome_history
-from agent.tools.email import TOOL_SCHEMA as EMAIL_SCHEMA, send_email
-from agent.tools.github_starred import TOOL_SCHEMA as GITHUB_STARRED_SCHEMA, fetch_starred_repos
-from agent.tools.memory import (
-    ARCHIVE_TOOL_SCHEMA,
-    FORGET_TOOL_SCHEMA,
-    PIN_TOOL_SCHEMA,
-    RECALL_TOOL_SCHEMA,
-    REMEMBER_TOOL_SCHEMA,
-    archive,
-    forget,
-    pin,
-    recall,
-    remember,
-)
-from agent.tools.google_tasks import (
-    COMPLETE_TASK_TOOL_SCHEMA,
-    CREATE_TASK_TOOL_SCHEMA,
-    GET_TASKS_DUE_SOON_TOOL_SCHEMA,
-    GET_TASKS_TOOL_SCHEMA,
-    UPDATE_TASK_DUE_DATE_TOOL_SCHEMA,
-    complete_task,
-    create_task,
-    get_tasks,
-    get_tasks_due_soon,
-    update_task_due_date,
-)
-from agent.tools.skills import (
-    SKILL_TOOL_SCHEMAS,
-    delete_skill,
-    list_skills,
-    read_skill,
-    render_skills_index,
-    write_skill,
-)
-from agent.tools.reminders import (
-    CANCEL_REMINDER_TOOL_SCHEMA,
-    LIST_REMINDERS_TOOL_SCHEMA,
-    SET_REMINDER_TOOL_SCHEMA,
-    cancel_reminder,
-    list_reminders,
-    set_reminder,
-)
-from agent.tools.strava import TOOL_SCHEMA as STRAVA_SCHEMA, fetch_strava
-from agent.tools.weather import TOOL_SCHEMA as WEATHER_SCHEMA, fetch_weather
-from agent.tools.web_search import TOOL_SCHEMA as WEB_SEARCH_SCHEMA, search_web
-from agent.tools.wiki import (
-    WIKI_TOOL_SCHEMAS,
-    list_weekly_reviews,
-    list_wiki_pages,
-    read_weekly_review,
-    read_wiki_index,
-    read_wiki_page,
-)
+from agent.toolset import DISPATCH as _BASE_DISPATCH, TOOLS, WRITE_TOOLS
+from agent.tools import background
+from agent.tools.memory import recall
+from agent.tools.notify import notify
+from agent.tools.skills import render_skills_index
 from tasks._common import setup_logger
-from tasks.morning_brief import SEND_BRIEF_TOOL_SCHEMA, build_and_send_brief
+from tasks.morning_brief import build_and_send_brief
 
 _ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(_ROOT / "config" / ".env")
@@ -121,84 +62,16 @@ if not WREN_CHAT_TOKEN or not FLASK_SECRET_KEY:
         "run safely."
     )
 
-TOOLS = [
-    CALENDAR_LIST_SCHEMA,
-    CALENDAR_LOG_SCHEMA,
-    CALENDAR_BY_DATE_SCHEMA,
-    CALENDAR_RECOLOR_SCHEMA,
-    CHROME_SCHEMA,
-    EMAIL_SCHEMA,
-    STRAVA_SCHEMA,
-    WEATHER_SCHEMA,
-    WEB_SEARCH_SCHEMA,
-    GITHUB_STARRED_SCHEMA,
-    SEND_BRIEF_TOOL_SCHEMA,
-    GET_TASKS_TOOL_SCHEMA,
-    GET_TASKS_DUE_SOON_TOOL_SCHEMA,
-    CREATE_TASK_TOOL_SCHEMA,
-    UPDATE_TASK_DUE_DATE_TOOL_SCHEMA,
-    COMPLETE_TASK_TOOL_SCHEMA,
-    REMEMBER_TOOL_SCHEMA,
-    PIN_TOOL_SCHEMA,
-    RECALL_TOOL_SCHEMA,
-    ARCHIVE_TOOL_SCHEMA,
-    FORGET_TOOL_SCHEMA,
-    SET_REMINDER_TOOL_SCHEMA,
-    LIST_REMINDERS_TOOL_SCHEMA,
-    CANCEL_REMINDER_TOOL_SCHEMA,
-    *WIKI_TOOL_SCHEMAS,
-    *SKILL_TOOL_SCHEMAS,
-]
-
-
 def _send_morning_brief(**_) -> dict:
-    # Bound here instead of imported directly so it logs to the "wren"
-    # logger below rather than build_and_send_brief()'s default of none.
-    # Accepts/ignores stray kwargs in case the model hallucinates an argument
-    # for this no-parameter tool.
+    # Bound here so the chat-triggered brief logs to the "wren" logger rather
+    # than agent.toolset._send_morning_brief's default of none. Accepts/ignores
+    # stray kwargs in case the model hallucinates an argument.
     return build_and_send_brief(logger=logger)
 
 
-DISPATCH = {
-    "get_upcoming_events": get_upcoming_events,
-    "log_calendar_event": log_calendar_event,
-    "get_events_by_date": get_events_by_date,
-    "recolor_event": recolor_event,
-    "fetch_chrome_history": fetch_chrome_history,
-    "send_email": send_email,
-    "fetch_strava": fetch_strava,
-    "fetch_weather": fetch_weather,
-    "search_web": search_web,
-    "fetch_starred_repos": fetch_starred_repos,
-    "send_morning_brief": _send_morning_brief,
-    "get_tasks": get_tasks,
-    "get_tasks_due_soon": get_tasks_due_soon,
-    "create_task": create_task,
-    "update_task_due_date": update_task_due_date,
-    "complete_task": complete_task,
-    "remember": remember,
-    "pin": pin,
-    "recall": recall,
-    "archive": archive,
-    "forget": forget,
-    "read_wiki_index": read_wiki_index,
-    "list_wiki_pages": list_wiki_pages,
-    "read_wiki_page": read_wiki_page,
-    "list_weekly_reviews": list_weekly_reviews,
-    "read_weekly_review": read_weekly_review,
-    "list_skills": list_skills,
-    "read_skill": read_skill,
-    "write_skill": write_skill,
-    "delete_skill": delete_skill,
-    "set_reminder": set_reminder,
-    "list_reminders": list_reminders,
-    "cancel_reminder": cancel_reminder,
-}
-WRITE_TOOLS = frozenset({
-    "log_calendar_event", "send_email", "recolor_event", "send_morning_brief",
-    "create_task", "update_task_due_date", "complete_task", "forget",
-    "write_skill", "delete_skill", "set_reminder", "cancel_reminder",
-})
+# TOOLS and WRITE_TOOLS come straight from the shared registry; only the
+# morning-brief dispatch is overridden to bind the server's logger.
+DISPATCH = {**_BASE_DISPATCH, "send_morning_brief": _send_morning_brief}
 
 CHAT_SYSTEM_PROMPT = (
     load_persona("wren_chat.md")
@@ -265,7 +138,15 @@ CHAT_SYSTEM_PROMPT = (
     "time yourself, and the reminder text as message. It fires once as a phone "
     "notification. Use list_reminders to see what's pending and cancel_reminder "
     "(with an id from list_reminders) to drop one; setting and cancelling pause "
-    "for confirmation like the other write actions."
+    "for confirmation like the other write actions. "
+    "Finally, for a task Craig wants done in the background — something that will "
+    "take a while, or that he wants to hand off and walk away from (research and "
+    "compile, gather from several places, watch for and report) — use "
+    "run_in_background with a complete self-contained description of the task; it "
+    "runs detached and pushes him a summary when done, and any consequential "
+    "action it needs is routed to his phone for approval automatically. Don't use "
+    "it for something you can just answer or do now in the conversation. "
+    "list_background_jobs and get_job_result report on what's running or finished."
 )
 
 def _system_message_content() -> str:
@@ -622,6 +503,38 @@ def map_page():
     if not _authenticated():
         return LOGIN_PAGE.format(error="")
     return send_from_directory(STATIC_DIR, "map.html")
+
+
+@app.route("/api/bg/resolve", methods=["POST", "GET"])
+def bg_resolve():
+    """Approve/deny a background job's paused action from an ntfy button tap.
+
+    Token-authenticated, NOT session-authenticated — this is the one mutating
+    endpoint reachable without the login cookie (the phone's ntfy app calls it
+    directly). The token is HMAC-signed with a ~1h expiry; single-use falls out
+    of the job state machine (resolve_job only acts on an awaiting_approval job,
+    so a replay finds nothing to do). It does exactly one thing and logs every
+    hit."""
+    token = request.args.get("token", "")
+    payload = background.read_approval_token(token)
+    if payload is None:
+        logger.warning("bg_resolve: rejected invalid or expired token")
+        return jsonify({"error": "invalid or expired token"}), 403
+    approved = payload["decision"] == "approve"
+    applied = background.resolve_job(payload["job"], approved)
+    logger.info("bg_resolve job=%s decision=%s applied=%s",
+                payload["job"], payload["decision"], applied)
+    # Acknowledge the tap so the phone shows what the choice registered as — the
+    # ntfy buttons themselves have no selected state. Only on a real transition,
+    # so a replayed/expired tap doesn't spam a second ack. (Title stays ASCII;
+    # the emoji lives in the UTF-8 body, since the plain-push path sends the
+    # title as an HTTP header.)
+    if applied:
+        if approved:
+            notify(title="Approved", message="👍 Approved — Wren is proceeding.")
+        else:
+            notify(title="Denied", message="🚫 Denied — Wren will skip that action.")
+    return jsonify({"ok": applied, "job": payload["job"], "decision": payload["decision"]})
 
 
 def _run_summary(run: dict | None) -> dict | None:

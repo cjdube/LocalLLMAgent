@@ -437,6 +437,7 @@ TOOL_SERVICES = {
                                "list_weekly_reviews", "read_weekly_review"]),
     "skills": ("Skills", ["list_skills", "read_skill", "write_skill", "delete_skill"]),
     "reminders": ("Reminders", ["set_reminder", "list_reminders", "cancel_reminder"]),
+    "background": ("Background Tasks", ["run_in_background", "list_background_jobs", "get_job_result"]),
 }
 
 # Which services each scheduled routine touches (mirrors the tasks' agent.tools

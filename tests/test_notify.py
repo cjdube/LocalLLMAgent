@@ -78,3 +78,29 @@ def test_network_exception_never_raises(monkeypatch):
     _capture_post(monkeypatch, raises=requests.exceptions.ConnectionError("refused"))
     result = notify("hi")
     assert "error" in result
+
+
+def test_actions_publish_as_json_to_base_url(monkeypatch):
+    # With action buttons, notify() must JSON-publish to the server BASE url
+    # (with a "topic" field), not POST plaintext to the topic url.
+    monkeypatch.setattr(notify_mod, "load_env", lambda: None)
+    monkeypatch.setenv("NTFY_URL", "http://box:2586/wren-alerts")
+    monkeypatch.setenv("NTFY_TOKEN", "tk_x")
+    captured = {}
+
+    def fake_post(url, data=None, json=None, headers=None, timeout=None):
+        captured.update(url=url, data=data, json=json, headers=headers)
+        return _FakeResp()
+
+    monkeypatch.setattr(notify_mod.requests, "post", fake_post)
+    actions = [{"action": "http", "label": "Approve", "url": "https://h/x"}]
+
+    result = notify("do it?", title="T", priority="high", actions=actions)
+
+    assert result == {"ok": True}
+    assert captured["url"] == "http://box:2586"           # base, not topic
+    assert captured["data"] is None                       # JSON body, not plaintext
+    assert captured["json"]["topic"] == "wren-alerts"
+    assert captured["json"]["actions"] == actions
+    assert captured["json"]["priority"] == 4              # "high" -> int
+    assert captured["headers"]["Authorization"] == "Bearer tk_x"
