@@ -430,21 +430,23 @@ TOOL_SERVICES = {
     "web_search": ("Tavily Search", ["search_web"]),
     "github": ("GitHub", ["fetch_starred_repos"]),
     "youtube": ("YouTube", []),  # weekly_learnings-only; no chat tool
+    "ntfy": ("ntfy Push", []),  # routine failure-alert channel; no chat tool
     "brief": ("Morning Brief", ["send_morning_brief"]),
     "memory": ("Memory", ["remember", "pin", "recall", "archive", "forget"]),
     "wiki": ("Obsidian Wiki", ["read_wiki_index", "list_wiki_pages", "read_wiki_page",
                                "list_weekly_reviews", "read_weekly_review"]),
     "skills": ("Skills", ["list_skills", "read_skill", "write_skill", "delete_skill"]),
+    "reminders": ("Reminders", ["set_reminder", "list_reminders", "cancel_reminder"]),
 }
 
 # Which services each scheduled routine touches (mirrors the tasks' agent.tools
 # imports) — drawn as edges on the map. Update alongside TOOL_SERVICES when a
 # task gains or loses an integration.
 ROUTINE_USES = {
-    "morning_brief": ["google_calendar", "gmail", "github", "google_tasks", "weather"],
-    "daily_log": ["google_calendar", "strava"],
-    "calendar_colorizer": ["google_calendar", "gmail"],
-    "weekly_learnings": ["google_calendar", "chrome", "gmail", "youtube", "wiki"],
+    "morning_brief": ["google_calendar", "gmail", "github", "google_tasks", "weather", "ntfy"],
+    "daily_log": ["google_calendar", "strava", "ntfy"],
+    "calendar_colorizer": ["google_calendar", "gmail", "ntfy"],
+    "weekly_learnings": ["google_calendar", "chrome", "gmail", "youtube", "wiki", "ntfy"],
 }
 
 # Keep the payload bounded: memory texts are truncated for the map (the detail

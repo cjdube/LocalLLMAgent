@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent.tools.calendar import CATEGORY_COLORS, log_calendar_event
 from agent.tools.strava import fetch_strava
-from tasks._common import setup_logger
+from tasks._common import notify_failure, setup_logger
 
 # All Strava activities are logged as Fitness (Flamingo) — reuse the single
 # source of truth in agent/tools/calendar.py rather than a bare "4".
@@ -97,6 +97,7 @@ def main() -> int:
         return 0
     except Exception as e:
         logger.exception(f"Daily log run failed: {e}")
+        notify_failure("daily_log", e, logger)
         return 1
 
 

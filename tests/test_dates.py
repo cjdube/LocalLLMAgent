@@ -3,11 +3,17 @@
 `today` is pinned throughout so the MM-DD past/future boundary is deterministic.
 """
 
-from datetime import date
+from datetime import date, datetime
 
-from agent.dates import resolve_date
+from zoneinfo import ZoneInfo
+
+from agent.dates import local_timezone, resolve_date, resolve_reminder_time
 
 TODAY = date(2026, 7, 7)  # a Tuesday
+
+# A fixed "now" for reminder-time tests: Tue Jul 7 2026, 2:00pm local.
+_TZ = ZoneInfo(local_timezone())
+NOW = datetime(2026, 7, 7, 14, 0, tzinfo=_TZ)
 
 
 def test_today():
@@ -116,3 +122,44 @@ def test_prefer_future_keeps_this_year_for_upcoming_day():
 
 def test_prefer_nearest_still_passes_through_impossible_date():
     assert resolve_date("02-30", today=TODAY, prefer="nearest") == "02-30"
+
+
+# --- resolve_reminder_time -------------------------------------------------
+
+def _r(when):
+    return resolve_reminder_time(when, now=NOW)
+
+
+def test_reminder_relative_hours():
+    assert _r("in 2 hours") == datetime(2026, 7, 7, 16, 0, tzinfo=_TZ)
+
+
+def test_reminder_relative_compact_units():
+    assert _r("90m") == datetime(2026, 7, 7, 15, 30, tzinfo=_TZ)
+    assert _r("2h") == datetime(2026, 7, 7, 16, 0, tzinfo=_TZ)
+    assert _r("in 3 days") == datetime(2026, 7, 10, 14, 0, tzinfo=_TZ)
+
+
+def test_reminder_clock_later_today():
+    assert _r("3pm") == datetime(2026, 7, 7, 15, 0, tzinfo=_TZ)
+    assert _r("at 3:30 pm") == datetime(2026, 7, 7, 15, 30, tzinfo=_TZ)
+
+
+def test_reminder_clock_already_passed_rolls_to_tomorrow():
+    # 9am is behind 2pm now, so it means tomorrow's 9am.
+    assert _r("9am") == datetime(2026, 7, 8, 9, 0, tzinfo=_TZ)
+
+
+def test_reminder_tomorrow_with_time():
+    assert _r("tomorrow 9am") == datetime(2026, 7, 8, 9, 0, tzinfo=_TZ)
+    assert _r("tomorrow at 15:00") == datetime(2026, 7, 8, 15, 0, tzinfo=_TZ)
+
+
+def test_reminder_explicit_datetime():
+    assert _r("2026-07-11 08:30") == datetime(2026, 7, 11, 8, 30, tzinfo=_TZ)
+
+
+def test_reminder_unparseable_returns_none():
+    assert _r("sometime soon") is None
+    assert _r("") is None
+    assert _r("25:00") is None

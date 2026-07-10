@@ -10,9 +10,11 @@ to pass the argument.
 """
 
 import os
+import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 # Reusable JSON-schema description for a "which day" tool argument. Append it
 # to a tool's own lead-in (e.g. "The day to look up. " + DATE_ARG_GUIDANCE) so
@@ -120,3 +122,83 @@ def resolve_date(date_str: str, *, today: Optional[date] = None, prefer: str = "
     except ValueError:
         pass
     return date_str
+
+
+# Guidance dropped into the set_reminder tool schema so the model passes a phrase
+# resolve_reminder_time() can handle — and, crucially, doesn't try to compute the
+# time itself (it can't do date math reliably).
+REMINDER_WHEN_GUIDANCE = (
+    "Pass Craig's time expression verbatim — do NOT compute or convert it "
+    "yourself. Understood forms: a relative delay ('in 2 hours', '90m', "
+    "'30 minutes', 'in 3 days'); a clock time, taken as the next time it occurs "
+    "('3pm', '3:30 pm', '15:00'); 'tomorrow' with a time ('tomorrow 9am'); or an "
+    "explicit 'YYYY-MM-DD HH:MM'."
+)
+
+# Relative-delay units accepted by resolve_reminder_time, in seconds.
+_DELAY_UNIT_SECONDS = {
+    "m": 60, "min": 60, "mins": 60, "minute": 60, "minutes": 60,
+    "h": 3600, "hr": 3600, "hrs": 3600, "hour": 3600, "hours": 3600,
+    "d": 86400, "day": 86400, "days": 86400,
+}
+
+
+def _parse_clock(text: str) -> Optional[tuple[int, int]]:
+    """Parse a bare clock time ('3pm', '3:30 pm', '15:00') to (hour, minute),
+    or None if it isn't one."""
+    m = re.fullmatch(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", text.strip())
+    if not m:
+        return None
+    hour, minute, ampm = int(m.group(1)), int(m.group(2) or 0), m.group(3)
+    if ampm:
+        if not 1 <= hour <= 12:
+            return None
+        if ampm == "pm" and hour != 12:
+            hour += 12
+        if ampm == "am" and hour == 12:
+            hour = 0
+    if hour > 23 or minute > 59:
+        return None
+    return hour, minute
+
+
+def resolve_reminder_time(when: str, *, now: Optional[datetime] = None) -> Optional[datetime]:
+    """Resolve a reminder time expression to a concrete timezone-aware datetime
+    in the local zone, or None if it can't be parsed. Parsing lives here (not in
+    the model) so 'in 2 hours' etc. resolve deterministically. `now` is
+    injectable so tests can pin the result."""
+    tz = ZoneInfo(local_timezone())
+    now = now or datetime.now(tz)
+    s = (when or "").strip().lower()
+    s = re.sub(r"^at\s+", "", s)  # "at 3pm" -> "3pm"
+    if not s:
+        return None
+
+    # Relative delay: "in 2 hours", "2h", "90m", "in 3 days".
+    m = re.fullmatch(r"(?:in\s+)?(\d+)\s*([a-z]+)", s)
+    if m and m.group(2) in _DELAY_UNIT_SECONDS:
+        return now + timedelta(seconds=int(m.group(1)) * _DELAY_UNIT_SECONDS[m.group(2)])
+
+    # "tomorrow [at] <clock>".
+    m = re.fullmatch(r"tomorrow(?:\s+at)?\s+(.+)", s)
+    if m:
+        clock = _parse_clock(m.group(1))
+        if clock:
+            return (now + timedelta(days=1)).replace(
+                hour=clock[0], minute=clock[1], second=0, microsecond=0)
+
+    # Bare clock time: the next time it occurs (today if still ahead, else tomorrow).
+    clock = _parse_clock(s)
+    if clock:
+        cand = now.replace(hour=clock[0], minute=clock[1], second=0, microsecond=0)
+        return cand if cand > now else cand + timedelta(days=1)
+
+    # Explicit "YYYY-MM-DD HH:MM" (or ISO 'T' separator).
+    m = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})[ t](\d{1,2}):(\d{2})", s)
+    if m:
+        try:
+            return datetime(int(m[1]), int(m[2]), int(m[3]), int(m[4]), int(m[5]), tzinfo=tz)
+        except ValueError:
+            return None
+
+    return None

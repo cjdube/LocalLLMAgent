@@ -26,7 +26,7 @@ from agent.tools.chrome_history import fetch_chrome_history
 from agent.tools.learnings_file import get_previous_entry_text, write_weekly_entry
 from agent.tools.email import send_email
 from agent.tools.youtube import fetch_liked_videos
-from tasks._common import setup_logger
+from tasks._common import notify_failure, setup_logger
 
 DRAFT_SYSTEM_PROMPT = """You are Craig's personal executive assistant. You write a \
 structured weekly retrospective entry for his Weekly Learning & Project Log, covering \
@@ -204,6 +204,7 @@ def main() -> int:
 
         if "error" in write_result:
             logger.warning("File write failed — emailing the draft so it isn't lost")
+            notify_failure("weekly_learnings", "vault write failed — draft emailed instead", logger)
             send_email(
                 subject=f"Weekly Log (needs manual paste) - week ending {sunday.strftime('%Y-%m-%d')}",
                 body=entry_text,
@@ -213,6 +214,7 @@ def main() -> int:
         return 0
     except Exception as e:
         logger.exception(f"Weekly learnings run failed: {e}")
+        notify_failure("weekly_learnings", e, logger)
         try:
             send_email(
                 subject="Weekly Log run failed",

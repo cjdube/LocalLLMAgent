@@ -6,6 +6,8 @@ from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+from agent.tools.notify import notify
+
 _ROOT = Path(__file__).resolve().parent.parent
 LOGS_DIR = _ROOT / "logs"
 
@@ -35,3 +37,21 @@ def setup_logger(task_name: str) -> logging.Logger:
 
 def today_str() -> str:
     return datetime.now().strftime("%Y-%m-%d")
+
+
+def notify_failure(task_name: str, detail: object, logger: logging.Logger = None) -> None:
+    """Push a one-line failure alert for a scheduled task (best-effort).
+
+    Swallows any error from the push itself so an ntfy outage can never mask
+    the original task failure — the failure is already logged by the caller."""
+    try:
+        result = notify(
+            message=f"{task_name} failed: {detail}",
+            title=f"Wren: {task_name} failed",
+            priority="high",
+        )
+        if logger and result.get("error"):
+            logger.warning(f"Failure push via ntfy did not send: {result['error']}")
+    except Exception:
+        if logger:
+            logger.exception("notify_failure raised while sending the failure push")

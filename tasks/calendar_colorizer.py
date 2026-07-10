@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from agent.loop import complete_text
 from agent.tools.calendar import CATEGORY_COLORS, _local_timezone, get_events_in_range, set_event_color
 from agent.tools.email import send_email
-from tasks._common import setup_logger
+from tasks._common import notify_failure, setup_logger
 
 VALID_COLOR_IDS = {color_id for color_id, _ in CATEGORY_COLORS.values()}
 
@@ -117,6 +117,7 @@ def main() -> int:
         return 0
     except Exception as e:
         logger.exception(f"Calendar colorizer run failed: {e}")
+        notify_failure("calendar_colorizer", e, logger)
         try:
             send_email(
                 subject="Calendar colorizer run failed",

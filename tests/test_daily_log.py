@@ -97,5 +97,8 @@ def test_overnight_activity_rolls_end_date_forward(monkeypatch):
 
 def test_fetch_error_returns_failure_and_writes_nothing(monkeypatch):
     calls = _patch(monkeypatch, error="Strava token refresh failed (401)")
+    # Neutralize the failure push so the test never hits a real ntfy server
+    # (config/.env may define NTFY_URL on the dev/prod machine).
+    monkeypatch.setattr(daily_log, "notify_failure", lambda *a, **k: None)
     assert daily_log.main() == 1
     assert calls == []

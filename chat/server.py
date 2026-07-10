@@ -80,6 +80,14 @@ from agent.tools.skills import (
     render_skills_index,
     write_skill,
 )
+from agent.tools.reminders import (
+    CANCEL_REMINDER_TOOL_SCHEMA,
+    LIST_REMINDERS_TOOL_SCHEMA,
+    SET_REMINDER_TOOL_SCHEMA,
+    cancel_reminder,
+    list_reminders,
+    set_reminder,
+)
 from agent.tools.strava import TOOL_SCHEMA as STRAVA_SCHEMA, fetch_strava
 from agent.tools.weather import TOOL_SCHEMA as WEATHER_SCHEMA, fetch_weather
 from agent.tools.web_search import TOOL_SCHEMA as WEB_SEARCH_SCHEMA, search_web
@@ -135,6 +143,9 @@ TOOLS = [
     RECALL_TOOL_SCHEMA,
     ARCHIVE_TOOL_SCHEMA,
     FORGET_TOOL_SCHEMA,
+    SET_REMINDER_TOOL_SCHEMA,
+    LIST_REMINDERS_TOOL_SCHEMA,
+    CANCEL_REMINDER_TOOL_SCHEMA,
     *WIKI_TOOL_SCHEMAS,
     *SKILL_TOOL_SCHEMAS,
 ]
@@ -179,11 +190,14 @@ DISPATCH = {
     "read_skill": read_skill,
     "write_skill": write_skill,
     "delete_skill": delete_skill,
+    "set_reminder": set_reminder,
+    "list_reminders": list_reminders,
+    "cancel_reminder": cancel_reminder,
 }
 WRITE_TOOLS = frozenset({
     "log_calendar_event", "send_email", "recolor_event", "send_morning_brief",
     "create_task", "update_task_due_date", "complete_task", "forget",
-    "write_skill", "delete_skill",
+    "write_skill", "delete_skill", "set_reminder", "cancel_reminder",
 })
 
 CHAT_SYSTEM_PROMPT = (
@@ -244,7 +258,14 @@ CHAT_SYSTEM_PROMPT = (
     "sequence of steps and tools, not a plain fact (facts go to remember/pin). "
     "Saving over an existing skill name overwrites it, so include the full "
     "updated body. Use delete_skill to drop a stale one; write_skill and "
-    "delete_skill pause for confirmation like the other write actions."
+    "delete_skill pause for confirmation like the other write actions. "
+    "You can also set reminders: when Craig asks to be reminded of something "
+    "later, use set_reminder — pass his time expression verbatim (e.g. 'in 2 "
+    "hours', '3pm', 'tomorrow 9am') as the when argument without computing the "
+    "time yourself, and the reminder text as message. It fires once as a phone "
+    "notification. Use list_reminders to see what's pending and cancel_reminder "
+    "(with an id from list_reminders) to drop one; setting and cancelling pause "
+    "for confirmation like the other write actions."
 )
 
 def _system_message_content() -> str:

@@ -38,7 +38,7 @@ from agent.tools.email import send_email
 from agent.tools.github_starred import fetch_starred_repos
 from agent.tools.google_tasks import get_tasks_due_soon
 from agent.tools.weather import fetch_weather
-from tasks._common import setup_logger, today_str
+from tasks._common import notify_failure, setup_logger, today_str
 
 _ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(_ROOT / "config" / ".env")
@@ -350,7 +350,13 @@ def build_and_send_brief(logger: Optional[logging.Logger] = None) -> dict:
 def main() -> int:
     logger = setup_logger("morning_brief")
     result = build_and_send_brief(logger=logger)
-    return 0 if "error" not in result else 1
+    if "error" in result:
+        # Push only from the scheduled run — the chat send_morning_brief tool
+        # shares build_and_send_brief() but the user is present there to see
+        # the error, so the alert lives here in main(), not in the shared path.
+        notify_failure("morning_brief", result["error"], logger)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

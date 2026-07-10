@@ -102,6 +102,7 @@ in — nothing new inherits it automatically.
 | `youtube.py` | List videos Liked on the authorized YouTube channel in a date range (`fetch_liked_videos`) — title, channel, and description per video, via the YouTube Data API v3 and the shared Google OAuth token |
 | `memory.py` | Persistent long-term memory in two tiers — `remember` (archival, search-only), `pin` (active, injected into every system prompt), `recall` (search either tier, optionally by category), `archive` (demote active→archival), `forget` (delete). Stored in `config/wren_memory.json`; archival facts track an `access_count` |
 | `skills.py` | Procedural memory (chat-only) — reusable how-to procedures composing the other tools: `list_skills`, `read_skill`, `write_skill` (create/overwrite), `delete_skill`. One Markdown file per skill under `skills/` (override with `WREN_SKILLS_DIR`); a capped title+one-line index is injected into the chat prompt so Wren knows what procedures exist, reading a body on demand. Writes are confirmation-gated |
+| `reminders.py` | Scheduled reminders — `set_reminder` (parses the time in Python via `dates.resolve_reminder_time`, not the model), `list_reminders`, `cancel_reminder`. Stored in `config/reminders.json`; the `reminder_sweep` task fires each due one as an `ntfy` phone push, then clears it. Set/cancel are confirmation-gated |
 | `google_auth.py` | Shared OAuth helper — one cached token for Calendar, Gmail, Tasks, and YouTube (read-only) scopes |
 
 Every tool module is runnable standalone for testing, e.g.:
@@ -116,14 +117,26 @@ Every tool module is runnable standalone for testing, e.g.:
 |---|---|---|
 | `tasks/morning_brief.py` | Daily 6:00 AM | Fetches weather + next-24h calendar events + Google Tasks past due or due within 48h (via `google_tasks.get_tasks_due_soon`) + starred GitHub repos pushed to since the last brief (via `github_starred.fetch_starred_repos`, cursor persisted in `config/github_starred_state.json`), has the model write a short "at a glance" summary and a one-sentence intro for the starred-repos section, assembles a styled HTML email (weather / calendar / tasks due soon / Starred Repos sections), sends it via Gmail. The pipeline lives in `build_and_send_brief()`, shared with the chat `send_morning_brief` tool. |
 | `tasks/daily_log.py` | Daily 6:15 AM | Fetches yesterday's Strava activities and maps each one onto a Google Calendar event in plain Python — no model, since it's a pure field mapping with no natural-language step. Deduped by `source_id` (Strava activity id) so re-runs never create duplicates. |
-| `tasks/weekly_learnings.py` | Mondays 5:00 AM | Computes the most recently completed Mon–Sun week, pulls calendar events (categorized by color) + Chrome browsing history + YouTube liked videos (the strongest learning signal, since Craig deliberately Liked them) + the previous week's file (for carry-forwards), has the model draft a 4-section retrospective, writes it as `Strategic-Weekly-Review-<week-ending>.md` in `LEARNINGS_DIR` (Obsidian vault, one file per week). If the write fails — e.g. the external drive isn't mounted — it emails the draft instead so it's never silently lost. |
-| `tasks/calendar_colorizer.py` | Daily 5:00 PM | Fetches yesterday's calendar events, has the model guess a category per event title (Work/LLC, AARP, Fitness, Meal Prep, Domestic/Chores, Meetings, Travel, Appointments, or Uncategorized) and returns a colorId per event, then patches each event's color. Always re-classifies, even events colored by a previous run or by hand. On failure, emails a notice. |
+| `tasks/weekly_learnings.py` | Mondays 5:00 AM | Computes the most recently completed Mon–Sun week, pulls calendar events (categorized by color) + Chrome browsing history + YouTube liked videos (the strongest learning signal, since Craig deliberately Liked them) + the previous week's file (for carry-forwards), has the model draft a 4-section retrospective, writes it as `Strategic-Weekly-Review-<week-ending>.md` in `LEARNINGS_DIR` (Obsidian vault, one file per week). If the write fails — e.g. the external drive isn't mounted — it emails the draft instead so it's never silently lost (and pushes a phone alert). |
+| `tasks/calendar_colorizer.py` | Daily 5:00 PM | Fetches yesterday's calendar events, has the model guess a category per event title (Work/LLC, AARP, Fitness, Meal Prep, Domestic/Chores, Meetings, Travel, Appointments, or Uncategorized) and returns a colorId per event, then patches each event's color. Always re-classifies, even events colored by a previous run or by hand. On failure, pushes a phone alert and emails a notice. |
 
 All four are **fully unattended** — no prompts, no approval steps. This is a
 deliberate difference from the original interactive Claude Code skills these
 were ported from (`ai-memory` / `AgentOS`), which asked clarifying questions
 and waited for approval before writing anywhere. There's nobody to ask at
 5am, so these versions infer everything from the data and just act.
+
+**Failure alerts (push).** Since these run with nobody watching — and a
+browser tab can't reach out while an emailed failure notice gets buried — each
+task pushes a one-line alert to Craig's phone if its run fails, via a
+self-hosted [ntfy](https://ntfy.sh) server (`agent/tools/notify.py`). The push
+is best-effort: a notify outage is logged and swallowed so it can never mask
+the underlying task failure. It's failures-only (no "success" pings), and
+leaving `NTFY_URL` unset simply disables it. Self-hosting on the always-on Mac
+mini behind Tailscale keeps alerts private and off the public internet;
+`auth-default-access: deny-all` plus a publish token means nobody else can
+inject fake notifications. Set `NTFY_URL` and `NTFY_TOKEN` in `config/.env`
+(see Setup).
 
 ## Wren — ad hoc chat
 
@@ -180,12 +193,19 @@ chat/
   injected into the chat prompt (chat-only, like the wiki tools, to protect the
   small `num_ctx`), and Wren opens a body on demand with `read_skill` before
   following it. `write_skill` (create or overwrite) and `delete_skill` are
-  confirmation-gated; capture is Craig-initiated, mirroring memory. Not yet wired up for chat:
+  confirmation-gated; capture is Craig-initiated, mirroring memory. Wren can also
+  set **reminders**: `set_reminder` takes Craig's time phrase verbatim (e.g. "in
+  2 hours", "3pm", "tomorrow 9am" — resolved in Python by
+  `dates.resolve_reminder_time`, never by the model) plus a message, and the
+  `reminder_sweep` task pushes it to his phone via `ntfy` when it comes due, then
+  clears it. `list_reminders`/`cancel_reminder` manage pending ones; set and
+  cancel are confirmation-gated. Not yet wired up for chat:
   reading/writing the Weekly Log doc — those functions don't have a
   `TOOL_SCHEMA` yet (only ever called directly from Python by
   `weekly_learnings.py`). Same pattern extends it later if wanted.
 - **Confirmation gate:** before `log_calendar_event`, `send_email`,
-  `recolor_event`, `send_morning_brief`, or `forget` actually runs, the chat UI shows
+  `recolor_event`, `send_morning_brief`, `forget`, `set_reminder`, or
+  `cancel_reminder` actually runs, the chat UI shows
   what Wren wants to do and waits for a tap to confirm or cancel — enforced in
   code (`advance()`'s `confirm_before` set in `agent/loop.py`), not just
   requested in the prompt, so it doesn't depend on the small local model
@@ -333,7 +353,10 @@ copied to `~/Library/LaunchAgents/` and loaded with `launchctl load`.
 native macOS mechanism — no Claude Code/Cowork involvement in scheduling at
 all. The four scheduled tasks use `StartCalendarInterval`; Wren's chat server
 (`com.craigdube.localllmagent.wren.plist`) uses `RunAtLoad` + `KeepAlive`
-instead, since it needs to just stay running rather than fire on a timer.
+instead, since it needs to just stay running rather than fire on a timer. The
+reminder sweep (`com.craigdube.localllmagent.remindersweep.plist`) uses a
+60-second `StartInterval` — a short-lived poll that fires any due reminders and
+exits, so a reminder lands within about a minute of its time.
 
 Useful commands:
 ```bash
@@ -388,6 +411,12 @@ mostly useful if the Python process fails to start at all).
      across several named lists); set this to a specific list id to scope reads
      — and the default list new tasks land in — to just that one list
    - `BRIEF_TO_EMAIL`, `DEFAULT_LOCATION` — your own values
+   - `NTFY_URL`, `NTFY_TOKEN` — optional; enable phone push alerts when a
+     scheduled task fails. `NTFY_URL` is the full topic URL of a self-hosted
+     [ntfy](https://ntfy.sh) server (e.g.
+     `http://<mac-mini-tailscale-name>:2586/wren-alerts`), `NTFY_TOKEN` is a
+     publish token for that topic. See "ntfy push server" below. Leave unset
+     to disable push.
    - `WREN_CHAT_TOKEN`, `FLASK_SECRET_KEY` — generate each with
      `python -c "import secrets; print(secrets.token_hex(32))"`; leave
      `WREN_CHAT_PORT` at its default unless it conflicts with something else
@@ -417,6 +446,59 @@ mostly useful if the Python process fails to start at all).
    if you want to reach Wren's chat from outside your home WiFi, then run
    `tailscale serve --bg 8420` (see "Wren — ad hoc chat" above for the
    one-time HTTPS Certificates setup this needs).
+9. **ntfy push server** (optional — enables the failure alerts above).
+   Self-hosting keeps alerts off the public internet and, with `deny-all`,
+   makes fake notifications impossible. **ntfy has no native macOS server** —
+   `brew install ntfy` gives a *client-only* binary (no `serve`), and even the
+   official `darwin` release is client-only. So on macOS the server runs as the
+   Linux container in a lightweight VM (colima — no Docker Desktop needed):
+   ```bash
+   brew install colima docker
+   brew services start colima          # starts the VM now + restarts at login
+   ```
+   Create config + data dirs under your home (colima mounts `$HOME` into the
+   VM, so the container can read them) and a `server.yml`:
+   ```bash
+   mkdir -p ~/ntfy-server/{etc,lib,cache}
+   ```
+   `~/ntfy-server/etc/server.yml`:
+   ```yaml
+   base-url: "http://<mac-mini-tailscale-name>:2586"
+   listen-http: ":2586"
+   auth-file: "/var/lib/ntfy/user.db"
+   auth-default-access: "deny-all"      # no anonymous read OR publish
+   cache-file: "/var/cache/ntfy/cache.db"
+   upstream-base-url: "https://ntfy.sh" # iOS only: relays a *contentless*
+                                        # wakeup ping so push is instant; the
+                                        # message body is still fetched from
+                                        # this server, never ntfy.sh.
+   ```
+   Run the server container (`--restart always` brings it back when colima
+   restarts at login):
+   ```bash
+   docker run -d --name ntfy --restart always -p 2586:2586 \
+     -v ~/ntfy-server/etc:/etc/ntfy \
+     -v ~/ntfy-server/lib:/var/lib/ntfy \
+     -v ~/ntfy-server/cache:/var/cache/ntfy \
+     binwiederhier/ntfy:v2.26.0 serve
+   ```
+   Create the publisher + subscriber, lock the topic down, and mint a publish
+   token (`NTFY_PASSWORD=...` sets passwords non-interactively):
+   ```bash
+   docker exec -e NTFY_PASSWORD='<wren-pw>'  ntfy ntfy user add wren
+   docker exec ntfy ntfy access wren wren-alerts write
+   docker exec -e NTFY_PASSWORD='<craig-pw>' ntfy ntfy user add craig
+   docker exec ntfy ntfy access craig wren-alerts read
+   docker exec ntfy ntfy token add wren    # -> tk_...  set as NTFY_TOKEN
+   ```
+   Set `NTFY_URL=http://<mac-mini-tailscale-name>:2586/wren-alerts` and
+   `NTFY_TOKEN=tk_...` in `config/.env`. On your iPhone, install the ntfy app →
+   add a custom server pointing at the same Tailscale URL, log in as `craig`
+   (its password), subscribe to `wren-alerts`. Smoke-test end to end:
+   ```bash
+   .venv/bin/python -m agent.tools.notify --message "hello from Wren" --title "Wren"
+   ```
+   TLS is unnecessary — the link rides Tailscale's encrypted tunnel.
 
 ## Adding a new scheduled skill
 
