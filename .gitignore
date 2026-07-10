@@ -9,6 +9,8 @@ config/github_starred_state.json
 config/wren_memory.json
 config/reminders.json
 config/bg_jobs.json
+config/*.lock
+config/*.corrupt-*
 logs/*.log
 .DS_Store
 .claude/

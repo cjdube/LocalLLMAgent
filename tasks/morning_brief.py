@@ -20,7 +20,6 @@ import logging
 import os
 import re
 import sys
-import tempfile
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -33,6 +32,7 @@ from dotenv import load_dotenv
 
 from agent.dates import local_timezone
 from agent.loop import complete_text
+from agent.store import atomic_write_json, load_json
 from agent.tools.calendar import get_upcoming_events
 from agent.tools.email import send_email
 from agent.tools.github_starred import fetch_starred_repos
@@ -59,23 +59,15 @@ the output — just the sentence itself. Be concise and neutral."""
 
 
 def _read_starred_state() -> Optional[str]:
-    try:
-        return json.loads(STARRED_STATE_PATH.read_text()).get("last_checked")
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return None
+    # Single-writer state (only the brief run writes it), so no locked() —
+    # atomic writes alone make lock-free reads safe.
+    return load_json(STARRED_STATE_PATH, {}).get("last_checked")
 
 
 def _write_starred_state(last_checked: str) -> None:
-    # Atomic write: temp file in the same dir, then os.replace() — so a crash
-    # mid-write can't leave a truncated state file behind.
-    fd, tmp = tempfile.mkstemp(dir=STARRED_STATE_PATH.parent, prefix=".github_starred_state.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w") as f:
-            json.dump({"last_checked": last_checked}, f)
-        os.replace(tmp, STARRED_STATE_PATH)
-    except BaseException:
-        os.unlink(tmp)
-        raise
+    # Atomic write via agent.store — a crash mid-write can't leave a truncated
+    # state file behind.
+    atomic_write_json(STARRED_STATE_PATH, {"last_checked": last_checked})
 
 _STYLE = """
   <style>

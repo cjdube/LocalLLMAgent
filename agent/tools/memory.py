@@ -28,21 +28,15 @@ Usage:
 
 import argparse
 import json
-import os
 import sys
-import tempfile
-import threading
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
+from agent.store import atomic_write_json, load_json, locked
+
 _ROOT = Path(__file__).resolve().parent.parent.parent
 _STORE_PATH = _ROOT / "config" / "wren_memory.json"
-
-# Serializes the read-modify-write in the mutating handlers below. The chat
-# server runs Flask with threaded=True, so two concurrent calls could otherwise
-# interleave _load() -> mutate -> _save() and lose the loser's update.
-_LOCK = threading.Lock()
 
 # Closed set of category tags. Advertised to the model via the tool schemas so
 # it tags consistently; handlers store whatever is passed (a stray value just
@@ -188,26 +182,16 @@ ARCHIVE_TOOL_SCHEMA = {
 
 
 def _load() -> dict:
-    """The memory store, or an empty one if the file doesn't exist yet."""
-    try:
-        return json.loads(_STORE_PATH.read_text())
-    except FileNotFoundError:
-        return {"memories": []}
+    """The memory store, or an empty one if the file doesn't exist yet (or is
+    corrupt — see agent.store.load_json, which quarantines a damaged file)."""
+    return load_json(_STORE_PATH, {"memories": []})
 
 
 def _save(data: dict) -> None:
-    # Atomic write: serialize to a temp file in the same directory, then
-    # os.replace() (atomic on the same filesystem) so any reader — including
-    # separate batch-job processes reading via render_memory_block() — sees a
-    # complete file, never a half-written one.
-    fd, tmp = tempfile.mkstemp(dir=_STORE_PATH.parent, prefix=".wren_memory.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(data, f, indent=2)
-        os.replace(tmp, _STORE_PATH)
-    except BaseException:
-        os.unlink(tmp)
-        raise
+    # Atomic write via agent.store, so any reader — including separate
+    # batch-job processes reading via render_memory_block() — sees a complete
+    # file, never a half-written one.
+    atomic_write_json(_STORE_PATH, data)
 
 
 def _save_fact(text: str, category: str, scope: str) -> dict:
@@ -218,7 +202,7 @@ def _save_fact(text: str, category: str, scope: str) -> dict:
     if not text:
         return {"error": "nothing to remember — text was empty"}
 
-    with _LOCK:
+    with locked(_STORE_PATH):
         data = _load()
         for m in data["memories"]:
             if m["text"].strip().lower() == text.lower():
@@ -250,7 +234,7 @@ def pin(text: str, category: str = None) -> dict:
 
 
 def recall(query: str = None, category: str = None) -> dict:
-    with _LOCK:
+    with locked(_STORE_PATH):
         data = _load()
         memories = data["memories"]
         if category:
@@ -275,7 +259,7 @@ def recall(query: str = None, category: str = None) -> dict:
 
 
 def archive(memory_id: str, memory_text: str = "") -> dict:
-    with _LOCK:
+    with locked(_STORE_PATH):
         data = _load()
         for m in data["memories"]:
             if m["id"] == memory_id:
@@ -286,7 +270,7 @@ def archive(memory_id: str, memory_text: str = "") -> dict:
 
 
 def forget(memory_id: str, memory_text: str = "") -> dict:
-    with _LOCK:
+    with locked(_STORE_PATH):
         data = _load()
         kept = [m for m in data["memories"] if m["id"] != memory_id]
         if len(kept) == len(data["memories"]):

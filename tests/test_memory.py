@@ -223,6 +223,21 @@ def test_legacy_entry_without_scope_is_treated_as_active():
 
 
 # --------------------------------------------------------------------------- #
+# corrupt store: degrades to empty instead of crashing every conversation
+# (render_memory_block() seeds each system prompt via with_identity())
+# --------------------------------------------------------------------------- #
+
+def test_corrupt_store_degrades_to_empty_and_recovers():
+    memory._STORE_PATH.write_text('{"memories": [truncated garbage')
+
+    assert memory.render_memory_block() == ""
+    assert memory.recall()["count"] == 0
+    # The damaged file was quarantined, so a fresh save works.
+    assert "id" in memory.remember("Craig prefers metric units")
+    assert memory.recall()["count"] == 1
+
+
+# --------------------------------------------------------------------------- #
 # concurrency: atomic writes + lock (Flask runs threaded=True)
 # --------------------------------------------------------------------------- #
 

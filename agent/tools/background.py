@@ -8,9 +8,10 @@ and is pushed to Craig's phone to approve. Untrusted content pulled mid-task
 therefore can never trigger an unattended irreversible action.
 
 This module owns the job store and the approval-token logic; the worker owns
-execution. State lives in config/bg_jobs.json, written atomically under a lock
-(same model as agent/tools/reminders.py) so the Flask chat server, the worker,
-and the approval endpoint never read a half-written file.
+execution. State lives in config/bg_jobs.json, written atomically under a
+cross-process file lock (agent/store.py) so the Flask chat server, the worker,
+and the approval endpoint never read a half-written file or clobber each
+other's updates.
 
 A job moves through:
     pending -> (worker) -> done | failed
@@ -24,8 +25,6 @@ import argparse
 import json
 import os
 import sys
-import tempfile
-import threading
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -33,11 +32,12 @@ from uuid import uuid4
 from dotenv import load_dotenv
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
+from agent.store import atomic_write_json, load_json, locked
+
 _ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(_ROOT / "config" / ".env")
 
 _STORE_PATH = _ROOT / "config" / "bg_jobs.json"
-_LOCK = threading.Lock()
 
 # Approval tokens are short-lived and single-purpose; reuse the Flask secret so
 # there's no extra key to manage. Single-use is enforced by the job state
@@ -99,21 +99,11 @@ GET_JOB_RESULT_TOOL_SCHEMA = {
 
 
 def _load() -> dict:
-    try:
-        return json.loads(_STORE_PATH.read_text())
-    except FileNotFoundError:
-        return {"jobs": []}
+    return load_json(_STORE_PATH, {"jobs": []})
 
 
 def _save(data: dict) -> None:
-    fd, tmp = tempfile.mkstemp(dir=_STORE_PATH.parent, prefix=".bg_jobs.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(data, f, indent=2)
-        os.replace(tmp, _STORE_PATH)
-    except BaseException:
-        os.unlink(tmp)
-        raise
+    atomic_write_json(_STORE_PATH, data)
 
 
 def _now() -> str:
@@ -140,7 +130,7 @@ def run_in_background(task: str) -> dict:
         "created": _now(),
         "updated": _now(),
     }
-    with _LOCK:
+    with locked(_STORE_PATH):
         data = _load()
         data["jobs"].append(job)
         _save(data)
@@ -149,7 +139,7 @@ def run_in_background(task: str) -> dict:
 
 
 def list_background_jobs() -> dict:
-    with _LOCK:
+    with locked(_STORE_PATH):
         jobs = _load()["jobs"]
     return {
         "count": len(jobs),
@@ -162,7 +152,7 @@ def list_background_jobs() -> dict:
 
 
 def get_job_result(job_id: str) -> dict:
-    with _LOCK:
+    with locked(_STORE_PATH):
         job = _find(_load()["jobs"], job_id)
     if job is None:
         return {"error": f"no background job with id {job_id!r}"}
@@ -174,14 +164,14 @@ def get_job_result(job_id: str) -> dict:
 
 def next_actionable() -> dict | None:
     """The oldest job the worker should act on (pending/approved/denied), or None."""
-    with _LOCK:
+    with locked(_STORE_PATH):
         jobs = _load()["jobs"]
     actionable = [j for j in jobs if j["status"] in _ACTIONABLE]
     return min(actionable, key=lambda j: j["created"]) if actionable else None
 
 
 def _update(job_id: str, **fields) -> None:
-    with _LOCK:
+    with locked(_STORE_PATH):
         data = _load()
         job = _find(data["jobs"], job_id)
         if job is None:
@@ -206,7 +196,7 @@ def mark_failed(job_id: str, error: str) -> None:
 def resolve_job(job_id: str, approved: bool) -> bool:
     """Approve/deny a job awaiting approval. Returns True if applied, False if the
     job isn't awaiting (unknown, or already resolved — makes the token single-use)."""
-    with _LOCK:
+    with locked(_STORE_PATH):
         data = _load()
         job = _find(data["jobs"], job_id)
         if job is None or job["status"] != "awaiting_approval":

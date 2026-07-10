@@ -6,9 +6,9 @@ Craig's time expression verbatim and resolve_reminder_time() does the date math
 in Python (the model can't be trusted to). Fired reminders are removed from the
 store — the push itself is the record.
 
-State lives in config/reminders.json, written atomically under a lock (same
-model as agent/tools/memory.py) so the Flask chat server and the separate
-sweeper process never read a half-written file.
+State lives in config/reminders.json, written atomically under a cross-process
+file lock (agent/store.py) so the Flask chat server and the separate sweeper
+process never read a half-written file or clobber each other's updates.
 
 Usage:
     python -m agent.tools.reminders --list
@@ -16,23 +16,17 @@ Usage:
 
 import argparse
 import json
-import os
 import sys
-import tempfile
-import threading
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from agent.dates import REMINDER_WHEN_GUIDANCE, local_timezone, resolve_reminder_time
+from agent.store import atomic_write_json, load_json, locked
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
 _STORE_PATH = _ROOT / "config" / "reminders.json"
-
-# Serializes read-modify-write; the chat server runs Flask threaded, so two
-# concurrent tool calls could otherwise interleave and lose an update.
-_LOCK = threading.Lock()
 
 
 SET_REMINDER_TOOL_SCHEMA = {
@@ -84,28 +78,18 @@ CANCEL_REMINDER_TOOL_SCHEMA = {
 
 
 def _load() -> dict:
-    try:
-        return json.loads(_STORE_PATH.read_text())
-    except FileNotFoundError:
-        return {"reminders": []}
+    return load_json(_STORE_PATH, {"reminders": []})
 
 
 def _save(data: dict) -> None:
-    # Atomic write: temp file in the same dir, then os.replace() — so the sweeper
-    # process never reads a half-written store.
-    fd, tmp = tempfile.mkstemp(dir=_STORE_PATH.parent, prefix=".reminders.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(data, f, indent=2)
-        os.replace(tmp, _STORE_PATH)
-    except BaseException:
-        os.unlink(tmp)
-        raise
+    # Atomic write via agent.store — the sweeper process never reads a
+    # half-written store.
+    atomic_write_json(_STORE_PATH, data)
 
 
 def _remove_ids(ids: set) -> int:
     """Drop reminders whose id is in `ids`; return how many were removed."""
-    with _LOCK:
+    with locked(_STORE_PATH):
         data = _load()
         kept = [r for r in data["reminders"] if r["id"] not in ids]
         removed = len(data["reminders"]) - len(kept)
@@ -137,7 +121,7 @@ def set_reminder(when: str, message: str) -> dict:
         "message": message,
         "created": datetime.now(ZoneInfo(local_timezone())).isoformat(),
     }
-    with _LOCK:
+    with locked(_STORE_PATH):
         data = _load()
         data["reminders"].append(reminder)
         _save(data)
@@ -145,7 +129,7 @@ def set_reminder(when: str, message: str) -> dict:
 
 
 def list_reminders() -> dict:
-    with _LOCK:
+    with locked(_STORE_PATH):
         reminders = sorted(_load()["reminders"], key=lambda r: r["due"])
     return {
         "count": len(reminders),
@@ -167,7 +151,7 @@ def get_due(now: datetime = None) -> list:
     the sweeper removes them via complete() only after the push succeeds, so a
     failed push is retried on the next sweep."""
     now = now or datetime.now(ZoneInfo(local_timezone()))
-    with _LOCK:
+    with locked(_STORE_PATH):
         reminders = _load()["reminders"]
     return [r for r in reminders if datetime.fromisoformat(r["due"]) <= now]
 
