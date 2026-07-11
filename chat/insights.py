@@ -444,7 +444,7 @@ TOOL_SERVICES = {
     "chrome": ("Chrome History", ["fetch_chrome_history"]),
     "strava": ("Strava", ["fetch_strava"]),
     "weather": ("OpenWeatherMap", ["fetch_weather"]),
-    "web_search": ("Tavily Search", ["search_web"]),
+    "web_search": ("Tavily Search", ["search_web", "research_company"]),
     "github": ("GitHub", ["fetch_starred_repos"]),
     "youtube": ("YouTube", []),  # weekly_learnings-only; no chat tool
     "ntfy": ("ntfy Push", []),  # routine failure-alert channel; no chat tool

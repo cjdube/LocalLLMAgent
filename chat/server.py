@@ -44,7 +44,7 @@ from agent.toolset import (
 from agent.tools import background
 from agent.tools import opportunities
 from agent.tools.memory import recall
-from agent.tools.research import research_company
+from agent.tools.research import research_opportunity
 from agent.tools.notify import notify
 from agent.tools.skills import render_skills_index
 from tasks._common import setup_logger
@@ -637,7 +637,7 @@ def _start_research(item: dict) -> None:
     opportunities.set_research(item["id"], {"status": "pending", "summary": None})
 
     def run():
-        result = research_company(item["id"])
+        result = research_opportunity(item["id"])
         if "error" in result:
             logger.warning(f"research {item['id']} failed: {result['error']}")
             notify(title="Wren: research failed", message=f"{item['company']}: {result['error']}")

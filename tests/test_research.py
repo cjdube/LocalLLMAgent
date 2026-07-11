@@ -49,7 +49,7 @@ def stubbed_pipeline(monkeypatch):
 # --------------------------------------------------------------------------- #
 
 def test_happy_path_stores_brief_on_the_item(seeded_item, stubbed_pipeline):
-    result = rs.research_company(seeded_item)
+    result = rs.research_opportunity(seeded_item)
     assert result["summary"] == "What they do: tiny things."
     research = opp.get_item(seeded_item)["research"]
     assert research["status"] == "done"
@@ -60,7 +60,7 @@ def test_happy_path_stores_brief_on_the_item(seeded_item, stubbed_pipeline):
 
 
 def test_unknown_id_errors_without_searching(stubbed_pipeline):
-    result = rs.research_company("missing")
+    result = rs.research_opportunity("missing")
     assert "error" in result
     assert stubbed_pipeline["prompts"] == []
 
@@ -68,14 +68,14 @@ def test_unknown_id_errors_without_searching(stubbed_pipeline):
 def test_one_dead_search_still_produces_a_brief(seeded_item, stubbed_pipeline, monkeypatch):
     calls = iter([{"error": "tavily 503"}, _search_stub()("q"), _search_stub()("q")])
     monkeypatch.setattr(rs, "search_web", lambda *a, **k: next(calls))
-    result = rs.research_company(seeded_item)
+    result = rs.research_opportunity(seeded_item)
     assert "summary" in result
     assert opp.get_item(seeded_item)["research"]["status"] == "done"
 
 
 def test_everything_dead_marks_the_item_failed(seeded_item, stubbed_pipeline, monkeypatch):
     monkeypatch.setattr(rs, "search_web", lambda *a, **k: {"error": "tavily down"})
-    result = rs.research_company(seeded_item)
+    result = rs.research_opportunity(seeded_item)
     assert "error" in result and "tavily down" in result["error"]
     assert opp.get_item(seeded_item)["research"]["status"] == "failed"
     assert stubbed_pipeline["prompts"] == []  # no model call on empty input
@@ -85,7 +85,7 @@ def test_model_exception_is_caught_and_marked_failed(seeded_item, stubbed_pipeli
     def boom(**k):
         raise RuntimeError("ollama not running")
     monkeypatch.setattr(rs, "complete_text", boom)
-    result = rs.research_company(seeded_item)
+    result = rs.research_opportunity(seeded_item)
     assert "error" in result and "ollama" in result["error"]
     assert opp.get_item(seeded_item)["research"]["status"] == "failed"
 
@@ -152,3 +152,28 @@ def test_form_d_facts_skips_non_edgar_and_degrades(monkeypatch):
 
     monkeypatch.setattr(rs.requests, "get", lambda url, **k: _FakeResp(b"not xml"))
     assert rs.form_d_facts(_edgar_item()) is None
+
+
+# --------------------------------------------------------------------------- #
+# research_company — the general-purpose entry point (any name, no store)
+# --------------------------------------------------------------------------- #
+
+def test_research_company_works_on_any_name_without_the_store(stubbed_pipeline):
+    result = rs.research_company("Corvus Robotics")
+    assert result["summary"] == "What they do: tiny things."
+    assert result["company"] == "Corvus Robotics"
+    # Nothing persisted — this entry point is store-free.
+    assert opp.all_items() == []
+    prompt = stubbed_pipeline["prompts"][0]["user_prompt"]
+    assert "general research request" in prompt
+
+
+def test_research_company_rejects_empty_name(stubbed_pipeline):
+    assert "error" in rs.research_company("   ")
+    assert stubbed_pipeline["prompts"] == []
+
+
+def test_research_company_reports_dead_sources(stubbed_pipeline, monkeypatch):
+    monkeypatch.setattr(rs, "search_web", lambda *a, **k: {"error": "tavily down"})
+    result = rs.research_company("Corvus Robotics")
+    assert "error" in result and "tavily down" in result["error"]
