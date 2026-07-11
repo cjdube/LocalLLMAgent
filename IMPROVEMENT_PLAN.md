@@ -4,6 +4,18 @@
 structure/code quality, performance, documentation, and test coverage. No code
 was changed — this plan is for manual review and approval.*
 
+> **Status (2026-07-11):** steps 1–7 of the execution order have been executed
+> on this branch (see the commit history: one commit per step, two for step 7's
+> sub-batches). All high-severity items (H1–H4), all mediums (M1–M10), and the
+> low-severity items are addressed, with these deliberate exceptions:
+> **L-deferred:** the `.env`-loading/`sys.path` centralization (item 9 below —
+> pure churn, no behavior change), the HTTP-endpoint reference table (item 13,
+> "not urgent"), and hardening `int(os.getenv(...))` parses (item 11 — a
+> malformed hand-edited value failing loudly at startup is acceptable
+> feedback). Tool-result logging (item 3) was documented as a privacy note in
+> the README rather than redacted, since the dashboard's run history depends
+> on parsed results. Suite grew from 260 to 331 tests, all passing.
+
 ## Overall assessment
 
 The codebase is in genuinely good shape for its threat model (single user,

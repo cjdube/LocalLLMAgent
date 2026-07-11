@@ -104,7 +104,31 @@ def _load() -> dict:
     return load_json(_STORE_PATH, {"jobs": []})
 
 
+# Keep the store bounded: it's re-read on every worker poll (every 30s,
+# forever) and list_background_jobs feeds the model's context. Terminal jobs
+# old enough that their result has long been read fall off on the next write;
+# pending/awaiting jobs are never pruned.
+_PRUNE_TERMINAL_AFTER_S = 14 * 24 * 3600
+_LIST_LIMIT = 20
+
+
+def _prune(data: dict, now: datetime | None = None) -> None:
+    now = now or datetime.now()
+
+    def keep(job: dict) -> bool:
+        if job["status"] not in ("done", "failed"):
+            return True
+        try:
+            age = (now - datetime.fromisoformat(job["updated"])).total_seconds()
+        except (ValueError, TypeError):
+            return True  # unparseable timestamp: keep rather than guess
+        return age <= _PRUNE_TERMINAL_AFTER_S
+
+    data["jobs"] = [j for j in data["jobs"] if keep(j)]
+
+
 def _save(data: dict) -> None:
+    _prune(data)
     atomic_write_json(_STORE_PATH, data)
 
 
@@ -144,12 +168,14 @@ def run_in_background(task: str) -> dict:
 def list_background_jobs() -> dict:
     with locked(_STORE_PATH):
         jobs = _load()["jobs"]
+    newest_first = sorted(jobs, key=lambda j: j["created"], reverse=True)
     return {
         "count": len(jobs),
+        # Capped: this listing lands in the model's context window.
         "jobs": [
             {"id": j["id"], "status": j["status"], "task": j["task_text"][:120],
              "created": j["created"]}
-            for j in sorted(jobs, key=lambda j: j["created"], reverse=True)
+            for j in newest_first[:_LIST_LIMIT]
         ],
     }
 

@@ -110,7 +110,20 @@ def _discover_tasks_uncached() -> list[dict]:
         std_out = data.get("StandardOutPath", "")
         key = _log_key_from_stdout(std_out) if std_out else module.split(".")[-1]
         sci = data.get("StartCalendarInterval")
+        interval = data.get("StartInterval")
+        # Interval pollers (bg_worker, reminder_sweep) are classified as
+        # daemons ON PURPOSE, not by accident: is_daemon is what blocks the
+        # dashboard's "Run now" — a manually spawned poller could race
+        # launchd's copy and pick up the same job twice — and skips run-history
+        # parsing of their poll-shaped logs. Only the label distinguishes them
+        # from the always-on chat server.
         is_daemon = sci is None or bool(data.get("KeepAlive"))
+        if is_daemon and interval:
+            human = f"Every {interval}s (poll)"
+        elif is_daemon:
+            human = "Always on"
+        else:
+            human = human_schedule(sci)
 
         tasks.append({
             "key": key,
@@ -118,7 +131,7 @@ def _discover_tasks_uncached() -> list[dict]:
             "label": data.get("Label", ""),
             "module": module,
             "schedule": sci,
-            "human_schedule": "Always on" if is_daemon else human_schedule(sci),
+            "human_schedule": human,
             "log_path": str(LOGS_DIR / f"{key}.log"),
             "is_daemon": is_daemon,
         })
@@ -332,7 +345,11 @@ def _parse_runs_uncached(log_path: Path) -> list[dict]:
         if current is None:
             continue
 
-        if level in ("ERROR", "CRITICAL") or "failed" in msg.lower():
+        # The substring check skips tool-activity lines (they contain "->"):
+        # a tool RESULT that happens to say "failed" (e.g. `fetch_strava ->
+        # {"error": "... token refresh failed"}`) is the tool reporting an
+        # error the run may recover from, not the run failing.
+        if level in ("ERROR", "CRITICAL") or ("failed" in msg.lower() and "->" not in msg):
             current["status"] = "failure"
             current["end"] = ts
             current["error"] = (current.get("error") or "") + msg + "\n"
@@ -568,9 +585,14 @@ class RunManager:
     def status(self, task_key: str) -> dict:
         with self._lock:
             proc = self._procs.get(task_key)
-        if proc is None:
-            return {"running": False, "returncode": None}
-        code = proc.poll()
+            if proc is None:
+                return {"running": False, "returncode": None}
+            code = proc.poll()
+            if code is not None:
+                # poll() reaped the exited child; drop the handle too so
+                # finished runs don't accumulate in _procs for the life of
+                # the server.
+                del self._procs[task_key]
         return {"running": code is None, "returncode": code}
 
 

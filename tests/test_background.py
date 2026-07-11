@@ -2,8 +2,11 @@
 _STORE_PATH is redirected to tmp and FLASK_SECRET_KEY is stubbed, so nothing
 touches the real config/bg_jobs.json or the real signing key."""
 
+from datetime import datetime, timedelta
+
 import pytest
 
+from agent.store import atomic_write_json
 from agent.tools import background
 
 
@@ -60,6 +63,46 @@ def test_mark_failed():
     jid = background.run_in_background("x")["id"]
     background.mark_failed(jid, "boom")
     assert background.get_job_result(jid)["status"] == "failed"
+
+
+def _age_job_bypassing_save(jid: str, days: float) -> None:
+    """Backdate a job's updated timestamp without going through _save (whose
+    pruning is exactly what's under test)."""
+    with background.locked(background._STORE_PATH):
+        data = background._load()
+        job = background._find(data["jobs"], jid)
+        job["updated"] = (datetime.now() - timedelta(days=days)).isoformat(timespec="seconds")
+        atomic_write_json(background._STORE_PATH, data)
+
+
+def test_old_terminal_jobs_prune_on_next_write():
+    old = background.run_in_background("finished ages ago")["id"]
+    background.mark_done(old, "result")
+    _age_job_bypassing_save(old, days=15)
+
+    background.run_in_background("fresh work")  # any write prunes
+    jobs = background.list_background_jobs()["jobs"]
+    ids = {j["id"] for j in jobs}
+    assert old not in ids
+    assert len(jobs) == 1
+
+
+def test_prune_never_touches_non_terminal_jobs():
+    stuck = background.run_in_background("stuck approval")["id"]
+    _await(stuck)  # awaiting_approval
+    _age_job_bypassing_save(stuck, days=30)
+
+    background.run_in_background("fresh work")
+    statuses = {j["id"]: j["status"] for j in background.list_background_jobs()["jobs"]}
+    assert statuses[stuck] == "awaiting_approval"  # old but alive — kept
+
+
+def test_list_background_jobs_caps_output_but_counts_all():
+    for i in range(background._LIST_LIMIT + 5):
+        background.run_in_background(f"job {i}")
+    out = background.list_background_jobs()
+    assert out["count"] == background._LIST_LIMIT + 5
+    assert len(out["jobs"]) == background._LIST_LIMIT
 
 
 def test_bump_attempts_counts_up():

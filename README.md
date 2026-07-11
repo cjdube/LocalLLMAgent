@@ -51,30 +51,26 @@ oldest exchanges — instead of hitting `num_ctx` and losing its system prompt.
 
 ### `agent/loop.py` — how tasks and chat talk to the model
 
-- **`run_agent(...)`** — the full tool-calling loop for unattended tasks. Sends
-  messages + tool schemas to Ollama's `/api/chat`, dispatches any `tool_calls`
-  to local Python functions immediately, feeds results back, repeats (capped
-  at `MAX_TOOL_ITERATIONS`) until the model returns a final text answer.
-  Retained as the entrypoint for a future genuinely model-driven task; it
-  currently has no caller (`daily_log` was converted to deterministic Python —
-  see the scheduled-tasks table). Internally a thin wrapper over `advance()`
-  (below).
+- **`advance(messages, tools, dispatch, confirm_before=...)`** /
+  **`resolve(messages, call, approved, dispatch)`** — the resumable
+  tool-calling loop both drivers (`chat/server.py` and `tasks/bg_worker.py`)
+  are built on. Sends messages + tool schemas to Ollama's `/api/chat`,
+  dispatches any `tool_calls` to local Python functions, feeds results back,
+  and repeats (capped at `MAX_TOOL_ITERATIONS`) until the model returns a
+  final text answer. `advance()` auto-executes any tool call whose name isn't
+  in `confirm_before`; the moment one *is* in that set, it stops and returns
+  the pending call without executing it, so the caller can show a human
+  what's about to happen and come back later (`resolve()` then `advance()`
+  again) to actually run it. A future model-driven task would call these
+  directly, exactly as the worker does. (An earlier `run_agent()` convenience
+  wrapper — `advance()` with nothing gated — was removed once nothing called
+  it.)
 - **`complete_text(...)`** — a single-turn, tool-free completion. Used when
   the surrounding structure (HTML layout, doc template) is built
   deterministically in Python and the model is only asked to write a
   paragraph of prose to slot in. Used by `morning_brief.py` and
   `weekly_learnings.py` — this is more reliable than trusting a small local
   model to produce well-formed HTML/markdown on its own.
-- **`advance(messages, tools, dispatch, confirm_before=...)`** /
-  **`resolve(messages, call, approved, dispatch)`** — the lower-level,
-  resumable primitive `chat/server.py` uses for ad hoc chat. `advance()` auto-
-  executes any tool call whose name isn't in `confirm_before`, same as
-  `run_agent`; the moment one *is* in that set, it stops and returns the
-  pending call without executing it, so a web request can show the user what's
-  about to happen and come back later (a second HTTP request calling
-  `resolve()` then `advance()` again) to actually run it. `run_agent` calls
-  `advance()` with an empty `confirm_before`, so nothing ever pauses —
-  identical behavior to before this was extracted.
 
 The model call (`_ollama_chat`) **streams** from Ollama and reassembles the
 reply, which gives `advance()` an interruption point: it takes an optional
@@ -183,10 +179,13 @@ chat/
   through rather than computing a date itself, same reasoning as
   `get_events_by_date`'s `'today'`/`'yesterday'` resolution — each matching
   repo also comes back with a `recent_changes` one-to-two-line summary from
-  its latest release notes or recent commit subjects) — all read-only,
+  its latest release notes or recent commit subjects), and the Google Tasks
+  reads `get_tasks` / `get_tasks_due_soon` (spanning every task list on the
+  account) — all read-only,
   execute immediately — plus `log_calendar_event`,
-  `send_email`, `recolor_event`, and `send_morning_brief` (state-changing —
-  see confirmation gate below).
+  `send_email`, `recolor_event`, `send_morning_brief`, and the Google Tasks
+  writes `create_task` / `update_task_due_date` / `complete_task`
+  (state-changing — see confirmation gate below).
   `recolor_event` takes a category name (`agent/tools/calendar.py`'s
   `CATEGORY_COLORS` — the same mapping `calendar_colorizer.py`'s daily job
   uses), not a raw colorId, since that's far more reliable for a small local
@@ -229,9 +228,12 @@ chat/
   reading/writing the Weekly Log doc — those functions don't have a
   `TOOL_SCHEMA` yet (only ever called directly from Python by
   `weekly_learnings.py`). Same pattern extends it later if wanted.
-- **Confirmation gate:** before `log_calendar_event`, `send_email`,
-  `recolor_event`, `send_morning_brief`, `forget`, `set_reminder`,
-  `cancel_reminder`, or `run_in_background` actually runs, the chat UI shows
+- **Confirmation gate:** before any state-changing tool runs — the 13 in
+  `toolset.WRITE_TOOLS`, the single source of truth: `log_calendar_event`,
+  `send_email`, `recolor_event`, `send_morning_brief`, the three Google Tasks
+  writes (`create_task`, `update_task_due_date`, `complete_task`), `forget`,
+  `write_skill`, `delete_skill`, `set_reminder`, `cancel_reminder`, and
+  `run_in_background` — the chat UI shows
   what Wren wants to do and waits for a tap to confirm or cancel — enforced in
   code (`advance()`'s `confirm_before` set in `agent/loop.py`), not just
   requested in the prompt, so it doesn't depend on the small local model
@@ -490,7 +492,10 @@ mostly useful if the Python process fails to start at all).
    step 8 for anything beyond a one-off check.)
 7. Load the launchd plists (see Scheduling section above) — this now
    includes `com.craigdube.localllmagent.wren.plist`, the always-on chat
-   server.
+   server. On a different machine or checkout path, first edit the absolute
+   paths in each plist (`ProgramArguments`, `WorkingDirectory`, the two log
+   paths — they hardcode `/Users/craigdube/Projects/LocalLLMAgent`) and
+   rename the `com.craigdube.*` labels to taste.
 8. Install [Tailscale](https://tailscale.com) on the Mac Mini and your phone
    if you want to reach Wren's chat from outside your home WiFi, then run
    `tailscale serve --bg 8420` (see "Wren — ad hoc chat" above for the
@@ -553,9 +558,10 @@ mostly useful if the Python process fails to start at all).
 
 1. Add any new tool module(s) to `agent/tools/` (a `TOOL_SCHEMA` dict + a
    plain callable function, following the existing modules as a template).
-2. Write `tasks/<name>.py` — decide upfront whether it needs `run_agent`
-   (multi-step tool-calling) or `complete_text` (deterministic Python
-   structure + one narrative paragraph from the model). Prefer `complete_text`
+2. Write `tasks/<name>.py` — decide upfront whether it needs the
+   `advance()`/`resolve()` tool-calling loop (multi-step, like
+   `tasks/bg_worker.py`) or `complete_text` (deterministic Python structure +
+   one narrative paragraph from the model). Prefer `complete_text`
    where possible — it's far more reliable with a small local model.
 3. Write a `.plist` in `launchd/`, copy it to `~/Library/LaunchAgents/`, load it.
 4. Run the task manually first and check `logs/<name>.log` before relying on
@@ -572,10 +578,17 @@ Run the suite from the repo root:
 ```
 
 The tests are pure/offline — they mock the model and network, so no Ollama or
-API keys are needed. They cover the date resolver, run-history parsing and
-caching, the login throttle, the morning-brief rendering helpers, and the chat
-server's auth + confirm/rollback flow. After editing the always-on chat server,
-restart it (it runs under launchd) so the changes take effect.
+API keys are needed. Nearly every module has a dedicated test file (see
+`tests/`), covering error paths and edge cases as well as happy paths; the
+deliberate exception is live-API wrapper internals (Google/Strava/Tavily
+calls), where only the pure helpers and error mapping are exercised. After
+editing the always-on chat server, restart it (it runs under launchd) so the
+changes take effect.
+
+Note on privacy: `logs/*.log` records tool arguments and results — calendar
+contents, email bodies, browsing history — in cleartext (secrets in tool
+*arguments* are redacted, but results are not). The logs are gitignored;
+treat them as personal data if you back the directory up elsewhere.
 
 ## Security model / trust boundaries
 

@@ -169,6 +169,21 @@ def test_parse_runs_failure_on_failed_keyword(tmp_path):
     assert runs[0]["status"] == "failure"
 
 
+def test_tool_result_saying_failed_does_not_fail_the_run(tmp_path):
+    # A tool RESULT containing "failed" is the tool reporting an error the run
+    # may recover from — the run itself completed. It must parse as a clean
+    # success, not a failure with spurious error text.
+    log = tmp_path / "task.log"
+    _write_log(log, [
+        "2026-07-07 06:00:00,000 [INFO] Starting task run",
+        "2026-07-07 06:00:01,000 [INFO] fetch_strava(x) -> {'error': 'token refresh failed'}",
+        "2026-07-07 06:00:05,000 [INFO] Task run complete",
+    ])
+    runs = insights.parse_runs(log)
+    assert runs[0]["status"] == "success"
+    assert runs[0]["error"] == ""
+
+
 def test_parse_runs_running_when_never_completed(tmp_path):
     log = tmp_path / "task.log"
     _write_log(log, [
@@ -315,6 +330,28 @@ def _write_plist(path, sci):
     }
     with open(path, "wb") as fh:
         plistlib.dump(data, fh)
+
+
+def test_interval_poller_shows_interval_but_stays_daemon(tmp_path, monkeypatch):
+    # StartInterval pollers (bg_worker, reminder_sweep) get a truthful label,
+    # but keep is_daemon=True on purpose: that's what blocks the dashboard's
+    # "Run now" (a manually spawned poller could race launchd's copy and pick
+    # up the same job twice).
+    monkeypatch.setattr(insights, "LAUNCHD_DIR", tmp_path)
+    insights._TASKS_CACHE.clear()
+    data = {
+        "Label": "com.test.bg_worker",
+        "ProgramArguments": ["python", "-m", "tasks.bg_worker"],
+        "StandardOutPath": str(tmp_path / "bg_worker.launchd.log"),
+        "StartInterval": 30,
+    }
+    with open(tmp_path / "bg_worker.plist", "wb") as fh:
+        plistlib.dump(data, fh)
+
+    (task,) = insights.discover_tasks()
+    assert task["is_daemon"] is True
+    assert task["human_schedule"] == "Every 30s (poll)"
+    insights._TASKS_CACHE.clear()
 
 
 def test_discover_tasks_reuses_cache_and_invalidates(tmp_path, monkeypatch):

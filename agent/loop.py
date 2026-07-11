@@ -204,6 +204,11 @@ def advance(
     """Advance a tool-calling conversation already seeded in `messages`
     (system + user turns, and any prior assistant/tool turns).
 
+    tools: list of OpenAI-style tool schemas (see agent/tools/*.py TOOL_SCHEMA).
+    dispatch: {function_name: callable} mapping — each callable takes the
+              parsed arguments dict via **kwargs and returns a
+              JSON-serializable dict.
+
     Sends to Ollama, auto-executing any tool_calls whose name is NOT in
     confirm_before (appending assistant/tool messages to `messages` in
     place as it goes — same behavior as before this was extracted). Stops
@@ -275,29 +280,6 @@ def resolve(
         messages.append(
             {"role": "tool", "content": json.dumps({"error": "user declined this action"})}
         )
-
-
-def run_agent(
-    system_prompt: str,
-    user_prompt: str,
-    tools: list[dict],
-    dispatch: dict[str, Callable[..., dict]],
-    model: str = None,
-    host: str = None,
-    logger: Optional[logging.Logger] = None,
-) -> str:
-    """Run the tool-calling loop and return the model's final text response.
-
-    tools: list of OpenAI-style tool schemas (see agent/tools/*.py TOOL_SCHEMA).
-    dispatch: {function_name: callable} mapping — callable takes the parsed
-              arguments dict via **kwargs and returns a JSON-serializable dict.
-    """
-    messages = [
-        {"role": "system", "content": with_identity(system_prompt)},
-        {"role": "user", "content": user_prompt},
-    ]
-    result = advance(messages, tools, dispatch, model=model, host=host, logger=logger)
-    return result["text"]
 
 
 def complete_text(

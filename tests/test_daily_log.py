@@ -102,3 +102,27 @@ def test_fetch_error_returns_failure_and_writes_nothing(monkeypatch):
     monkeypatch.setattr(daily_log, "notify_failure", lambda *a, **k: None)
     assert daily_log.main() == 1
     assert calls == []
+
+
+# --------------------------------------------------------------------------- #
+# partial-failure alerting
+# --------------------------------------------------------------------------- #
+
+def test_partial_failure_pushes_alert_but_exits_zero(monkeypatch):
+    alerts = []
+    monkeypatch.setattr(daily_log, "notify_failure",
+                        lambda name, detail, logger=None: alerts.append(str(detail)))
+    # One good activity, one with no start_time (skipped by _log_activity).
+    _patch(monkeypatch, activities=[_activity(), _activity(strava_id=999, start_time=None)])
+
+    assert daily_log.main() == 0  # the logged one is done; re-runs can't duplicate it
+    assert any("1 of 2" in a for a in alerts)  # ...but the miss is pushed, not silent
+
+
+def test_full_success_pushes_no_alert(monkeypatch):
+    alerts = []
+    monkeypatch.setattr(daily_log, "notify_failure",
+                        lambda name, detail, logger=None: alerts.append(str(detail)))
+    _patch(monkeypatch, activities=[_activity()])
+    assert daily_log.main() == 0
+    assert alerts == []

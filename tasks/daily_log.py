@@ -93,6 +93,17 @@ def main() -> int:
                 logged += 1
 
         logger.info(f"Logged {logged} of {len(activities)} activities")
+        if logged < len(activities):
+            # A partial failure used to read as clean success, so a
+            # persistently malformed activity was skipped forever with no
+            # alert. Still exit 0 — the logged ones are done, and re-runs
+            # can't duplicate them (source_id dedupe) — but push the miss.
+            notify_failure(
+                "daily_log",
+                f"{len(activities) - logged} of {len(activities)} activities "
+                "failed to log — see logs/daily_log.log",
+                logger,
+            )
         logger.info("Daily log run complete")
         return 0
     except Exception as e:
