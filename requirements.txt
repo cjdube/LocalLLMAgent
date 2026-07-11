@@ -7,3 +7,9 @@ google-api-python-client==2.198.0
 google-auth-httplib2==0.4.0
 google-auth-oauthlib==1.4.0
 flask==3.1.3
+# Direct imports that would otherwise ride in unpinned as transitive deps:
+# httplib2 (google_auth.py's timeout-bearing transport, also pulled in by the
+# Google client libs) and itsdangerous (background.py's signed approval
+# tokens, also pulled in by Flask).
+httplib2==0.32.0
+itsdangerous==2.2.0

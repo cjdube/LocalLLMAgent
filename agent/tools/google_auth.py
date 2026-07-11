@@ -22,15 +22,26 @@ import os
 import threading
 from pathlib import Path
 
+import httplib2
 from dotenv import load_dotenv
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
+from google_auth_httplib2 import AuthorizedHttp
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
 _ENV_PATH = _ROOT / "config" / ".env"
 load_dotenv(_ENV_PATH)
+
+# Outbound timeout (seconds) for every Google API call. Without it the
+# client's default httplib2 transport has NO timeout — the one HTTP surface in
+# the repo that could hang forever, blocking a chat-turn thread (the Stop
+# button can't interrupt a blocked tool call; should_cancel is only consulted
+# between model chunks) or a launchd run past its next scheduled fire. 30s is
+# generous for calendar/gmail/tasks round-trips. (Token refresh goes through
+# google.auth's own transport, which defaults to a 120s timeout.)
+GOOGLE_HTTP_TIMEOUT_S = int(os.getenv("GOOGLE_HTTP_TIMEOUT_S", "30"))
 
 SCOPES = [
     "https://www.googleapis.com/auth/calendar",
@@ -107,7 +118,14 @@ def build_service(api: str, version: str):
     with _LOCK:
         service = _SERVICES.get(key)
         if service is None:
-            service = build(api, version, credentials=creds)
+            # Passing an AuthorizedHttp built on a timeout-bearing
+            # httplib2.Http, rather than credentials=, is what applies
+            # GOOGLE_HTTP_TIMEOUT_S: given credentials, build() would wrap
+            # them in an AuthorizedHttp of its own around a default Http with
+            # no timeout. Refresh-on-401 behavior is identical — build() uses
+            # this same AuthorizedHttp class internally.
+            http = AuthorizedHttp(creds, http=httplib2.Http(timeout=GOOGLE_HTTP_TIMEOUT_S))
+            service = build(api, version, http=http)
             _SERVICES[key] = service
         return service
 
