@@ -43,4 +43,12 @@ The on-device model is small; design around it:
 - **Persistence**: JSON stores under `config/` via `agent/store.py` (`locked`, `load_json`, `atomic_write_json`); prune on write so polling stores don't grow unbounded (`agent/tools/background.py`).
 - **Config**: `os.getenv()` with inline defaults; document every new variable in `config/.env.example`.
 - **Tests**: one `tests/test_<module>.py` per module; monkeypatch all network/model/Google collaborators; no real network calls.
+
+## Tests must never touch production state
+
+Three real incidents, same shape: tests wrote fixture rows into production `logs/`, sent real ntfy pushes to the phone, and — worst — a daemon thread spawned by a server test outlived its test, raced monkeypatch teardown mid-write, and saved fixture data over the production `config/opportunities.json`. Rules, enforced by autouse fixtures in `tests/conftest.py`:
+
+- **Never spawn a real background thread in a test.** Any function that spawns one (e.g. `chat/server.py:_start_research`) gets an autouse stub in its test file. A surviving thread resolves monkeypatched paths *after* they're restored — a passing suite is timing luck.
+- **Every production side effect gets a suite-wide guard in `tests/conftest.py`**, not just per-test monkeypatching: JSON stores under `config/` → redirect to `tmp_path`; `logs/` → redirect; push/egress calls → stub.
+- **Adding a new store, log, push channel, or thread-spawner? Extend `tests/conftest.py` in the same commit.** Per-test isolation is the convention; the conftest guard is the backstop that makes a missed convention harmless.
 - Commit straight to `main` (no feature branches). Update `README.md` whenever a capability is added.
