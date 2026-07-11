@@ -41,7 +41,13 @@ keep a single large tool result (e.g. a web search dumping page after page of
 listings) from blowing past `num_ctx` — which triggers exactly that front-
 truncation and, with the system prompt gone, a runaway repetition loop — each
 tool result is capped at `OLLAMA_MAX_TOOL_RESULT_CHARS` (default 8000 chars,
-~2000 tokens) before it's appended to the conversation.
+~2000 tokens) before it's appended to the conversation. The conversation
+history itself is budgeted too: before each chat turn the server drops the
+oldest whole user-turns once the history exceeds `WREN_CHAT_MAX_HISTORY_CHARS`
+(default 16000 chars, ~4k tokens — half the default window, leaving the rest
+for the tool schemas and the turn's own growth), keeping the system prompt and
+the newest turn. So a long session degrades gracefully — the model forgets the
+oldest exchanges — instead of hitting `num_ctx` and losing its system prompt.
 
 ### `agent/loop.py` — how tasks and chat talk to the model
 
@@ -234,6 +240,8 @@ chat/
   carries a session id; conversation history lives in a server-side dict
   keyed by it). Fresh conversation on first visit or after tapping "New
   chat"; lost entirely on server restart — no persistence across sessions.
+  Long sessions are trimmed oldest-turn-first to stay inside the model's
+  context window (`WREN_CHAT_MAX_HISTORY_CHARS`, see above).
 - **Auth:** a shared token (`WREN_CHAT_TOKEN` in `config/.env`) gates
   `POST /login`, checked with a constant-time comparison; a signed session
   cookie (`FLASK_SECRET_KEY`) remembers you for 30 days after that. This is

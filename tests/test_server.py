@@ -93,6 +93,69 @@ def test_login_throttle_returns_429_after_repeated_failures(client):
 
 
 # --------------------------------------------------------------------------- #
+# History trimming — the budget that keeps the prompt inside num_ctx
+# --------------------------------------------------------------------------- #
+
+def _turn(i, size=100):
+    """One complete user-turn: user msg, assistant tool_call, tool result, answer."""
+    return [
+        {"role": "user", "content": f"question {i} " + "q" * size},
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"function": {"name": "fetch_weather", "arguments": {"n": i}}}]},
+        {"role": "tool", "content": "t" * size},
+        {"role": "assistant", "content": f"answer {i} " + "a" * size},
+    ]
+
+
+def test_trim_history_is_a_noop_under_budget():
+    history = [{"role": "system", "content": "s"}, *_turn(1)]
+    before = list(history)
+    assert srv._trim_history(history) == 0
+    assert history == before
+
+
+def test_trim_drops_oldest_whole_turns_keeps_system_and_last(monkeypatch):
+    monkeypatch.setattr(srv, "MAX_HISTORY_CHARS", 400)
+    history = [{"role": "system", "content": "s"}, *_turn(1), *_turn(2), *_turn(3)]
+
+    dropped = srv._trim_history(history)
+
+    assert dropped == 8  # turns 1 and 2, four messages each
+    assert history[0]["role"] == "system"
+    # What survives starts at a user-message boundary: no orphaned tool result
+    # or assistant half-turn at the front of the retained window.
+    assert history[1]["role"] == "user" and "question 3" in history[1]["content"]
+    assert [m["role"] for m in history[1:]] == ["user", "assistant", "tool", "assistant"]
+
+
+def test_trim_never_drops_the_only_turn(monkeypatch):
+    monkeypatch.setattr(srv, "MAX_HISTORY_CHARS", 10)  # everything is over budget
+    history = [{"role": "system", "content": "s"}, *_turn(1)]
+    assert srv._trim_history(history) == 0
+    assert len(history) == 5
+
+
+def test_chat_trims_before_running_the_turn(auth_client, monkeypatch):
+    monkeypatch.setattr(srv, "MAX_HISTORY_CHARS", 400)
+    srv.conversations[SID] = [{"role": "system", "content": "s"},
+                              *_turn(1), *_turn(2), *_turn(3)]
+
+    def fake_advance(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
+                     should_cancel=None):
+        return {"type": "final", "text": "done"}
+
+    monkeypatch.setattr(srv, "advance", fake_advance)
+    resp = auth_client.post("/chat", json={"message": "next question"})
+    assert resp.status_code == 200
+
+    history = srv.conversations[SID]
+    assert history[0]["role"] == "system"
+    contents = " ".join(m.get("content") or "" for m in history)
+    assert "question 1" not in contents and "question 2" not in contents
+    assert "question 3" in contents and "next question" in contents
+
+
+# --------------------------------------------------------------------------- #
 # Confirmation payload (describers themselves are covered in test_toolset.py)
 # --------------------------------------------------------------------------- #
 

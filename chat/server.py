@@ -8,6 +8,7 @@ Usage:
 """
 
 import hmac
+import json
 import logging
 import os
 import sys
@@ -58,6 +59,13 @@ WREN_CHAT_PORT = int(os.getenv("WREN_CHAT_PORT", "8420"))
 # local LAN. Override with WREN_CHAT_HOST only if you know you need a wider bind.
 WREN_CHAT_HOST = os.getenv("WREN_CHAT_HOST", "127.0.0.1")
 MAX_MESSAGE_CHARS = 8000
+# Cap on the conversation history (system message included in the count) that
+# gets re-sent to Ollama each turn. ~4 chars/token, so the 16000-char default
+# is roughly 4k tokens of the default 8192-token OLLAMA_NUM_CTX — leaving the
+# other half for the tool schemas and the current turn's own growth (a user
+# message up to MAX_MESSAGE_CHARS plus tool results up to
+# OLLAMA_MAX_TOOL_RESULT_CHARS each). Raise together with OLLAMA_NUM_CTX.
+MAX_HISTORY_CHARS = int(os.getenv("WREN_CHAT_MAX_HISTORY_CHARS", "16000"))
 
 if not WREN_CHAT_TOKEN or not FLASK_SECRET_KEY:
     raise RuntimeError(
@@ -338,6 +346,70 @@ def _call_response(result: dict) -> dict:
     }
 
 
+def _message_chars(msg: dict) -> int:
+    """Approximate prompt cost of one history message in characters — content
+    plus any tool_calls payload (assistant tool-call turns often have empty
+    content but big arguments)."""
+    n = len(msg.get("content") or "")
+    for call in msg.get("tool_calls") or []:
+        n += len(json.dumps(call))
+    return n
+
+
+def _trim_history(history: list) -> int:
+    """Drop the oldest whole user-turns (a user message and everything up to
+    the next user message) until the history fits MAX_HISTORY_CHARS. The
+    system message (index 0) and the most recent turn always survive. Returns
+    how many messages were dropped.
+
+    Without this the history grows without bound: every turn re-sends all of
+    it, so prefill latency climbs with session length, and once the prompt
+    exceeds num_ctx Ollama silently truncates the FRONT — the system prompt —
+    after which the model typically degrades into repetition loops (loop.py
+    logs a warning when that happens; this keeps it from happening). Dropping
+    whole turns keeps every assistant tool_call adjacent to its tool results,
+    so the model never sees an orphaned half of a pair."""
+    total = sum(_message_chars(m) for m in history)
+    if total <= MAX_HISTORY_CHARS:
+        return 0
+    starts = [i for i, m in enumerate(history) if m.get("role") == "user"]
+    dropped = 0
+    while total > MAX_HISTORY_CHARS and len(starts) > 1:
+        start, end = starts[0], starts[1]
+        total -= sum(_message_chars(m) for m in history[start:end])
+        del history[start:end]
+        dropped += end - start
+        starts = [i - (end - start) for i in starts[1:]]
+    return dropped
+
+
+def _run_turn(sid: str, history: list, checkpoint: int, stage: str = "turn"):
+    """Advance the session's conversation and shape the HTTP response — the
+    shared back half of /chat and /chat/confirm. On cancel or failure the
+    history is rolled back to `checkpoint` so the next turn starts clean; for
+    /chat/confirm the checkpoint sits after the resolved tool result, which
+    therefore survives the rollback (see that route's comment). Registers the
+    session's cancel Event for /chat/cancel to signal, and always clears it."""
+    cancel = cancel_events[sid] = threading.Event()
+    try:
+        result = advance(history, TOOLS, DISPATCH, confirm_before=WRITE_TOOLS,
+                         logger=logger, should_cancel=cancel.is_set)
+    except TurnCancelled:
+        del history[checkpoint:]  # discard the stopped turn so the next one starts clean
+        logger.info(f"chat {stage} cancelled by user")
+        return jsonify({"type": "cancelled"})
+    except Exception as e:
+        del history[checkpoint:]  # roll back the failed turn so the next one starts clean
+        logger.exception(f"chat {stage} failed: {e}")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cancel_events.pop(sid, None)
+
+    if result["type"] == "confirm":
+        pending_confirmations[sid] = result["call"]
+    return jsonify(_call_response(result))
+
+
 @app.route("/", methods=["GET"])
 def index():
     if not _authenticated():
@@ -389,26 +461,18 @@ def chat():
     if not history:
         history.append({"role": "system", "content": _system_message_content()})
 
+    # Trim before taking the checkpoint — trimming shifts indices, and
+    # _run_turn's rollback slices from the checkpoint.
+    trimmed = _trim_history(history)
+    if trimmed:
+        logger.info(
+            f"trimmed {trimmed} oldest history messages to fit the context budget "
+            f"({MAX_HISTORY_CHARS} chars)"
+        )
+
     checkpoint = len(history)
     history.append({"role": "user", "content": user_message})
-    cancel = cancel_events[sid] = threading.Event()
-    try:
-        result = advance(history, TOOLS, DISPATCH, confirm_before=WRITE_TOOLS,
-                         logger=logger, should_cancel=cancel.is_set)
-    except TurnCancelled:
-        del history[checkpoint:]  # discard the stopped turn so the next one starts clean
-        logger.info("chat turn cancelled by user")
-        return jsonify({"type": "cancelled"})
-    except Exception as e:
-        del history[checkpoint:]  # roll back this failed turn so the next one starts clean
-        logger.exception(f"chat turn failed: {e}")
-        return jsonify({"error": str(e)}), 500
-    finally:
-        cancel_events.pop(sid, None)
-
-    if result["type"] == "confirm":
-        pending_confirmations[sid] = result["call"]
-    return jsonify(_call_response(result))
+    return _run_turn(sid, history, checkpoint)
 
 
 @app.route("/chat/confirm", methods=["POST"])
@@ -424,28 +488,13 @@ def chat_confirm():
 
     history = conversations.setdefault(sid, [])
     # Resolve first (this answers the paused tool_call), then checkpoint — so a
-    # rollback below never strips the tool result and re-orphans that call.
+    # rollback in _run_turn never strips the tool result and re-orphans that
+    # call. No trim here: the in-flight turn is part of the newest user-turn,
+    # which _trim_history always keeps; the next /chat trims.
     resolve(history, call, approved, DISPATCH, logger=logger)
 
     checkpoint = len(history)
-    cancel = cancel_events[sid] = threading.Event()
-    try:
-        result = advance(history, TOOLS, DISPATCH, confirm_before=WRITE_TOOLS,
-                         logger=logger, should_cancel=cancel.is_set)
-    except TurnCancelled:
-        del history[checkpoint:]  # discard the stopped continuation, keep the resolved call
-        logger.info("chat continuation cancelled by user")
-        return jsonify({"type": "cancelled"})
-    except Exception as e:
-        del history[checkpoint:]  # roll back the failed continuation, keep the resolved call
-        logger.exception(f"chat turn failed after confirmation: {e}")
-        return jsonify({"error": str(e)}), 500
-    finally:
-        cancel_events.pop(sid, None)
-
-    if result["type"] == "confirm":
-        pending_confirmations[sid] = result["call"]
-    return jsonify(_call_response(result))
+    return _run_turn(sid, history, checkpoint, stage="continuation")
 
 
 @app.route("/chat/cancel", methods=["POST"])
