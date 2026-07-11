@@ -62,6 +62,38 @@ def test_mark_failed():
     assert background.get_job_result(jid)["status"] == "failed"
 
 
+def test_bump_attempts_counts_up():
+    jid = background.run_in_background("x")["id"]
+    assert background.bump_attempts(jid) == 1
+    assert background.bump_attempts(jid) == 2
+    assert background.bump_attempts("nope") == 0
+
+
+def test_mark_resumed_parks_conversation_back_in_pending():
+    jid = background.run_in_background("x")["id"]
+    _await(jid)
+    background.resolve_job(jid, True)
+    background.mark_resumed(jid, [{"role": "tool", "content": "sent"}])
+    job = background.next_actionable()
+    assert job["id"] == jid and job["status"] == "pending"
+    assert job["messages"] == [{"role": "tool", "content": "sent"}]
+    assert job["pending_call"] is None
+
+
+def test_cli_approve_and_deny_resolve_a_stuck_job(capsys):
+    jid = background.run_in_background("x")["id"]
+    _await(jid)
+    assert background.main(["--approve", jid]) == 0
+    assert background.get_job_result(jid)["status"] == "approved"
+    # No longer awaiting: a second resolve (or a replayed tap) does nothing.
+    assert background.main(["--approve", jid]) == 1
+
+    jid2 = background.run_in_background("y")["id"]
+    _await(jid2)
+    assert background.main(["--deny", jid2]) == 0
+    assert background.get_job_result(jid2)["status"] == "denied"
+
+
 def test_token_roundtrip_and_rejects_garbage():
     tok = background.make_approval_token("j1", "approve")
     assert background.read_approval_token(tok) == {"job": "j1", "decision": "approve"}

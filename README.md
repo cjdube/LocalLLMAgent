@@ -388,7 +388,19 @@ exits, so a reminder lands within about a minute of its time. The background
 worker (`com.craigdube.localllmagent.bgworker.plist`) likewise uses a 30-second
 `StartInterval`, running at most one queued background job per poll; launchd
 never runs two copies of the same job at once, so a long job just delays the
-next poll rather than overlapping.
+next poll rather than overlapping. The worker's idle poll is deliberately
+cheap: the agent stack (Google client libraries etc.) is imported lazily, only
+when a poll actually finds a job to run.
+
+The worker is also resilient to the realities of a local model host: a
+*transient* error (Ollama restarting, a network blip) leaves the job actionable
+and the next poll retries it — up to 3 attempts before it's marked failed — and
+a resolved approval is persisted before the run continues, so a retry can never
+re-execute an already-approved consequential action. A job stuck in
+`awaiting_approval` longer than the 1-hour token lifetime (missed push, expired
+buttons) gets its approval push re-sent with fresh tokens, once per lifetime;
+as a last resort `python -m agent.tools.background --approve <job_id>` /
+`--deny <job_id>` resolves it from the terminal.
 
 Useful commands:
 ```bash

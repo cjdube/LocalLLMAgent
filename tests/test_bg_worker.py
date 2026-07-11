@@ -1,9 +1,16 @@
 """Tests for the background worker's control flow. advance()/resolve() and
 notify() are stubbed (no model, no network, no real sends) and the job store is
 redirected to tmp, so the tests exercise the state machine and — critically —
-the guarantee that a consequential action is never auto-executed."""
+the guarantee that a consequential action is never auto-executed (and, once
+approved, never executed twice)."""
+
+import subprocess
+import sys
+from datetime import datetime, timedelta
+from pathlib import Path
 
 import pytest
+import requests
 
 from agent import toolset
 from agent.tools import background
@@ -138,3 +145,147 @@ def test_no_actionable_job_is_a_noop(monkeypatch):
     calls = _capture_notify(monkeypatch)
     assert bg_worker.main() == 0
     assert calls == []
+
+
+# --------------------------------------------------------------------------- #
+# Transient-error retry
+# --------------------------------------------------------------------------- #
+
+def _raise_connection_error(*a, **k):
+    raise requests.exceptions.ConnectionError("ollama unreachable")
+
+
+def test_transient_error_retries_then_fails_after_bound(monkeypatch):
+    calls = _capture_notify(monkeypatch)
+    failures = []
+    monkeypatch.setattr(bg_worker, "notify_failure", lambda *a, **k: failures.append(a))
+    monkeypatch.setattr(bg_worker, "advance", _raise_connection_error)
+
+    jid = background.run_in_background("research x")["id"]
+
+    # First attempts: job stays actionable, no failure push, exit 0.
+    for _ in range(bg_worker.MAX_TRANSIENT_ATTEMPTS - 1):
+        assert bg_worker.main() == 0
+        assert background.get_job_result(jid)["status"] == "pending"
+        assert failures == []
+
+    # Bound reached: give up for real.
+    assert bg_worker.main() == 1
+    job = background.get_job_result(jid)
+    assert job["status"] == "failed"
+    assert "transient failures" in job["result"]
+    assert failures
+    assert calls == []  # never a bogus "Task done" push
+
+
+def test_non_transient_error_still_fails_immediately(monkeypatch):
+    _capture_notify(monkeypatch)
+    monkeypatch.setattr(bg_worker, "notify_failure", lambda *a, **k: None)
+
+    def boom(*a, **k):
+        raise RuntimeError("logic error")
+
+    monkeypatch.setattr(bg_worker, "advance", boom)
+    jid = background.run_in_background("x")["id"]
+    assert bg_worker.main() == 1
+    assert background.get_job_result(jid)["status"] == "failed"
+
+
+def test_approved_call_is_not_replayed_after_transient_failure(monkeypatch):
+    # The double-send guard: resolve() executes the approved consequential
+    # call, then the continuation dies transiently. The retry must resume from
+    # AFTER the resolved call — never re-enter the approved branch.
+    _capture_notify(monkeypatch)
+    resolve_calls = []
+
+    def fake_resolve(messages, call, approved, dispatch, logger=None):
+        resolve_calls.append(approved)
+        messages.append({"role": "tool", "content": "sent"})
+
+    monkeypatch.setattr(bg_worker, "resolve", fake_resolve)
+    monkeypatch.setattr(bg_worker, "advance", _raise_connection_error)
+
+    jid = background.run_in_background("x")["id"]
+    background.save_awaiting(jid, [{"role": "user", "content": "x"}],
+                             {"function": {"name": "send_email", "arguments": {}}})
+    background.resolve_job(jid, True)  # Craig tapped Approve
+
+    assert bg_worker.main() == 0       # transient failure after the resolve
+    assert resolve_calls == [True]
+    parked = background.next_actionable()
+    assert parked["id"] == jid and parked["status"] == "pending"
+    assert parked["messages"][-1] == {"role": "tool", "content": "sent"}  # persisted
+
+    # Retry succeeds — resolve is NOT called again, the conversation resumes.
+    monkeypatch.setattr(bg_worker, "advance",
+                        lambda *a, **k: {"type": "final", "text": "done"})
+    assert bg_worker.main() == 0
+    assert resolve_calls == [True]
+    assert background.get_job_result(jid)["status"] == "done"
+
+
+# --------------------------------------------------------------------------- #
+# Stale-approval re-push
+# --------------------------------------------------------------------------- #
+
+def _age_job(jid: str, hours: float) -> None:
+    with background.locked(background._STORE_PATH):
+        data = background._load()
+        job = background._find(data["jobs"], jid)
+        job["updated"] = (datetime.now() - timedelta(hours=hours)).isoformat(timespec="seconds")
+        background._save(data)
+
+
+def test_stale_awaiting_job_is_repushed_once_per_lifetime(monkeypatch):
+    calls = _capture_notify(monkeypatch)
+    monkeypatch.setenv("WREN_PUBLIC_URL", "https://host")
+
+    jid = background.run_in_background("x")["id"]
+    background.save_awaiting(jid, [], {"function": {"name": "send_email", "arguments": {}}},
+                             approval_message="Send an email to c@x — approve?")
+    _age_job(jid, hours=2)  # older than the 1h token lifetime
+
+    assert bg_worker.main() == 0
+    assert calls[-1]["title"] == "Wren still needs approval"
+    assert calls[-1]["message"] == "Send an email to c@x — approve?"
+    assert [a["label"] for a in calls[-1]["actions"]] == ["Approve", "Deny"]
+    assert background.get_job_result(jid)["status"] == "awaiting_approval"
+
+    # touch() reset the clock: the next idle poll does not re-push again.
+    n = len(calls)
+    assert bg_worker.main() == 0
+    assert len(calls) == n
+
+
+def test_fresh_awaiting_job_is_not_repushed(monkeypatch):
+    calls = _capture_notify(monkeypatch)
+    jid = background.run_in_background("x")["id"]
+    background.save_awaiting(jid, [], {"function": {"name": "send_email", "arguments": {}}},
+                             approval_message="m")
+    assert bg_worker.main() == 0
+    assert calls == []
+
+
+# --------------------------------------------------------------------------- #
+# Lazy imports — the 30-second idle poll must not pay the agent-stack tax
+# --------------------------------------------------------------------------- #
+
+def test_idle_poll_never_imports_the_heavy_stack(tmp_path):
+    # A real child interpreter (the shape launchd actually runs): point the
+    # store at an empty tmp file, run an idle poll, then assert none of the
+    # heavy modules were ever imported.
+    code = "\n".join([
+        "import pathlib, sys",
+        "import agent.tools.background as background",
+        f"background._STORE_PATH = pathlib.Path({str(tmp_path / 'bg_jobs.json')!r})",
+        "import tasks.bg_worker as w",
+        "assert w.main() == 0",
+        "for heavy in ('agent.toolset', 'agent.loop', 'tasks.morning_brief', 'googleapiclient'):",
+        "    assert heavy not in sys.modules, heavy + ' imported on the idle path'",
+    ])
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=str(Path(__file__).resolve().parent.parent),
+        capture_output=True, text=True, timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr

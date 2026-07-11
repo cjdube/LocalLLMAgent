@@ -19,6 +19,8 @@ A job moves through:
 
 Usage:
     python -m agent.tools.background --list
+    python -m agent.tools.background --approve <job_id>   # CLI fallback when the
+    python -m agent.tools.background --deny <job_id>      # push buttons expired
 """
 
 import argparse
@@ -127,6 +129,7 @@ def run_in_background(task: str) -> dict:
         "messages": None,
         "pending_call": None,
         "result": None,
+        "attempts": 0,
         "created": _now(),
         "updated": _now(),
     }
@@ -180,9 +183,22 @@ def _update(job_id: str, **fields) -> None:
         _save(data)
 
 
-def save_awaiting(job_id: str, messages: list, pending_call: dict) -> None:
-    """Persist a paused run: its full conversation + the call awaiting approval."""
-    _update(job_id, status="awaiting_approval", messages=messages, pending_call=pending_call)
+def save_awaiting(job_id: str, messages: list, pending_call: dict,
+                  approval_message: str | None = None) -> None:
+    """Persist a paused run: its full conversation + the call awaiting approval.
+    approval_message is the human text of the approval push, stored so a
+    re-push for a stale job (see stale_awaiting) doesn't need the heavy
+    describer stack the worker only loads when actually running a job."""
+    _update(job_id, status="awaiting_approval", messages=messages,
+            pending_call=pending_call, approval_message=approval_message)
+
+
+def mark_resumed(job_id: str, messages: list) -> None:
+    """Persist the conversation right after a resolved approval/denial and hand
+    the job back to the pending queue. Persisting at this boundary makes a
+    transient-failure retry resume from AFTER the resolved call — so an
+    approved consequential action can't execute a second time."""
+    _update(job_id, status="pending", messages=messages, pending_call=None)
 
 
 def mark_done(job_id: str, result: str) -> None:
@@ -191,6 +207,46 @@ def mark_done(job_id: str, result: str) -> None:
 
 def mark_failed(job_id: str, error: str) -> None:
     _update(job_id, status="failed", result=f"failed: {error}", messages=None, pending_call=None)
+
+
+def bump_attempts(job_id: str) -> int:
+    """Increment and return the job's transient-failure attempt count (the
+    worker retries a transient error a bounded number of times)."""
+    with locked(_STORE_PATH):
+        data = _load()
+        job = _find(data["jobs"], job_id)
+        if job is None:
+            return 0
+        job["attempts"] = job.get("attempts", 0) + 1
+        job["updated"] = _now()
+        _save(data)
+        return job["attempts"]
+
+
+def stale_awaiting(max_age_s: int, now: datetime | None = None) -> list:
+    """Jobs stuck in awaiting_approval whose last update is older than
+    max_age_s — i.e. their approval push's tokens have expired (or it never had
+    buttons because WREN_PUBLIC_URL was unset). The worker re-pushes these;
+    touch() resets the clock so each re-push happens once per interval."""
+    now = now or datetime.now()
+    out = []
+    with locked(_STORE_PATH):
+        jobs = _load()["jobs"]
+    for j in jobs:
+        if j["status"] != "awaiting_approval":
+            continue
+        try:
+            age = (now - datetime.fromisoformat(j["updated"])).total_seconds()
+        except (ValueError, TypeError):
+            age = max_age_s + 1  # unparseable timestamp: treat as stale
+        if age > max_age_s:
+            out.append(j)
+    return out
+
+
+def touch(job_id: str) -> None:
+    """Refresh the job's updated timestamp (e.g. after re-pushing its approval)."""
+    _update(job_id)
 
 
 def resolve_job(job_id: str, approved: bool) -> bool:
@@ -245,10 +301,22 @@ def approval_actions(job_id: str) -> list | None:
     ]
 
 
-def main() -> int:
+def main(argv: list | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--list", action="store_true")
-    args = parser.parse_args()
+    parser.add_argument("--approve", metavar="JOB_ID",
+                        help="approve a job stuck awaiting_approval (fallback "
+                        "when the push's buttons expired or never rendered)")
+    parser.add_argument("--deny", metavar="JOB_ID", help="deny a job awaiting approval")
+    args = parser.parse_args(argv)
+    if args.approve or args.deny:
+        job_id = args.approve or args.deny
+        applied = resolve_job(job_id, approved=bool(args.approve))
+        print(json.dumps({"ok": applied, "job": job_id,
+                          "decision": "approve" if args.approve else "deny"}))
+        if not applied:
+            print(f"no job {job_id!r} awaiting approval", file=sys.stderr)
+        return 0 if applied else 1
     if args.list:
         print(json.dumps(list_background_jobs(), indent=2))
     return 0
