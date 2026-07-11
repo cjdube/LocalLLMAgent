@@ -533,10 +533,16 @@ def test_api_watchlist_add_and_remove(auth_client, opp_store):
 # Research triggers (the pipeline itself is covered in test_research.py)
 # --------------------------------------------------------------------------- #
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def research_spy(monkeypatch):
     """Replace the thread-spawning runner with a recorder that also writes the
-    pending marker, mirroring the real _start_research's synchronous half."""
+    pending marker, mirroring the real _start_research's synchronous half.
+
+    Autouse for the whole file: any status POST can trigger _start_research,
+    and the real one spawns a daemon thread running the real pipeline. A
+    thread that outlives its test races monkeypatch teardown — it once loaded
+    a tmp-store's fixture data and saved it over the production store when
+    the path monkeypatch was undone mid-write. No test may spawn it."""
     from agent.tools import opportunities as opp
     started = []
 
