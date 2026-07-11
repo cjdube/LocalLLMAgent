@@ -173,6 +173,35 @@ def test_stalled_opening_reported_exactly_once(stubbed_run, monkeypatch):
     assert len(stubbed_run["emails"]) == 1
 
 
+def test_stalled_flip_rescores_under_the_new_signal(stubbed_run, monkeypatch):
+    """A posting digested as 'hiring' crosses the stalled threshold later: it
+    re-enters the digest and gets a FRESH score/angle — the hiring-era ones
+    are shed on flip, since the stall is the stronger signal."""
+    def posting(days_old):
+        return {"id": "greenhouse:acme:1", "source": "ats", "signal": "hiring",
+                "company": "Acme", "title": "VP of Engineering",
+                "url": "https://boards.greenhouse.io/acme/1",
+                "posted_at": (datetime.now() - timedelta(days=days_old))
+                             .isoformat(timespec="seconds")}
+
+    monkeypatch.setattr(od, "poll_edgar", lambda *a: {"items": []})
+    monkeypatch.setattr(od, "poll_ats",
+                        lambda wl: {"items": [posting(10)], "errors": []})
+    monkeypatch.setattr(od, "complete_text",
+                        lambda **k: "greenhouse:acme:1|4|Just posted, wait.")
+    assert od.main() == 0
+    assert "4/10" in stubbed_run["emails"][0][1]
+
+    # 50 days later the board still lists the same posting.
+    monkeypatch.setattr(od, "poll_ats",
+                        lambda wl: {"items": [posting(60)], "errors": []})
+    monkeypatch.setattr(od, "complete_text",
+                        lambda **k: "greenhouse:acme:1|9|Seat's been open 60 days — offer to bridge.")
+    assert od.main() == 0
+    body = stubbed_run["emails"][1][1]
+    assert "Stalled Searches" in body and "9/10" in body and "bridge" in body
+
+
 def test_digest_html_escapes_and_guards_urls(stubbed_run, monkeypatch):
     hostile = {"id": "hn:x", "source": "hn", "signal": "hiring",
                "company": "<script>alert(1)</script>",

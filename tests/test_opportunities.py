@@ -101,11 +101,14 @@ def test_flip_stalled_by_posted_age_and_only_once():
     old = _candidate("greenhouse:acme:1", "hiring", posted_at=_days_ago_iso(60))
     fresh = _candidate("greenhouse:acme:2", "hiring", posted_at=_days_ago_iso(10))
     opp.insert_new_items([old, fresh])
+    opp.record_scores({"greenhouse:acme:1": (4, "Just posted, wait and see.")})
 
     open_postings = {c["id"]: c["posted_at"] for c in (old, fresh)}
     flipped = opp.flip_stalled(open_postings, stalled_days=45)
     assert [i["id"] for i in flipped] == ["greenhouse:acme:1"]
     assert flipped[0]["signal"] == "stalled_search" and flipped[0]["status"] == "new"
+    # The hiring-era score/angle are shed so the stall gets re-scored.
+    assert "score" not in flipped[0] and "angle" not in flipped[0]
 
     # Second sweep with the same board state: already flipped, nothing repeats.
     assert opp.flip_stalled(open_postings, stalled_days=45) == []

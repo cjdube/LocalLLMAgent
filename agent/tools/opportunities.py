@@ -292,8 +292,9 @@ def flip_stalled(open_postings: dict, stalled_days: int, now: datetime | None = 
     the board provides one, else from when the scout first saw it. Only
     'hiring' items flip — so each flips exactly once, since the age check
     would otherwise match on every later run — and dismissed ones stay
-    dismissed. Flipped items return to status 'new' so the next digest
-    reports the stall. Returns the flipped items."""
+    dismissed. Flipped items return to status 'new' and shed any prior
+    score/angle so the next digest reports the stall and re-scores it under
+    the stronger signal. Returns the flipped items."""
     now = now or datetime.now()
     flipped = []
     with locked(_STORE_PATH):
@@ -308,6 +309,8 @@ def flip_stalled(open_postings: dict, stalled_days: int, now: datetime | None = 
                 continue
             item["signal"] = "stalled_search"
             item["status"] = "new"
+            item.pop("score", None)
+            item.pop("angle", None)
             item["updated"] = _now()
             flipped.append(item)
         if flipped:

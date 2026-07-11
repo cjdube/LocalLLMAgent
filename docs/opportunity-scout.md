@@ -96,12 +96,12 @@ new signal about the same posting.
 
 ## Do scores change over time?
 
-No — an item is scored once, when it's new, and the score is frozen. Known
-gap: when an opening flips from `hiring` to `stalled_search` it re-enters the
-digest but keeps its original score and angle, even though the stall is the
-stronger signal. If that starts to matter (i.e. once the watchlist is
-populated), the fix is to clear the score on flip so the next digest re-scores
-it under its new signal.
+An item is scored when it's new and the score then stays put — with one
+deliberate exception: when an opening flips from `hiring` to `stalled_search`,
+the flip sheds the old score and outreach angle, so the next digest re-scores
+it under the stronger signal (the scoring prompt anchors long-open leadership
+seats high). Nothing else re-scores; interested/dismissed/digested items keep
+whatever score they got.
 
 ## Research briefs
 
