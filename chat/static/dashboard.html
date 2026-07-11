@@ -341,9 +341,18 @@ async function runNow(task, btn) {
     return;
   }
   btn.textContent = "Running…";
+  let failures = 0;
   const timer = setInterval(async () => {
-    const st = await api("/api/run/" + encodeURIComponent(task.key) + "/status");
-    if (!st.running) { clearInterval(timer); loadTasks(); }
+    // A rejected fetch (server restart, dropped network, expired session)
+    // must eventually stop the poll — otherwise a forgotten tab polls
+    // forever. Tolerate a few blips, then give up and let a reload resume.
+    try {
+      const st = await api("/api/run/" + encodeURIComponent(task.key) + "/status");
+      failures = 0;
+      if (!st.running) { clearInterval(timer); loadTasks(); }
+    } catch (e) {
+      if (++failures >= 5) { clearInterval(timer); loadTasks(); }
+    }
   }, 2500);
 }
 

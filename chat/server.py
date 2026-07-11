@@ -227,11 +227,43 @@ logger.setLevel(logging.INFO)
 conversations: dict[str, list[dict]] = {}
 pending_confirmations: dict[str, dict] = {}
 # A per-session cancel signal for the turn currently running in another request
-# thread. /chat and /chat/confirm register a fresh Event before advancing and
-# hand advance() its .is_set; /chat/cancel sets it. Keyed by sid, cleared when
-# the turn ends. (Flask runs with threaded=True, so the cancelling request and
-# the blocked turn are different threads sharing this dict.)
+# thread. /chat and /chat/confirm register a fresh Event (via _begin_turn)
+# before advancing and hand advance() its .is_set; /chat/cancel sets it. Keyed
+# by sid, cleared when the turn ends. (Flask runs with threaded=True, so the
+# cancelling request and the blocked turn are different threads sharing this
+# dict.) Membership doubles as the "a turn is running" flag: a second /chat for
+# the same sid gets 409 instead of interleaving into the same history.
 cancel_events: dict[str, threading.Event] = {}
+_turn_registry_lock = threading.Lock()
+
+# Sessions idle past this are evicted on the next /chat from anyone — the
+# server runs for months under launchd, and every device/re-login mints a new
+# sid whose history would otherwise sit in RAM until restart.
+SESSION_IDLE_EVICT_S = 24 * 3600
+_session_last_active: dict[str, float] = {}
+
+
+def _begin_turn(sid: str) -> threading.Event | None:
+    """Register this request as the session's one running turn and return its
+    cancel Event, or None if a turn is already running (caller answers 409).
+    Registration is atomic under a lock: two concurrent requests for one sid
+    would otherwise interleave appends into the same history mid-advance() and
+    clobber each other's cancel Event."""
+    with _turn_registry_lock:
+        if sid in cancel_events:
+            return None
+        event = cancel_events[sid] = threading.Event()
+        return event
+
+
+def _evict_idle_sessions() -> None:
+    cutoff = time.time() - SESSION_IDLE_EVICT_S
+    for sid in [s for s, t in _session_last_active.items() if t < cutoff]:
+        if sid in cancel_events:
+            continue  # a turn is somehow still running; leave it alone
+        conversations.pop(sid, None)
+        pending_confirmations.pop(sid, None)
+        _session_last_active.pop(sid, None)
 
 # Triggers scheduled tasks on demand for the dashboard's "Run now" button.
 run_manager = RunManager()
@@ -272,11 +304,25 @@ class LoginThrottle:
     WINDOW_S = 300
     BASE_LOCKOUT_S = 30
     MAX_LOCKOUT_S = 900
+    # Failed-only keys are otherwise never removed (success is the only other
+    # cleanup), so a scanner cycling addresses could grow _state without bound.
+    # Past this size, record_failure first drops entries that are neither
+    # locked out nor inside an active failure window.
+    MAX_TRACKED = 1000
 
     def __init__(self, clock=time.monotonic):
         self._clock = clock
         self._lock = threading.Lock()
         self._state: dict[str, dict] = {}
+
+    def _sweep_stale(self, now: float) -> None:
+        # Caller holds self._lock.
+        stale = [
+            k for k, e in self._state.items()
+            if e["locked_until"] <= now and now - e["window_start"] > self.WINDOW_S
+        ]
+        for k in stale:
+            del self._state[k]
 
     def retry_after(self, key: str) -> float:
         """Seconds the caller must still wait, or 0 if an attempt is allowed now."""
@@ -290,6 +336,8 @@ class LoginThrottle:
     def record_failure(self, key: str) -> None:
         now = self._clock()
         with self._lock:
+            if len(self._state) >= self.MAX_TRACKED:
+                self._sweep_stale(now)
             entry = self._state.get(key)
             if not entry or now - entry["window_start"] > self.WINDOW_S:
                 entry = {"failures": 0, "window_start": now, "lockouts": 0, "locked_until": 0.0}
@@ -308,13 +356,19 @@ class LoginThrottle:
 
 
 def _client_ip() -> str:
-    # `tailscale serve` reverse-proxies from loopback, so remote_addr is
-    # 127.0.0.1 for real users; prefer the first hop it records in
-    # X-Forwarded-For when that header is present.
+    """The login throttle's key. `tailscale serve` reverse-proxies from
+    loopback and records the real client in X-Forwarded-For, so the header is
+    honored only when the peer IS loopback — a direct (non-proxied) client
+    could otherwise rotate a spoofed XFF value per attempt and dodge the
+    lockout entirely. The LAST entry is used because that's the hop appended
+    by the nearest (trusted) proxy; earlier entries are client-supplied."""
+    remote = request.remote_addr or "unknown"
+    if remote not in ("127.0.0.1", "::1"):
+        return remote
     forwarded = request.headers.get("X-Forwarded-For", "")
     if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.remote_addr or "unknown"
+        return forwarded.split(",")[-1].strip()
+    return remote
 
 
 # Rate-limits failed /login attempts per client (defense-in-depth; see class).
@@ -383,14 +437,15 @@ def _trim_history(history: list) -> int:
     return dropped
 
 
-def _run_turn(sid: str, history: list, checkpoint: int, stage: str = "turn"):
+def _run_turn(sid: str, history: list, checkpoint: int, cancel: threading.Event,
+              stage: str = "turn"):
     """Advance the session's conversation and shape the HTTP response — the
     shared back half of /chat and /chat/confirm. On cancel or failure the
     history is rolled back to `checkpoint` so the next turn starts clean; for
     /chat/confirm the checkpoint sits after the resolved tool result, which
-    therefore survives the rollback (see that route's comment). Registers the
-    session's cancel Event for /chat/cancel to signal, and always clears it."""
-    cancel = cancel_events[sid] = threading.Event()
+    therefore survives the rollback (see that route's comment). `cancel` is
+    the Event _begin_turn registered for this sid; it is always deregistered
+    on the way out, which also releases the session's one-turn slot."""
     try:
         result = advance(history, TOOLS, DISPATCH, confirm_before=WRITE_TOOLS,
                          logger=logger, should_cancel=cancel.is_set)
@@ -449,6 +504,12 @@ def chat():
         return jsonify({"error": "message too long"}), 400
 
     sid = _session_id()
+    cancel = _begin_turn(sid)
+    if cancel is None:
+        return jsonify({"error": "a turn is already running for this session"}), 409
+
+    _evict_idle_sessions()
+    _session_last_active[sid] = time.time()
     history = conversations.setdefault(sid, [])
 
     # If a write action was awaiting confirmation and the user sent a new
@@ -472,7 +533,7 @@ def chat():
 
     checkpoint = len(history)
     history.append({"role": "user", "content": user_message})
-    return _run_turn(sid, history, checkpoint)
+    return _run_turn(sid, history, checkpoint, cancel)
 
 
 @app.route("/chat/confirm", methods=["POST"])
@@ -482,10 +543,16 @@ def chat_confirm():
 
     approved = bool((request.get_json() or {}).get("approved"))
     sid = _session_id()
+    cancel = _begin_turn(sid)
+    if cancel is None:
+        return jsonify({"error": "a turn is already running for this session"}), 409
+
     call = pending_confirmations.pop(sid, None)
     if call is None:
+        cancel_events.pop(sid, None)  # release the turn slot taken above
         return jsonify({"error": "no pending action"}), 400
 
+    _session_last_active[sid] = time.time()
     history = conversations.setdefault(sid, [])
     # Resolve first (this answers the paused tool_call), then checkpoint — so a
     # rollback in _run_turn never strips the tool result and re-orphans that
@@ -494,7 +561,7 @@ def chat_confirm():
     resolve(history, call, approved, DISPATCH, logger=logger)
 
     checkpoint = len(history)
-    return _run_turn(sid, history, checkpoint, stage="continuation")
+    return _run_turn(sid, history, checkpoint, cancel, stage="continuation")
 
 
 @app.route("/chat/cancel", methods=["POST"])
@@ -518,6 +585,7 @@ def chat_new():
     sid = _session_id()
     conversations.pop(sid, None)
     pending_confirmations.pop(sid, None)
+    _session_last_active.pop(sid, None)
     return jsonify({"ok": True})
 
 
@@ -542,7 +610,7 @@ def map_page():
     return send_from_directory(STATIC_DIR, "map.html")
 
 
-@app.route("/api/bg/resolve", methods=["POST", "GET"])
+@app.route("/api/bg/resolve", methods=["POST"])
 def bg_resolve():
     """Approve/deny a background job's paused action from an ntfy button tap.
 
@@ -551,7 +619,9 @@ def bg_resolve():
     directly). The token is HMAC-signed with a ~1h expiry; single-use falls out
     of the job state machine (resolve_job only acts on an awaiting_approval job,
     so a replay finds nothing to do). It does exactly one thing and logs every
-    hit."""
+    hit. POST only — the ntfy action buttons send POST (see
+    background.approval_actions), and a GET mutating endpoint invites
+    prefetchers and leaves the token in more access logs than it needs to."""
     token = request.args.get("token", "")
     payload = background.read_approval_token(token)
     if payload is None:

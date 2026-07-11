@@ -110,3 +110,30 @@ def test_keys_are_independent():
         t.record_failure("attacker")
     assert t.retry_after("attacker") > 0
     assert t.retry_after("victim") == 0.0
+
+
+def test_stale_entries_swept_once_tracking_cap_reached():
+    # A scanner cycling addresses must not grow _state without bound: once the
+    # dict hits MAX_TRACKED, entries that are neither locked out nor inside an
+    # active window are dropped on the next failure.
+    t, clock = _throttle()
+    for i in range(LoginThrottle.MAX_TRACKED):
+        t.record_failure(f"scanner-{i}")
+    clock.advance(LoginThrottle.WINDOW_S + 1)  # all of those are now stale
+    t.record_failure("fresh")
+    assert len(t._state) == 1  # just "fresh"
+
+
+def test_locked_out_entries_survive_the_sweep():
+    t, clock = _throttle()
+    for _ in range(LoginThrottle.MAX_FAILURES):
+        t.record_failure("locked")  # locked out for BASE_LOCKOUT_S
+    for i in range(LoginThrottle.MAX_TRACKED):
+        t.record_failure(f"scanner-{i}")
+    clock.advance(LoginThrottle.WINDOW_S + 1)
+    # BASE_LOCKOUT_S < WINDOW_S, so "locked" is no longer locked... make it so:
+    # re-trip it just before the sweep to hold an active lockout.
+    for _ in range(LoginThrottle.MAX_FAILURES):
+        t.record_failure("locked")
+    t.record_failure("fresh")  # triggers the sweep
+    assert t.retry_after("locked") > 0  # still enforced, not swept

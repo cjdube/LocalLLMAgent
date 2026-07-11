@@ -12,6 +12,7 @@ two required secrets are stubbed into the environment before the import.
 
 import os
 import threading
+import time
 
 os.environ.setdefault("WREN_CHAT_TOKEN", "test-token")
 os.environ.setdefault("FLASK_SECRET_KEY", "test-secret")
@@ -28,6 +29,7 @@ def client():
     srv.conversations.clear()
     srv.pending_confirmations.clear()
     srv.cancel_events.clear()
+    srv._session_last_active.clear()
     with srv.app.test_client() as c:
         yield c
 
@@ -90,6 +92,22 @@ def test_login_throttle_returns_429_after_repeated_failures(client):
     resp = client.post("/login", data={"token": "wrong"}, headers=ip)
     assert resp.status_code == 429
     assert "Retry-After" in resp.headers
+
+
+def test_login_throttle_ignores_spoofed_xff_from_direct_clients(client):
+    # X-Forwarded-For is only honored when the peer is loopback (the
+    # `tailscale serve` shape). A direct client rotating the header per
+    # attempt must still be keyed by its real address — and locked out.
+    direct = {"REMOTE_ADDR": "198.51.100.7"}
+    for i in range(srv.LoginThrottle.MAX_FAILURES):
+        resp = client.post("/login", data={"token": "wrong"},
+                           headers={"X-Forwarded-For": f"10.0.0.{i}"},
+                           environ_base=direct)
+        assert resp.status_code == 401
+    resp = client.post("/login", data={"token": "wrong"},
+                       headers={"X-Forwarded-For": "10.0.0.99"},
+                       environ_base=direct)
+    assert resp.status_code == 429
 
 
 # --------------------------------------------------------------------------- #
@@ -279,6 +297,53 @@ def test_chat_confirm_without_pending_is_400(auth_client):
     resp = auth_client.post("/chat/confirm", json={"approved": True})
     assert resp.status_code == 400
     assert resp.get_json()["error"] == "no pending action"
+    # The 400 path must release the turn slot it briefly claimed, or the
+    # session would be stuck answering 409 forever.
+    assert SID not in srv.cancel_events
+
+
+# --------------------------------------------------------------------------- #
+# One turn per session — concurrent requests get 409, not interleaved history
+# --------------------------------------------------------------------------- #
+
+def test_second_chat_while_turn_running_is_409(auth_client):
+    srv.cancel_events[SID] = threading.Event()  # a turn is mid-flight
+    resp = auth_client.post("/chat", json={"message": "impatient double-send"})
+    assert resp.status_code == 409
+    assert "already running" in resp.get_json()["error"]
+    # The running turn's cancel Event was not clobbered.
+    assert SID in srv.cancel_events
+
+
+def test_chat_confirm_while_turn_running_is_409(auth_client):
+    srv.cancel_events[SID] = threading.Event()
+    srv.pending_confirmations[SID] = EMAIL_CALL
+    resp = auth_client.post("/chat/confirm", json={"approved": True})
+    assert resp.status_code == 409
+    # The pending confirmation is untouched — answerable once the turn ends.
+    assert srv.pending_confirmations[SID] == EMAIL_CALL
+
+
+# --------------------------------------------------------------------------- #
+# Idle-session eviction
+# --------------------------------------------------------------------------- #
+
+def test_idle_sessions_evicted_on_next_chat(auth_client, monkeypatch):
+    srv.conversations["stale-sid"] = [{"role": "system", "content": "s"}]
+    srv.pending_confirmations["stale-sid"] = EMAIL_CALL
+    srv._session_last_active["stale-sid"] = time.time() - srv.SESSION_IDLE_EVICT_S - 1
+    srv.conversations["fresh-sid"] = [{"role": "system", "content": "s"}]
+    srv._session_last_active["fresh-sid"] = time.time()
+
+    monkeypatch.setattr(srv, "advance",
+                        lambda *a, **k: {"type": "final", "text": "hi"})
+    resp = auth_client.post("/chat", json={"message": "hello"})
+    assert resp.status_code == 200
+
+    assert "stale-sid" not in srv.conversations
+    assert "stale-sid" not in srv.pending_confirmations
+    assert "fresh-sid" in srv.conversations
+    assert SID in srv.conversations  # the active session obviously survives
 
 
 # --------------------------------------------------------------------------- #
