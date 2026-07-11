@@ -229,6 +229,54 @@ def test_digest_footer_absent_without_public_url(stubbed_run, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# _ats_board_jobs — iCIMS sitemap parsing
+# --------------------------------------------------------------------------- #
+
+_ICIMS_SITEMAP = b"""<?xml version='1.0' encoding='utf-8'?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://corporatecareers-acme.icims.com/jobs/intro</loc></url>
+  <url><loc>https://corporatecareers-acme.icims.com/jobs/20089/director%2c-engineering-technology/job</loc>
+    <lastmod>2026-07-10T11:56:56-04:00</lastmod></url>
+  <url><loc>https://corporatecareers-acme.icims.com/jobs/14941/senior-android-engineer/job</loc></url>
+</urlset>"""
+
+
+class _SitemapResp:
+    content = _ICIMS_SITEMAP
+
+    def raise_for_status(self):
+        pass
+
+
+def test_icims_board_parses_sitemap_and_filters_titles(monkeypatch):
+    monkeypatch.setattr(od.requests, "get", lambda *a, **k: _SitemapResp())
+    entry = {"ats": "icims", "slug": "corporatecareers-acme", "company": "Acme"}
+    jobs = od._ats_board_jobs(entry)
+    assert len(jobs) == 1  # intro page and non-leadership title dropped
+    job = jobs[0]
+    assert job["id"] == "icims:corporatecareers-acme:20089"
+    assert job["title"] == "director, engineering technology"  # slug decoded
+    assert job["url"].endswith("/jobs/20089/director%2c-engineering-technology/job")
+    # lastmod moves on any edit, so it is deliberately NOT used as posted_at:
+    # the stalled clock runs from first_seen instead.
+    assert job["posted_at"] is None
+    assert job["signal"] == "hiring" and job["company"] == "Acme"
+
+
+def test_icims_malformed_sitemap_degrades_per_board(monkeypatch):
+    class _Garbage:
+        content = b"not xml at all"
+
+        def raise_for_status(self):
+            pass
+
+    monkeypatch.setattr(od.requests, "get", lambda *a, **k: _Garbage())
+    result = od.poll_ats([{"ats": "icims", "slug": "x", "company": "X"}])
+    assert result["items"] == []
+    assert len(result["errors"]) == 1
+
+
+# --------------------------------------------------------------------------- #
 # poll_edgar — fund-name filtering and serial-filer collapsing
 # --------------------------------------------------------------------------- #
 

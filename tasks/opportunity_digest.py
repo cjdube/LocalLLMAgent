@@ -31,7 +31,8 @@ import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
+from xml.etree import ElementTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -207,6 +208,10 @@ def _is_leadership(title: str) -> bool:
     return bool(_LEADERSHIP_RE.search(title or ""))
 
 
+# iCIMS job URLs in the portal sitemap: /jobs/<numeric id>/<title-slug>/job
+_ICIMS_JOB_URL_RE = re.compile(r"https://[^/]+\.icims\.com/jobs/(\d+)/([^/]+)/job$")
+
+
 def _lever_iso(created_ms) -> Optional[str]:
     try:
         return datetime.fromtimestamp(int(created_ms) / 1000, tz=timezone.utc).isoformat()
@@ -265,6 +270,32 @@ def _ats_board_jobs(entry: dict) -> list:
                 "location": job.get("location", ""),
                 "posted_at": job.get("publishedAt"),
             })
+    elif ats == "icims":
+        # iCIMS has no public JSON board API (its RSS endpoint renders HTML),
+        # but the portal's robots.txt publishes a sitemap listing every open
+        # job. Titles come from the URL slug; lastmod moves on any edit so
+        # there's no trustworthy posted date — posted_at stays None and the
+        # stalled clock runs from first_seen.
+        resp = requests.get(f"https://{slug}.icims.com/sitemap.xml", timeout=_TIMEOUT_S)
+        resp.raise_for_status()
+        root = ElementTree.fromstring(resp.content)
+        for node in root.iter():
+            if not node.tag.endswith("}loc"):
+                continue
+            match = _ICIMS_JOB_URL_RE.match((node.text or "").strip())
+            if not match:
+                continue
+            job_id, title_slug = match.groups()
+            title = unquote(title_slug).replace("-", " ")
+            if not _is_leadership(title):
+                continue
+            out.append({
+                "id": f"icims:{slug}:{job_id}",
+                "title": title,
+                "url": match.group(0),
+                "location": "",
+                "posted_at": None,
+            })
     for job in out:
         job.update({"source": "ats", "signal": "hiring", "company": company})
     return out
@@ -277,7 +308,8 @@ def poll_ats(watchlist: list) -> dict:
     for entry in watchlist:
         try:
             items.extend(_ats_board_jobs(entry))
-        except (requests.exceptions.RequestException, ValueError) as e:
+        except (requests.exceptions.RequestException, ValueError,
+                ElementTree.ParseError) as e:
             errors.append(f"{entry['company']} ({entry['ats']}/{entry['slug']}): {e}")
     return {"items": items, "errors": errors}
 

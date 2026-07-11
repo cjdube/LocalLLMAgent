@@ -32,7 +32,7 @@ from agent.store import atomic_write_json, load_json, locked
 _ROOT = Path(__file__).resolve().parent.parent.parent
 _STORE_PATH = _ROOT / "config" / "opportunities.json"
 
-_ATS_KINDS = ("greenhouse", "lever", "ashby")
+_ATS_KINDS = ("greenhouse", "lever", "ashby", "icims")
 
 # Craig acts on an item by marking it; everything else is lifecycle the digest
 # task manages ("new" -> scored + emailed -> "digested").
@@ -90,8 +90,9 @@ WATCH_COMPANY_TOOL_SCHEMA = {
         "description": "Add a company to the opportunity watchlist: the daily scout polls its "
         "public job board for product/engineering leadership openings and flags any that stay "
         "open past the stalled-search threshold. Needs which ATS the company uses (greenhouse, "
-        "lever, or ashby) and its board slug — the identifier in its job-board URL, e.g. "
-        "boards.greenhouse.io/<slug> or jobs.lever.co/<slug> or jobs.ashbyhq.com/<slug>.",
+        "lever, ashby, or icims) and its board slug — the identifier in its job-board URL, e.g. "
+        "boards.greenhouse.io/<slug>, jobs.lever.co/<slug>, jobs.ashbyhq.com/<slug>, or "
+        "<slug>.icims.com.",
         "parameters": {
             "type": "object",
             "properties": {

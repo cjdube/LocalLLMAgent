@@ -226,7 +226,7 @@ function renderWatchlist(watchlist, wrap) {
   const form = el("form", "add");
   const company = el("input"); company.placeholder = "Company"; company.required = true;
   const ats = el("select");
-  ["greenhouse", "lever", "ashby"].forEach(k => {
+  ["greenhouse", "lever", "ashby", "icims"].forEach(k => {
     const o = el("option", null, k); o.value = k; ats.appendChild(o);
   });
   const slug = el("input"); slug.placeholder = "Board slug"; slug.required = true;

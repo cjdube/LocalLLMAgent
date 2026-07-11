@@ -32,11 +32,21 @@ one dead feed never kills the digest.
    `config/opportunities_state.json`. Fund/trust/SPV/series-LLC paperwork is
    filtered out by name (`_FUND_NAME_RE`), and multiple same-day filings by
    one filer collapse into a single entry with an "(N filings)" count.
-2. **The ATS watchlist** — the public job boards (Greenhouse/Lever/Ashby) of
-   companies added to the watchlist, filtered to product/eng leadership titles
-   (VP/Head/Director/CPO/CTO of product or engineering). The watchlist starts
-   empty; curate it in chat ("watch Acme on greenhouse as acme") or on the
-   `/opportunities` page.
+2. **The ATS watchlist** — the public job boards of companies added to the
+   watchlist, filtered to product/eng leadership titles (VP/Head/Director/
+   CPO/CTO of product or engineering). Four ATSes are supported; the board
+   slug is the company's identifier in its careers-page URL:
+   - Greenhouse (`boards.greenhouse.io/<slug>`), Lever
+     (`jobs.lever.co/<slug>`), Ashby (`jobs.ashbyhq.com/<slug>`) — public
+     JSON board APIs, with real posted dates.
+   - iCIMS (`<slug>.icims.com`, common at larger companies) — no public JSON
+     API, so the scout reads the portal's robots.txt-published sitemap
+     instead: job id and title come from the URL, and since the sitemap has
+     no trustworthy posted date, the stalled clock runs from when Wren first
+     sees the opening.
+
+   Curate the watchlist in chat ("watch Acme on greenhouse as acme") or on
+   the `/opportunities` page.
 3. **HN "Who is hiring"** — the current month's thread, keyword-filtered to
    leadership/fractional-flavored top-level posts.
 
