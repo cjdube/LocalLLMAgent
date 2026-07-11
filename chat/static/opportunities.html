@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wren Opportunities</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="alternate icon" type="image/png" href="/static/favicon-32.png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    color: #1f2328;
+    background: #f4f4f5;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    background: #ffffff;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  header img.logo { height: 38px; width: 38px; border-radius: 9px; display: block; }
+  header h1 { font-size: 17px; margin: 0; }
+  header .sub { font-size: 13px; color: #9ca3af; }
+  header .spacer { flex: 1; }
+  header a.nav { font-size: 13px; color: #6b7280; text-decoration: none; margin-left: 12px; }
+  header a.nav:hover { color: #1f2328; }
+
+  main { max-width: 900px; margin: 0 auto; padding: 20px 18px 40px; display: flex; flex-direction: column; gap: 22px; }
+  .section-label { font-size: 13px; font-weight: 600; color: #6b7280; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: baseline; }
+  .section-label .hint { font-weight: 400; font-size: 12px; color: #9ca3af; }
+
+  .panel { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 6px 0; }
+  .empty { color: #9ca3af; font-size: 13px; padding: 10px 16px; }
+
+  .item { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 12px 16px; border-top: 1px solid #f1f2f4; }
+  .item:first-child { border-top: none; }
+  .item .body { flex: 1 1 240px; min-width: 0; }
+  .item .company { font-size: 14px; font-weight: 600; word-break: break-word; }
+  .item .company a { color: #2563eb; text-decoration: none; }
+  .item .title { font-size: 13px; color: #374151; word-break: break-word; }
+  .item .angle { font-size: 12.5px; color: #6b7280; font-style: italic; margin-top: 2px; }
+  .item .meta { font-size: 11.5px; color: #9ca3af; margin-top: 2px; }
+
+  .badge { display: inline-flex; align-items: center; font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 20px; white-space: nowrap; background: #f2f4f7; color: #667085; }
+  .badge.funded { background: #ecfdf3; color: #067647; }
+  .badge.stalled_search { background: #fffaeb; color: #b54708; }
+  .badge.hiring { background: #eff8ff; color: #175cd3; }
+  .badge.score { background: #eef2ff; color: #3730a3; }
+
+  .actions { display: flex; gap: 8px; margin-left: auto; }
+  button { font-size: 13px; padding: 7px 14px; border-radius: 8px; border: 1px solid #d0d5dd; background: #ffffff; color: #344054; cursor: pointer; }
+  button:hover { background: #f9fafb; }
+  button.primary { background: #1f2328; border-color: #1f2328; color: #ffffff; }
+  button.primary:hover { background: #333941; }
+  button:disabled { opacity: 0.5; cursor: default; }
+
+  .watch-row { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-top: 1px solid #f1f2f4; }
+  .watch-row:first-child { border-top: none; }
+  .watch-row .name { font-size: 14px; font-weight: 600; flex: 1; word-break: break-word; }
+  .watch-row .board { font-size: 12px; color: #6b7280; white-space: nowrap; }
+
+  form.add { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px; border-top: 1px solid #f1f2f4; }
+  form.add input, form.add select { font-size: 14px; padding: 8px 10px; border: 1px solid #d0d5dd; border-radius: 8px; }
+  form.add input { flex: 1 1 130px; min-width: 0; }
+  .form-error { color: #c0392b; font-size: 12.5px; padding: 0 16px 10px; }
+</style>
+</head>
+<body>
+  <header>
+    <img class="logo" src="/static/favicon.svg" alt="Wren">
+    <h1>Wren</h1>
+    <span class="sub">opportunities</span>
+    <span class="spacer"></span>
+    <a class="nav" href="/">chat</a>
+    <a class="nav" href="/dashboard">dashboard</a>
+  </header>
+
+  <main>
+    <section>
+      <div class="section-label">To triage <span id="triageHint" class="hint"></span></div>
+      <div id="triageWrap" class="panel">Loading…</div>
+    </section>
+    <section>
+      <div class="section-label">Interested <span id="interestedHint" class="hint"></span></div>
+      <div id="interestedWrap" class="panel">Loading…</div>
+    </section>
+    <section>
+      <div class="section-label">Watchlist <span class="hint">companies whose job boards the scout polls</span></div>
+      <div id="watchWrap" class="panel">Loading…</div>
+    </section>
+  </main>
+
+<script>
+async function api(path, opts) { return (await fetch(path, opts)).json(); }
+function post(path, body) {
+  return api(path, { method: "POST", headers: { "Content-Type": "application/json" },
+                     body: JSON.stringify(body || {}) });
+}
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;  // textContent only — never innerHTML
+  return e;
+}
+function fmtTs(ts) {
+  if (!ts) return "";
+  const d = new Date(ts);
+  if (isNaN(d)) return ts;
+  return d.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+// Item URLs come from external feeds — only link http(s), mirroring the
+// server-side _safe_url guard.
+function safeHref(url) { return /^https?:\/\//i.test(url || "") ? url : null; }
+
+const SIGNAL_LABELS = { funded: "just funded", stalled_search: "stalled search", hiring: "hiring" };
+
+function itemRow(item, buttons) {
+  const row = el("div", "item");
+  row.appendChild(el("span", "badge " + item.signal, SIGNAL_LABELS[item.signal] || item.signal));
+
+  const body = el("div", "body");
+  const company = el("div", "company");
+  const href = safeHref(item.url);
+  if (href) {
+    const a = el("a", null, item.company);
+    a.href = href; a.target = "_blank"; a.rel = "noopener noreferrer";
+    company.appendChild(a);
+  } else {
+    company.textContent = item.company;
+  }
+  body.appendChild(company);
+  if (item.title) body.appendChild(el("div", "title", item.title));
+  if (item.angle) body.appendChild(el("div", "angle", item.angle));
+  const metaBits = [fmtTs(item.first_seen), item.location].filter(Boolean).join(" · ");
+  if (metaBits) body.appendChild(el("div", "meta", metaBits));
+  row.appendChild(body);
+
+  if (item.score) row.appendChild(el("span", "badge score", item.score + "/10"));
+
+  const actions = el("div", "actions");
+  buttons.forEach(([label, status, primary]) => {
+    const b = el("button", primary ? "primary" : null, label);
+    b.onclick = async () => {
+      b.disabled = true;
+      await post(`/api/opportunities/${encodeURIComponent(item.id)}/status`, { status });
+      load();
+    };
+    actions.appendChild(b);
+  });
+  row.appendChild(actions);
+  return row;
+}
+
+function renderItems(items, wrap, buttons, emptyText) {
+  wrap.textContent = "";
+  if (!items.length) { wrap.appendChild(el("div", "empty", emptyText)); return; }
+  items.forEach(i => wrap.appendChild(itemRow(i, buttons)));
+}
+
+function renderWatchlist(watchlist, wrap) {
+  wrap.textContent = "";
+  watchlist.forEach(w => {
+    const row = el("div", "watch-row");
+    row.appendChild(el("span", "name", w.company));
+    row.appendChild(el("span", "board", `${w.ats}/${w.slug}`));
+    const b = el("button", null, "Remove");
+    b.onclick = async () => {
+      b.disabled = true;
+      await api(`/api/opportunities/watchlist/${encodeURIComponent(w.id)}`, { method: "DELETE" });
+      load();
+    };
+    row.appendChild(b);
+    wrap.appendChild(row);
+  });
+  if (!watchlist.length) {
+    wrap.appendChild(el("div", "empty",
+      "No boards watched yet — add a company below to track its leadership openings."));
+  }
+
+  const form = el("form", "add");
+  const company = el("input"); company.placeholder = "Company"; company.required = true;
+  const ats = el("select");
+  ["greenhouse", "lever", "ashby"].forEach(k => {
+    const o = el("option", null, k); o.value = k; ats.appendChild(o);
+  });
+  const slug = el("input"); slug.placeholder = "Board slug"; slug.required = true;
+  const submit = el("button", "primary", "Watch");
+  form.append(company, ats, slug, submit);
+  const errBox = el("div", "form-error");
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    submit.disabled = true;
+    const result = await post("/api/opportunities/watchlist",
+      { company: company.value, ats: ats.value, slug: slug.value });
+    if (result.error) { errBox.textContent = result.error; submit.disabled = false; }
+    else load();
+  };
+  wrap.appendChild(form);
+  wrap.appendChild(errBox);
+}
+
+function byScoreThenNewest(a, b) {
+  return (b.score || 0) - (a.score || 0) || (a.first_seen < b.first_seen ? 1 : -1);
+}
+
+async function load() {
+  const data = await api("/api/opportunities");
+  const items = data.items || [];
+  const triage = items.filter(i => i.status === "new" || i.status === "digested")
+                      .sort(byScoreThenNewest);
+  const interested = items.filter(i => i.status === "interested").sort(byScoreThenNewest);
+  document.getElementById("triageHint").textContent = `${triage.length}`;
+  document.getElementById("interestedHint").textContent = `${interested.length}`;
+  renderItems(triage, document.getElementById("triageWrap"),
+    [["Interested", "interested", true], ["Dismiss", "dismissed", false]],
+    "Nothing to triage — the scout reports here after each run.");
+  renderItems(interested, document.getElementById("interestedWrap"),
+    [["Dismiss", "dismissed", false]],
+    "Nothing marked interested yet.");
+  renderWatchlist(data.watchlist || [], document.getElementById("watchWrap"));
+}
+
+load();
+</script>
+</body>
+</html>

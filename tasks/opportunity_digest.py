@@ -397,6 +397,7 @@ _STYLE = """
     .score { display: inline-block; background: #eef2ff; color: #3730a3; border-radius: 8px; padding: 0 6px; font-size: 12px; font-weight: 600; }
     .angle { color: #6b7280; font-style: italic; }
     .meta { color: #9ca3af; font-size: 12px; }
+    .footer { margin: 20px 0 0; font-size: 13px; }
     a { color: #2563eb; text-decoration: none; }
   </style>
 """
@@ -433,6 +434,17 @@ def _item_html(item: dict) -> str:
             f"{meta_html}{angle_html}</li>")
 
 
+def _triage_footer() -> str:
+    """Link to the dashboard's /opportunities triage page — the digest itself
+    is read-only. Empty when WREN_PUBLIC_URL isn't configured."""
+    base = os.getenv("WREN_PUBLIC_URL", "").rstrip("/")
+    url = _safe_url(f"{base}/opportunities") if base else ""
+    if not url:
+        return ""
+    return (f'<p class="footer"><a href="{html.escape(url)}">'
+            f"Triage these in Wren &rarr;</a></p>")
+
+
 def render_digest_html(items: list) -> str:
     date_line = datetime.now().strftime("%A, %B %-d")
     sections = []
@@ -461,6 +473,7 @@ def render_digest_html(items: list) -> str:
       <p class="date">{html.escape(date_line)}</p>
       <hr>
       {"".join(sections)}
+      {_triage_footer()}
     </div>
   </div>
 </body>

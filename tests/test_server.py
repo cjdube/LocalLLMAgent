@@ -65,6 +65,10 @@ EMAIL_CALL = {"function": {"name": "send_email", "arguments": {"subject": "Hi", 
     ("get", "/api/run/morning_brief/status", {}),
     ("get", "/api/memories", {}),
     ("get", "/api/system_map", {}),
+    ("get", "/api/opportunities", {}),
+    ("post", "/api/opportunities/abc/status", {"json": {"status": "interested"}}),
+    ("post", "/api/opportunities/watchlist", {"json": {"company": "X"}}),
+    ("delete", "/api/opportunities/watchlist/abc", {}),
 ])
 def test_endpoints_require_auth(client, method, path, kwargs):
     resp = getattr(client, method)(path, **kwargs)
@@ -463,3 +467,62 @@ def test_bg_resolve_deny_acks_denied(client, monkeypatch, tmp_path):
     assert client.post(f"/api/bg/resolve?token={token}").get_json()["ok"] is True
     assert background.get_job_result(jid)["status"] == "denied"
     assert acks == ["Denied"]
+
+
+# --------------------------------------------------------------------------- #
+# /api/opportunities — the /opportunities page's triage endpoints
+# --------------------------------------------------------------------------- #
+
+@pytest.fixture
+def opp_store(tmp_path, monkeypatch):
+    """Isolate the opportunities store and seed one triageable item."""
+    from agent.tools import opportunities as opp
+    monkeypatch.setattr(opp, "_STORE_PATH", tmp_path / "opportunities.json")
+    item_id = opp.insert_new_items([{
+        "id": "hn:1", "source": "hn", "signal": "hiring", "company": "TinyCo",
+        "title": "Head of Product", "url": "https://example.com",
+        "posted_at": None,
+    }])[0]["id"]
+    return opp, item_id
+
+
+def test_api_opportunities_lists_items_and_watchlist(auth_client, opp_store):
+    opp, _ = opp_store
+    opp.watch_company("Acme", "greenhouse", "acme")
+    data = auth_client.get("/api/opportunities").get_json()
+    assert [i["id"] for i in data["items"]] == ["hn:1"]
+    assert [w["slug"] for w in data["watchlist"]] == ["acme"]
+
+
+def test_api_opportunity_status_triages_via_the_shared_store(auth_client, opp_store):
+    opp, item_id = opp_store
+    resp = auth_client.post(f"/api/opportunities/{item_id}/status",
+                            json={"status": "interested"})
+    assert resp.status_code == 200
+    # Same store the chat tool reads — the page and chat can't drift apart.
+    assert opp.list_opportunities(status="interested")["count"] == 1
+
+
+def test_api_opportunity_status_rejects_bad_input(auth_client, opp_store):
+    _, item_id = opp_store
+    assert auth_client.post(f"/api/opportunities/{item_id}/status",
+                            json={"status": "digested"}).status_code == 400
+    assert auth_client.post("/api/opportunities/missing/status",
+                            json={"status": "dismissed"}).status_code == 400
+    assert auth_client.post(f"/api/opportunities/{item_id}/status",
+                            json=None).status_code == 400
+
+
+def test_api_watchlist_add_and_remove(auth_client, opp_store):
+    opp, _ = opp_store
+    resp = auth_client.post("/api/opportunities/watchlist",
+                            json={"company": "Acme", "ats": "lever", "slug": "acme"})
+    assert resp.status_code == 200
+    wid = resp.get_json()["id"]
+    assert [w["id"] for w in opp.get_watchlist()] == [wid]
+    assert auth_client.post("/api/opportunities/watchlist",
+                            json={"company": "Bad", "ats": "workday", "slug": "x"}
+                            ).status_code == 400
+    assert auth_client.delete(f"/api/opportunities/watchlist/{wid}").status_code == 200
+    assert opp.get_watchlist() == []
+    assert auth_client.delete("/api/opportunities/watchlist/nope").status_code == 400

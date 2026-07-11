@@ -352,6 +352,20 @@ the facts that actually get recalled float to the top. Managing memories
 there. Backed by `GET /api/memories`, which calls `memory.recall()` with no
 query so viewing the page never bumps any access counts.
 
+### Opportunities
+
+`http://127.0.0.1:8420/opportunities` is the triage surface for the
+opportunity scout (same auth as the dashboard) — the daily digest email is
+read-only, so this page is where leads actually get worked. Three sections:
+**To triage** (new/digested items sorted by score, each with signal badge,
+model score and outreach angle, and **Interested** / **Dismiss** buttons),
+**Interested** (the live pipeline), and **Watchlist** (add or remove the
+companies whose Greenhouse/Lever/Ashby boards the scout polls). Backed by
+`GET /api/opportunities` plus small POST/DELETE triage endpoints that call the
+same `agent/tools/opportunities.py` store functions the chat tools use, so the
+page and chat can't drift apart. Each digest email footer links here (via
+`WREN_PUBLIC_URL`).
+
 ### System map
 
 `http://127.0.0.1:8420/map` is an explorable radial visualization of the whole

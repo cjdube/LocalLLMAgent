@@ -42,6 +42,7 @@ from agent.toolset import (
     describe_call_detail,
 )
 from agent.tools import background
+from agent.tools import opportunities
 from agent.tools.memory import recall
 from agent.tools.notify import notify
 from agent.tools.skills import render_skills_index
@@ -608,6 +609,53 @@ def map_page():
     if not _authenticated():
         return LOGIN_PAGE.format(error="")
     return send_from_directory(STATIC_DIR, "map.html")
+
+
+@app.route("/opportunities", methods=["GET"])
+def opportunities_page():
+    if not _authenticated():
+        return LOGIN_PAGE.format(error="")
+    return send_from_directory(STATIC_DIR, "opportunities.html")
+
+
+@app.route("/api/opportunities", methods=["GET"])
+def api_opportunities():
+    if not _authenticated():
+        return jsonify({"error": "not authenticated"}), 401
+    return jsonify({"items": opportunities.all_items(),
+                    "watchlist": opportunities.get_watchlist()})
+
+
+@app.route("/api/opportunities/<item_id>/status", methods=["POST"])
+def api_opportunity_status(item_id: str):
+    """Triage from the /opportunities page — same store call the chat's
+    update_opportunity tool makes, so the two surfaces can't drift apart."""
+    if not _authenticated():
+        return jsonify({"error": "not authenticated"}), 401
+    status = (request.get_json(silent=True) or {}).get("status", "")
+    result = opportunities.update_opportunity(item_id, status)
+    logger.info(f"opportunities page: {item_id} -> {status!r}: {result}")
+    return jsonify(result), (200 if "error" not in result else 400)
+
+
+@app.route("/api/opportunities/watchlist", methods=["POST"])
+def api_watch_company():
+    if not _authenticated():
+        return jsonify({"error": "not authenticated"}), 401
+    body = request.get_json(silent=True) or {}
+    result = opportunities.watch_company(
+        body.get("company", ""), body.get("ats", ""), body.get("slug", ""))
+    logger.info(f"opportunities page: watch {body}: {result}")
+    return jsonify(result), (200 if "error" not in result else 400)
+
+
+@app.route("/api/opportunities/watchlist/<watch_id>", methods=["DELETE"])
+def api_unwatch_company(watch_id: str):
+    if not _authenticated():
+        return jsonify({"error": "not authenticated"}), 401
+    result = opportunities.unwatch_company(watch_id)
+    logger.info(f"opportunities page: unwatch {watch_id}: {result}")
+    return jsonify(result), (200 if "error" not in result else 400)
 
 
 @app.route("/api/bg/resolve", methods=["POST"])

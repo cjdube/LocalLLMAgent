@@ -185,3 +185,15 @@ def test_digest_html_escapes_and_guards_urls(stubbed_run, monkeypatch):
     body = stubbed_run["emails"][0][1]
     assert "<script>" not in body
     assert "javascript:" not in body
+
+
+def test_digest_footer_links_to_triage_page(stubbed_run, monkeypatch):
+    monkeypatch.setenv("WREN_PUBLIC_URL", "https://mini.ts.net/")
+    assert od.main() == 0
+    assert 'https://mini.ts.net/opportunities' in stubbed_run["emails"][0][1]
+
+
+def test_digest_footer_absent_without_public_url(stubbed_run, monkeypatch):
+    monkeypatch.delenv("WREN_PUBLIC_URL", raising=False)
+    assert od.main() == 0
+    assert "/opportunities" not in stubbed_run["emails"][0][1]

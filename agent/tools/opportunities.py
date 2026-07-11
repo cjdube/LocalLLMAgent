@@ -315,6 +315,15 @@ def flip_stalled(open_postings: dict, stalled_days: int, now: datetime | None = 
     return flipped
 
 
+def all_items(limit: int = 200) -> list:
+    """Full item dicts, newest first — for the dashboard's /opportunities page
+    (page-sized cap), not the model: list_opportunities above is the
+    context-bounded view chat gets."""
+    with locked(_STORE_PATH):
+        items = _load()["items"]
+    return sorted(items, key=lambda i: i["first_seen"], reverse=True)[:limit]
+
+
 def pending_new_items() -> list:
     """Every item awaiting its first digest report (status 'new'), oldest
     first — uncapped, unlike list_opportunities, since this feeds the digest
