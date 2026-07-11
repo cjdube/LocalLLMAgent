@@ -197,3 +197,61 @@ def test_digest_footer_absent_without_public_url(stubbed_run, monkeypatch):
     monkeypatch.delenv("WREN_PUBLIC_URL", raising=False)
     assert od.main() == 0
     assert "/opportunities" not in stubbed_run["emails"][0][1]
+
+
+# --------------------------------------------------------------------------- #
+# poll_edgar — fund-name filtering and serial-filer collapsing
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("name", [
+    "AQR Flex 1 Series LLC - Series 2026-07A",   # series LLC paperwork
+    "NHIT: STRATEGIC ALPHA TRUST", "Mutual Bancorp", "Oak Hill Funds LLC",
+    "Granite Capital Partners", "Seaport Acquisition Corp SPV",
+    "GPE-G Co-Investment Limited Partnership",
+])
+def test_fund_names_are_filtered(name):
+    assert od._FUND_NAME_RE.search(name)
+
+
+@pytest.mark.parametrize("name", [
+    "LinqAlpha, Inc.", "Corvus Robotics", "Seacoast Analytics Inc",
+])
+def test_operating_company_names_pass(name):
+    assert not od._FUND_NAME_RE.search(name)
+
+
+def _edgar_hit(adsh, name, cik, date="2026-07-10"):
+    return {"_source": {"adsh": adsh, "display_names": [f"{name}  (CIK {cik})"],
+                        "ciks": [cik], "file_date": date,
+                        "biz_locations": ["Boston, MA"]}}
+
+
+class _EdgarResp:
+    def __init__(self, hits):
+        self._hits = hits
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return {"hits": {"hits": self._hits}}
+
+
+def test_poll_edgar_collapses_same_day_filings_per_filer(monkeypatch):
+    hits = [
+        _edgar_hit("0001-26-000001", "Acme Robotics Inc", "0000000111"),
+        _edgar_hit("0001-26-000002", "Acme Robotics Inc", "0000000111"),
+        _edgar_hit("0001-26-000003", "Acme Robotics Inc", "0000000111"),
+        _edgar_hit("0002-26-000001", "Beta Labs", "0000000222"),
+        _edgar_hit("0003-26-000001", "AQR Flex 1 Series LLC - Series X", "0000000333"),
+    ]
+    monkeypatch.setattr(od.requests, "get", lambda *a, **k: _EdgarResp(hits))
+    result = od.poll_edgar("2026-07-08", "2026-07-11", ["MA"])
+    by_company = {i["company"]: i for i in result["items"]}
+    # The series-LLC filer is filtered outright; the triple filer collapses.
+    assert set(by_company) == {"Acme Robotics Inc", "Beta Labs"}
+    acme = by_company["Acme Robotics Inc"]
+    assert acme["id"] == "edgar:111:2026-07-10"      # stable filer+day id
+    assert acme["title"].endswith("(3 filings)")
+    assert "filings" not in acme                      # bookkeeping key stripped
+    assert "filings" not in by_company["Beta Labs"]["title"]

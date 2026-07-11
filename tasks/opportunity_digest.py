@@ -119,21 +119,25 @@ def _write_edgar_watermark(day: str) -> None:
 # ---- pollers ---------------------------------------------------------------
 
 # Form D is filed by every kind of exempt offering — most filings are pooled
-# investment vehicles (funds, LPs), not operating startups. Skip the obvious
-# ones so the scoring prompt isn't mostly noise; the model down-scores
-# whatever slips through.
+# investment vehicles (funds, LPs, series LLCs, trusts), not operating
+# startups. Skip the obvious ones so the scoring prompt isn't mostly noise;
+# the model down-scores whatever slips through. "series" catches the serial
+# series-LLC filers (e.g. "AQR Flex 1 Series LLC - Series 2026-…") that once
+# flooded a digest with a dozen paperwork entries.
 _FUND_NAME_RE = re.compile(
-    r"\b(fund|capital|partners|holdings|realty|equity|investors|investments|"
-    r"acquisition|spv|l\.?p\.?)\b",
+    r"\b(funds?|capital|partners(?:hip)?|holdings|realty|equity|investors|"
+    r"investments?|acquisition|spv|series|trust|bancorp|l\.?p\.?)\b",
     re.IGNORECASE,
 )
 
 
 def poll_edgar(start_date: str, end_date: str, states: list) -> dict:
     """New Form D filings with a principal place of business in `states`,
-    filed within [start_date, end_date] (YYYY-MM-DD)."""
+    filed within [start_date, end_date] (YYYY-MM-DD). Same-day filings by one
+    filer (CIK) collapse to a single item with a filing count — a filer's
+    paperwork volume is one signal, not many."""
     headers = {"User-Agent": _EDGAR_UA}
-    items = []
+    grouped: dict = {}  # (cik, file_date) -> item
     try:
         for state in states:
             for page in range(_EDGAR_MAX_PAGES):
@@ -159,9 +163,16 @@ def poll_edgar(start_date: str, end_date: str, states: list) -> dict:
                     ciks = src.get("ciks") or [""]
                     cik = ciks[0].lstrip("0") or "0"
                     file_date = src.get("file_date", "")
+                    key = (cik, file_date)
+                    if key in grouped:
+                        grouped[key]["filings"] += 1
+                        continue
                     locations = src.get("biz_locations") or [""]
-                    items.append({
-                        "id": f"edgar:{adsh}",
+                    grouped[key] = {
+                        # Keyed by filer+day (not accession number) so the
+                        # collapsed group dedupes stably across runs.
+                        "id": f"edgar:{cik}:{file_date}",
+                        "filings": 1,
                         "source": "edgar",
                         "signal": "funded",
                         "company": company,
@@ -170,11 +181,17 @@ def poll_edgar(start_date: str, end_date: str, states: list) -> dict:
                                f"{adsh.replace('-', '')}/{adsh}-index.htm",
                         "location": locations[0],
                         "posted_at": file_date,
-                    })
+                    }
                 if len(hits) < 10:
                     break
     except (requests.exceptions.RequestException, ValueError) as e:
         return {"error": f"EDGAR poll failed: {e}"}
+    items = []
+    for item in grouped.values():
+        filings = item.pop("filings")  # bookkeeping only — keep it out of the store
+        if filings > 1:
+            item["title"] += f" ({filings} filings)"
+        items.append(item)
     return {"items": items}
 
 
