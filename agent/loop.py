@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import re
+import time
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -102,6 +103,9 @@ def _ollama_chat(
         "model": model,
         "messages": messages,
         "stream": True,
+        # Keep the (large, slow-to-load) model resident between calls so the
+        # next one doesn't pay the cold-load cost inside its read-timeout window.
+        "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
         "options": {"num_ctx": num_ctx},
     }
     if tools is not None:
@@ -146,6 +150,51 @@ def _ollama_chat(
                 prompt_tokens, num_ctx,
             )
     return message
+
+
+def warm_model(
+    model: str = None,
+    host: str = None,
+    timeout: float = None,
+    logger: Optional[logging.Logger] = None,
+) -> bool:
+    """Force-load the model into Ollama's memory before a heavy generation.
+
+    A cold local model (gemma4:26b-mlx is ~17GB) can't emit its first streamed
+    chunk until it's loaded AND the prompt is prefilled; stacked together on a
+    cold start these exceed the streamed call's read timeout, so a big-prompt
+    task like weekly_learnings times out before any token arrives. Loading the
+    model first — with the SAME num_ctx and keep_alive, so the real call reuses
+    this resident instance rather than reloading — moves the 17GB load out of
+    that window and leaves only prefill.
+
+    Sends an empty-messages /api/chat, which Ollama loads-and-returns without
+    generating. Gets its own generous timeout (OLLAMA_WARM_TIMEOUT, default
+    600s) because the load is the slow part. Degrades to a warning and returns
+    False on failure — the caller still attempts the generation cold."""
+    model = model or os.getenv("OLLAMA_MODEL", "gemma4")
+    host = host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    if timeout is None:
+        timeout = float(os.getenv("OLLAMA_WARM_TIMEOUT", "600"))
+    num_ctx = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
+    payload = {
+        "model": model,
+        "messages": [],
+        "stream": False,
+        "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
+        "options": {"num_ctx": num_ctx},
+    }
+    try:
+        t0 = time.monotonic()
+        resp = requests.post(f"{host}/api/chat", json=payload, timeout=timeout)
+        resp.raise_for_status()
+        if logger:
+            logger.info("warm_model loaded %s in %.1fs", model, time.monotonic() - t0)
+        return True
+    except Exception as e:
+        if logger:
+            logger.warning("warm_model failed (%s); attempting generation cold", e)
+        return False
 
 
 # Argument keys that may carry secrets — redacted before they reach the logs.

@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent.loop import complete_text
+from agent.loop import complete_text, warm_model
 from agent.tools.calendar import CATEGORY_COLORS, _local_timezone, get_events_in_range
 from agent.tools.chrome_history import fetch_chrome_history
 from agent.tools.learnings_file import get_previous_entry_text, write_weekly_entry
@@ -205,7 +205,13 @@ def main() -> int:
             f"carry_forward: {carry_forward or '(none)'}\n"
         )
 
-        entry_text = complete_text(system_prompt=DRAFT_SYSTEM_PROMPT, user_prompt=user_prompt)
+        # Load the model before the (large-prompt) draft so its cold-load cost
+        # isn't paid inside the generation's read-timeout window — this run has
+        # the biggest prompt of any task and used to time out cold at 5am.
+        warm_model(logger=logger)
+        entry_text = complete_text(
+            system_prompt=DRAFT_SYSTEM_PROMPT, user_prompt=user_prompt, logger=logger
+        )
         logger.info(f"Drafted entry:\n{entry_text}")
 
         write_result = write_weekly_entry(entry_text, sunday)

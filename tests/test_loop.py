@@ -68,6 +68,26 @@ def test_payload_sets_default_num_ctx(monkeypatch):
     assert message["content"] == "hi"
 
 
+def test_payload_sets_default_keep_alive(monkeypatch):
+    monkeypatch.delenv("OLLAMA_KEEP_ALIVE", raising=False)
+    captured = {}
+    _patch_post(monkeypatch, captured, {"message": {"content": "hi"}})
+
+    loop._ollama_chat([{"role": "user", "content": "hey"}])
+
+    assert captured["payload"]["keep_alive"] == "30m"
+
+
+def test_keep_alive_honors_env_override(monkeypatch):
+    monkeypatch.setenv("OLLAMA_KEEP_ALIVE", "-1")
+    captured = {}
+    _patch_post(monkeypatch, captured, {"message": {"content": "hi"}})
+
+    loop._ollama_chat([{"role": "user", "content": "hey"}])
+
+    assert captured["payload"]["keep_alive"] == "-1"
+
+
 def test_num_ctx_honors_env_override(monkeypatch):
     monkeypatch.setenv("OLLAMA_NUM_CTX", "16384")
     captured = {}
@@ -157,6 +177,65 @@ def test_advance_checks_cancel_before_calling_model(monkeypatch):
     monkeypatch.setattr(loop, "_ollama_chat", unexpected)
     with pytest.raises(loop.TurnCancelled):
         loop.advance([], [], {}, should_cancel=lambda: True)
+
+
+class _WarmResponse:
+    """Minimal non-streamed response for warm_model (raise_for_status only)."""
+    def __init__(self, ok=True):
+        self._ok = ok
+
+    def raise_for_status(self):
+        if not self._ok:
+            raise loop.requests.exceptions.HTTPError("boom")
+
+
+def test_warm_model_loads_with_empty_messages(monkeypatch):
+    """warm_model preloads via an empty-messages, non-streamed /api/chat that
+    carries the same num_ctx and keep_alive as a real call (so the model stays
+    resident and is reused)."""
+    monkeypatch.setenv("OLLAMA_NUM_CTX", "16384")
+    monkeypatch.setenv("OLLAMA_KEEP_ALIVE", "30m")
+    captured = {}
+
+    def fake_post(url, json=None, timeout=None, stream=None):
+        captured["url"] = url
+        captured["payload"] = json
+        captured["timeout"] = timeout
+        return _WarmResponse(ok=True)
+
+    monkeypatch.setattr(loop.requests, "post", fake_post)
+
+    assert loop.warm_model() is True
+    assert captured["url"].endswith("/api/chat")
+    assert captured["payload"]["messages"] == []
+    assert captured["payload"]["stream"] is False
+    assert captured["payload"]["options"]["num_ctx"] == 16384
+    assert captured["payload"]["keep_alive"] == "30m"
+
+
+def test_warm_model_uses_warm_timeout_env(monkeypatch):
+    monkeypatch.setenv("OLLAMA_WARM_TIMEOUT", "42")
+    captured = {}
+    monkeypatch.setattr(
+        loop.requests, "post",
+        lambda url, json=None, timeout=None, stream=None: captured.update(timeout=timeout)
+        or _WarmResponse(ok=True),
+    )
+
+    loop.warm_model()
+
+    assert captured["timeout"] == 42.0
+
+
+def test_warm_model_degrades_on_failure(monkeypatch):
+    """A failed preload returns False (not raises) so the caller still tries the
+    real generation."""
+    def boom(*a, **k):
+        raise loop.requests.exceptions.ConnectionError("no server")
+
+    monkeypatch.setattr(loop.requests, "post", boom)
+
+    assert loop.warm_model() is False
 
 
 def test_oversized_tool_result_is_truncated(monkeypatch):
