@@ -9,6 +9,8 @@ config/github_starred_state.json
 config/wren_memory.json
 config/reminders.json
 config/bg_jobs.json
+config/opportunities.json
+config/opportunities_state.json
 config/*.lock
 config/*.corrupt-*
 logs/*.log

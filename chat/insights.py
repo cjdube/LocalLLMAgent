@@ -455,6 +455,9 @@ TOOL_SERVICES = {
     "skills": ("Skills", ["list_skills", "read_skill", "write_skill", "delete_skill"]),
     "reminders": ("Reminders", ["set_reminder", "list_reminders", "cancel_reminder"]),
     "background": ("Background Tasks", ["run_in_background", "list_background_jobs", "get_job_result"]),
+    "opportunities": ("Opportunity Scout", ["list_opportunities", "update_opportunity",
+                                            "watch_company", "unwatch_company",
+                                            "send_opportunity_digest"]),
 }
 
 # Which services each scheduled routine touches (mirrors the tasks' agent.tools
@@ -465,6 +468,7 @@ ROUTINE_USES = {
     "daily_log": ["google_calendar", "strava", "ntfy"],
     "calendar_colorizer": ["google_calendar", "gmail", "ntfy"],
     "weekly_learnings": ["google_calendar", "chrome", "gmail", "youtube", "wiki", "ntfy"],
+    "opportunity_digest": ["opportunities", "gmail", "ntfy"],
 }
 
 # Keep the payload bounded: memory texts are truncated for the map (the detail

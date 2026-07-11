@@ -122,6 +122,7 @@ in — nothing new inherits it automatically.
 | `skills.py` | Procedural memory (chat-only) — reusable how-to procedures composing the other tools: `list_skills`, `read_skill`, `write_skill` (create/overwrite), `delete_skill`. One Markdown file per skill under `skills/` (override with `WREN_SKILLS_DIR`); a capped title+one-line index is injected into the chat prompt so Wren knows what procedures exist, reading a body on demand. Writes are confirmation-gated |
 | `reminders.py` | Scheduled reminders — `set_reminder` (parses the time in Python via `dates.resolve_reminder_time`, not the model), `list_reminders`, `cancel_reminder`. Stored in `config/reminders.json`; the `reminder_sweep` task fires each due one as an `ntfy` phone push, then clears it. Set/cancel are confirmation-gated |
 | `background.py` | Background tasks — `run_in_background` (hand off a multi-step task that runs detached and pushes a summary when done), `list_background_jobs`, `get_job_result`. Jobs live in `config/bg_jobs.json`; the `bg_worker` task runs them. Posture is "read/draft freely, tap-to-approve consequential actions" — see the background-tasks section below. Also owns the HMAC-signed approval tokens |
+| `opportunities.py` | Opportunity signal store for the fractional-work scout — `list_opportunities`, `update_opportunity` (mark interested/dismissed), `watch_company`/`unwatch_company` (curate which companies' job boards the scout polls). Items live in `config/opportunities.json`, deduped by a stable per-source id and pruned after 30 days once digested/dismissed. The `opportunity_digest` task fills it; see Scheduled tasks below |
 | `google_auth.py` | Shared OAuth helper — one cached token for Calendar, Gmail, Tasks, and YouTube (read-only) scopes |
 
 Every tool module is runnable standalone for testing, e.g.:
@@ -138,8 +139,9 @@ Every tool module is runnable standalone for testing, e.g.:
 | `tasks/daily_log.py` | Daily 6:15 AM | Fetches yesterday's Strava activities and maps each one onto a Google Calendar event in plain Python — no model, since it's a pure field mapping with no natural-language step. Deduped by `source_id` (Strava activity id) so re-runs never create duplicates. |
 | `tasks/weekly_learnings.py` | Mondays 5:00 AM | Computes the most recently completed Mon–Sun week, pulls calendar events (categorized by color) + Chrome browsing history + YouTube liked videos (the strongest learning signal, since Craig deliberately Liked them) + the previous week's file (for carry-forwards), has the model draft a 4-section retrospective, writes it as `Strategic-Weekly-Review-<week-ending>.md` in `LEARNINGS_DIR` (Obsidian vault, one file per week). If the write fails — e.g. the external drive isn't mounted — it emails the draft instead so it's never silently lost (and pushes a phone alert). |
 | `tasks/calendar_colorizer.py` | Daily 5:00 PM | Fetches yesterday's calendar events, has the model guess a category per event title (Work/LLC, AARP, Fitness, Meal Prep, Domestic/Chores, Meetings, Travel, Appointments, or Uncategorized) and returns a colorId per event, then patches each event's color. Always re-classifies, even events colored by a previous run or by hand. On failure, pushes a phone alert and emails a notice. |
+| `tasks/opportunity_digest.py` | Daily 7:30 AM | The fractional-work opportunity scout. Polls three free, ToS-clean sources: new SEC Form D filings in New England (EDGAR full-text search — the "just funded" signal), product/eng leadership openings on watched companies' public Greenhouse/Lever/Ashby boards (flagging any still open past `OPP_STALLED_DAYS` as a "stalled search"), and the current HN "Who is hiring" thread. New items are deduped into `config/opportunities.json`, scored 1–10 by the model for fractional-operator fit (with a one-line outreach angle; parsed defensively, digest structure assembled in Python), and emailed as a three-section Opportunity Digest. Anything scoring ≥ `OPP_SCORE_THRESHOLD` also triggers an ntfy push. Nothing new that day → no email. Shared with the chat `send_opportunity_digest` tool via `build_and_send_digest()`. Deliberately does NOT scrape LinkedIn or use paid data SaaS — see `CLAUDE.md`'s data sourcing policy. |
 
-All four are **fully unattended** — no prompts, no approval steps. This is a
+All of these are **fully unattended** — no prompts, no approval steps. This is a
 deliberate difference from the original interactive Claude Code skills these
 were ported from (`ai-memory` / `AgentOS`), which asked clarifying questions
 and waited for approval before writing anywhere. There's nobody to ask at
@@ -381,7 +383,7 @@ Each task (and the always-on chat server) has a `.plist` in `launchd/`,
 copied to `~/Library/LaunchAgents/` and loaded with `launchctl load`.
 `launchd` was chosen over `cron` because it survives sleep/wake and is the
 native macOS mechanism — no Claude Code/Cowork involvement in scheduling at
-all. The four scheduled tasks use `StartCalendarInterval`; Wren's chat server
+all. The calendar-driven tasks use `StartCalendarInterval`; Wren's chat server
 (`com.craigdube.localllmagent.wren.plist`) uses `RunAtLoad` + `KeepAlive`
 instead, since it needs to just stay running rather than fire on a timer. The
 reminder sweep (`com.craigdube.localllmagent.remindersweep.plist`) uses a
