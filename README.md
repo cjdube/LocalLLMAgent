@@ -122,8 +122,8 @@ in — nothing new inherits it automatically.
 | `skills.py` | Procedural memory (chat-only) — reusable how-to procedures composing the other tools: `list_skills`, `read_skill`, `write_skill` (create/overwrite), `delete_skill`. One Markdown file per skill under `skills/` (override with `WREN_SKILLS_DIR`); a capped title+one-line index is injected into the chat prompt so Wren knows what procedures exist, reading a body on demand. Writes are confirmation-gated |
 | `reminders.py` | Scheduled reminders — `set_reminder` (parses the time in Python via `dates.resolve_reminder_time`, not the model), `list_reminders`, `cancel_reminder`. Stored in `config/reminders.json`; the `reminder_sweep` task fires each due one as an `ntfy` phone push, then clears it. Set/cancel are confirmation-gated |
 | `background.py` | Background tasks — `run_in_background` (hand off a multi-step task that runs detached and pushes a summary when done), `list_background_jobs`, `get_job_result`. Jobs live in `config/bg_jobs.json`; the `bg_worker` task runs them. Posture is "read/draft freely, tap-to-approve consequential actions" — see the background-tasks section below. Also owns the HMAC-signed approval tokens |
-| `opportunities.py` | Opportunity signal store for the fractional-work scout — `list_opportunities`, `update_opportunity` (mark interested/dismissed), `watch_company`/`unwatch_company` (curate which companies' job boards the scout polls). Items live in `config/opportunities.json`, deduped by a stable per-source id and pruned after 30 days once digested/dismissed. The `opportunity_digest` task fills it; see Scheduled tasks below |
-| `research.py` | Company research — a fixed pipeline (not a freeform agent task): three bounded Tavily searches summarized by the model into a fixed-template brief (what they do / value prop / who to contact / size & stage / why now / recent news / red flags). Two entry points over one core: `research_opportunity` adds what the scout's store knows (signal context; for EDGAR items a deterministic parse of the Form D filing XML — officer names, offering/sold amounts, revenue range, industry) and persists the brief on the item for `/opportunities` (the page's Research button and the Interested auto-trigger run this); `research_company` researches ANY company by name, saves nothing, and returns the brief directly — the general-purpose verb chat and skills compose. Read-only against the outside world; web snippets are treated as untrusted display text |
+| `opportunities.py` | Opportunity signal store for the fractional-work scout — `list_opportunities`, `update_opportunity` (mark interested/dismissed), `watch_company`/`unwatch_company`. The `opportunity_digest` task fills it; full lifecycle in [docs/opportunity-scout.md](docs/opportunity-scout.md) |
+| `research.py` | Company research — a fixed pipeline (not a freeform agent task): bounded Tavily searches summarized by the model into a fixed-template brief. `research_opportunity` enriches and persists onto a scout item (see [docs/opportunity-scout.md](docs/opportunity-scout.md)); `research_company` researches ANY company by name and returns the brief directly — the general-purpose verb chat and skills compose. Read-only against the outside world; web snippets are treated as untrusted display text |
 | `google_auth.py` | Shared OAuth helper — one cached token for Calendar, Gmail, Tasks, and YouTube (read-only) scopes |
 
 Every tool module is runnable standalone for testing, e.g.:
@@ -140,7 +140,7 @@ Every tool module is runnable standalone for testing, e.g.:
 | `tasks/daily_log.py` | Daily 6:15 AM | Fetches yesterday's Strava activities and maps each one onto a Google Calendar event in plain Python — no model, since it's a pure field mapping with no natural-language step. Deduped by `source_id` (Strava activity id) so re-runs never create duplicates. |
 | `tasks/weekly_learnings.py` | Mondays 5:00 AM | Computes the most recently completed Mon–Sun week, pulls calendar events (categorized by color) + Chrome browsing history + YouTube liked videos (the strongest learning signal, since Craig deliberately Liked them) + the previous week's file (for carry-forwards), has the model draft a 4-section retrospective, writes it as `Strategic-Weekly-Review-<week-ending>.md` in `LEARNINGS_DIR` (Obsidian vault, one file per week). If the write fails — e.g. the external drive isn't mounted — it emails the draft instead so it's never silently lost (and pushes a phone alert). |
 | `tasks/calendar_colorizer.py` | Daily 5:00 PM | Fetches yesterday's calendar events, has the model guess a category per event title (Work/LLC, AARP, Fitness, Meal Prep, Domestic/Chores, Meetings, Travel, Appointments, or Uncategorized) and returns a colorId per event, then patches each event's color. Always re-classifies, even events colored by a previous run or by hand. On failure, pushes a phone alert and emails a notice. |
-| `tasks/opportunity_digest.py` | Daily 7:30 AM | The fractional-work opportunity scout. Polls three free, ToS-clean sources: new SEC Form D filings in New England (EDGAR full-text search — the "just funded" signal), product/eng leadership openings on watched companies' public Greenhouse/Lever/Ashby boards (flagging any still open past `OPP_STALLED_DAYS` as a "stalled search"), and the current HN "Who is hiring" thread. New items are deduped into `config/opportunities.json`, scored 1–10 by the model for fractional-operator fit (with a one-line outreach angle; parsed defensively, digest structure assembled in Python), and emailed as a three-section Opportunity Digest. Anything scoring ≥ `OPP_SCORE_THRESHOLD` also triggers an ntfy push. Nothing new that day → no email. Shared with the chat `send_opportunity_digest` tool via `build_and_send_digest()`. Deliberately does NOT scrape LinkedIn or use paid data SaaS — see `CLAUDE.md`'s data sourcing policy. |
+| `tasks/opportunity_digest.py` | Daily 7:30 AM | The fractional-work opportunity scout. Polls three free, ToS-clean sources — new SEC Form D filings in New England, leadership openings on watched Greenhouse/Lever/Ashby boards (flagging stalled searches), and the current HN "Who is hiring" thread — dedupes them into `config/opportunities.json`, has the model score fractional-operator fit, and emails a three-section Opportunity Digest (ntfy push for high scores; nothing new → no email). Full lifecycle — sources, dedupe/watermark behavior, triage semantics, scoring — in [docs/opportunity-scout.md](docs/opportunity-scout.md). |
 
 All of these are **fully unattended** — no prompts, no approval steps. This is a
 deliberate difference from the original interactive Claude Code skills these
@@ -357,20 +357,15 @@ query so viewing the page never bumps any access counts.
 
 `http://127.0.0.1:8420/opportunities` is the triage surface for the
 opportunity scout (same auth as the dashboard) — the daily digest email is
-read-only, so this page is where leads actually get worked. Three sections:
-**To triage** (new/digested items sorted by score, each with signal badge,
-model score and outreach angle, and **Interested** / **Dismiss** buttons),
-**Interested** (the live pipeline), and **Watchlist** (add or remove the
-companies whose Greenhouse/Lever/Ashby boards the scout polls). Marking an
-item Interested auto-starts a company research run (`agent/tools/research.py`)
-on a background thread — a "researching…" badge appears, the page refreshes
-itself until the brief lands as an expandable **Research brief** on the item,
-and an ntfy ping announces it; a per-item **Research** button triggers the
-same run manually (or retries a failure). Backed by
-`GET /api/opportunities` plus small POST/DELETE triage endpoints that call the
-same `agent/tools/opportunities.py` store functions the chat tools use, so the
-page and chat can't drift apart. Each digest email footer links here (via
-`WREN_PUBLIC_URL`).
+read-only, so this page is where leads actually get worked: **To triage**
+(Interested / Dismiss buttons per item), **Interested** (the live pipeline,
+where research briefs land), and **Watchlist** (the boards the scout polls).
+Backed by `GET /api/opportunities` plus small POST/DELETE triage endpoints
+that call the same `agent/tools/opportunities.py` store functions the chat
+tools use, so the page and chat can't drift apart. Each digest email footer
+links here (via `WREN_PUBLIC_URL`). What triage actually does to an item —
+and everything else about the scout's lifecycle — is documented in
+[docs/opportunity-scout.md](docs/opportunity-scout.md).
 
 ### System map
 
