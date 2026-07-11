@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent.loop import complete_text
-from agent.tools.calendar import _local_timezone, get_events_in_range
+from agent.tools.calendar import CATEGORY_COLORS, _local_timezone, get_events_in_range
 from agent.tools.chrome_history import fetch_chrome_history
 from agent.tools.learnings_file import get_previous_entry_text, write_weekly_entry
 from agent.tools.email import send_email
@@ -86,13 +86,14 @@ Output ONLY the filled-in template text, nothing else — no preamble, no explan
 """
 
 
-def _week_range() -> tuple[datetime, datetime]:
+def _week_range(now: datetime | None = None) -> tuple[datetime, datetime]:
     """Return (monday, sunday) datetimes for the most recently completed full
     week, in local tz. Anchored to "most recent Sunday strictly before today"
     rather than assuming today is Monday, so this is correct even if run
-    manually on an arbitrary day (not just via the Monday 5am launchd trigger)."""
+    manually on an arbitrary day (not just via the Monday 5am launchd trigger).
+    `now` is injectable for tests."""
     tz = ZoneInfo(_local_timezone())
-    today = datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0)
+    today = (now or datetime.now(tz)).replace(hour=0, minute=0, second=0, microsecond=0)
     days_since_last_sunday = today.weekday() + 1  # Mon=0 -> 1, ..., Sun=6 -> 7
     last_sunday = today - timedelta(days=days_since_last_sunday)
     last_monday = last_sunday - timedelta(days=6)
@@ -138,6 +139,14 @@ def _compact_videos(videos: list) -> list:
     ]
 
 
+# Derived from calendar.CATEGORY_COLORS — the declared single source of truth —
+# rather than repeating the raw colorId strings: recoloring a category there
+# would otherwise silently empty its bucket in every future weekly review.
+_WORK_COLOR = CATEGORY_COLORS["Work/LLC"][0]
+_MEETINGS_COLOR = CATEGORY_COLORS["Meetings"][0]
+_APPOINTMENTS_COLOR = CATEGORY_COLORS["Appointments"][0]
+
+
 def _categorize(events: list) -> dict:
     work, meetings, appointments, aarp = [], [], [], []
     for e in events:
@@ -145,11 +154,11 @@ def _categorize(events: list) -> dict:
         summary = (e.get("summary") or "").lower()
         if "aarp" in summary:
             aarp.append(e)
-        elif color == "1":
+        elif color == _WORK_COLOR:
             work.append(e)
-        elif color == "3":
+        elif color == _MEETINGS_COLOR:
             meetings.append(e)
-        elif color == "6":
+        elif color == _APPOINTMENTS_COLOR:
             appointments.append(e)
     return {"work": work, "meetings": meetings, "appointments": appointments, "aarp": aarp}
 
@@ -205,10 +214,20 @@ def main() -> int:
         if "error" in write_result:
             logger.warning("File write failed — emailing the draft so it isn't lost")
             notify_failure("weekly_learnings", "vault write failed — draft emailed instead", logger)
-            send_email(
+            email_result = send_email(
                 subject=f"Weekly Log (needs manual paste) - week ending {sunday.strftime('%Y-%m-%d')}",
                 body=entry_text,
             )
+            logger.info(f"send_email -> {email_result}")
+            if "error" in email_result:
+                # send_email returns error dicts rather than raising, so check
+                # it: both persistence paths failing must surface as a failed
+                # run (alert + nonzero exit), not a quiet success — the draft
+                # would survive only in the log line above.
+                raise RuntimeError(
+                    "vault write AND email fallback both failed: "
+                    f"{email_result['error']}"
+                )
 
         logger.info("Weekly learnings run complete")
         return 0

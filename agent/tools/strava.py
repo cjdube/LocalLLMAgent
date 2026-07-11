@@ -163,8 +163,6 @@ def fetch_strava(
                 "distance_km": activity.get("distance_km"),
                 "duration_minutes": activity.get("duration_minutes"),
                 "elevation_gain_m": activity.get("elevation_gain_m"),
-                "category": "Fitness",
-                "colorId": 4,  # Flamingo
             }
         )
 

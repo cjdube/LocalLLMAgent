@@ -14,15 +14,13 @@ Key resolution order: --api-key arg > config/.env file > OPENWEATHERMAP_API_KEY 
 """
 
 import argparse
-import json
 import os
 import sys
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlencode
-from urllib.request import urlopen
-from urllib.error import URLError, HTTPError
 
-from agent.tools._http import load_env, missing_key_error, print_result, resolve_key
+import requests
+
+from agent.tools._http import http_error, load_env, missing_key_error, print_result, resolve_key
 
 load_env()
 
@@ -61,9 +59,9 @@ def _clamp_days(days: int) -> int:
 
 def fetch_forecast(location: str, units: str, days: int, api_key: str) -> dict:
     params = {"q": location, "appid": api_key, "units": units, "cnt": _clamp_days(days) * 8}
-    url = f"{FORECAST_URL}?{urlencode(params)}"
-    with urlopen(url, timeout=10) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    resp = requests.get(FORECAST_URL, params=params, timeout=10)
+    resp.raise_for_status()
+    return resp.json()
 
 
 def _day_summary(entries: list) -> dict:
@@ -152,12 +150,8 @@ def fetch_weather(location: str = None, units: str = "imperial", days: int = 1, 
 
     try:
         raw = fetch_forecast(location, units, days, api_key)
-    except HTTPError as e:
-        return {"error": f"HTTP {e.code}: {e.reason}"}
-    except URLError as e:
-        return {"error": f"network error: {e.reason}"}
     except Exception as e:
-        return {"error": f"fetch error: {e}"}
+        return http_error(e)
 
     try:
         return parse(raw, days)

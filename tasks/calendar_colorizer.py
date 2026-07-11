@@ -63,6 +63,45 @@ def _yesterday_range() -> tuple[datetime, datetime]:
     return yesterday, today - timedelta(microseconds=1)
 
 
+def _parse_classification(raw_response: str) -> dict:
+    """Parse the model's {event_id: colorId} response, rejecting anything that
+    isn't a JSON object — the model is told to emit exactly that shape, but a
+    small local model can drift (prose preamble, a list, code fences)."""
+    try:
+        classification = json.loads(raw_response)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"Could not parse model response as JSON: {e}\nRaw: {raw_response}")
+    if not isinstance(classification, dict):
+        raise RuntimeError(
+            f"Model response is JSON but not an object mapping ids to colorIds: {raw_response!r}"
+        )
+    return classification
+
+
+def _apply_classification(events: list, classification: dict, logger) -> tuple[list, list]:
+    """Recolor each event per the classification. An event whose classified
+    color is missing/invalid, or whose patch fails, is skipped (logged) rather
+    than failing the run — one bad classification shouldn't lose the rest.
+    Returns (updated, skipped): updated as (summary, color_id), skipped as
+    summaries."""
+    updated, skipped = [], []
+    for event in events:
+        event_id = event["id"]
+        color_id = classification.get(event_id)
+        if color_id not in VALID_COLOR_IDS:
+            logger.warning(f"No valid color for event {event_id} ({event['summary']!r}), skipping")
+            skipped.append(event["summary"])
+            continue
+
+        result = set_event_color(event_id, color_id)
+        logger.info(f"set_event_color({event_id}, {color_id}) -> {result}")
+        if "error" in result:
+            skipped.append(event["summary"])
+        else:
+            updated.append((event["summary"], color_id))
+    return updated, skipped
+
+
 def main() -> int:
     logger = setup_logger("calendar_colorizer")
     logger.info("Starting calendar colorizer run")
@@ -92,26 +131,8 @@ def main() -> int:
         )
         logger.info(f"Raw classification response: {raw_response}")
 
-        try:
-            classification = json.loads(raw_response)
-        except json.JSONDecodeError as e:
-            raise RuntimeError(f"Could not parse model response as JSON: {e}\nRaw: {raw_response}")
-
-        updated, skipped = [], []
-        for event in events:
-            event_id = event["id"]
-            color_id = classification.get(event_id)
-            if color_id not in VALID_COLOR_IDS:
-                logger.warning(f"No valid color for event {event_id} ({event['summary']!r}), skipping")
-                skipped.append(event["summary"])
-                continue
-
-            result = set_event_color(event_id, color_id)
-            logger.info(f"set_event_color({event_id}, {color_id}) -> {result}")
-            if "error" in result:
-                skipped.append(event["summary"])
-            else:
-                updated.append((event["summary"], color_id))
+        classification = _parse_classification(raw_response)
+        updated, skipped = _apply_classification(events, classification, logger)
 
         logger.info(f"Colorizer run complete: {len(updated)} updated, {len(skipped)} skipped")
         return 0
