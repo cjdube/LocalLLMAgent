@@ -316,11 +316,17 @@ def poll_ats(watchlist: list) -> dict:
 
 # Phrases that make an HN "Who is hiring" post worth scoring. Deliberately
 # leadership-shaped — plain "hiring engineers" posts are out of scope.
+# Matched with word boundaries: bare substring checks let "cto" hit
+# "direCTOr", "YoCTO", "faCTOry", and "conduCTOr".
 _HN_PHRASES = (
     "head of product", "vp of product", "vp product", "director of product",
-    "product lead", "founding pm", "founding product",
+    "product director", "product lead", "founding pm", "founding product",
     "head of engineering", "vp of engineering", "vp engineering",
-    "founding engineer", "fractional", "cto", "cpo",
+    "director of engineering", "engineering director",
+    "founding engineer", "founding engineers", "fractional", "cto", "cpo",
+)
+_HN_PHRASE_RE = re.compile(
+    r"\b(?:%s)\b" % "|".join(re.escape(p) for p in _HN_PHRASES), re.IGNORECASE
 )
 
 
@@ -359,9 +365,16 @@ def poll_hn() -> dict:
                 # Top-level comments are the job posts; replies are chatter.
                 if str(hit.get("parent_id")) != str(story_id):
                     continue
-                text = _hn_clean(hit.get("comment_text"))
-                lowered = text.lower()
-                if not any(p in lowered for p in _HN_PHRASES):
+                raw = hit.get("comment_text") or ""
+                # Match roles against the headline only (HN convention:
+                # "Company | Role | Location" in the first paragraph) — a
+                # body mentioning "our CTO" isn't a leadership opening. The
+                # exception is "fractional": that's the exact engagement on
+                # offer, wherever the post says it.
+                headline = _hn_clean(raw.split("<p>", 1)[0])
+                text = _hn_clean(raw)
+                if (not _HN_PHRASE_RE.search(headline)
+                        and "fractional" not in text.lower()):
                     continue
                 # HN convention: "Company | Role | Location | ..." on line one.
                 first_segment = text.split("|", 1)[0].strip()

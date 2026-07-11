@@ -229,6 +229,48 @@ def test_digest_footer_absent_without_public_url(stubbed_run, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# poll_hn — headline-only role matching
+# --------------------------------------------------------------------------- #
+
+def _hn_resp(payload):
+    class _R:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return payload
+    return _R()
+
+
+def test_poll_hn_matches_headline_not_body(monkeypatch):
+    story = {"hits": [{"objectID": "999", "title": "Ask HN: Who is hiring? (July 2026)"}]}
+    comments = {"hits": [
+        # Leadership role in the headline: kept.
+        {"objectID": "1", "parent_id": 999,
+         "comment_text": "Acme | Head of Product | Remote<p>Come build with us."},
+        # IC role whose body name-drops the CTO: dropped.
+        {"objectID": "2", "parent_id": 999,
+         "comment_text": "Beta | Senior QA Engineer | NYC<p>You will report to our CTO."},
+        # IC headline but the body offers fractional work: kept.
+        {"objectID": "3", "parent_id": 999,
+         "comment_text": "Gamma | Staff Engineer | Remote<p>Open to fractional arrangements."},
+        # Reply chatter, not a top-level post: dropped regardless of content.
+        {"objectID": "4", "parent_id": 111, "comment_text": "our cto agrees"},
+        # "cto" must match as a word — not inside Yocto/factory/director.
+        {"objectID": "5", "parent_id": 999,
+         "comment_text": "Delta | Embedded Engineer (Yocto, C++) | Hybrid<p>Factory tooling."},
+        # An engineering-director opening IS leadership: kept.
+        {"objectID": "6", "parent_id": 999,
+         "comment_text": "Echo | Engineering Director | Stockholm<p>Scale three teams."},
+    ]}
+    responses = iter([_hn_resp(story), _hn_resp(comments)])
+    monkeypatch.setattr(od.requests, "get", lambda *a, **k: next(responses))
+    items = od.poll_hn()["items"]
+    assert [i["id"] for i in items] == ["hn:1", "hn:3", "hn:6"]
+    assert items[0]["company"] == "Acme"
+
+
+# --------------------------------------------------------------------------- #
 # _ats_board_jobs — iCIMS sitemap parsing
 # --------------------------------------------------------------------------- #
 
