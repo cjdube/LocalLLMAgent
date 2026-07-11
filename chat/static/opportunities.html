@@ -51,6 +51,13 @@
   .badge.stalled_search { background: #fffaeb; color: #b54708; }
   .badge.hiring { background: #eff8ff; color: #175cd3; }
   .badge.score { background: #eef2ff; color: #3730a3; }
+  .badge.pending { background: #fffaeb; color: #b54708; }
+  .badge.failed { background: #fef3f2; color: #b42318; }
+
+  details.research { flex-basis: 100%; margin-top: 2px; }
+  details.research summary { font-size: 12.5px; font-weight: 600; color: #175cd3; cursor: pointer; }
+  .research-text { white-space: pre-wrap; font-size: 13px; line-height: 1.55; color: #374151; background: #f9fafb; border: 1px solid #eef0f2; border-radius: 8px; padding: 10px 12px; margin-top: 6px; word-break: break-word; }
+  .research-date { font-size: 11px; color: #9ca3af; margin-top: 4px; }
 
   .actions { display: flex; gap: 8px; margin-left: auto; }
   button { font-size: 13px; padding: 7px 14px; border-radius: 8px; border: 1px solid #d0d5dd; background: #ffffff; color: #344054; cursor: pointer; }
@@ -119,6 +126,11 @@ function safeHref(url) { return /^https?:\/\//i.test(url || "") ? url : null; }
 
 const SIGNAL_LABELS = { funded: "just funded", stalled_search: "stalled search", hiring: "hiring" };
 
+// Set during render when any item is mid-research; load() then schedules one
+// refresh so the finished brief appears without a manual reload.
+let anyResearchPending = false;
+let refreshTimer = null;
+
 function itemRow(item, buttons) {
   const row = el("div", "item");
   row.appendChild(el("span", "badge " + item.signal, SIGNAL_LABELS[item.signal] || item.signal));
@@ -142,7 +154,25 @@ function itemRow(item, buttons) {
 
   if (item.score) row.appendChild(el("span", "badge score", item.score + "/10"));
 
+  const research = item.research || null;
+  if (research && research.status === "pending") {
+    row.appendChild(el("span", "badge pending", "researching…"));
+    anyResearchPending = true;
+  } else if (research && research.status === "failed") {
+    row.appendChild(el("span", "badge failed", "research failed"));
+  }
+
   const actions = el("div", "actions");
+  if (!research || research.status === "failed") {
+    const label = research ? "Retry research" : "Research";
+    const b = el("button", null, label);
+    b.onclick = async () => {
+      b.disabled = true;
+      await post(`/api/opportunities/${encodeURIComponent(item.id)}/research`);
+      load();
+    };
+    actions.appendChild(b);
+  }
   buttons.forEach(([label, status, primary]) => {
     const b = el("button", primary ? "primary" : null, label);
     b.onclick = async () => {
@@ -153,6 +183,17 @@ function itemRow(item, buttons) {
     actions.appendChild(b);
   });
   row.appendChild(actions);
+
+  if (research && research.status === "done" && research.summary) {
+    const details = el("details", "research");
+    details.dataset.itemId = item.id;
+    details.appendChild(el("summary", null, "Research brief"));
+    details.appendChild(el("div", "research-text", research.summary));
+    if (research.generated_at) {
+      details.appendChild(el("div", "research-date", "Researched " + fmtTs(research.generated_at)));
+    }
+    row.appendChild(details);
+  }
   return row;
 }
 
@@ -210,6 +251,12 @@ function byScoreThenNewest(a, b) {
 
 async function load() {
   const data = await api("/api/opportunities");
+  anyResearchPending = false;
+  if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null; }
+  // The pending-research auto-refresh re-renders everything; don't collapse a
+  // brief Craig is reading.
+  const openBriefs = new Set([...document.querySelectorAll("details.research[open]")]
+                             .map(d => d.dataset.itemId));
   const items = data.items || [];
   const triage = items.filter(i => i.status === "new" || i.status === "digested")
                       .sort(byScoreThenNewest);
@@ -223,6 +270,10 @@ async function load() {
     [["Dismiss", "dismissed", false]],
     "Nothing marked interested yet.");
   renderWatchlist(data.watchlist || [], document.getElementById("watchWrap"));
+  document.querySelectorAll("details.research").forEach(d => {
+    if (openBriefs.has(d.dataset.itemId)) d.open = true;
+  });
+  if (anyResearchPending) refreshTimer = setTimeout(load, 8000);
 }
 
 load();

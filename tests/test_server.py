@@ -69,6 +69,7 @@ EMAIL_CALL = {"function": {"name": "send_email", "arguments": {"subject": "Hi", 
     ("post", "/api/opportunities/abc/status", {"json": {"status": "interested"}}),
     ("post", "/api/opportunities/watchlist", {"json": {"company": "X"}}),
     ("delete", "/api/opportunities/watchlist/abc", {}),
+    ("post", "/api/opportunities/abc/research", {}),
 ])
 def test_endpoints_require_auth(client, method, path, kwargs):
     resp = getattr(client, method)(path, **kwargs)
@@ -526,3 +527,48 @@ def test_api_watchlist_add_and_remove(auth_client, opp_store):
     assert auth_client.delete(f"/api/opportunities/watchlist/{wid}").status_code == 200
     assert opp.get_watchlist() == []
     assert auth_client.delete("/api/opportunities/watchlist/nope").status_code == 400
+
+
+# --------------------------------------------------------------------------- #
+# Research triggers (the pipeline itself is covered in test_research.py)
+# --------------------------------------------------------------------------- #
+
+@pytest.fixture
+def research_spy(monkeypatch):
+    """Replace the thread-spawning runner with a recorder that also writes the
+    pending marker, mirroring the real _start_research's synchronous half."""
+    from agent.tools import opportunities as opp
+    started = []
+
+    def fake_start(item):
+        started.append(item["id"])
+        opp.set_research(item["id"], {"status": "pending", "summary": None})
+
+    monkeypatch.setattr(srv, "_start_research", fake_start)
+    return started
+
+
+def test_research_endpoint_starts_a_run(auth_client, opp_store, research_spy):
+    _, item_id = opp_store
+    resp = auth_client.post(f"/api/opportunities/{item_id}/research")
+    assert resp.status_code == 202
+    assert research_spy == [item_id]
+    # Already pending: acknowledged, not restarted.
+    resp = auth_client.post(f"/api/opportunities/{item_id}/research")
+    assert resp.status_code == 200 and "already" in resp.get_json()["note"]
+    assert research_spy == [item_id]
+    assert auth_client.post("/api/opportunities/missing/research").status_code == 400
+
+
+def test_marking_interested_auto_researches_once(auth_client, opp_store, research_spy):
+    opp, item_id = opp_store
+    assert auth_client.post(f"/api/opportunities/{item_id}/status",
+                            json={"status": "interested"}).status_code == 200
+    assert research_spy == [item_id]
+    # Re-marking interested later (research already present) doesn't re-run.
+    opp.set_research(item_id, {"status": "done", "summary": "brief"})
+    auth_client.post(f"/api/opportunities/{item_id}/status", json={"status": "interested"})
+    assert research_spy == [item_id]
+    # Dismissing never triggers research.
+    auth_client.post(f"/api/opportunities/{item_id}/status", json={"status": "dismissed"})
+    assert research_spy == [item_id]

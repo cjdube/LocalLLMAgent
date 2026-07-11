@@ -315,6 +315,25 @@ def flip_stalled(open_postings: dict, stalled_days: int, now: datetime | None = 
     return flipped
 
 
+def get_item(item_id: str) -> dict | None:
+    with locked(_STORE_PATH):
+        return next((i for i in _load()["items"] if i["id"] == item_id), None)
+
+
+def set_research(item_id: str, research: dict) -> bool:
+    """Attach a research payload ({"status": "pending"|"done"|"failed", ...})
+    to an item. Returns False if the item doesn't exist."""
+    with locked(_STORE_PATH):
+        data = _load()
+        item = next((i for i in data["items"] if i["id"] == item_id), None)
+        if item is None:
+            return False
+        item["research"] = research
+        item["updated"] = _now()
+        _save(data)
+    return True
+
+
 def all_items(limit: int = 200) -> list:
     """Full item dicts, newest first — for the dashboard's /opportunities page
     (page-sized cap), not the model: list_opportunities above is the

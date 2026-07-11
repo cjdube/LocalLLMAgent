@@ -69,6 +69,7 @@ from agent.tools.opportunities import (
     update_opportunity,
     watch_company,
 )
+from agent.tools.research import RESEARCH_TOOL_SCHEMA, research_company
 from agent.tools.reminders import (
     CANCEL_REMINDER_TOOL_SCHEMA,
     LIST_REMINDERS_TOOL_SCHEMA,
@@ -143,6 +144,7 @@ TOOLS = [
     *SKILL_TOOL_SCHEMAS,
     *OPPORTUNITY_TOOL_SCHEMAS,
     SEND_DIGEST_TOOL_SCHEMA,
+    RESEARCH_TOOL_SCHEMA,
 ]
 
 DISPATCH = {
@@ -189,6 +191,9 @@ DISPATCH = {
     "watch_company": watch_company,
     "unwatch_company": unwatch_company,
     "send_opportunity_digest": _send_opportunity_digest,
+    # Read-only against the outside world (web searches + an internal cached
+    # brief), so ungated like search_web.
+    "research_opportunity": research_company,
 }
 
 WRITE_TOOLS = frozenset({

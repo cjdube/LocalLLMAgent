@@ -457,7 +457,8 @@ TOOL_SERVICES = {
     "background": ("Background Tasks", ["run_in_background", "list_background_jobs", "get_job_result"]),
     "opportunities": ("Opportunity Scout", ["list_opportunities", "update_opportunity",
                                             "watch_company", "unwatch_company",
-                                            "send_opportunity_digest"]),
+                                            "send_opportunity_digest",
+                                            "research_opportunity"]),
 }
 
 # Which services each scheduled routine touches (mirrors the tasks' agent.tools

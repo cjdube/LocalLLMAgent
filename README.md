@@ -123,6 +123,7 @@ in — nothing new inherits it automatically.
 | `reminders.py` | Scheduled reminders — `set_reminder` (parses the time in Python via `dates.resolve_reminder_time`, not the model), `list_reminders`, `cancel_reminder`. Stored in `config/reminders.json`; the `reminder_sweep` task fires each due one as an `ntfy` phone push, then clears it. Set/cancel are confirmation-gated |
 | `background.py` | Background tasks — `run_in_background` (hand off a multi-step task that runs detached and pushes a summary when done), `list_background_jobs`, `get_job_result`. Jobs live in `config/bg_jobs.json`; the `bg_worker` task runs them. Posture is "read/draft freely, tap-to-approve consequential actions" — see the background-tasks section below. Also owns the HMAC-signed approval tokens |
 | `opportunities.py` | Opportunity signal store for the fractional-work scout — `list_opportunities`, `update_opportunity` (mark interested/dismissed), `watch_company`/`unwatch_company` (curate which companies' job boards the scout polls). Items live in `config/opportunities.json`, deduped by a stable per-source id and pruned after 30 days once digested/dismissed. The `opportunity_digest` task fills it; see Scheduled tasks below |
+| `research.py` | Company research for the opportunity scout (`research_opportunity`) — a fixed pipeline (not a freeform agent task): three bounded Tavily searches plus, for EDGAR items, a deterministic parse of the Form D filing XML itself (officer names, offering/sold amounts, revenue range, industry), summarized by the model into a fixed-template brief (what they do / value prop / who to contact / size & stage / why now / recent news / red flags) stored on the item and shown on `/opportunities`. Read-only against the outside world; web snippets are treated as untrusted display text. Triggered by the page's Research button, automatically on marking an item Interested, or from chat |
 | `google_auth.py` | Shared OAuth helper — one cached token for Calendar, Gmail, Tasks, and YouTube (read-only) scopes |
 
 Every tool module is runnable standalone for testing, e.g.:
@@ -360,7 +361,12 @@ read-only, so this page is where leads actually get worked. Three sections:
 **To triage** (new/digested items sorted by score, each with signal badge,
 model score and outreach angle, and **Interested** / **Dismiss** buttons),
 **Interested** (the live pipeline), and **Watchlist** (add or remove the
-companies whose Greenhouse/Lever/Ashby boards the scout polls). Backed by
+companies whose Greenhouse/Lever/Ashby boards the scout polls). Marking an
+item Interested auto-starts a company research run (`agent/tools/research.py`)
+on a background thread — a "researching…" badge appears, the page refreshes
+itself until the brief lands as an expandable **Research brief** on the item,
+and an ntfy ping announces it; a per-item **Research** button triggers the
+same run manually (or retries a failure). Backed by
 `GET /api/opportunities` plus small POST/DELETE triage endpoints that call the
 same `agent/tools/opportunities.py` store functions the chat tools use, so the
 page and chat can't drift apart. Each digest email footer links here (via

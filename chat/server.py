@@ -44,6 +44,7 @@ from agent.toolset import (
 from agent.tools import background
 from agent.tools import opportunities
 from agent.tools.memory import recall
+from agent.tools.research import research_company
 from agent.tools.notify import notify
 from agent.tools.skills import render_skills_index
 from tasks._common import setup_logger
@@ -626,16 +627,57 @@ def api_opportunities():
                     "watchlist": opportunities.get_watchlist()})
 
 
+def _start_research(item: dict) -> None:
+    """Kick off the research pipeline for one opportunity on a daemon thread —
+    a couple of Tavily searches plus a local-model summary takes a minute or
+    two, far too long to hold the page's request open. The pending marker is
+    written synchronously so the page shows "researching…" on its next load;
+    the thread overwrites it with done/failed and pings the phone (the whole
+    point of async: Craig has usually navigated away by the time it lands)."""
+    opportunities.set_research(item["id"], {"status": "pending", "summary": None})
+
+    def run():
+        result = research_company(item["id"])
+        if "error" in result:
+            logger.warning(f"research {item['id']} failed: {result['error']}")
+            notify(title="Wren: research failed", message=f"{item['company']}: {result['error']}")
+        else:
+            logger.info(f"research {item['id']} done")
+            notify(title="Wren: research ready",
+                   message=f"{item['company']} brief is on the opportunities page.")
+
+    threading.Thread(target=run, daemon=True, name=f"research-{item['id']}").start()
+
+
 @app.route("/api/opportunities/<item_id>/status", methods=["POST"])
 def api_opportunity_status(item_id: str):
     """Triage from the /opportunities page — same store call the chat's
-    update_opportunity tool makes, so the two surfaces can't drift apart."""
+    update_opportunity tool makes, so the two surfaces can't drift apart.
+    Marking an item interested auto-starts research on it (once)."""
     if not _authenticated():
         return jsonify({"error": "not authenticated"}), 401
     status = (request.get_json(silent=True) or {}).get("status", "")
     result = opportunities.update_opportunity(item_id, status)
     logger.info(f"opportunities page: {item_id} -> {status!r}: {result}")
+    if "error" not in result and status == "interested":
+        item = opportunities.get_item(item_id)
+        if item is not None and not item.get("research"):
+            _start_research(item)
     return jsonify(result), (200 if "error" not in result else 400)
+
+
+@app.route("/api/opportunities/<item_id>/research", methods=["POST"])
+def api_opportunity_research(item_id: str):
+    """The page's manual Research button (also the retry after a failure)."""
+    if not _authenticated():
+        return jsonify({"error": "not authenticated"}), 401
+    item = opportunities.get_item(item_id)
+    if item is None:
+        return jsonify({"error": f"no opportunity with id {item_id!r}"}), 400
+    if (item.get("research") or {}).get("status") == "pending":
+        return jsonify({"status": "pending", "note": "already researching"})
+    _start_research(item)
+    return jsonify({"status": "pending"}), 202
 
 
 @app.route("/api/opportunities/watchlist", methods=["POST"])
