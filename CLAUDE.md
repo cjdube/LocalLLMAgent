@@ -38,7 +38,7 @@ The on-device model is small; design around it:
 
 ## Conventions quick reference
 
-- **New tool**: `TOOL_SCHEMA` dict + plain callable + `main()` CLI in `agent/tools/<name>.py`; register in `agent/toolset.py` (`TOOLS`, `DISPATCH`, and the right gating set). Restart the chat server after edits.
+- **New tool**: `TOOL_SCHEMA` dict + plain callable + `main()` CLI in `agent/tools/<name>.py`; register in `agent/toolset.py` (`TOOLS`, `DISPATCH`, and the right gating set), and slot it into `CORE_TOOL_NAMES` or a `TOOL_GROUP_NAMES` group so chat can offer it (the partition test in `tests/test_toolset.py` fails otherwise; see `docs/tool-loading.md`). Restart the chat server after edits.
 - **New scheduled task**: `tasks/<name>.py` with `main() -> int`, `setup_logger` and `notify_failure` from `tasks/_common.py`, plus a launchd plist. `tasks/morning_brief.py` is the digest template; `tasks/weekly_learnings.py` the gather→LLM→persist template.
 - **Persistence**: JSON stores under `config/` via `agent/store.py` (`locked`, `load_json`, `atomic_write_json`); prune on write so polling stores don't grow unbounded (`agent/tools/background.py`).
 - **Config**: `os.getenv()` with inline defaults; document every new variable in `config/.env.example`.
