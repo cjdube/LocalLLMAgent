@@ -287,3 +287,38 @@ def test_oversized_tool_result_is_truncated(monkeypatch):
     content = messages[-1]["content"]
     assert "truncated" in content
     assert len(content) < 5000
+
+
+def test_advance_resends_mutated_tools_list_next_iteration(monkeypatch):
+    """The lazy-loading contract: advance() passes the SAME tools list object to
+    the model each iteration, so a dispatched tool that appends to that list
+    (as chat.server's load_tools does) makes the new schema visible on the very
+    next model call — within the same turn."""
+    def _schema(name):
+        return {"type": "function", "function": {"name": name, "parameters": {}}}
+
+    tools = [_schema("grow")]
+
+    def grow(**_):
+        tools.append(_schema("late_tool"))  # mutate the live list in place
+        return {"ok": True}
+
+    calls_tools_seen = []
+    step = {"n": 0}
+
+    def fake_post(url, json=None, timeout=None, stream=None):
+        calls_tools_seen.append([t["function"]["name"] for t in json["tools"]])
+        step["n"] += 1
+        if step["n"] == 1:
+            msg = {"role": "assistant", "content": "",
+                   "tool_calls": [{"function": {"name": "grow", "arguments": {}}}]}
+        else:
+            msg = {"role": "assistant", "content": "done"}
+        return _FakeResponse([{"message": msg, "done": True}])
+
+    monkeypatch.setattr(loop.requests, "post", fake_post)
+    result = loop.advance([{"role": "user", "content": "go"}], tools, {"grow": grow})
+
+    assert result == {"type": "final", "text": "done"}
+    assert calls_tools_seen[0] == ["grow"]                 # first call: pre-load list
+    assert calls_tools_seen[1] == ["grow", "late_tool"]    # second call: expanded

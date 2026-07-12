@@ -28,6 +28,7 @@ def client():
     srv.app.config["TESTING"] = True
     srv.conversations.clear()
     srv.pending_confirmations.clear()
+    srv.loaded_groups.clear()
     srv.cancel_events.clear()
     srv._session_last_active.clear()
     with srv.app.test_client() as c:
@@ -599,3 +600,83 @@ def test_marking_interested_auto_researches_once(auth_client, opp_store, researc
     # Dismissing never triggers research.
     auth_client.post(f"/api/opportunities/{item_id}/status", json={"status": "dismissed"})
     assert research_spy == [item_id]
+
+
+# --------------------------------------------------------------------------- #
+# Lazy tool loading: chat sends only the core plus the session's activated
+# groups. Groups are pre-loaded by keyword and, as a fallback, by the model
+# calling load_tools (which extends the live turn's tools and persists the
+# group on the session).
+# --------------------------------------------------------------------------- #
+
+def test_chat_sends_core_only_when_no_group_cued(auth_client, monkeypatch):
+    seen = {}
+
+    def fake_advance(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
+                     should_cancel=None):
+        seen["names"] = {t["function"]["name"] for t in tools}
+        seen["dispatch_has_load"] = "load_tools" in dispatch
+        return {"type": "final", "text": "sunny"}
+
+    monkeypatch.setattr(srv, "advance", fake_advance)
+    resp = auth_client.post("/chat", json={"message": "what's the weather?"})
+    assert resp.status_code == 200
+    # Core tool present, deferred group tool absent, meta-tool always offered.
+    assert "fetch_weather" in seen["names"]
+    assert "list_opportunities" not in seen["names"]
+    assert "load_tools" in seen["names"]
+    assert seen["dispatch_has_load"]
+    assert SID not in srv.loaded_groups or not srv.loaded_groups[SID]
+
+
+def test_chat_keyword_preloads_a_group(auth_client, monkeypatch):
+    seen = {}
+
+    def fake_advance(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
+                     should_cancel=None):
+        seen["names"] = {t["function"]["name"] for t in tools}
+        return {"type": "final", "text": "here's your watchlist"}
+
+    monkeypatch.setattr(srv, "advance", fake_advance)
+    resp = auth_client.post("/chat", json={"message": "what's on my opportunities watchlist?"})
+    assert resp.status_code == 200
+    # The 'opportunities' group was attached before the model ran — no load hop.
+    assert "list_opportunities" in seen["names"]
+    assert srv.loaded_groups[SID] == {"opportunities"}
+
+
+def test_make_load_tools_extends_live_list_and_persists(monkeypatch):
+    srv.loaded_groups.pop(SID, None)
+    tools = list(srv.tools_for(set()))
+    before = {t["function"]["name"] for t in tools}
+    load = srv._make_load_tools(SID, tools)
+
+    result = load(group="wiki")
+    after = {t["function"]["name"] for t in tools}
+    # The live list grew in place with the wiki group's tools...
+    assert "read_wiki_index" in after and "read_wiki_index" not in before
+    assert "read_wiki_index" in result["now_available"]
+    # ...and the group is recorded on the session for later turns / continuation.
+    assert srv.loaded_groups[SID] == {"wiki"}
+    # Idempotent: loading again adds nothing new.
+    assert load(group="wiki")["now_available"] == []
+    # Unknown group is a soft error listing the choices, not a crash.
+    err = load(group="nope")
+    assert "error" in err and "wiki" in err["available"]
+    srv.loaded_groups.pop(SID, None)
+
+
+def test_loaded_groups_persist_across_turns_and_clear_on_new(auth_client, monkeypatch):
+    def fake_advance(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
+                     should_cancel=None):
+        return {"type": "final", "text": "ok"}
+
+    monkeypatch.setattr(srv, "advance", fake_advance)
+    auth_client.post("/chat", json={"message": "anything about my strava runs?"})
+    assert "activity" in srv.loaded_groups[SID]
+    # A later plain turn keeps the group loaded (persists across turns).
+    auth_client.post("/chat", json={"message": "thanks"})
+    assert "activity" in srv.loaded_groups[SID]
+    # Starting a new session drops it.
+    auth_client.post("/chat/new")
+    assert SID not in srv.loaded_groups

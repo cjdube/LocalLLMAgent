@@ -243,6 +243,146 @@ UNATTENDED_EXCLUDED_TOOLS = frozenset({
 
 
 # --------------------------------------------------------------------------- #
+# Lazy tool loading (chat only). The full TOOLS list above stays the source of
+# truth — the dashboard and the background worker use it whole. Chat sessions,
+# though, only send the model a small always-loaded CORE plus whichever GROUPS
+# the turn has activated, so the per-turn schema overhead (and the prompt
+# narrative describing every tool) doesn't crowd the small model's context on
+# the common asks. A group is pulled in two ways: deterministic keyword
+# pre-loading in the server (GROUP_KEYWORDS) and, as a fallback, the model
+# calling the load_tools meta-tool. See docs/tool-loading.md.
+#
+# Groups are defined by tool NAME and resolved against TOOLS, so the schema
+# objects aren't duplicated and the *_TOOL_SCHEMAS bundles can reorder freely.
+# --------------------------------------------------------------------------- #
+
+_BY_NAME = {t["function"]["name"]: t for t in TOOLS}
+
+# The lean always-loaded set. Skills READ (list_skills/read_skill) is core
+# because the skills index is rendered into the chat prompt every turn and tells
+# the model to read_skill; skill authoring (write/delete) is deferred below.
+CORE_TOOL_NAMES = [
+    "fetch_weather",
+    "get_upcoming_events", "get_events_by_date", "log_calendar_event", "recolor_event",
+    "get_tasks", "get_tasks_due_soon", "create_task", "update_task_due_date", "complete_task",
+    "search_web",
+    "remember", "pin", "recall", "archive", "forget",
+    "set_reminder", "list_reminders", "cancel_reminder",
+    "list_skills", "read_skill",
+]
+
+# Deferred groups, loadable on demand. Every tool in TOOLS is in exactly one of
+# CORE_TOOL_NAMES or a group here (enforced by tests/test_toolset.py) so nothing
+# becomes unreachable when a new tool is added.
+TOOL_GROUP_NAMES = {
+    "opportunities": [
+        "list_opportunities", "update_opportunity", "watch_company",
+        "unwatch_company", "send_opportunity_digest",
+        "research_opportunity", "research_company",
+    ],
+    "wiki": [
+        "read_wiki_index", "list_wiki_pages", "read_wiki_page",
+        "list_weekly_reviews", "read_weekly_review",
+    ],
+    "background": ["run_in_background", "list_background_jobs", "get_job_result"],
+    "web": ["fetch_webpage", "evaluate_app", "fetch_starred_repos"],
+    "activity": ["fetch_strava", "fetch_chrome_history"],
+    "authoring": ["write_skill", "delete_skill"],
+    "brief": ["send_morning_brief", "send_email"],
+}
+
+# One-line "when to load it" blurb per group, rendered into the chat prompt so
+# the model can reach for load_tools on a keyword the pre-loader missed.
+_GROUP_BLURBS = {
+    "opportunities": "Craig's fractional-work opportunities, watchlist, and company research.",
+    "wiki": "Craig's learnings wiki — weekly reviews and concept pages.",
+    "background": "Hand a long-running task off to run detached and report back.",
+    "web": "Fetch a specific web page, evaluate a web app, or list starred GitHub repos.",
+    "activity": "Craig's Strava activities and recent Chrome browsing history.",
+    "authoring": "Save or delete a skill (a reusable multi-step procedure).",
+    "brief": "Send the morning brief, or send an email.",
+}
+
+# Case-insensitive word-boundary cues that pre-load a group before the model
+# runs, so it usually never has to make the load_tools reasoning hop. Tunable.
+GROUP_KEYWORDS = {
+    "opportunities": ["job", "jobs", "role", "opportunit", "hiring", "watchlist",
+                      "watch", "fractional", "research", "compan"],
+    "wiki": ["wiki", "learning", "weekly review", "working on"],
+    "background": ["background", "kick off", "hand off", "handoff"],
+    "web": ["webpage", "web page", "fetch", "url", "evaluate", "starred", "github"],
+    "activity": ["strava", "run", "ran", "ride", "cycling", "workout",
+                 "browsing", "chrome", "history"],
+    "authoring": ["skill"],
+    "brief": ["brief", "email"],
+}
+
+# The meta-tool. Not in TOOLS/DISPATCH — its callable is bound per session in
+# chat/server.py (it needs the session id and that turn's live tools list).
+LOAD_TOOLS_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "load_tools",
+        "description": (
+            "Load an additional group of tools when the current tools can't do "
+            "what Craig asked. After loading, the group's tools become available "
+            "to call on your next step."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "group": {
+                    "type": "string",
+                    "enum": list(TOOL_GROUP_NAMES),
+                    "description": "Which tool group to load.",
+                },
+            },
+            "required": ["group"],
+        },
+    },
+}
+
+CORE_TOOLS = [LOAD_TOOLS_SCHEMA] + [_BY_NAME[n] for n in CORE_TOOL_NAMES]
+TOOL_GROUPS = {g: [_BY_NAME[n] for n in names] for g, names in TOOL_GROUP_NAMES.items()}
+
+
+def tools_for(group_names) -> list[dict]:
+    """CORE_TOOLS plus the schemas for each loaded group, de-duped by tool name
+    and order-stable (core first, then groups in definition order)."""
+    out, seen = [], set()
+    for schema in [*CORE_TOOLS, *(s for g in TOOL_GROUPS if g in group_names for s in TOOL_GROUPS[g])]:
+        name = schema["function"]["name"]
+        if name not in seen:
+            seen.add(name)
+            out.append(schema)
+    return out
+
+
+def groups_for_message(text: str) -> set[str]:
+    """Groups whose keyword cues appear in the user message (word-boundary,
+    case-insensitive) — the deterministic pre-load path."""
+    low = (text or "").lower()
+    hits = set()
+    for group, words in GROUP_KEYWORDS.items():
+        if any(re.search(rf"\b{re.escape(w)}", low) for w in words):
+            hits.add(group)
+    return hits
+
+
+def render_toolgroups_index() -> str:
+    """The compact loadable-groups block for the chat system prompt. Replaces
+    the per-tool narrative for deferred groups and tells the model it can pull a
+    group in with load_tools when the core tools fall short."""
+    lines = [
+        "Beyond the tools already available to you, these tool GROUPS can be "
+        "loaded on demand with load_tools(group) when Craig asks for something "
+        "the current tools can't do:",
+    ]
+    lines += [f"- {g}: {_GROUP_BLURBS[g]}" for g in TOOL_GROUPS]
+    return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------- #
 # Human-readable descriptions of a pending confirm-gated call. Shared by the
 # chat confirmation card (chat/server.py) and the background worker's approval
 # push (tasks/bg_worker.py) so the two surfaces can't drift apart — they once

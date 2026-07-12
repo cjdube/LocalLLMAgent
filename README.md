@@ -57,6 +57,12 @@ for the tool schemas and the turn's own growth), keeping the system prompt and
 the newest turn. So a long session degrades gracefully — the model forgets the
 oldest exchanges — instead of hitting `num_ctx` and losing its system prompt.
 
+Chat also trims the *tool* overhead: instead of sending all ~45 tool schemas
+every turn, a session sends a small always-loaded core plus whichever tool
+groups the turn needs, pulled in by keyword pre-load or the model's `load_tools`
+meta-tool. Background tasks keep the full toolset. See
+[docs/tool-loading.md](docs/tool-loading.md).
+
 ### `agent/loop.py` — how tasks and chat talk to the model
 
 - **`advance(messages, tools, dispatch, confirm_before=...)`** /

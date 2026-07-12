@@ -36,10 +36,14 @@ from chat.insights import (
 )
 from agent.toolset import (
     DISPATCH as _BASE_DISPATCH,
+    TOOL_GROUPS,
     TOOLS,
     WRITE_TOOLS,
     describe_call,
     describe_call_detail,
+    groups_for_message,
+    render_toolgroups_index,
+    tools_for,
 )
 from agent.tools import background
 from agent.tools import opportunities
@@ -92,24 +96,12 @@ CHAT_SYSTEM_PROMPT = (
     + "\n\n---\n\n"
     + "You can check the weather (current conditions plus a forecast up to 5 "
     "days out — pass a days argument if Craig asks about more than just "
-    "today), look up Craig's calendar (upcoming, or any "
-    "past or future date range), fetch his recent Strava activities, look up "
-    "his recent Chrome browsing history, search the web for current "
-    "information you don't already know, and look up his starred GitHub "
-    "repos (pass days_ago rather than computing a date yourself if he asks "
-    "what's new in the last N days). Each repo's recent_changes field is "
-    "already condensed to what matters — if it ends with a '(+N more "
-    "commits)' or '(+N more releases)' note, that count is important, not a "
-    "footnote to drop: always carry it into your summary (e.g. 'plus 8 more "
-    "commits') so Craig knows the repo had more activity than what's shown. "
-    "Use these tools when they'd help answer the question. You can also send an email, log a calendar "
-    "event, or recolor an existing event by category on request; the app "
-    "pauses those for Craig's confirmation before they execute, so just "
-    "explain what you're about to do. If Craig asks you to send or resend "
-    "his morning brief, use send_morning_brief rather than composing that "
-    "email yourself with send_email — it builds the same formatted HTML "
-    "brief the scheduled task sends, which you can't reliably reproduce by "
-    "writing the email body freehand. You can also look up Craig's Google "
+    "today), look up Craig's calendar (upcoming, or any past or future date "
+    "range), and search the web for current information you don't already "
+    "know. Use these tools when they'd help answer the question. You can also "
+    "log a calendar event or recolor an existing event by category on request; "
+    "the app pauses those for Craig's confirmation before they execute, so just "
+    "explain what you're about to do. You can also look up Craig's Google "
     "Tasks (get_tasks for everything open, get_tasks_due_soon for what's "
     "overdue or due soon — these span all of his task lists, e.g. Domestic, "
     "Travel, AARP, and each result says which list a task is in), create a "
@@ -117,7 +109,7 @@ CHAT_SYSTEM_PROMPT = (
     "rescheduling, or completing a task pauses for confirmation just like "
     "the other write actions. To change or complete a task you need its "
     "tasklist_id as well as its id, both of which come from a prior "
-    "get_tasks/get_tasks_due_soon call. Finally, you have a long-term memory "
+    "get_tasks/get_tasks_due_soon call. You have a long-term memory "
     "with two tiers. Use remember to save a fact you can look up later with "
     "recall (e.g. an interesting fact, a detail to bring up another time) — "
     "these are searchable but not kept in front of you. Use pin for a lasting "
@@ -129,38 +121,18 @@ CHAT_SYSTEM_PROMPT = (
     "what you remember or to find a fact's id; pass a category to narrow it. Use "
     "archive to move a pinned fact back to search-only when Craig wants to "
     "declutter, and forget to delete one for good; forgetting pauses for "
-    "confirmation like the other write actions. You can also search Craig's "
-    "personal learnings wiki — his weekly reviews and the concept pages built "
-    "from them — to answer what he's been working on or decided about a topic. "
-    "Start with read_wiki_index to see what topics exist, then read only the one "
-    "or two most relevant pages with read_wiki_page and answer, citing the page "
-    "names you drew from — don't read every page or keep digging once you can "
-    "answer. Only fall back to list_weekly_reviews / read_weekly_review if the "
-    "wiki index has no page for what Craig asked (e.g. a very recent week not "
-    "summarized yet). Finally, you keep a set of skills — reusable procedures "
-    "for multi-step tasks you've worked out before. The skills index (names and "
-    "one-line descriptions) is shown to you each turn; when a task matches one, "
-    "read_skill to get its steps before following it rather than improvising. "
-    "Use write_skill when Craig asks you to remember HOW to do something — the "
-    "sequence of steps and tools, not a plain fact (facts go to remember/pin). "
-    "Saving over an existing skill name overwrites it, so include the full "
-    "updated body. Use delete_skill to drop a stale one; write_skill and "
-    "delete_skill pause for confirmation like the other write actions. "
+    "confirmation like the other write actions. You keep a set of skills — "
+    "reusable procedures for multi-step tasks you've worked out before. The "
+    "skills index (names and one-line descriptions) is shown to you each turn; "
+    "when a task matches one, read_skill to get its steps before following it "
+    "rather than improvising. "
     "You can also set reminders: when Craig asks to be reminded of something "
     "later, use set_reminder — pass his time expression verbatim (e.g. 'in 2 "
     "hours', '3pm', 'tomorrow 9am') as the when argument without computing the "
     "time yourself, and the reminder text as message. It fires once as a phone "
     "notification. Use list_reminders to see what's pending and cancel_reminder "
     "(with an id from list_reminders) to drop one; setting and cancelling pause "
-    "for confirmation like the other write actions. "
-    "Finally, for a task Craig wants done in the background — something that will "
-    "take a while, or that he wants to hand off and walk away from (research and "
-    "compile, gather from several places, watch for and report) — use "
-    "run_in_background with a complete self-contained description of the task; it "
-    "runs detached and pushes him a summary when done, and any consequential "
-    "action it needs is routed to his phone for approval automatically. Don't use "
-    "it for something you can just answer or do now in the conversation. "
-    "list_background_jobs and get_job_result report on what's running or finished."
+    "for confirmation like the other write actions."
 )
 
 def _system_message_content() -> str:
@@ -185,6 +157,9 @@ def _system_message_content() -> str:
     skills_index = render_skills_index()
     if skills_index:
         dated += "\n\n" + skills_index
+    # The loadable tool-group index: the deferred groups' schemas aren't sent
+    # every turn, so this tells the model what it can pull in with load_tools.
+    dated += "\n\n" + render_toolgroups_index()
     return with_identity(dated)
 
 
@@ -230,6 +205,10 @@ logger.setLevel(logging.INFO)
 # In-memory only, per the "fresh session" design — lost on server restart.
 conversations: dict[str, list[dict]] = {}
 pending_confirmations: dict[str, dict] = {}
+# Which deferred tool groups each session has activated (via keyword pre-load or
+# a load_tools call). Persists across turns so a group loaded once stays loaded
+# — including across the /chat/confirm continuation, which rebuilds the toolset.
+loaded_groups: dict[str, set[str]] = {}
 # A per-session cancel signal for the turn currently running in another request
 # thread. /chat and /chat/confirm register a fresh Event (via _begin_turn)
 # before advancing and hand advance() its .is_set; /chat/cancel sets it. Keyed
@@ -267,6 +246,7 @@ def _evict_idle_sessions() -> None:
             continue  # a turn is somehow still running; leave it alone
         conversations.pop(sid, None)
         pending_confirmations.pop(sid, None)
+        loaded_groups.pop(sid, None)
         _session_last_active.pop(sid, None)
 
 # Triggers scheduled tasks on demand for the dashboard's "Run now" button.
@@ -441,6 +421,28 @@ def _trim_history(history: list) -> int:
     return dropped
 
 
+def _make_load_tools(sid: str, tools: list[dict]):
+    """Bind the load_tools meta-tool to this turn: record the group on the
+    session (so it survives later turns and the confirm continuation) and extend
+    THIS turn's live tools list in place — advance() re-sends the same list each
+    iteration, so the group's schemas reach the model on its very next step."""
+    def load_tools(group: str = "", **_) -> dict:
+        if group not in TOOL_GROUPS:
+            return {"error": f"unknown group '{group}'", "available": list(TOOL_GROUPS)}
+        loaded_groups.setdefault(sid, set()).add(group)
+        have = {t["function"]["name"] for t in tools}
+        added = []
+        for schema in TOOL_GROUPS[group]:
+            name = schema["function"]["name"]
+            if name not in have:
+                tools.append(schema)
+                have.add(name)
+                added.append(name)
+        return {"loaded": group, "now_available": added}
+
+    return load_tools
+
+
 def _run_turn(sid: str, history: list, checkpoint: int, cancel: threading.Event,
               stage: str = "turn"):
     """Advance the session's conversation and shape the HTTP response — the
@@ -450,8 +452,14 @@ def _run_turn(sid: str, history: list, checkpoint: int, cancel: threading.Event,
     therefore survives the rollback (see that route's comment). `cancel` is
     the Event _begin_turn registered for this sid; it is always deregistered
     on the way out, which also releases the session's one-turn slot."""
+    # Chat sends only the always-loaded core plus this session's activated
+    # groups, not the whole registry — keeps the small model's context lean. The
+    # tools list is mutable so a mid-turn load_tools call can extend it (see
+    # _make_load_tools); dispatch carries every real tool, gated only in schema.
+    tools = tools_for(loaded_groups.get(sid, set()))
+    dispatch = {**DISPATCH, "load_tools": _make_load_tools(sid, tools)}
     try:
-        result = advance(history, TOOLS, DISPATCH, confirm_before=WRITE_TOOLS,
+        result = advance(history, tools, dispatch, confirm_before=WRITE_TOOLS,
                          logger=logger, should_cancel=cancel.is_set)
     except TurnCancelled:
         del history[checkpoint:]  # discard the stopped turn so the next one starts clean
@@ -541,6 +549,12 @@ def chat():
             f"({MAX_HISTORY_CHARS} chars)"
         )
 
+    # Deterministic pre-load: attach any tool groups this message's keywords cue
+    # so the model usually doesn't have to make the load_tools reasoning hop.
+    preload = groups_for_message(user_message)
+    if preload:
+        loaded_groups.setdefault(sid, set()).update(preload)
+
     checkpoint = len(history)
     history.append({"role": "user", "content": user_message})
     return _run_turn(sid, history, checkpoint, cancel)
@@ -595,6 +609,7 @@ def chat_new():
     sid = _session_id()
     conversations.pop(sid, None)
     pending_confirmations.pop(sid, None)
+    loaded_groups.pop(sid, None)
     _session_last_active.pop(sid, None)
     return jsonify({"ok": True})
 
