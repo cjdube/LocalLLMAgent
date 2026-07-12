@@ -55,12 +55,10 @@ RUN_IN_BACKGROUND_TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "run_in_background",
-        "description": "Kick off a multi-step task to run in the background and notify Craig with a "
-        "summary when it's done. Use this when Craig asks you to go do something that will take a "
-        "while or that he wants to walk away from (research, gather and compile, watch for and "
-        "report). You do NOT do the task now — you hand it off, and it runs detached. Any "
-        "consequential action it needs (like sending an email) is automatically routed to Craig's "
-        "phone for approval, so describe the task fully and let it proceed.",
+        "description": "Kick off a multi-step task to run in the background and notify Craig with "
+        "a summary when it's done — for things that take a while or that he wants to walk away "
+        "from. You do NOT do the task now; you hand it off. Any consequential action it needs "
+        "(like sending an email) is routed to Craig's phone for approval automatically.",
         "parameters": {
             "type": "object",
             "properties": {

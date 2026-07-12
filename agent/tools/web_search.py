@@ -24,10 +24,9 @@ TOOL_SCHEMA = {
     "function": {
         "name": "search_web",
         "description": (
-            "Search the web for current information — news, facts, prices, "
-            "documentation, anything not in the model's training data or "
-            "Craig's local tools. Returns a short list of relevant results "
-            "with titles, URLs, and content snippets."
+            "Search the web for current information — anything not in your "
+            "training data or Craig's local tools. Returns results with "
+            "titles, URLs, and content snippets."
         ),
         "parameters": {
             "type": "object",
@@ -48,10 +47,9 @@ TOOL_SCHEMA = {
                 "days": {
                     "type": "integer",
                     "description": (
-                        "For topic='news' only: limit results to those published "
-                        "within the last N days. Use a small value (e.g. 1) when "
-                        "you need genuinely current headlines rather than "
-                        "whatever ranks highest."
+                        "For topic='news' only: only results published in the "
+                        "last N days. Use a small value (e.g. 1) for genuinely "
+                        "current headlines."
                     ),
                 },
             },

@@ -88,11 +88,9 @@ WATCH_COMPANY_TOOL_SCHEMA = {
     "function": {
         "name": "watch_company",
         "description": "Add a company to the opportunity watchlist: the daily scout polls its "
-        "public job board for product/engineering leadership openings and flags any that stay "
-        "open past the stalled-search threshold. Needs which ATS the company uses (greenhouse, "
-        "lever, ashby, or icims) and its board slug — the identifier in its job-board URL, e.g. "
-        "boards.greenhouse.io/<slug>, jobs.lever.co/<slug>, jobs.ashbyhq.com/<slug>, or "
-        "<slug>.icims.com.",
+        "public job board for leadership openings and flags stalled searches. The slug is the "
+        "identifier in its job-board URL, e.g. boards.greenhouse.io/<slug>, jobs.lever.co/<slug>, "
+        "jobs.ashbyhq.com/<slug>, or <slug>.icims.com.",
         "parameters": {
             "type": "object",
             "properties": {

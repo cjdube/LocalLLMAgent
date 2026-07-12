@@ -184,9 +184,8 @@ LIST_SKILLS_SCHEMA = {
     "type": "function",
     "function": {
         "name": "list_skills",
-        "description": "List the saved skills (procedures you've written down) with their "
-        "one-line descriptions. The system prompt already shows this index, so you usually "
-        "don't need to call this — use read_skill to open the one you need.",
+        "description": "List saved skills with their one-line descriptions. The system prompt "
+        "already shows this index, so you rarely need this — use read_skill to open one.",
         "parameters": {"type": "object", "properties": {}},
     },
 }
@@ -195,9 +194,8 @@ READ_SKILL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "read_skill",
-        "description": "Read the full step-by-step body of one saved skill by its name (the slug "
-        "shown in the skills index). Do this before following a procedure — the index only shows "
-        "the title and a one-line summary, not the steps.",
+        "description": "Read the full step-by-step body of one saved skill by its slug. Do this "
+        "before following a procedure — the index only shows the one-line summary, not the steps.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -215,9 +213,8 @@ WRITE_SKILL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "write_skill",
-        "description": "Save a reusable procedure as a skill so you (or a future you) can follow it "
-        "again without re-deriving it. Use this when Craig asks you to remember HOW to do a "
-        "multi-step task — the sequence of tools and steps — not a plain fact (use remember/pin for "
+        "description": "Save a reusable procedure as a skill — for remembering HOW to do a "
+        "multi-step task (the sequence of tools and steps), not a plain fact (use remember/pin for "
         "facts). Saving under an existing name overwrites it, so pass the complete, updated body.",
         "parameters": {
             "type": "object",

@@ -20,10 +20,9 @@ from zoneinfo import ZoneInfo
 # to a tool's own lead-in (e.g. "The day to look up. " + DATE_ARG_GUIDANCE) so
 # the model passes something resolve_date() can handle.
 DATE_ARG_GUIDANCE = (
-    "Use 'today' or 'yesterday' for those. If a month and day are given "
-    "WITHOUT a year (e.g. 'July 2nd'), pass just the month and day as 'MM-DD' "
-    "(e.g. '07-02') and the correct year is filled in automatically. Only use "
-    "a full 'YYYY-MM-DD' when a specific year is stated."
+    "Use 'today'/'yesterday' as-is. When no year is stated, pass just 'MM-DD' "
+    "(e.g. '07-02') and the year is filled in automatically; use 'YYYY-MM-DD' "
+    "only when a year is stated."
 )
 
 
@@ -129,10 +128,9 @@ def resolve_date(date_str: str, *, today: Optional[date] = None, prefer: str = "
 # time itself (it can't do date math reliably).
 REMINDER_WHEN_GUIDANCE = (
     "Pass Craig's time expression verbatim — do NOT compute or convert it "
-    "yourself. Understood forms: a relative delay ('in 2 hours', '90m', "
-    "'30 minutes', 'in 3 days'); a clock time, taken as the next time it occurs "
-    "('3pm', '3:30 pm', '15:00'); 'tomorrow' with a time ('tomorrow 9am'); or an "
-    "explicit 'YYYY-MM-DD HH:MM'."
+    "yourself. Understood: relative delays ('in 2 hours', '90m'), clock times "
+    "taken as the next occurrence ('3pm', '15:00'), 'tomorrow 9am', or "
+    "'YYYY-MM-DD HH:MM'."
 )
 
 # Relative-delay units accepted by resolve_reminder_time, in seconds.

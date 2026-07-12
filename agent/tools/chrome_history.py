@@ -46,11 +46,9 @@ TOOL_SCHEMA = {
     "function": {
         "name": "fetch_chrome_history",
         "description": (
-            "Get meaningful (non-noise) Chrome browsing history sites. Pass "
-            "'days_ago' for a recent window (e.g. 7 for the last week) — the "
-            "date is resolved in Python, so don't compute one yourself. Or pass "
-            "an explicit 'start'/'end' range for a specific span. Day boundaries "
-            "are interpreted in Craig's local timezone."
+            "Get meaningful (non-noise) Chrome browsing history. Pass 'days_ago' "
+            "for a recent window, or an explicit 'start'/'end' range. Day "
+            "boundaries use Craig's local timezone."
         ),
         "parameters": {
             "type": "object",
@@ -58,12 +56,12 @@ TOOL_SCHEMA = {
                 "days_ago": {
                     "type": "integer",
                     "description": (
-                        "How many days back to look, e.g. 7 for 'the last week'. "
-                        "Resolved from the current time in Python. Use this rather "
-                        "than computing a date yourself; omit if giving start/end."
+                        "Days back to look, e.g. 7 for 'the last week' — resolved "
+                        "in Python, don't compute a date yourself. Omit if giving "
+                        "start/end."
                     ),
                 },
-                "start": {"type": "string", "description": "Start date (use with 'end' for an explicit range). " + DATE_ARG_GUIDANCE},
+                "start": {"type": "string", "description": "Start date (use with 'end'). " + DATE_ARG_GUIDANCE},
                 "end": {"type": "string", "description": "End date. " + DATE_ARG_GUIDANCE},
             },
         },

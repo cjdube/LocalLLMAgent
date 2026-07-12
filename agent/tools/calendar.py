@@ -51,7 +51,7 @@ LOG_TOOL_SCHEMA = {
                 "color_id": {"type": "string", "description": "Google Calendar colorId, e.g. '4' for Flamingo"},
                 "source_id": {
                     "type": "string",
-                    "description": "Stable external id (e.g. Strava activity id) used to avoid creating duplicate events if this tool is called more than once for the same activity.",
+                    "description": "Stable external id (e.g. Strava activity id) used to avoid creating duplicate events.",
                 },
             },
             "required": ["summary", "start", "end"],

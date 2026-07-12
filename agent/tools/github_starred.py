@@ -33,10 +33,9 @@ TOOL_SCHEMA = {
         "name": "fetch_starred_repos",
         "description": (
             "List Craig's starred GitHub repos. Pass 'days_ago' to only get repos "
-            "that have been pushed to in that many days (i.e. what's new) — each "
-            "returned repo then also includes a 'recent_changes' one-to-two-line "
-            "summary of its latest release notes or commit messages. Omit "
-            "'days_ago' to list every starred repo, unfiltered (no changelog lookup)."
+            "pushed to in that many days (i.e. what's new), each with a "
+            "'recent_changes' summary of its latest release notes or commits. Omit "
+            "'days_ago' to list every starred repo, unfiltered."
         ),
         "parameters": {
             "type": "object",
@@ -44,10 +43,8 @@ TOOL_SCHEMA = {
                 "days_ago": {
                     "type": "integer",
                     "description": (
-                        "How many days back to look for repo updates, e.g. 3 for "
-                        "'in the last three days'. Resolved from the current time in "
-                        "Python, so don't compute a date yourself. Omit to list all "
-                        "starred repos, unfiltered."
+                        "Days back to look for repo updates, e.g. 3 — resolved in "
+                        "Python, don't compute a date yourself. Omit to list all."
                     ),
                 },
             },

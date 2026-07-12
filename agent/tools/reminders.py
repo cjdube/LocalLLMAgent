@@ -33,9 +33,8 @@ SET_REMINDER_TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "set_reminder",
-        "description": "Set a reminder that will push a notification to Craig's phone at a future "
-        "time. Use this whenever Craig asks to be reminded of something later. The reminder fires "
-        "once, then is cleared.",
+        "description": "Push a reminder notification to Craig's phone at a future time — use "
+        "whenever Craig asks to be reminded of something. Fires once, then is cleared.",
         "parameters": {
             "type": "object",
             "properties": {

@@ -223,13 +223,11 @@ RESEARCH_OPPORTUNITY_TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "research_opportunity",
-        "description": "Research the company behind a scout opportunity: a few web "
-        "searches (plus its SEC Form D filing, when the signal came from EDGAR) "
-        "summarized into a short brief — what they do, value proposition, who to "
-        "contact, size/stage, why now, red flags. The brief is saved on the opportunity "
-        "and shown on the /opportunities page. Use when Craig marks an opportunity "
-        "interested or asks to look into one. Takes a minute or two. Get the id from "
-        "list_opportunities.",
+        "description": "Research the company behind a scout opportunity into a short "
+        "brief — what they do, value proposition, who to contact, size/stage, why now, "
+        "red flags — saved on the opportunity and shown on the /opportunities page. Use "
+        "when Craig marks one interested or asks to look into it. Takes a minute or "
+        "two; get the id from list_opportunities.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -246,11 +244,9 @@ RESEARCH_COMPANY_TOOL_SCHEMA = {
     "function": {
         "name": "research_company",
         "description": "Research ANY company by name — same brief as "
-        "research_opportunity (what they do, value proposition, who to contact, "
-        "size/stage, why now, red flags) from a few web searches, but not tied to the "
-        "opportunity scout: nothing is saved, the brief is returned directly. Use when "
-        "Craig names a company to look into that isn't in the opportunities list. "
-        "Takes a minute or two.",
+        "research_opportunity, but not tied to the scout: nothing is saved, the brief "
+        "is returned directly. Use when Craig names a company to look into that isn't "
+        "in the opportunities list. Takes a minute or two.",
         "parameters": {
             "type": "object",
             "properties": {

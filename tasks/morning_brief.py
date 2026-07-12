@@ -249,11 +249,10 @@ SEND_BRIEF_TOOL_SCHEMA = {
         "name": "send_morning_brief",
         "description": (
             "Build and send Craig's morning brief email right now (weather, "
-            "calendar, tasks due soon, starred repo updates), using the same "
-            "polished HTML layout as the scheduled morning brief. Use this "
-            "whenever Craig asks to send or resend the morning brief — do NOT "
-            "compose that email yourself with send_email, since freehand text "
-            "loses the formatting."
+            "calendar, tasks due soon, starred repo updates) in the same HTML "
+            "layout as the scheduled one. Use whenever Craig asks to send or "
+            "resend the morning brief — do NOT compose it yourself with "
+            "send_email."
         ),
         "parameters": {"type": "object", "properties": {}, "required": []},
     },

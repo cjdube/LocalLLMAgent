@@ -36,9 +36,9 @@ GET_TASKS_TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "get_tasks",
-        "description": "Get all open (incomplete) Google Tasks across every task list, regardless of "
-        "due date. Each returned task includes which list it's in (the 'list' field) and a "
-        "tasklist_id — pass that tasklist_id back to update_task_due_date/complete_task later.",
+        "description": "Get all open Google Tasks across every task list, regardless of due date. "
+        "Each task includes its list name ('list') and a tasklist_id — pass that back to "
+        "update_task_due_date/complete_task later.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -80,9 +80,8 @@ CREATE_TASK_TOOL_SCHEMA = {
                 "due": {"type": "string", "description": "Due date, optional. " + DATE_ARG_GUIDANCE},
                 "list_name": {
                     "type": "string",
-                    "description": "Which task list to create it in, matched by name (e.g. 'Travel', "
-                    "'Domestic', 'AARP') — use the 'list' field from a prior get_tasks/get_tasks_due_soon "
-                    "result if you need to know the exact name. Optional; defaults to the primary list.",
+                    "description": "Which task list to create it in, matched by name (the 'list' "
+                    "field from a prior get_tasks result). Optional; defaults to the primary list.",
                 },
             },
             "required": ["title"],
@@ -101,14 +100,14 @@ UPDATE_TASK_DUE_DATE_TOOL_SCHEMA = {
                 "task_id": {"type": "string", "description": "The task's id, from get_tasks or get_tasks_due_soon."},
                 "tasklist_id": {
                     "type": "string",
-                    "description": "The task's tasklist_id, from the same get_tasks/get_tasks_due_soon "
-                    "result — required because task ids are only unique within their own list.",
+                    "description": "The task's tasklist_id, from the same get_tasks result — task "
+                    "ids are only unique within their own list.",
                 },
                 "due": {"type": "string", "description": DATE_ARG_GUIDANCE},
                 "task_title": {
                     "type": "string",
-                    "description": "The task's title, echoed back from the get_tasks/get_tasks_due_soon "
-                    "result you already have — used only to describe this action for confirmation.",
+                    "description": "The task's title, echoed back — used only to describe this "
+                    "action for confirmation.",
                 },
             },
             "required": ["task_id", "tasklist_id", "due"],
@@ -127,13 +126,13 @@ COMPLETE_TASK_TOOL_SCHEMA = {
                 "task_id": {"type": "string", "description": "The task's id, from get_tasks or get_tasks_due_soon."},
                 "tasklist_id": {
                     "type": "string",
-                    "description": "The task's tasklist_id, from the same get_tasks/get_tasks_due_soon "
-                    "result — required because task ids are only unique within their own list.",
+                    "description": "The task's tasklist_id, from the same get_tasks result — task "
+                    "ids are only unique within their own list.",
                 },
                 "task_title": {
                     "type": "string",
-                    "description": "The task's title, echoed back from the get_tasks/get_tasks_due_soon "
-                    "result you already have — used only to describe this action for confirmation.",
+                    "description": "The task's title, echoed back — used only to describe this "
+                    "action for confirmation.",
                 },
             },
             "required": ["task_id", "tasklist_id"],

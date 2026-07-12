@@ -573,11 +573,11 @@ SEND_DIGEST_TOOL_SCHEMA = {
     "function": {
         "name": "send_opportunity_digest",
         "description": (
-            "Run Craig's opportunity scout right now — poll SEC Form D filings, "
-            "watched job boards, and HN Who-is-hiring; score any NEW leads; and "
-            "email the Opportunity Digest (nothing is sent if there's nothing "
-            "new). Use whenever Craig asks to check for opportunities or send "
-            "the digest — do NOT compose that email yourself with send_email."
+            "Run Craig's opportunity scout right now — poll the sources, score "
+            "any NEW leads, and email the Opportunity Digest (nothing is sent "
+            "if there's nothing new). Use whenever Craig asks to check for "
+            "opportunities or send the digest — do NOT compose it yourself "
+            "with send_email."
         ),
         "parameters": {"type": "object", "properties": {}, "required": []},
     },

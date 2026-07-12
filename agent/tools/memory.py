@@ -42,27 +42,22 @@ _STORE_PATH = _ROOT / "config" / "wren_memory.json"
 # it tags consistently; handlers store whatever is passed (a stray value just
 # won't match a category filter) rather than rejecting.
 CATEGORIES = ["preference", "person", "schedule", "project", "health", "place", "trivia", "other"]
-_CATEGORY_DESC = (
-    "Optional tag for the kind of fact, one of: " + ", ".join(CATEGORIES) + "."
-)
+_CATEGORY_DESC = "Optional tag for the kind of fact."
 
 REMEMBER_TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "remember",
-        "description": "Save a fact about Craig to searchable long-term memory so you can look it "
-        "up later with recall. Use this when Craig asks you to remember or note something worth "
-        "keeping that you don't need in mind every conversation (e.g. an interesting fact, a detail "
-        "to bring up later). For a lasting preference or routine that should shape every "
-        "conversation, use pin instead. State the fact as a standalone sentence that will still "
-        "make sense weeks from now.",
+        "description": "Save a fact about Craig to searchable long-term memory, looked up later "
+        "with recall — for things worth keeping but not needed in every conversation. For a lasting "
+        "preference or routine that should shape every conversation, use pin instead.",
         "parameters": {
             "type": "object",
             "properties": {
                 "text": {
                     "type": "string",
                     "description": "The fact to remember, phrased as a self-contained sentence "
-                    "(e.g. 'Crows can recognize human faces and hold grudges').",
+                    "that will still make sense weeks from now.",
                 },
                 "category": {
                     "type": "string",
@@ -79,18 +74,17 @@ PIN_TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "pin",
-        "description": "Save a durable fact as always-on memory that's kept in mind in every "
-        "conversation. Use this for lasting preferences, routines, or facts about Craig that should "
-        "shape how you respond generally (e.g. 'Craig prefers metric units', a recurring schedule). "
-        "For a one-off fact you'd only look up later, use remember instead. If the fact is already "
-        "remembered, pinning it promotes it to always-on. State it as a self-contained sentence.",
+        "description": "Save a durable fact as always-on memory, kept in mind in every "
+        "conversation — for lasting preferences, routines, or facts that should shape how you "
+        "respond generally. For a one-off fact you'd only look up later, use remember instead; "
+        "pinning an already-remembered fact promotes it to always-on.",
         "parameters": {
             "type": "object",
             "properties": {
                 "text": {
                     "type": "string",
                     "description": "The fact to keep in mind always, phrased as a self-contained "
-                    "sentence (e.g. 'Craig prefers metric units').",
+                    "sentence.",
                 },
                 "category": {
                     "type": "string",
@@ -108,10 +102,8 @@ RECALL_TOOL_SCHEMA = {
     "function": {
         "name": "recall",
         "description": "Search everything you've remembered about Craig, including archival facts "
-        "that aren't kept in your active context each turn. Use this when Craig asks what you "
-        "remember or to look up a fact you've saved (or to find a fact's id before archiving or "
-        "forgetting it). Pass a query to filter to facts whose text or category contains it, and/or "
-        "a category to narrow to one kind of fact. Omit both to list everything.",
+        "not kept in your active context. Use it to list or look up saved facts, or to find a "
+        "fact's id before archiving or forgetting it. Omit both arguments to list everything.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -122,8 +114,7 @@ RECALL_TOOL_SCHEMA = {
                 "category": {
                     "type": "string",
                     "enum": CATEGORIES,
-                    "description": "Optional category to restrict the search to one of: "
-                    + ", ".join(CATEGORIES) + ".",
+                    "description": "Optional category to restrict the search to.",
                 },
             },
         },
@@ -134,8 +125,8 @@ FORGET_TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "forget",
-        "description": "Permanently remove a remembered fact by its id. Get the id from a prior "
-        "recall call. This deletes the fact for good.",
+        "description": "Permanently remove a remembered fact by its id (from a prior recall "
+        "call). This deletes the fact for good.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -145,8 +136,8 @@ FORGET_TOOL_SCHEMA = {
                 },
                 "memory_text": {
                     "type": "string",
-                    "description": "The fact's text, echoed back from the recall result you already "
-                    "have — used only to describe this action for confirmation.",
+                    "description": "The fact's text, echoed back from the recall result — used "
+                    "only to describe this action for confirmation.",
                 },
             },
             "required": ["memory_id"],
@@ -158,10 +149,9 @@ ARCHIVE_TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "archive",
-        "description": "Move an always-on (pinned) fact to search-only storage without deleting it. "
-        "Use this when Craig wants to declutter what you keep in mind every conversation but still "
-        "be able to look the fact up later with recall. Get the id from a prior recall call. This is "
-        "reversible — pinning the fact again makes it always-on.",
+        "description": "Move an always-on (pinned) fact to search-only storage without deleting "
+        "it — still findable with recall, and pinning it again makes it always-on. Get the id from "
+        "a prior recall call.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -171,8 +161,8 @@ ARCHIVE_TOOL_SCHEMA = {
                 },
                 "memory_text": {
                     "type": "string",
-                    "description": "The fact's text, echoed back from the recall result you already "
-                    "have — used only to describe this action.",
+                    "description": "The fact's text, echoed back from the recall result — used "
+                    "only to describe this action.",
                 },
             },
             "required": ["memory_id"],
