@@ -1,0 +1,36 @@
+{
+  "_comment": "Personal preferences (not secrets). Edit to make Wren yours. Docs: docs/preferences.md. Restart the chat server after editing.",
+  "persona": {
+    "user_name": "Craig",
+    "positioning": "a fractional product/engineering leader (Vibe Foundry)",
+    "engagement_model": "steps into tech companies under ~100 people for 1-2 days a week to clear roadmaps, stabilize teams, and build AI-accelerated delivery workflows"
+  },
+  "calendar": {
+    "categories": [
+      {"name": "Work/LLC", "color_id": "1", "color_name": "Lavender", "role": "work"},
+      {"name": "AARP", "color_id": "9", "color_name": "Blueberry"},
+      {"name": "Fitness", "color_id": "4", "color_name": "Flamingo", "role": "fitness"},
+      {"name": "Meal Prep", "color_id": "10", "color_name": "Basil"},
+      {"name": "Domestic/Chores", "color_id": "5", "color_name": "Banana"},
+      {"name": "Meetings", "color_id": "3", "color_name": "Grape", "hint": "with others", "role": "meetings"},
+      {"name": "Travel", "color_id": "7", "color_name": "Peacock", "hint": "/ Vacation"},
+      {"name": "Appointments", "color_id": "6", "color_name": "Tangerine", "hint": "(doctor, dentist, car, etc.)", "role": "appointments"},
+      {"name": "Uncategorized", "color_id": "11", "color_name": "Tomato", "hint": "(only if genuinely unable to tell)", "role": "fallback"}
+    ],
+    "community_keywords": ["aarp"]
+  },
+  "job_search": {
+    "seniority_terms": ["vp", "vice president", "head", "director", "chief"],
+    "function_terms": ["product", "engineering", "technolog"],
+    "title_acronyms": ["cpo", "cto", "cpto"],
+    "hn_phrases": [
+      "head of product", "vp of product", "vp product", "director of product",
+      "product director", "product lead", "founding pm", "founding product",
+      "head of engineering", "vp of engineering", "vp engineering",
+      "director of engineering", "engineering director",
+      "founding engineer", "founding engineers", "fractional", "cto", "cpo"
+    ],
+    "states": ["MA", "NH", "ME", "VT", "RI", "CT"]
+  },
+  "location": "Newfields,NH,US"
+}

@@ -40,6 +40,7 @@ from dotenv import load_dotenv
 
 import requests
 
+from agent import prefs
 from agent.loop import complete_text
 from agent.store import atomic_write_json, load_json
 from agent.tools import opportunities
@@ -71,9 +72,14 @@ MAX_SCORE_ITEMS = 40
 _SNIPPET_CHARS = 300
 
 
+# Job-search terms (titles, HN phrases, states) from config/preferences.json.
+_JOB_PREFS = prefs.job_search()
+
+
 def _states() -> list:
-    return [s.strip().upper() for s in
-            os.getenv("OPP_STATES", "MA,NH,ME,VT,RI,CT").split(",") if s.strip()]
+    # Env wins; otherwise the states list from config/preferences.json.
+    configured = os.getenv("OPP_STATES") or ",".join(_JOB_PREFS.get("states", []))
+    return [s.strip().upper() for s in configured.split(",") if s.strip()]
 
 
 def _stalled_days() -> int:
@@ -84,10 +90,16 @@ def _score_threshold() -> int:
     return int(os.getenv("OPP_SCORE_THRESHOLD", "8"))
 
 
-SCORING_SYSTEM_PROMPT = """You score business-development leads for Craig, a fractional \
-product/engineering leader (Vibe Foundry) who steps into tech companies under ~100 people \
-for 1-2 days a week to clear roadmaps, stabilize teams, and build AI-accelerated delivery \
-workflows. You'll get a JSON list of leads. Signals mean: "funded" = the company just \
+# Who the leads are scored for comes from config/preferences.json; the output
+# format and scoring rubric are operational and stay here.
+_NAME = prefs.user_name()
+_POSITIONING = prefs.persona().get("positioning", "an independent operator")
+_ENGAGEMENT = prefs.persona().get(
+    "engagement_model", "works with companies part-time on product and engineering"
+)
+
+SCORING_SYSTEM_PROMPT = f"""You score business-development leads for {_NAME}, {_POSITIONING} \
+who {_ENGAGEMENT}. You'll get a JSON list of leads. Signals mean: "funded" = the company just \
 raised money (investor pressure to ship), "stalled_search" = a leadership seat has sat \
 open a long time (founder is stretched thin), "hiring" = they're seeking product/eng \
 leadership.
@@ -99,7 +111,7 @@ id|score|angle
 execution that a fractional operator could fill. Investment funds, holding companies, \
 banks, and real-estate vehicles score 1-2. Small operating tech/product companies with a \
 fresh raise or a long-open leadership seat score high.
-- angle: ONE short sentence suggesting Craig's outreach angle. Plain text, no pipe \
+- angle: ONE short sentence suggesting {_NAME}'s outreach angle. Plain text, no pipe \
 characters, no markdown.
 
 Output only the id|score|angle lines, one per lead, no preamble."""
@@ -196,12 +208,27 @@ def poll_edgar(start_date: str, end_date: str, states: list) -> dict:
     return {"items": items}
 
 
-# Titles worth flagging on a watched board: senior product/eng leadership.
-_LEADERSHIP_RE = re.compile(
-    r"(?:\b(?:vp|vice president|head|director|chief)\b.{0,40}"
-    r"\b(?:product|engineering|technolog)|\b(?:cpo|cto|cpto)\b)",
-    re.IGNORECASE,
-)
+# Titles worth flagging on a watched board, built from the term lists in
+# config/preferences.json: a seniority term within 40 chars of a function
+# term (functions are prefix-matched — "technolog" covers technology and
+# technologies — so no trailing \b), or a standalone title acronym.
+def _leadership_pattern() -> str:
+    seniority = _JOB_PREFS.get("seniority_terms", [])
+    functions = _JOB_PREFS.get("function_terms", [])
+    acronyms = _JOB_PREFS.get("title_acronyms", [])
+    alternatives = []
+    if seniority and functions:
+        alternatives.append(r"\b(?:%s)\b.{0,40}\b(?:%s)" % (
+            "|".join(re.escape(t) for t in seniority),
+            "|".join(re.escape(t) for t in functions),
+        ))
+    if acronyms:
+        alternatives.append(r"\b(?:%s)\b" % "|".join(re.escape(t) for t in acronyms))
+    # No terms configured -> match nothing (an empty alternation matches everything).
+    return "(?:%s)" % "|".join(alternatives) if alternatives else r"(?!)"
+
+
+_LEADERSHIP_RE = re.compile(_leadership_pattern(), re.IGNORECASE)
 
 
 def _is_leadership(title: str) -> bool:
@@ -314,19 +341,16 @@ def poll_ats(watchlist: list) -> dict:
     return {"items": items, "errors": errors}
 
 
-# Phrases that make an HN "Who is hiring" post worth scoring. Deliberately
-# leadership-shaped — plain "hiring engineers" posts are out of scope.
-# Matched with word boundaries: bare substring checks let "cto" hit
-# "direCTOr", "YoCTO", "faCTOry", and "conduCTOr".
-_HN_PHRASES = (
-    "head of product", "vp of product", "vp product", "director of product",
-    "product director", "product lead", "founding pm", "founding product",
-    "head of engineering", "vp of engineering", "vp engineering",
-    "director of engineering", "engineering director",
-    "founding engineer", "founding engineers", "fractional", "cto", "cpo",
-)
+# Phrases that make an HN "Who is hiring" post worth scoring, from
+# config/preferences.json. Deliberately leadership-shaped — plain "hiring
+# engineers" posts are out of scope. Matched with word boundaries: bare
+# substring checks let "cto" hit "direCTOr", "YoCTO", "faCTOry", and
+# "conduCTOr". No phrases configured -> match nothing.
+_HN_PHRASES = tuple(_JOB_PREFS.get("hn_phrases", []))
 _HN_PHRASE_RE = re.compile(
-    r"\b(?:%s)\b" % "|".join(re.escape(p) for p in _HN_PHRASES), re.IGNORECASE
+    r"\b(?:%s)\b" % "|".join(re.escape(p) for p in _HN_PHRASES)
+    if _HN_PHRASES else r"(?!)",
+    re.IGNORECASE,
 )
 
 

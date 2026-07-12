@@ -12,6 +12,14 @@ ways:
   talk to Wren directly and have her take action on request, from anywhere,
   over Tailscale. See "Wren — ad hoc chat" below.
 
+**Make it yours.** Personal preferences — whose agent this is, calendar
+categories and colors, which job titles the opportunity scout flags, default
+location — live in the committed `config/preferences.json`, not in Python.
+Clone the repo, edit that one file (and the persona Markdown in
+`agent/identity.md` / `agent/wren.md`), and Wren serves you instead. Every
+key is documented in [docs/preferences.md](docs/preferences.md). Secrets stay
+in the gitignored `config/.env`.
+
 ## Architecture
 
 ```

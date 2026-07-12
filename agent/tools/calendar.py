@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
+from agent import prefs
 from agent.dates import DATE_ARG_GUIDANCE, local_timezone as _local_timezone, resolve_date
 from agent.tools.google_auth import build_service
 
@@ -58,18 +59,11 @@ LOG_TOOL_SCHEMA = {
     },
 }
 
-# Single source of truth for category -> (colorId, color name). Also used by
-# tasks/calendar_colorizer.py to build its classification prompt.
+# Single source of truth for category -> (colorId, color name), defined in
+# config/preferences.json. Also used by tasks/calendar_colorizer.py to build
+# its classification prompt.
 CATEGORY_COLORS = {
-    "Work/LLC": ("1", "Lavender"),
-    "AARP": ("9", "Blueberry"),
-    "Fitness": ("4", "Flamingo"),
-    "Meal Prep": ("10", "Basil"),
-    "Domestic/Chores": ("5", "Banana"),
-    "Meetings": ("3", "Grape"),
-    "Travel": ("7", "Peacock"),
-    "Appointments": ("6", "Tangerine"),
-    "Uncategorized": ("11", "Tomato"),
+    c["name"]: (c["color_id"], c["color_name"]) for c in prefs.calendar_categories()
 }
 
 RECOLOR_TOOL_SCHEMA = {

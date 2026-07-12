@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from agent import prefs
 from agent.loop import complete_text
 from agent.tools.calendar import CATEGORY_COLORS, _local_timezone, get_events_in_range, set_event_color
 from agent.tools.email import send_email
@@ -20,34 +21,28 @@ from tasks._common import notify_failure, setup_logger
 
 VALID_COLOR_IDS = {color_id for color_id, _ in CATEGORY_COLORS.values()}
 
-# Extra classification guidance per category — genuinely prompt-specific, so
-# it stays local rather than living in agent/tools/calendar.py's mapping.
-_CATEGORY_HINTS = {
-    "Meetings": "with others",
-    "Travel": "/ Vacation",
-    "Appointments": "(doctor, dentist, car, etc.)",
-    "Uncategorized": "(only if genuinely unable to tell)",
-}
+# The colorId the model should use only when it can't tell what an event is.
+_FALLBACK_COLOR = prefs.category_color_by_role("fallback", "11")
 
 
 def _classification_table() -> str:
     rows = ["| Category | Color name | colorId |", "|----------|-----------|---------|"]
-    for category, (color_id, color_name) in CATEGORY_COLORS.items():
-        label = category.replace("/", " / ")
-        if category in _CATEGORY_HINTS:
-            label = f"{label} {_CATEGORY_HINTS[category]}"
-        rows.append(f"| {label} | {color_name} | {color_id} |")
+    for c in prefs.calendar_categories():
+        label = c["name"].replace("/", " / ")
+        if c.get("hint"):
+            label = f"{label} {c['hint']}"
+        rows.append(f"| {label} | {c.get('color_name', '')} | {c['color_id']} |")
     return "\n".join(rows)
 
 
-CLASSIFY_SYSTEM_PROMPT = f"""You are Craig's calendar color-coding assistant. You are given a \
+CLASSIFY_SYSTEM_PROMPT = f"""You are {prefs.user_name()}'s calendar color-coding assistant. You are given a \
 JSON list of yesterday's calendar events, each with an "id" and a "summary" (title). For \
 each event, decide which category it belongs to and return the matching Google Calendar \
 colorId, using EXACTLY this mapping:
 
 {_classification_table()}
 
-Best-guess every event from its title. Only use colorId "11" when you genuinely cannot tell \
+Best-guess every event from its title. Only use colorId "{_FALLBACK_COLOR}" when you genuinely cannot tell \
 what category an event belongs to — do not use it as a default.
 
 Output ONLY a single JSON object mapping each event's "id" to its chosen colorId string, \

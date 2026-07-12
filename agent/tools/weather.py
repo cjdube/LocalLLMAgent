@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
+from agent import prefs
 from agent.tools._http import http_error, load_env, missing_key_error, print_result, resolve_key
 
 load_env()
@@ -144,7 +145,8 @@ def fetch_weather(location: str = None, units: str = "imperial", days: int = 1, 
     if not api_key:
         return missing_key_error("OPENWEATHERMAP_API_KEY")
 
-    location = location or os.getenv("DEFAULT_LOCATION", "Newfields,NH,US")
+    # Env wins; otherwise the location from config/preferences.json.
+    location = location or os.getenv("DEFAULT_LOCATION") or prefs.PREFS.get("location", "")
     location = _normalize_location(location)
     days = _clamp_days(days)
 
@@ -161,7 +163,7 @@ def fetch_weather(location: str = None, units: str = "imperial", days: int = 1, 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--location", default="Newfields,NH,US")
+    parser.add_argument("--location", default=None)
     parser.add_argument("--units", default="imperial")
     parser.add_argument("--days", type=int, default=1)
     parser.add_argument("--api-key", dest="api_key", default=None)

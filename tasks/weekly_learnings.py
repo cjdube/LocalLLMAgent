@@ -21,14 +21,22 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent.loop import complete_text, warm_model
-from agent.tools.calendar import CATEGORY_COLORS, _local_timezone, get_events_in_range
+from agent import prefs
+from agent.tools.calendar import _local_timezone, get_events_in_range
 from agent.tools.chrome_history import fetch_chrome_history
 from agent.tools.learnings_file import get_previous_entry_text, write_weekly_entry
 from agent.tools.email import send_email
 from agent.tools.youtube import fetch_liked_videos
 from tasks._common import notify_failure, setup_logger
 
-DRAFT_SYSTEM_PROMPT = """You are Craig's personal executive assistant. You write a \
+# Looked up by role, not category name, so renaming a category in
+# config/preferences.json can't silently empty its bucket in every future
+# weekly review. Defaults are the shipped colorIds.
+_WORK_COLOR = prefs.category_color_by_role("work", "1")
+_MEETINGS_COLOR = prefs.category_color_by_role("meetings", "3")
+_APPOINTMENTS_COLOR = prefs.category_color_by_role("appointments", "6")
+
+DRAFT_SYSTEM_PROMPT = f"""You are {prefs.user_name()}'s personal executive assistant. You write a \
 structured weekly retrospective entry for his Weekly Learning & Project Log, covering \
 the week just completed. You are running unattended — there is no one to ask questions, \
 so infer everything from the data given and write your best draft.
@@ -55,12 +63,12 @@ do not include the literal brackets):
 - **[Entity]:** [Administrative or community-focused actions and their outcome]
 
 Source data you'll receive:
-- work_events: calendar events tagged as Work-related (colorId 1) — draft "Project Milestones" from these.
+- work_events: calendar events tagged as Work-related (colorId {_WORK_COLOR}) — draft "Project Milestones" from these.
 - meeting_events / appointment_events / aarp_events: draft "Operational & Community Updates" from these.
 - chrome_sites: browsing history for the week — draft "Technical Evolution & Tooling" and \
   "Industry Insights & Core Learning" from any technical/developer/AI/product sites (tools, \
   APIs, platforms, documentation, frameworks). Ignore anything not genuinely technical.
-- youtube_videos: AI/technical videos Craig deliberately Liked this week (title, channel, \
+- youtube_videos: AI/technical videos {prefs.user_name()} deliberately Liked this week (title, channel, \
   description) — the STRONGEST signal for "Technical Evolution & Tooling" and "Industry \
   Insights & Core Learning". Prefer these over chrome_sites, which only shows what he loaded, \
   not what he engaged with. Name the specific tool/concept the video covers, not the video.
@@ -139,12 +147,12 @@ def _compact_videos(videos: list) -> list:
     ]
 
 
-# Derived from calendar.CATEGORY_COLORS — the declared single source of truth —
-# rather than repeating the raw colorId strings: recoloring a category there
-# would otherwise silently empty its bucket in every future weekly review.
-_WORK_COLOR = CATEGORY_COLORS["Work/LLC"][0]
-_MEETINGS_COLOR = CATEGORY_COLORS["Meetings"][0]
-_APPOINTMENTS_COLOR = CATEGORY_COLORS["Appointments"][0]
+# Events matching any of these summary keywords go to the community bucket
+# regardless of color (e.g. "aarp" for Craig's AARP volunteer work).
+_COMMUNITY_KEYWORDS = [
+    k.lower() for k in prefs.section("calendar").get("community_keywords", [])
+    if isinstance(k, str) and k
+]
 
 
 def _categorize(events: list) -> dict:
@@ -152,7 +160,7 @@ def _categorize(events: list) -> dict:
     for e in events:
         color = e.get("colorId")
         summary = (e.get("summary") or "").lower()
-        if "aarp" in summary:
+        if any(k in summary for k in _COMMUNITY_KEYWORDS):
             aarp.append(e)
         elif color == _WORK_COLOR:
             work.append(e)

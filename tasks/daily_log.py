@@ -19,13 +19,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent.tools.calendar import CATEGORY_COLORS, log_calendar_event
+from agent import prefs
+from agent.tools.calendar import log_calendar_event
 from agent.tools.strava import fetch_strava
 from tasks._common import notify_failure, setup_logger
 
-# All Strava activities are logged as Fitness (Flamingo) — reuse the single
-# source of truth in agent/tools/calendar.py rather than a bare "4".
-FITNESS_COLOR_ID = CATEGORY_COLORS["Fitness"][0]
+# All Strava activities get the fitness category's color — looked up by role,
+# not name, so renaming the category in config/preferences.json can't break it.
+FITNESS_COLOR_ID = prefs.category_color_by_role("fitness", "4")
 
 
 def _log_activity(activity: dict, logger) -> bool:

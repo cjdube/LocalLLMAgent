@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dotenv import load_dotenv
 
+from agent import prefs
 from agent.dates import local_timezone
 from agent.loop import complete_text
 from agent.store import atomic_write_json, load_json
@@ -43,7 +44,8 @@ from tasks._common import notify_failure, setup_logger, today_str
 _ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(_ROOT / "config" / ".env")
 
-DEFAULT_LOCATION = os.getenv("DEFAULT_LOCATION", "Newfields,NH,US")
+# Env wins; otherwise the location from config/preferences.json.
+DEFAULT_LOCATION = os.getenv("DEFAULT_LOCATION") or prefs.PREFS.get("location", "")
 STARRED_STATE_PATH = _ROOT / "config" / "github_starred_state.json"
 
 GLANCE_SYSTEM_PROMPT = """You write a single short "Today at a Glance" blurb for a \

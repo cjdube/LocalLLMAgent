@@ -31,6 +31,7 @@ from datetime import datetime
 
 import requests
 
+from agent import prefs
 from agent.loop import complete_text
 from agent.tools import opportunities
 from agent.tools._http import load_env, print_result
@@ -46,8 +47,13 @@ _SNIPPET_CHARS = 400
 
 _EDGAR_UA = f"Wren opportunity scout ({os.getenv('BRIEF_TO_EMAIL', 'contact unset')})"
 
-RESEARCH_SYSTEM_PROMPT = """You write a short research brief on a company for Craig, a \
-fractional product/engineering leader (Vibe Foundry) deciding whether to reach out. \
+# Who the brief is for comes from config/preferences.json; the section
+# template below is operational and stays here.
+_NAME = prefs.user_name()
+_POSITIONING = prefs.persona().get("positioning", "an independent operator")
+
+RESEARCH_SYSTEM_PROMPT = f"""You write a short research brief on a company for {_NAME}, \
+{_POSITIONING} deciding whether to reach out. \
 You'll get the reason he's researching it plus raw web search snippets and, sometimes, \
 facts parsed from the company's SEC Form D filing.
 
