@@ -117,6 +117,8 @@ in — nothing new inherits it automatically.
 |---|---|
 | `weather.py` | OpenWeatherMap forecast for `DEFAULT_LOCATION` |
 | `web_search.py` | Web search via Tavily API |
+| `web_fetch.py` | Fetch one web page as clean markdown via the Firecrawl API (`fetch_webpage`) — search finds pages, this reads one. Content is untrusted, scheme-validated, and capped (`WEB_FETCH_MAX_CHARS`) |
+| `evaluate_app.py` | Strategic teardown of a product from its website URL (`evaluate_app`) — a fixed pipeline (Firecrawl fetch → deterministic compaction → one model call) producing a skeptical VC-style analysis: hidden risks, adoption friction, missing technical constraints. See [docs/app-evaluator.md](docs/app-evaluator.md) |
 | `github_starred.py` | List starred GitHub repos, optionally filtered to those pushed to since a given timestamp, with a `recent_changes` summary (release notes or recent commit subjects) per matched repo |
 | `strava.py` | Strava activities via the Strava API (own OAuth app), for a given date. Run `--authorize` once to mint a refresh token |
 | `calendar.py` | Google Calendar read/write (`get_upcoming_events`, `get_events_in_range`, `log_calendar_event` — idempotent via `source_id`) |

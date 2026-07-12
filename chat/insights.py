@@ -445,6 +445,7 @@ TOOL_SERVICES = {
     "strava": ("Strava", ["fetch_strava"]),
     "weather": ("OpenWeatherMap", ["fetch_weather"]),
     "web_search": ("Tavily Search", ["search_web", "research_company"]),
+    "firecrawl": ("Firecrawl", ["fetch_webpage", "evaluate_app"]),
     "github": ("GitHub", ["fetch_starred_repos"]),
     "youtube": ("YouTube", []),  # weekly_learnings-only; no chat tool
     "ntfy": ("ntfy Push", []),  # routine failure-alert channel; no chat tool

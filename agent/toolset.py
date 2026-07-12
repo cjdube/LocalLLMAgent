@@ -37,6 +37,7 @@ from agent.tools.calendar import (
 )
 from agent.tools.chrome_history import TOOL_SCHEMA as CHROME_SCHEMA, fetch_chrome_history
 from agent.tools.email import TOOL_SCHEMA as EMAIL_SCHEMA, send_email_tool
+from agent.tools.evaluate_app import TOOL_SCHEMA as EVALUATE_APP_SCHEMA, evaluate_app
 from agent.tools.github_starred import TOOL_SCHEMA as GITHUB_STARRED_SCHEMA, fetch_starred_repos
 from agent.tools.google_tasks import (
     COMPLETE_TASK_TOOL_SCHEMA,
@@ -87,6 +88,7 @@ from agent.tools.skills import (
 )
 from agent.tools.strava import TOOL_SCHEMA as STRAVA_SCHEMA, fetch_strava
 from agent.tools.weather import TOOL_SCHEMA as WEATHER_SCHEMA, fetch_weather
+from agent.tools.web_fetch import TOOL_SCHEMA as WEB_FETCH_SCHEMA, fetch_webpage
 from agent.tools.web_search import TOOL_SCHEMA as WEB_SEARCH_SCHEMA, search_web
 from agent.tools.wiki import (
     WIKI_TOOL_SCHEMAS,
@@ -122,6 +124,7 @@ TOOLS = [
     STRAVA_SCHEMA,
     WEATHER_SCHEMA,
     WEB_SEARCH_SCHEMA,
+    WEB_FETCH_SCHEMA,
     GITHUB_STARRED_SCHEMA,
     SEND_BRIEF_TOOL_SCHEMA,
     GET_TASKS_TOOL_SCHEMA,
@@ -145,6 +148,7 @@ TOOLS = [
     *OPPORTUNITY_TOOL_SCHEMAS,
     SEND_DIGEST_TOOL_SCHEMA,
     *RESEARCH_TOOL_SCHEMAS,
+    EVALUATE_APP_SCHEMA,
 ]
 
 DISPATCH = {
@@ -159,6 +163,7 @@ DISPATCH = {
     "fetch_strava": fetch_strava,
     "fetch_weather": fetch_weather,
     "search_web": search_web,
+    "fetch_webpage": fetch_webpage,
     "fetch_starred_repos": fetch_starred_repos,
     "send_morning_brief": _send_morning_brief,
     "get_tasks": get_tasks,
@@ -195,6 +200,8 @@ DISPATCH = {
     # brief), so ungated like search_web.
     "research_opportunity": research_opportunity,
     "research_company": research_company,
+    # Read-only like the research tools: fetches + analyzes a page, writes nothing.
+    "evaluate_app": evaluate_app,
 }
 
 WRITE_TOOLS = frozenset({
