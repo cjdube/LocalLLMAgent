@@ -35,6 +35,10 @@ MAX_TOOL_ITERATIONS = 10
 MAX_TOOL_RESULT_CHARS = int(os.getenv("OLLAMA_MAX_TOOL_RESULT_CHARS", "8000"))
 
 
+# Default cloud model when the Gemini backend is selected but no model is pinned.
+GEMINI_DEFAULT_MODEL = "gemini-2.5-flash"
+
+
 class TurnCancelled(Exception):
     """Raised inside advance()/_ollama_chat when the caller's should_cancel()
     reports the running turn was cancelled. The caller rolls back the partial
@@ -169,8 +173,13 @@ def warm_model(
     host: str = None,
     timeout: float = None,
     logger: Optional[logging.Logger] = None,
+    backend: Optional[str] = None,
 ) -> bool:
     """Force-load the model into Ollama's memory before a heavy generation.
+
+    A no-op (returns True) for any non-Ollama backend: there's nothing to
+    pre-load for a cloud model, and the caller passes the task's resolved
+    backend so a cloud-routed task doesn't needlessly poke a local Ollama.
 
     A cold local model (gemma4:26b-mlx is ~17GB) can't emit its first streamed
     chunk until it's loaded AND the prompt is prefilled; stacked together on a
@@ -184,6 +193,8 @@ def warm_model(
     generating. Gets its own generous timeout (OLLAMA_WARM_TIMEOUT, default
     600s) because the load is the slow part. Degrades to a warning and returns
     False on failure — the caller still attempts the generation cold."""
+    if _resolve_backend(backend) != "ollama":
+        return True
     model = model or os.getenv("OLLAMA_MODEL", "gemma4")
     host = host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
     if timeout is None:
@@ -207,6 +218,209 @@ def warm_model(
         if logger:
             logger.warning("warm_model failed (%s); attempting generation cold", e)
         return False
+
+
+# --------------------------------------------------------------------------- #
+# Backend seam. Wren speaks one canonical message/tool shape internally (the
+# Ollama/OpenAI shape every caller already builds); _llm_chat dispatches to the
+# selected backend, which translates to/from its provider format *inside itself*
+# so advance()/complete_text() and their callers never change. The default is
+# local Ollama — a cloud backend is opt-in per the local-first design.
+# --------------------------------------------------------------------------- #
+
+def _resolve_backend(backend: Optional[str] = None) -> str:
+    """explicit arg -> WREN_LLM_BACKEND env -> 'ollama' fallback."""
+    return (backend or os.getenv("WREN_LLM_BACKEND") or "ollama").strip().lower()
+
+
+def resolve_backend(task_key: str) -> Optional[str]:
+    """Per-task backend override for scheduled tasks: WREN_<TASK_KEY>_BACKEND
+    falls back to the global WREN_LLM_BACKEND. Returns None when neither is set,
+    which lets _llm_chat apply its own 'ollama' default. Lets chat stay local
+    while an individual task (e.g. weekly_learnings) opts into a cloud model."""
+    return os.getenv(f"WREN_{task_key.upper()}_BACKEND") or os.getenv("WREN_LLM_BACKEND") or None
+
+
+def active_model_label(backend: Optional[str] = None) -> str:
+    """A human 'model (backend)' label for the current backend — surfaced in the
+    dashboard so the UI reflects the model actually in use, not a hardcoded one."""
+    b = _resolve_backend(backend)
+    if b in ("gemini", "google"):
+        return f"{os.getenv('WREN_GEMINI_MODEL', GEMINI_DEFAULT_MODEL)} ({b})"
+    return f"{os.getenv('OLLAMA_MODEL', 'gemma4')} ({b})"
+
+
+def _llm_chat(
+    messages: list[dict],
+    backend: Optional[str] = None,
+    model: str = None,
+    host: str = None,
+    tools: Optional[list[dict]] = None,
+    timeout: float = None,
+    logger: Optional[logging.Logger] = None,
+    should_cancel: Optional[Callable[[], bool]] = None,
+) -> dict:
+    """Dispatch a chat completion to the selected backend, returning the same
+    canonical `message` dict shape regardless of provider."""
+    b = _resolve_backend(backend)
+    if b == "ollama":
+        return _ollama_chat(messages, model=model, host=host, tools=tools,
+                            timeout=timeout, logger=logger, should_cancel=should_cancel)
+    if b in ("gemini", "google"):
+        return _gemini_chat(messages, model=model, tools=tools, timeout=timeout,
+                            logger=logger, should_cancel=should_cancel)
+    raise ValueError(f"unknown WREN_LLM_BACKEND {b!r} (expected 'ollama' or 'gemini')")
+
+
+def _coerce_response(content) -> dict:
+    """A canonical tool message carries its result as a JSON string; Gemini's
+    functionResponse needs a dict. Parse it back, wrapping non-dicts."""
+    if content is None:
+        return {}
+    if isinstance(content, dict):
+        return content
+    try:
+        val = json.loads(content)
+    except (ValueError, TypeError):
+        return {"result": content}
+    return val if isinstance(val, dict) else {"result": val}
+
+
+def _gemini_contents(messages: list[dict]):
+    """Translate canonical messages into (system_instruction, contents) for the
+    Gemini SDK. System turns are hoisted out; assistant tool_calls become
+    functionCall parts and each following `tool` result is paired (FIFO) with its
+    call name to build the matching functionResponse."""
+    from google.genai import types
+
+    system_parts: list[str] = []
+    contents = []
+    pending_names: list[str] = []  # function-call names awaiting their tool result
+    for m in messages:
+        role = m.get("role")
+        if role == "system":
+            if m.get("content"):
+                system_parts.append(m["content"])
+        elif role == "user":
+            contents.append(types.Content(
+                role="user", parts=[types.Part.from_text(text=m.get("content") or "")]))
+        elif role == "assistant":
+            parts = []
+            if m.get("content"):
+                parts.append(types.Part.from_text(text=m["content"]))
+            for call in m.get("tool_calls") or []:
+                fn = call["function"]
+                args = fn.get("arguments") or {}
+                if not isinstance(args, dict):
+                    try:
+                        args = json.loads(args)
+                    except (ValueError, TypeError):
+                        args = {"_raw": args}
+                parts.append(types.Part.from_function_call(name=fn["name"], args=args))
+                pending_names.append(fn["name"])
+            if parts:
+                contents.append(types.Content(role="model", parts=parts))
+        elif role == "tool":
+            name = pending_names.pop(0) if pending_names else "tool"
+            contents.append(types.Content(role="user", parts=[
+                types.Part.from_function_response(name=name, response=_coerce_response(m.get("content")))]))
+    system = "\n\n".join(system_parts) if system_parts else None
+    return system, contents
+
+
+def _tools_to_gemini(tools: list[dict]):
+    """Translate canonical OpenAI-style TOOL_SCHEMA dicts into a Gemini Tool of
+    functionDeclarations. A no-parameter tool gets parameters=None (Gemini
+    rejects an OBJECT schema with empty properties)."""
+    from google.genai import types
+
+    decls = []
+    for t in tools:
+        fn = t.get("function", t)
+        params = fn.get("parameters") or {}
+        if not params.get("properties"):
+            params = None
+        decls.append(types.FunctionDeclaration(
+            name=fn["name"], description=fn.get("description", ""), parameters=params))
+    return types.Tool(function_declarations=decls)
+
+
+def _gemini_client(timeout: float = None):
+    """Build a Gemini client. The key comes from GEMINI_API_KEY or GOOGLE_API_KEY
+    (the SDK's own fallback order). Isolated so tests can stub it — and so the
+    conftest guard can block any un-mocked real call."""
+    from google import genai
+    from google.genai import types
+
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    kwargs = {"api_key": api_key}
+    if timeout is not None:
+        kwargs["http_options"] = types.HttpOptions(timeout=int(timeout * 1000))  # ms
+    return genai.Client(**kwargs)
+
+
+def _gemini_chat(
+    messages: list[dict],
+    model: str = None,
+    tools: Optional[list[dict]] = None,
+    timeout: float = None,
+    logger: Optional[logging.Logger] = None,
+    should_cancel: Optional[Callable[[], bool]] = None,
+) -> dict:
+    """Gemini backend. Streams (consulting should_cancel between chunks so the
+    chat cancel button still lands), reassembling the reply into the same
+    canonical `message` dict the Ollama path returns — content concatenated,
+    tool_calls collected with a dict `arguments` so _execute_tool_call is
+    unchanged."""
+    from google.genai import types
+
+    model = model or os.getenv("WREN_GEMINI_MODEL", GEMINI_DEFAULT_MODEL)
+    max_out = int(os.getenv("WREN_GEMINI_MAX_OUTPUT_TOKENS", "4096"))
+    system, contents = _gemini_contents(messages)
+
+    cfg_kwargs = dict(
+        max_output_tokens=max_out,
+        # We drive the tool loop ourselves; disable the SDK's auto tool-calling
+        # so it returns functionCall parts instead of trying to invoke Python.
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+    )
+    if system:
+        cfg_kwargs["system_instruction"] = system
+    if tools:
+        cfg_kwargs["tools"] = [_tools_to_gemini(tools)]
+    config = types.GenerateContentConfig(**cfg_kwargs)
+
+    client = _gemini_client(timeout=timeout)
+    content_parts: list[str] = []
+    tool_calls: list[dict] = []
+    prompt_tokens = output_tokens = None
+    stream = client.models.generate_content_stream(model=model, contents=contents, config=config)
+    for chunk in stream:
+        if should_cancel is not None and should_cancel():
+            raise TurnCancelled()
+        cand = (chunk.candidates or [None])[0]
+        if cand and cand.content and cand.content.parts:
+            for p in cand.content.parts:
+                if getattr(p, "text", None):
+                    content_parts.append(p.text)
+                fc = getattr(p, "function_call", None)
+                if fc:
+                    tool_calls.append(
+                        {"function": {"name": fc.name, "arguments": dict(fc.args or {})}})
+        um = getattr(chunk, "usage_metadata", None)
+        if um:
+            prompt_tokens = getattr(um, "prompt_token_count", None) or prompt_tokens
+            output_tokens = getattr(um, "candidates_token_count", None) or output_tokens
+
+    message: dict = {"role": "assistant", "content": "".join(content_parts)}
+    if tool_calls:
+        message["tool_calls"] = tool_calls
+    if logger:
+        logger.info(
+            "gemini_chat model=%s prompt_tokens=%s output_tokens=%s",
+            model, prompt_tokens, output_tokens,
+        )
+    return message
 
 
 # Argument keys that may carry secrets — redacted before they reach the logs.
@@ -261,6 +475,7 @@ def advance(
     logger: Optional[logging.Logger] = None,
     confirm_before: frozenset[str] = frozenset(),
     should_cancel: Optional[Callable[[], bool]] = None,
+    backend: Optional[str] = None,
 ) -> dict:
     """Advance a tool-calling conversation already seeded in `messages`
     (system + user turns, and any prior assistant/tool turns).
@@ -288,9 +503,9 @@ def advance(
     for _ in range(MAX_TOOL_ITERATIONS):
         if should_cancel is not None and should_cancel():
             raise TurnCancelled()
-        message = _ollama_chat(
-            messages, model=model, host=host, tools=tools, logger=logger,
-            should_cancel=should_cancel,
+        message = _llm_chat(
+            messages, backend=backend, model=model, host=host, tools=tools,
+            logger=logger, should_cancel=should_cancel,
         )
         messages.append(message)
 
@@ -350,15 +565,18 @@ def complete_text(
     host: str = None,
     timeout: float = None,
     logger: Optional[logging.Logger] = None,
+    backend: Optional[str] = None,
 ) -> str:
     """Single-turn, tool-free completion — for tasks like writing a short
     summary paragraph where the caller assembles the surrounding structure
-    itself rather than trusting the model to produce it."""
-    message = _ollama_chat(
+    itself rather than trusting the model to produce it. `backend` lets a
+    scheduled task route just itself to a cloud model (see resolve_backend)."""
+    message = _llm_chat(
         [
             {"role": "system", "content": with_identity(system_prompt)},
             {"role": "user", "content": user_prompt},
         ],
+        backend=backend,
         model=model,
         host=host,
         timeout=timeout,

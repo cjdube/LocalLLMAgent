@@ -26,6 +26,7 @@ import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from agent.loop import active_model_label
 from agent.tools.memory import recall
 from agent.tools.skills import list_skills, read_skill
 from agent.tools.wiki import list_wiki_pages
@@ -542,7 +543,7 @@ def system_map(tools: list[dict], write_tools) -> dict:
                        "body": detail.get("body", "")})
 
     return {
-        "identity": {"name": "Wren", "model": os.getenv("OLLAMA_MODEL", "")},
+        "identity": {"name": "Wren", "model": active_model_label()},
         "services": services,
         "routines": routines,
         "memory": {"entries": entries, "wiki_pages": wiki_pages},

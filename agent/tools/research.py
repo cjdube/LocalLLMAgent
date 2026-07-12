@@ -32,7 +32,7 @@ from datetime import datetime
 import requests
 
 from agent import prefs
-from agent.loop import complete_text
+from agent.loop import complete_text, resolve_backend
 from agent.tools import opportunities
 from agent.tools._http import load_env, print_result
 from agent.tools.web_search import search_web
@@ -180,7 +180,8 @@ def research(company: str, context: str = None, filing: dict = None) -> dict:
             f"search_people_funding: {compacted['people_funding']}\n"
             f"search_news: {compacted['news']}\n"
         )
-        summary = complete_text(system_prompt=RESEARCH_SYSTEM_PROMPT, user_prompt=user_prompt)
+        summary = complete_text(system_prompt=RESEARCH_SYSTEM_PROMPT, user_prompt=user_prompt,
+                                backend=resolve_backend("research"))
         return {"company": company, "summary": summary}
     except Exception as e:
         return {"error": f"research failed for {company!r}: {e}"}

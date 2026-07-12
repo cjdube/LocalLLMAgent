@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent import prefs
-from agent.loop import complete_text
+from agent.loop import complete_text, resolve_backend
 from agent.tools.calendar import CATEGORY_COLORS, _local_timezone, get_events_in_range, set_event_color
 from agent.tools.email import send_email
 from tasks._common import notify_failure, setup_logger
@@ -123,6 +123,7 @@ def main() -> int:
         raw_response = complete_text(
             system_prompt=CLASSIFY_SYSTEM_PROMPT,
             user_prompt=json.dumps(classify_input),
+            backend=resolve_backend("calendar_colorizer"),
         )
         logger.info(f"Raw classification response: {raw_response}")
 

@@ -16,7 +16,7 @@ import argparse
 import re
 import sys
 
-from agent.loop import complete_text
+from agent.loop import complete_text, resolve_backend
 from agent.tools._http import load_env, print_result
 from agent.tools.web_fetch import fetch_webpage
 
@@ -104,7 +104,8 @@ def evaluate_app(url: str = "", **_) -> dict:
             f"page_title: {page.get('title') or '(none)'}\n\n"
             f"Here is the marketing website content:\n\n{content}"
         )
-        teardown = complete_text(system_prompt=TEARDOWN_SYSTEM_PROMPT, user_prompt=user_prompt)
+        teardown = complete_text(system_prompt=TEARDOWN_SYSTEM_PROMPT, user_prompt=user_prompt,
+                                 backend=resolve_backend("evaluate_app"))
         return {"url": url, "teardown": teardown}
     except Exception as e:
         return {"error": f"evaluate_app failed for {url!r}: {e}"}

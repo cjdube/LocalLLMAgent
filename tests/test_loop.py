@@ -289,6 +289,190 @@ def test_oversized_tool_result_is_truncated(monkeypatch):
     assert len(content) < 5000
 
 
+# --------------------------------------------------------------------------- #
+# Cloud (Gemini) backend + backend selection. The adapter must return the SAME
+# canonical message shape as the Ollama path so advance()/_execute_tool_call and
+# the confirm/resolve gate keep working unchanged. Fakes stand in for the Gemini
+# SDK's streamed chunks; no network. (conftest blanket-blocks the real client.)
+# --------------------------------------------------------------------------- #
+
+
+class _FakeFC:
+    def __init__(self, name, args):
+        self.name = name
+        self.args = args
+
+
+class _FakePart:
+    def __init__(self, text=None, function_call=None):
+        self.text = text
+        self.function_call = function_call
+
+
+class _FakeUsage:
+    def __init__(self, prompt, out):
+        self.prompt_token_count = prompt
+        self.candidates_token_count = out
+
+
+class _FakeChunk:
+    def __init__(self, parts=None, usage=None):
+        cand = type("C", (), {"content": type("Ct", (), {"parts": parts or []})()})()
+        self.candidates = [cand]
+        self.usage_metadata = usage
+
+
+class _FakeGeminiClient:
+    """Returns one canned chunk-stream per generate_content_stream() call, in
+    order, and records the (contents, config) it was handed for assertions."""
+    def __init__(self, responses, captured):
+        self._responses = list(responses)
+        self._captured = captured
+        self._i = 0
+        outer = self
+
+        class _Models:
+            def generate_content_stream(self, model=None, contents=None, config=None):
+                outer._captured.setdefault("calls", []).append(
+                    {"model": model, "contents": contents, "config": config})
+                r = outer._responses[outer._i]
+                outer._i += 1
+                return iter(r)
+
+        self.models = _Models()
+
+
+def _patch_gemini(monkeypatch, responses, captured=None):
+    """responses: a list of chunk-streams (one per model round-trip). Returns one
+    persistent fake client so its per-call index survives across the multiple
+    _gemini_client() constructions a multi-turn advance() makes."""
+    captured = captured if captured is not None else {}
+    client = _FakeGeminiClient(responses, captured)
+    monkeypatch.setattr(loop, "_gemini_client", lambda timeout=None: client)
+    return captured
+
+
+def test_gemini_backend_reassembles_text_and_tool_calls(monkeypatch):
+    stream = [
+        _FakeChunk(parts=[_FakePart(text="Hel")]),
+        _FakeChunk(parts=[_FakePart(text="lo")]),
+        _FakeChunk(parts=[_FakePart(function_call=_FakeFC("search_web", {"query": "x"}))],
+                   usage=_FakeUsage(5, 3)),
+    ]
+    _patch_gemini(monkeypatch, [stream])
+
+    message = loop._gemini_chat([{"role": "user", "content": "hey"}], tools=[])
+
+    assert message["role"] == "assistant"
+    assert message["content"] == "Hello"
+    # canonical shape: arguments is a dict, so _execute_tool_call is unchanged
+    assert message["tool_calls"] == [
+        {"function": {"name": "search_web", "arguments": {"query": "x"}}}]
+
+
+def test_gemini_hoists_system_and_pairs_tool_result(monkeypatch):
+    captured = _patch_gemini(monkeypatch, [[_FakeChunk(parts=[_FakePart(text="ok")])]])
+    messages = [
+        {"role": "system", "content": "You are Wren"},
+        {"role": "user", "content": "weather?"},
+        {"role": "assistant", "content": "",
+         "tool_calls": [{"function": {"name": "fetch_weather", "arguments": {"city": "Boston"}}}]},
+        {"role": "tool", "content": '{"temp": 70}'},
+    ]
+
+    loop._gemini_chat(messages, tools=[])
+
+    call = captured["calls"][0]
+    # system message hoisted to system_instruction, not left in contents
+    assert call["config"].system_instruction == "You are Wren"
+    roles = [c.role for c in call["contents"]]
+    assert roles == ["user", "model", "user"]
+    # the tool result is paired (by name) with the preceding function call
+    fr = call["contents"][2].parts[0].function_response
+    assert fr.name == "fetch_weather"
+    assert fr.response == {"temp": 70}
+
+
+def test_gemini_should_cancel_interrupts(monkeypatch):
+    stream = [_FakeChunk(parts=[_FakePart(text="partial")]), _FakeChunk(parts=[])]
+    _patch_gemini(monkeypatch, [stream])
+
+    with pytest.raises(loop.TurnCancelled):
+        loop._gemini_chat([{"role": "user", "content": "hey"}],
+                          should_cancel=lambda: True)
+
+
+def test_resolve_backend_precedence(monkeypatch):
+    monkeypatch.delenv("WREN_LLM_BACKEND", raising=False)
+    monkeypatch.delenv("WREN_WEEKLY_LEARNINGS_BACKEND", raising=False)
+    assert loop.resolve_backend("weekly_learnings") is None
+
+    monkeypatch.setenv("WREN_LLM_BACKEND", "ollama")
+    assert loop.resolve_backend("weekly_learnings") == "ollama"
+
+    # per-task var wins over the global default
+    monkeypatch.setenv("WREN_WEEKLY_LEARNINGS_BACKEND", "gemini")
+    assert loop.resolve_backend("weekly_learnings") == "gemini"
+
+
+def test_llm_chat_dispatch_and_unknown_backend(monkeypatch):
+    monkeypatch.delenv("WREN_LLM_BACKEND", raising=False)
+
+    # explicit arg routes to gemini even though the global default is ollama
+    _patch_gemini(monkeypatch, [[_FakeChunk(parts=[_FakePart(text="cloud")])]])
+    assert loop._llm_chat([{"role": "user", "content": "hi"}],
+                          backend="gemini")["content"] == "cloud"
+
+    # global env selects gemini
+    monkeypatch.setenv("WREN_LLM_BACKEND", "gemini")
+    _patch_gemini(monkeypatch, [[_FakeChunk(parts=[_FakePart(text="cloud2")])]])
+    assert loop._llm_chat([{"role": "user", "content": "hi"}])["content"] == "cloud2"
+
+    monkeypatch.setenv("WREN_LLM_BACKEND", "nonsense")
+    with pytest.raises(ValueError):
+        loop._llm_chat([{"role": "user", "content": "hi"}])
+
+
+def test_advance_gemini_pauses_on_confirm_and_resumes(monkeypatch):
+    """The tool-call round-trip and the confirm/resolve gate survive translation:
+    advance() on the cloud backend pauses at a confirm-gated call and resumes to a
+    final answer once resolved."""
+    first = [_FakeChunk(parts=[_FakePart(
+        function_call=_FakeFC("send_email", {"subject": "hi"}))])]
+    second = [_FakeChunk(parts=[_FakePart(text="done")])]
+    _patch_gemini(monkeypatch, [first, second])
+
+    messages = [{"role": "user", "content": "email them"}]
+    result = loop.advance(messages, tools=[], dispatch={}, backend="gemini",
+                          confirm_before=frozenset({"send_email"}))
+    assert result["type"] == "confirm"
+    assert result["call"]["function"]["name"] == "send_email"
+
+    loop.resolve(messages, result["call"], approved=True,
+                 dispatch={"send_email": lambda **_: {"sent": True}})
+    final = loop.advance(messages, tools=[], dispatch={}, backend="gemini")
+    assert final == {"type": "final", "text": "done"}
+
+
+def test_warm_model_noop_for_cloud_backend(monkeypatch):
+    """warm_model short-circuits (True) for a cloud backend without poking Ollama."""
+    def boom(*a, **k):
+        raise AssertionError("Ollama must not be contacted for a cloud backend")
+    monkeypatch.setattr(loop.requests, "post", boom)
+
+    assert loop.warm_model(backend="gemini") is True
+
+
+def test_active_model_label(monkeypatch):
+    monkeypatch.setenv("OLLAMA_MODEL", "gemma4")
+    monkeypatch.setenv("WREN_LLM_BACKEND", "ollama")
+    assert loop.active_model_label() == "gemma4 (ollama)"
+
+    monkeypatch.setenv("WREN_LLM_BACKEND", "gemini")
+    monkeypatch.setenv("WREN_GEMINI_MODEL", "gemini-2.5-flash")
+    assert loop.active_model_label() == "gemini-2.5-flash (gemini)"
+
+
 def test_advance_resends_mutated_tools_list_next_iteration(monkeypatch):
     """The lazy-loading contract: advance() passes the SAME tools list object to
     the model each iteration, so a dispatched tool that appends to that list

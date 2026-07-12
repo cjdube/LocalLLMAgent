@@ -41,7 +41,7 @@ from dotenv import load_dotenv
 import requests
 
 from agent import prefs
-from agent.loop import complete_text
+from agent.loop import complete_text, resolve_backend
 from agent.store import atomic_write_json, load_json
 from agent.tools import opportunities
 from agent.tools.email import send_email
@@ -458,6 +458,7 @@ def score_items(items: list, logger: Optional[logging.Logger] = None) -> dict:
     raw = complete_text(
         system_prompt=SCORING_SYSTEM_PROMPT,
         user_prompt=f"leads: {json.dumps(_compact_for_scoring(to_score))}",
+        backend=resolve_backend("opportunity_digest"),
     )
     if logger:
         logger.info(f"scoring output ->\n{raw}")

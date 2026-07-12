@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent.loop import complete_text, warm_model
+from agent.loop import complete_text, resolve_backend, warm_model
 from agent import prefs
 from agent.tools.calendar import _local_timezone, get_events_in_range
 from agent.tools.chrome_history import fetch_chrome_history
@@ -216,9 +216,11 @@ def main() -> int:
         # Load the model before the (large-prompt) draft so its cold-load cost
         # isn't paid inside the generation's read-timeout window — this run has
         # the biggest prompt of any task and used to time out cold at 5am.
-        warm_model(logger=logger)
+        backend = resolve_backend("weekly_learnings")
+        warm_model(logger=logger, backend=backend)
         entry_text = complete_text(
-            system_prompt=DRAFT_SYSTEM_PROMPT, user_prompt=user_prompt, logger=logger
+            system_prompt=DRAFT_SYSTEM_PROMPT, user_prompt=user_prompt, logger=logger,
+            backend=backend,
         )
         logger.info(f"Drafted entry:\n{entry_text}")
 

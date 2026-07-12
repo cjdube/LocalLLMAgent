@@ -40,6 +40,13 @@ swap: the **chat server** relies on Ollama's tool-calling protocol (`tools` /
 reliably — the scheduled tasks only need plain text completion (or, for
 `daily_log`, no model at all).
 
+**The backend is swappable too.** All model calls route through one seam
+(`agent/loop.py:_llm_chat`), which defaults to local Ollama but can be pointed at
+a cloud model (Gemini) via `WREN_LLM_BACKEND` — globally, or per-task with
+`WREN_<TASK>_BACKEND` so chat stays local while a heavy scheduled task uses the
+cloud. This sends that task's data off-device, the opposite of the local-first
+default, so it's opt-in. See [docs/llm-backend.md](docs/llm-backend.md).
+
 Every chat call sets the context window explicitly via `OLLAMA_NUM_CTX`
 (default 8192) rather than leaving it to Ollama's small default, which would
 silently truncate the front of the prompt (where the system prompt lives). Each

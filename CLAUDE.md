@@ -1,11 +1,11 @@
 # CLAUDE.md
 
-Wren is a local-first personal AI agent: a Gemma model served by Ollama on a Mac mini. Nothing about the user's day ships to a cloud model at runtime. Run `pytest` before calling any change to existing code done.
+Wren is a local-first personal AI agent: a Gemma model served by Ollama on a Mac mini. Nothing about the user's day ships to a cloud model at runtime **by default** — an opt-in cloud backend (Gemini) can be selected per-task via `WREN_LLM_BACKEND` / `WREN_<TASK>_BACKEND`, which does send that task's data off-device (see [docs/llm-backend.md](docs/llm-backend.md)). Run `pytest` before calling any change to existing code done.
 
 ## Module map
 
 - `chat/server.py` — Flask chat server (phone-reachable UI + API); pauses on gated writes for tap-to-confirm.
-- `agent/loop.py` — model interface: `advance()` (tool-calling loop), `complete_text()` (one-shot, tool-free — what scheduled tasks use).
+- `agent/loop.py` — model interface: `advance()` (tool-calling loop), `complete_text()` (one-shot, tool-free — what scheduled tasks use). Both route through the `_llm_chat` backend seam (`_ollama_chat` / `_gemini_chat`); backends translate to/from their provider format internally so callers speak one canonical shape.
 - `agent/toolset.py` — the single tool registry (`TOOLS`, `DISPATCH`) and gating sets (`WRITE_TOOLS`, `CONSEQUENTIAL_TOOLS`, `UNATTENDED_EXCLUDED_TOOLS`), shared by the chat server and background runs.
 - `agent/tools/*.py` — one module per capability (weather, strava, email, notify, wiki, skills, …).
 - `agent/store.py` — locked/atomic JSON store primitives used by every store under `config/`.

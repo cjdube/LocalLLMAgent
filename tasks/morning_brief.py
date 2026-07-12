@@ -32,7 +32,7 @@ from dotenv import load_dotenv
 
 from agent import prefs
 from agent.dates import local_timezone
-from agent.loop import complete_text
+from agent.loop import complete_text, resolve_backend
 from agent.store import atomic_write_json, load_json
 from agent.tools.calendar import get_upcoming_events
 from agent.tools.email import send_email
@@ -282,9 +282,11 @@ def build_and_send_brief(logger: Optional[logging.Logger] = None) -> dict:
         tasks_error = tasks_result.get("error")
         tasks = [] if tasks_error else tasks_result.get("tasks", [])
 
+        brief_backend = resolve_backend("morning_brief")
         glance_text = complete_text(
             system_prompt=GLANCE_SYSTEM_PROMPT,
             user_prompt=f"weather: {weather}\ncalendar_events: {events}",
+            backend=brief_backend,
         )
         if logger:
             logger.info(f"glance summary -> {glance_text}")
@@ -306,6 +308,7 @@ def build_and_send_brief(logger: Optional[logging.Logger] = None) -> dict:
             starred_intro = complete_text(
                 system_prompt=STARRED_REPOS_SYSTEM_PROMPT,
                 user_prompt=f"starred_repo_updates: {starred_repos}",
+                backend=brief_backend,
             )
             if logger:
                 logger.info(f"starred repos intro -> {starred_intro}")
