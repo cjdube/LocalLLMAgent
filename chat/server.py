@@ -167,9 +167,11 @@ def _system_message_content() -> str:
     """Build the chat system prompt with today's date baked in. The local
     model doesn't know the current date, so without this it resolves a bare
     "July 2nd" to a default year (e.g. 2024) and tools like fetch_strava come
-    back empty. Computed per conversation rather than at import time because
-    the server is long-running under launchd and would otherwise go stale
-    after midnight."""
+    back empty. Computed per turn (the /chat route rebuilds history[0] on
+    every message) rather than at import time or per conversation: the server
+    is long-running under launchd, so the date would otherwise go stale after
+    midnight, and a fact pinned or skill saved mid-session would otherwise
+    only take effect in the NEXT conversation."""
     today = datetime.now().strftime("%A, %B %-d, %Y")
     dated = (
         CHAT_SYSTEM_PROMPT
@@ -179,7 +181,7 @@ def _system_message_content() -> str:
     )
     # Skills are chat-only (like the wiki tools), so the index lives here rather
     # than in with_identity() where the scheduled tasks would also carry it.
-    # Rendered per conversation so a skill saved mid-session shows up next turn.
+    # Rendered per turn so a skill saved mid-session shows up on the next turn.
     skills_index = render_skills_index()
     if skills_index:
         dated += "\n\n" + skills_index
@@ -521,8 +523,14 @@ def chat():
     if pending is not None:
         resolve(history, pending, False, DISPATCH, logger=logger)
 
-    if not history:
-        history.append({"role": "system", "content": _system_message_content()})
+    # (Re)build the system message every turn, not just on session start, so a
+    # fact pinned or a skill saved mid-session takes effect on the very next
+    # turn, and the baked-in date rolls over at midnight in a long-lived session.
+    system_message = {"role": "system", "content": _system_message_content()}
+    if history:
+        history[0] = system_message
+    else:
+        history.append(system_message)
 
     # Trim before taking the checkpoint — trimming shifts indices, and
     # _run_turn's rollback slices from the checkpoint.

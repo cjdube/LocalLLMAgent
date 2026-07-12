@@ -98,6 +98,11 @@ def _ollama_chat(
     # (~4096) and silently truncates the FRONT of the prompt, where Wren's
     # system prompt (identity + tool-use rules) lives.
     num_ctx = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
+    # Cap tokens generated per call: the small model can fall into a repetition
+    # loop and, uncapped, run away for thousands of junk tokens that then live
+    # in the session history (observed: a 5,459-token "list memories" reply).
+    # 3072 clears the longest legitimate reply seen (a ~2,200-token teardown).
+    num_predict = int(os.getenv("OLLAMA_NUM_PREDICT", "3072"))
 
     payload = {
         "model": model,
@@ -106,7 +111,7 @@ def _ollama_chat(
         # Keep the (large, slow-to-load) model resident between calls so the
         # next one doesn't pay the cold-load cost inside its read-timeout window.
         "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
-        "options": {"num_ctx": num_ctx},
+        "options": {"num_ctx": num_ctx, "num_predict": num_predict},
     }
     if tools is not None:
         payload["tools"] = tools
@@ -148,6 +153,13 @@ def _ollama_chat(
                 "ollama prompt (%d tokens) reached num_ctx=%d — the front of "
                 "the conversation (system prompt) was likely truncated",
                 prompt_tokens, num_ctx,
+            )
+        if isinstance(eval_tokens, int) and eval_tokens >= num_predict:
+            logger.warning(
+                "ollama generation (%d tokens) reached num_predict=%d and was "
+                "cut off — healthy replies stay well under the cap, so this "
+                "usually means a repetition loop",
+                eval_tokens, num_predict,
             )
     return message
 

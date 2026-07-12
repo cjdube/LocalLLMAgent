@@ -178,6 +178,27 @@ def test_chat_trims_before_running_the_turn(auth_client, monkeypatch):
     assert "question 3" in contents and "next question" in contents
 
 
+def test_chat_rebuilds_system_message_every_turn(auth_client, monkeypatch):
+    """A fact pinned (or skill saved) mid-session must reach the model on the
+    very next turn: /chat rebuilds history[0] from _system_message_content()
+    on every message, not just when the session starts."""
+    srv.conversations[SID] = [{"role": "system", "content": "stale prompt"}, *_turn(1)]
+    monkeypatch.setattr(srv, "_system_message_content", lambda: "fresh prompt")
+
+    def fake_advance(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
+                     should_cancel=None):
+        return {"type": "final", "text": "done"}
+
+    monkeypatch.setattr(srv, "advance", fake_advance)
+    resp = auth_client.post("/chat", json={"message": "hi"})
+    assert resp.status_code == 200
+
+    history = srv.conversations[SID]
+    assert history[0] == {"role": "system", "content": "fresh prompt"}
+    # Still exactly one system message — the rebuild replaces, never stacks.
+    assert [m["role"] for m in history].count("system") == 1
+
+
 # --------------------------------------------------------------------------- #
 # Confirmation payload (describers themselves are covered in test_toolset.py)
 # --------------------------------------------------------------------------- #

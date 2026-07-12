@@ -98,6 +98,42 @@ def test_num_ctx_honors_env_override(monkeypatch):
     assert captured["payload"]["options"]["num_ctx"] == 16384
 
 
+def test_payload_sets_default_num_predict(monkeypatch):
+    monkeypatch.delenv("OLLAMA_NUM_PREDICT", raising=False)
+    captured = {}
+    _patch_post(monkeypatch, captured, {"message": {"content": "hi"}})
+
+    loop._ollama_chat([{"role": "user", "content": "hey"}])
+
+    assert captured["payload"]["options"]["num_predict"] == 3072
+
+
+def test_num_predict_honors_env_override(monkeypatch):
+    monkeypatch.setenv("OLLAMA_NUM_PREDICT", "1024")
+    captured = {}
+    _patch_post(monkeypatch, captured, {"message": {"content": "hi"}})
+
+    loop._ollama_chat([{"role": "user", "content": "hey"}])
+
+    assert captured["payload"]["options"]["num_predict"] == 1024
+
+
+def test_warns_when_generation_reaches_num_predict(monkeypatch, caplog):
+    monkeypatch.setenv("OLLAMA_NUM_PREDICT", "50")
+    _patch_post(
+        monkeypatch,
+        {},
+        {"message": {"content": "hi"}, "prompt_eval_count": 10, "eval_count": 50},
+    )
+    logger = logging.getLogger("test_loop.predict_warn")
+
+    with caplog.at_level(logging.WARNING, logger=logger.name):
+        loop._ollama_chat([{"role": "user", "content": "hey"}], logger=logger)
+
+    assert any(r.levelno == logging.WARNING for r in caplog.records)
+    assert "num_predict=50" in caplog.text and "cut off" in caplog.text
+
+
 def test_logs_prompt_token_usage(monkeypatch, caplog):
     monkeypatch.delenv("OLLAMA_NUM_CTX", raising=False)
     _patch_post(
