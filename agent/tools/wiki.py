@@ -10,7 +10,8 @@ query CLI does: read the index, open the relevant page(s), answer.
 Vault layout (see ObsidianWikiAgent):
     <vault>/wiki/index.md   -- table of contents the model reads first
     <vault>/wiki/*.md       -- concept pages (excluding index.md, log.md)
-    <vault>/raw/*.md        -- raw weekly reviews (may cover weeks not yet in wiki/)
+    <vault>/raw/*.md        -- raw learnings reviews: daily (Daily-Chrome-*, Daily-YouTube-*)
+                               plus older weekly ones (may cover days not yet in wiki/)
 
 The vault lives on an external drive, so a missing vault dir is surfaced as an
 error (like learnings_file.py) rather than raising. Functions read from a single
@@ -22,7 +23,7 @@ Usage:
     python -m agent.tools.wiki list-pages
     python -m agent.tools.wiki read-page speakers-bureau
     python -m agent.tools.wiki list-reviews
-    python -m agent.tools.wiki read-review Strategic-Weekly-Review-2026-07-05.md
+    python -m agent.tools.wiki read-review Daily-Chrome-2026-07-12.md
 """
 
 import argparse
@@ -187,8 +188,10 @@ LIST_WEEKLY_REVIEWS_SCHEMA = {
     "function": {
         "name": "list_weekly_reviews",
         "description": (
-            "List Craig's raw weekly review filenames (Strategic-Weekly-Review-<date>.md). "
-            "Use these for a recent week that may not be summarized into the wiki yet."
+            "List Craig's raw learnings review filenames — the daily reviews "
+            "(Daily-Chrome-<date>.md, Daily-YouTube-<date>.md) plus any older "
+            "Strategic-Weekly-Review-<date>.md. Use these for recent days not yet "
+            "summarized into the wiki."
         ),
         "parameters": {"type": "object", "properties": {}},
     },
@@ -198,11 +201,11 @@ READ_WEEKLY_REVIEW_SCHEMA = {
     "type": "function",
     "function": {
         "name": "read_weekly_review",
-        "description": "Read one raw weekly review file by filename (from list_weekly_reviews).",
+        "description": "Read one raw learnings review file by filename (from list_weekly_reviews).",
         "parameters": {
             "type": "object",
             "properties": {
-                "filename": {"type": "string", "description": "Filename, e.g. 'Strategic-Weekly-Review-2026-07-05.md'."},
+                "filename": {"type": "string", "description": "Filename, e.g. 'Daily-Chrome-2026-07-12.md'."},
             },
             "required": ["filename"],
         },

@@ -1,0 +1,113 @@
+"""Shared helpers for the daily learnings tasks (daily_chrome_learnings,
+daily_youtube_learnings).
+
+Both tasks follow the same shape — resolve the prior day, compact the fetched
+data to bound the prompt for the small local model, draft with the model, then
+persist to the Obsidian vault (emailing the draft if the vault write fails so an
+entry is never silently lost). This module holds the pieces they share.
+"""
+
+from datetime import datetime, timedelta
+from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
+
+from agent.tools.calendar import _local_timezone
+from agent.tools.email import send_email
+from agent.tools.learnings_file import write_entry
+from tasks._common import notify_failure
+
+
+def prior_day(now: datetime | None = None) -> tuple[datetime, datetime, "datetime.date"]:
+    """Return (start, end, day) for yesterday in local tz: start at 00:00:00 and
+    end at 23:59:59 of the day before today, plus the date itself (for the output
+    filename). `now` is injectable for tests. Anchored to "the calendar day before
+    today", so a 5am launchd run covers all of yesterday."""
+    tz = ZoneInfo(_local_timezone())
+    today = (now or datetime.now(tz)).replace(hour=0, minute=0, second=0, microsecond=0)
+    start = today - timedelta(days=1)
+    end = start.replace(hour=23, minute=59, second=59)
+    return start, end, start.date()
+
+
+# Prompt-bounding caps. Daily volume is much smaller than the weekly run, so
+# these rarely bind — but they keep a heavy browsing day (or a link-dump video
+# description) from blowing past the local model's context window.
+MAX_CHROME_SITES = 40
+MAX_YOUTUBE_VIDEOS = 25
+MAX_YOUTUBE_DESC_CHARS = 500
+
+
+def compact_sites(sites: list) -> list:
+    """Trim browsing history to the top visited sites and drop the full `url`
+    (redundant with `domain` and often long) before embedding in the prompt."""
+    top = sorted(sites, key=lambda s: s.get("visits", 0), reverse=True)[:MAX_CHROME_SITES]
+    return [
+        {"domain": s.get("domain"), "title": s.get("title"), "visits": s.get("visits")}
+        for s in top
+    ]
+
+
+def compact_videos(videos: list) -> list:
+    """Keep only the fields the model needs from each liked video and truncate
+    the description, bounding the prompt the same way compact_sites does."""
+    return [
+        {
+            "title": v.get("title"),
+            "channel": v.get("channel"),
+            "description": (v.get("description") or "")[:MAX_YOUTUBE_DESC_CHARS],
+            "url": v.get("url"),
+        }
+        for v in videos[:MAX_YOUTUBE_VIDEOS]
+    ]
+
+
+def safe_url(url: str) -> str:
+    """Return url only if it's an http(s) link, else "". A video's URL is built
+    by agent.tools.youtube from the API's videoId, but the fields are still
+    externally sourced — scheme-validate before rendering into the Markdown
+    (same guard as tasks/morning_brief._safe_url)."""
+    try:
+        return url if urlparse(url).scheme in ("http", "https") else ""
+    except (ValueError, AttributeError):
+        return ""
+
+
+def videos_section(videos: list) -> str:
+    """Deterministic Markdown section listing every video Liked, with a link to
+    each. Built in Python (not asked of the model) so the titles and URLs are
+    exact and every link is scheme-validated. Titles keep their raw text; only a
+    bad-scheme URL is dropped (the title then renders unlinked)."""
+    lines = ["### Videos Liked"]
+    if not videos:
+        lines.append("- **None:** [No videos Liked this day]")
+        return "\n".join(lines)
+    for v in videos:
+        title = (v.get("title") or "Untitled").strip()
+        channel = (v.get("channel") or "").strip()
+        url = safe_url(v.get("url") or "")
+        label = f"[{title}]({url})" if url else title
+        lines.append(f"- {label}{f' — {channel}' if channel else ''}")
+    return "\n".join(lines)
+
+
+def persist_or_email(content: str, prefix: str, day, subject: str,
+                     task_name: str, logger) -> dict:
+    """Write `content` to the vault as <prefix>-<day>.md; if the write fails
+    (e.g. drive unmounted), email the draft instead so it's never silently lost.
+    Both paths failing is a hard failure (alert + raise), matching the contract
+    the retired weekly task established."""
+    write_result = write_entry(content, prefix, day)
+    logger.info(f"write_entry -> {write_result}")
+    if "error" in write_result:
+        logger.warning("File write failed — emailing the draft so it isn't lost")
+        notify_failure(task_name, "vault write failed — draft emailed instead", logger)
+        email_result = send_email(subject=subject, body=content)
+        logger.info(f"send_email -> {email_result}")
+        if "error" in email_result:
+            # send_email returns error dicts rather than raising, so check it:
+            # both persistence paths failing must surface as a failed run.
+            raise RuntimeError(
+                "vault write AND email fallback both failed: "
+                f"{email_result['error']}"
+            )
+    return write_result

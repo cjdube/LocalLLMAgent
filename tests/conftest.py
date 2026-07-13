@@ -1,11 +1,16 @@
 """Shared pytest fixtures.
 
 Task-runner tests exercise `main()` (daily_log, bg_worker, opportunity_digest,
-reminder_sweep, weekly_learnings), and `main()` calls `setup_logger`, which
-writes to `tasks._common.LOGS_DIR` — the real `logs/` directory. Left alone,
-every run appends fixture rows (e.g. the daily_log tests' "Morning Run" on
-2026-07-08) into the production logs. Redirect LOGS_DIR to a tmp dir for every
-test so the suite can never pollute real logs.
+reminder_sweep, daily_chrome_learnings, daily_youtube_learnings), and `main()`
+calls `setup_logger`, which writes to `tasks._common.LOGS_DIR` — the real `logs/`
+directory. Left alone, every run appends fixture rows (e.g. the daily_log tests'
+"Morning Run" on 2026-07-08) into the production logs. Redirect LOGS_DIR to a tmp
+dir for every test so the suite can never pollute real logs.
+
+The learnings tasks write reviews to `LEARNINGS_DIR` — Craig's Obsidian vault on
+an external drive. Tests stub the writer per-test, but redirect LEARNINGS_DIR to
+tmp_path suite-wide as the backstop, so a missed stub lands a fixture file in a
+throwaway dir, never in the real vault.
 
 Those same `main()` calls also reach `notify_failure` on a failure path (e.g.
 daily_log's partial-failure alert), which POSTs to the real ntfy server when
@@ -41,6 +46,12 @@ from tasks import opportunity_digest as _opportunity_digest
 @pytest.fixture(autouse=True)
 def _isolate_task_logs(tmp_path, monkeypatch):
     monkeypatch.setattr(_common, "LOGS_DIR", tmp_path)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_learnings_dir(tmp_path, monkeypatch):
+    # learnings_file._learnings_dir() reads this env at call time.
+    monkeypatch.setenv("LEARNINGS_DIR", str(tmp_path))
 
 
 @pytest.fixture(autouse=True)

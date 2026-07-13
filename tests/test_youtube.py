@@ -4,15 +4,15 @@ The live YouTube API is faked with a small stand-in service (matching the
 project's precedent of not hitting live Google APIs in tests), which lets us
 exercise the real logic worth testing: the [start, end] date window, the
 stop-paginating-once-past-the-window shortcut, and graceful error degradation.
-The pure helpers (_video_from_item, _compact_videos) are unit-tested directly.
+The pure helpers (_video_from_item, compact_videos) are unit-tested directly.
 """
 
 import agent.tools.youtube as youtube
 from agent.tools.youtube import _video_from_item, fetch_liked_videos
-from tasks.weekly_learnings import (
+from tasks._learnings_common import (
     MAX_YOUTUBE_DESC_CHARS,
     MAX_YOUTUBE_VIDEOS,
-    _compact_videos,
+    compact_videos,
 )
 
 
@@ -146,19 +146,19 @@ def test_fetch_error_degrades_to_empty_list(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# _compact_videos (weekly_learnings)
+# compact_videos (tasks._learnings_common)
 # --------------------------------------------------------------------------- #
 
 def test_compact_videos_caps_count():
     videos = [{"title": f"v{i}", "channel": "c", "description": "d", "url": "u"} for i in range(MAX_YOUTUBE_VIDEOS + 5)]
-    assert len(_compact_videos(videos)) == MAX_YOUTUBE_VIDEOS
+    assert len(compact_videos(videos)) == MAX_YOUTUBE_VIDEOS
 
 
 def test_compact_videos_truncates_description():
     videos = [{"title": "t", "channel": "c", "description": "x" * (MAX_YOUTUBE_DESC_CHARS + 100), "url": "u"}]
-    assert len(_compact_videos(videos)[0]["description"]) == MAX_YOUTUBE_DESC_CHARS
+    assert len(compact_videos(videos)[0]["description"]) == MAX_YOUTUBE_DESC_CHARS
 
 
 def test_compact_videos_keeps_only_expected_fields():
     videos = [{"title": "t", "channel": "c", "description": "d", "url": "u", "video_id": "x", "liked_at": "z"}]
-    assert set(_compact_videos(videos)[0]) == {"title", "channel", "description", "url"}
+    assert set(compact_videos(videos)[0]) == {"title", "channel", "description", "url"}

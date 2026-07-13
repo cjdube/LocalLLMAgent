@@ -184,7 +184,7 @@ def warm_model(
     A cold local model (gemma4:26b-mlx is ~17GB) can't emit its first streamed
     chunk until it's loaded AND the prompt is prefilled; stacked together on a
     cold start these exceed the streamed call's read timeout, so a big-prompt
-    task like weekly_learnings times out before any token arrives. Loading the
+    big-prompt task times out before any token arrives. Loading the
     model first — with the SAME num_ctx and keep_alive, so the real call reuses
     this resident instance rather than reloading — moves the 17GB load out of
     that window and leaves only prefill.
@@ -237,7 +237,7 @@ def resolve_backend(task_key: str) -> Optional[str]:
     """Per-task backend override for scheduled tasks: WREN_<TASK_KEY>_BACKEND
     falls back to the global WREN_LLM_BACKEND. Returns None when neither is set,
     which lets _llm_chat apply its own 'ollama' default. Lets chat stay local
-    while an individual task (e.g. weekly_learnings) opts into a cloud model."""
+    while an individual task (e.g. opportunity_digest) opts into a cloud model."""
     return os.getenv(f"WREN_{task_key.upper()}_BACKEND") or os.getenv("WREN_LLM_BACKEND") or None
 
 
@@ -375,11 +375,21 @@ def _gemini_chat(
     from google.genai import types
 
     model = model or os.getenv("WREN_GEMINI_MODEL", GEMINI_DEFAULT_MODEL)
-    max_out = int(os.getenv("WREN_GEMINI_MAX_OUTPUT_TOKENS", "4096"))
+    max_out = int(os.getenv("WREN_GEMINI_MAX_OUTPUT_TOKENS", "8192"))
+    # Gemini 2.5 models are *thinking* models, and thinking tokens count against
+    # max_output_tokens. Left unbounded, the model can spend nearly the whole
+    # budget on invisible reasoning and get cut off mid-answer (observed: a
+    # weekly-learnings draft truncated to 162 visible tokens). Default the budget
+    # to 0 (thinking off) — the scheduled tasks that use Gemini fill in a
+    # template and don't need chain-of-thought. Note: 0 is valid for
+    # gemini-2.5-flash (the default model); gemini-2.5-pro can't disable thinking,
+    # so pin a positive WREN_GEMINI_THINKING_BUDGET if you switch to pro.
+    thinking_budget = int(os.getenv("WREN_GEMINI_THINKING_BUDGET", "0"))
     system, contents = _gemini_contents(messages)
 
     cfg_kwargs = dict(
         max_output_tokens=max_out,
+        thinking_config=types.ThinkingConfig(thinking_budget=thinking_budget),
         # We drive the tool loop ourselves; disable the SDK's auto tool-calling
         # so it returns functionCall parts instead of trying to invoke Python.
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
@@ -393,7 +403,8 @@ def _gemini_chat(
     client = _gemini_client(timeout=timeout)
     content_parts: list[str] = []
     tool_calls: list[dict] = []
-    prompt_tokens = output_tokens = None
+    prompt_tokens = output_tokens = thinking_tokens = None
+    finish_reason = None
     stream = client.models.generate_content_stream(model=model, contents=contents, config=config)
     for chunk in stream:
         if should_cancel is not None and should_cancel():
@@ -407,19 +418,37 @@ def _gemini_chat(
                 if fc:
                     tool_calls.append(
                         {"function": {"name": fc.name, "arguments": dict(fc.args or {})}})
+        if cand and getattr(cand, "finish_reason", None):
+            finish_reason = cand.finish_reason
         um = getattr(chunk, "usage_metadata", None)
         if um:
             prompt_tokens = getattr(um, "prompt_token_count", None) or prompt_tokens
             output_tokens = getattr(um, "candidates_token_count", None) or output_tokens
+            thinking_tokens = getattr(um, "thoughts_token_count", None) or thinking_tokens
 
     message: dict = {"role": "assistant", "content": "".join(content_parts)}
     if tool_calls:
         message["tool_calls"] = tool_calls
     if logger:
+        # finish_reason may be an enum; str() so it logs readably regardless.
+        reason = str(finish_reason) if finish_reason is not None else None
         logger.info(
-            "gemini_chat model=%s prompt_tokens=%s output_tokens=%s",
-            model, prompt_tokens, output_tokens,
+            "gemini_chat model=%s prompt_tokens=%s output_tokens=%s "
+            "thinking_tokens=%s finish_reason=%s",
+            model, prompt_tokens, output_tokens, thinking_tokens, reason,
         )
+        # MAX_TOKENS means the reply was cut off before the model was done —
+        # mirrors the Ollama num_predict warning above. With a thinking model,
+        # the usual cause is thinking eating the output budget (see thinking
+        # config above); WREN_GEMINI_THINKING_BUDGET=0 avoids that.
+        if reason and "MAX_TOKENS" in reason:
+            logger.warning(
+                "gemini generation hit finish_reason=MAX_TOKENS and was cut off "
+                "(output_tokens=%s, thinking_tokens=%s) — the draft is likely "
+                "incomplete; raise WREN_GEMINI_MAX_OUTPUT_TOKENS or lower "
+                "WREN_GEMINI_THINKING_BUDGET",
+                output_tokens, thinking_tokens,
+            )
     return message
 
 

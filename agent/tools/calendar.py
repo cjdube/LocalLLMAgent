@@ -124,7 +124,7 @@ def get_upcoming_events(hours_ahead: int = 24) -> dict:
 
 def get_events_in_range(time_min: str, time_max: str) -> dict:
     """List events between two ISO 8601 datetimes (inclusive), with colorId —
-    used by tasks/weekly_learnings.py to categorize a past week's events."""
+    used by tasks/daily_chrome_learnings.py to categorize the prior day's events."""
     calendar_id = os.getenv("GOOGLE_CALENDAR_ID", "primary")
 
     try:

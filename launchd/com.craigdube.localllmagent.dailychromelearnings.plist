@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.craigdube.localllmagent.weeklylearnings</string>
+    <string>com.craigdube.localllmagent.dailychromelearnings</string>
 
     <key>ProgramArguments</key>
     <array>
         <string>/Users/craigdube/Projects/LocalLLMAgent/.venv/bin/python</string>
         <string>-m</string>
-        <string>tasks.weekly_learnings</string>
+        <string>tasks.daily_chrome_learnings</string>
     </array>
 
     <key>WorkingDirectory</key>
@@ -17,18 +17,16 @@
 
     <key>StartCalendarInterval</key>
     <dict>
-        <key>Weekday</key>
-        <integer>1</integer>
         <key>Hour</key>
         <integer>5</integer>
         <key>Minute</key>
-        <integer>0</integer>
+        <integer>15</integer>
     </dict>
 
     <key>StandardOutPath</key>
-    <string>/Users/craigdube/Projects/LocalLLMAgent/logs/weekly_learnings.launchd.log</string>
+    <string>/Users/craigdube/Projects/LocalLLMAgent/logs/daily_chrome_learnings.launchd.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/craigdube/Projects/LocalLLMAgent/logs/weekly_learnings.launchd.log</string>
+    <string>/Users/craigdube/Projects/LocalLLMAgent/logs/daily_chrome_learnings.launchd.log</string>
 
     <key>RunAtLoad</key>
     <false/>

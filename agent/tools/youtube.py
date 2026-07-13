@@ -74,7 +74,7 @@ def fetch_liked_videos(start_date: str, end_date: str) -> dict:
     """Liked videos whose like-date falls within [start_date, end_date] inclusive.
 
     Dates are resolved in Python (never trusting the model to compute them);
-    explicit 'YYYY-MM-DD' strings — what tasks.weekly_learnings passes — are
+    explicit 'YYYY-MM-DD' strings — what tasks.daily_youtube_learnings passes — are
     honored as-is. Returns {"videos": [...]} or, on any failure, the same shape
     with an "error" so callers can degrade to an empty list.
     """

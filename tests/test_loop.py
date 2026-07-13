@@ -370,6 +370,33 @@ def test_gemini_backend_reassembles_text_and_tool_calls(monkeypatch):
         {"function": {"name": "search_web", "arguments": {"query": "x"}}}]
 
 
+def test_gemini_disables_thinking_and_sets_output_cap_by_default(monkeypatch):
+    # Thinking is a *thinking* model's default, and thinking tokens count against
+    # the output cap — leaving it on starved the weekly-learnings draft. Default
+    # to budget 0 (off) with generous output headroom.
+    monkeypatch.delenv("WREN_GEMINI_THINKING_BUDGET", raising=False)
+    monkeypatch.delenv("WREN_GEMINI_MAX_OUTPUT_TOKENS", raising=False)
+    captured = _patch_gemini(monkeypatch, [[_FakeChunk(parts=[_FakePart(text="ok")])]])
+
+    loop._gemini_chat([{"role": "user", "content": "hey"}], tools=[])
+
+    config = captured["calls"][0]["config"]
+    assert config.thinking_config.thinking_budget == 0
+    assert config.max_output_tokens == 8192
+
+
+def test_gemini_thinking_budget_and_cap_are_env_overridable(monkeypatch):
+    monkeypatch.setenv("WREN_GEMINI_THINKING_BUDGET", "1024")
+    monkeypatch.setenv("WREN_GEMINI_MAX_OUTPUT_TOKENS", "2048")
+    captured = _patch_gemini(monkeypatch, [[_FakeChunk(parts=[_FakePart(text="ok")])]])
+
+    loop._gemini_chat([{"role": "user", "content": "hey"}], tools=[])
+
+    config = captured["calls"][0]["config"]
+    assert config.thinking_config.thinking_budget == 1024
+    assert config.max_output_tokens == 2048
+
+
 def test_gemini_hoists_system_and_pairs_tool_result(monkeypatch):
     captured = _patch_gemini(monkeypatch, [[_FakeChunk(parts=[_FakePart(text="ok")])]])
     messages = [

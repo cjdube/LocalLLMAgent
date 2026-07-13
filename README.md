@@ -5,8 +5,8 @@ served by Ollama** — no Anthropic/Claude API calls at runtime, and no Claude
 Code/Cowork-managed scheduling. The agent has a name: **Wren**. It works two
 ways:
 
-- **Scheduled tasks** (Strava-to-calendar logging, a morning brief email, a
-  weekly retrospective doc entry) — unattended, triggered entirely by macOS
+- **Scheduled tasks** (Strava-to-calendar logging, a morning brief email, daily
+  activity + YouTube learnings entries) — unattended, triggered entirely by macOS
   `launchd`, no human in the loop.
 - **Ad hoc chat** — a small always-on web app (`chat/server.py`) so Craig can
   talk to Wren directly and have her take action on request, from anywhere,
@@ -89,8 +89,8 @@ meta-tool. Background tasks keep the full toolset. See
 - **`complete_text(...)`** — a single-turn, tool-free completion. Used when
   the surrounding structure (HTML layout, doc template) is built
   deterministically in Python and the model is only asked to write a
-  paragraph of prose to slot in. Used by `morning_brief.py` and
-  `weekly_learnings.py` — this is more reliable than trusting a small local
+  paragraph of prose to slot in. Used by `morning_brief.py` and the daily
+  learnings tasks — this is more reliable than trusting a small local
   model to produce well-formed HTML/markdown on its own.
 
 The model call (`_ollama_chat`) **streams** from Ollama and reassembles the
@@ -161,7 +161,8 @@ Every tool module is runnable standalone for testing, e.g.:
 |---|---|---|
 | `tasks/morning_brief.py` | Daily 6:00 AM | Fetches weather + next-24h calendar events + Google Tasks past due or due within 48h (via `google_tasks.get_tasks_due_soon`) + starred GitHub repos pushed to since the last brief (via `github_starred.fetch_starred_repos`, cursor persisted in `config/github_starred_state.json`), has the model write a short "at a glance" summary and a one-sentence intro for the starred-repos section, assembles a styled HTML email (weather / calendar / tasks due soon / Starred Repos sections), sends it via Gmail. The pipeline lives in `build_and_send_brief()`, shared with the chat `send_morning_brief` tool. |
 | `tasks/daily_log.py` | Daily 6:15 AM | Fetches yesterday's Strava activities and maps each one onto a Google Calendar event in plain Python — no model, since it's a pure field mapping with no natural-language step. Deduped by `source_id` (Strava activity id) so re-runs never create duplicates. |
-| `tasks/weekly_learnings.py` | Mondays 5:00 AM | Computes the most recently completed Mon–Sun week, pulls calendar events (categorized by color) + Chrome browsing history + YouTube liked videos (the strongest learning signal, since Craig deliberately Liked them) + the previous week's file (for carry-forwards), has the model draft a 4-section retrospective, writes it as `Strategic-Weekly-Review-<week-ending>.md` in `LEARNINGS_DIR` (Obsidian vault, one file per week). If the write fails — e.g. the external drive isn't mounted — it emails the draft instead so it's never silently lost (and pushes a phone alert). |
+| `tasks/daily_chrome_learnings.py` | Daily 5:15 AM | Covers the prior day: pulls calendar events (categorized by color) + Chrome browsing history, has the local model draft a compact 3-section daily log (What I Worked On / Tools & Tech Encountered / Operational & Community), writes it as `Daily-Chrome-<date>.md` in `LEARNINGS_DIR` (Obsidian vault, one file per day). Small, focused prompt so the on-device model produces a full draft. If the write fails — e.g. the external drive isn't mounted — it emails the draft instead so it's never silently lost (and pushes a phone alert). |
+| `tasks/daily_youtube_learnings.py` | Daily 5:35 AM | Covers the prior day's YouTube Liked videos: the local model writes a short synthesis of what they teach, and a deterministic, scheme-validated linked list of the exact videos (verbatim titles + URLs) is appended in Python; writes it as `Daily-YouTube-<date>.md` in `LEARNINGS_DIR`. A day with no Likes writes nothing. Same vault-write-fails → email fallback. |
 | `tasks/calendar_colorizer.py` | Daily 5:00 PM | Fetches yesterday's calendar events, has the model guess a category per event title (Work/LLC, AARP, Fitness, Meal Prep, Domestic/Chores, Meetings, Travel, Appointments, or Uncategorized) and returns a colorId per event, then patches each event's color. Always re-classifies, even events colored by a previous run or by hand. On failure, pushes a phone alert and emails a notice. |
 | `tasks/opportunity_digest.py` | Daily 7:30 AM | The fractional-work opportunity scout. Polls three free, ToS-clean sources — new SEC Form D filings in New England, leadership openings on watched ATS boards (Greenhouse/Lever/Ashby/iCIMS, flagging stalled searches), and the current HN "Who is hiring" thread — dedupes them into `config/opportunities.json`, has the model score fractional-operator fit, and emails a three-section Opportunity Digest (ntfy push for high scores; nothing new → no email). Full lifecycle — sources, dedupe/watermark behavior, triage semantics, scoring — in [docs/opportunity-scout.md](docs/opportunity-scout.md). |
 
@@ -251,9 +252,9 @@ chat/
   background** with `run_in_background` — a multi-step job that outlives the chat
   turn and pushes Craig a summary when done (see **Background tasks** below).
   `list_background_jobs`/`get_job_result` report on them. Not yet wired up for chat:
-  reading/writing the Weekly Log doc — those functions don't have a
-  `TOOL_SCHEMA` yet (only ever called directly from Python by
-  `weekly_learnings.py`). Same pattern extends it later if wanted.
+  writing a learnings review file — `learnings_file.write_entry` doesn't have a
+  `TOOL_SCHEMA` yet (only ever called directly from Python by the daily learnings
+  tasks). Same pattern extends it later if wanted.
 - **Confirmation gate:** before any state-changing tool runs — the 13 in
   `toolset.WRITE_TOOLS`, the single source of truth: `log_calendar_event`,
   `send_email`, `recolor_event`, `send_morning_brief`, the three Google Tasks
@@ -522,7 +523,8 @@ mostly useful if the Python process fails to start at all).
    ```bash
    .venv/bin/python -m tasks.morning_brief
    .venv/bin/python -m tasks.daily_log
-   .venv/bin/python -m tasks.weekly_learnings
+   .venv/bin/python -m tasks.daily_chrome_learnings
+   .venv/bin/python -m tasks.daily_youtube_learnings
    .venv/bin/python -m tasks.calendar_colorizer
    ```
 6. Test the chat server manually: `.venv/bin/python -m chat.server`, then
@@ -677,7 +679,7 @@ steer the model. The blast radius is contained by design:
   forward it. Chat card and background approval push render through the same
   describers (`toolset.describe_call`/`describe_call_detail`), so the two
   surfaces can't drift on what they disclose.
-- **`morning_brief`, `weekly_learnings`, and `calendar_colorizer`** use the
+- **`morning_brief`, the daily learnings tasks, and `calendar_colorizer`** use the
   tool-free `complete_text` path — the model only writes narrative prose, it
   never calls a tool, so injected instructions have nothing to actuate.
   **`daily_log`** goes further and uses no model at all: it's a deterministic

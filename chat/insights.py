@@ -448,7 +448,7 @@ TOOL_SERVICES = {
     "web_search": ("Tavily Search", ["search_web", "research_company"]),
     "firecrawl": ("Firecrawl", ["fetch_webpage", "evaluate_app"]),
     "github": ("GitHub", ["fetch_starred_repos"]),
-    "youtube": ("YouTube", []),  # weekly_learnings-only; no chat tool
+    "youtube": ("YouTube", []),  # daily_youtube_learnings-only; no chat tool
     "ntfy": ("ntfy Push", []),  # routine failure-alert channel; no chat tool
     "brief": ("Morning Brief", ["send_morning_brief"]),
     "memory": ("Memory", ["remember", "pin", "recall", "archive", "forget"]),
@@ -470,7 +470,8 @@ ROUTINE_USES = {
     "morning_brief": ["google_calendar", "gmail", "github", "google_tasks", "weather", "ntfy"],
     "daily_log": ["google_calendar", "strava", "ntfy"],
     "calendar_colorizer": ["google_calendar", "gmail", "ntfy"],
-    "weekly_learnings": ["google_calendar", "chrome", "gmail", "youtube", "wiki", "ntfy"],
+    "daily_chrome_learnings": ["google_calendar", "chrome", "gmail", "ntfy"],
+    "daily_youtube_learnings": ["youtube", "gmail", "ntfy"],
     "opportunity_digest": ["opportunities", "gmail", "ntfy"],
 }
 
