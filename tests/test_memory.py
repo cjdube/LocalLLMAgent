@@ -158,6 +158,47 @@ def test_archive_unknown_id_reports_error():
 
 
 # --------------------------------------------------------------------------- #
+# recategorize (relabel in place, preserving id / created / access_count)
+# --------------------------------------------------------------------------- #
+
+def test_recategorize_changes_tag_without_losing_history():
+    saved = memory.remember("Crows can recognize human faces", category="trivia")
+    memory.recall(query="crows")  # bump access_count to 1
+    created = memory.recall()["memories"][0]["created"]
+
+    result = memory.recategorize(saved["id"], "person")
+    assert result == {"recategorized": True, "id": saved["id"],
+                      "from": "trivia", "to": "person"}
+
+    m = memory.recall(category="person")["memories"][0]
+    assert m["id"] == saved["id"]          # same fact, not a new one
+    assert m["category"] == "person"
+    assert m["created"] == created         # timestamp kept
+    assert m["access_count"] == 1          # preserved from the earlier recall
+
+
+def test_recategorize_preserves_active_scope():
+    saved = memory.pin("Craig prefers metric units", category="preference")
+    memory.recategorize(saved["id"], "other")
+    assert memory.recall()["memories"][0]["scope"] == "active"
+
+
+def test_recategorize_empty_category_clears_tag():
+    saved = memory.remember("Crows can recognize human faces", category="trivia")
+    result = memory.recategorize(saved["id"], "  ")
+    assert result["to"] is None
+    assert memory.recall()["memories"][0]["category"] is None
+
+
+def test_recategorize_unknown_id_reports_error():
+    memory.remember("Craig prefers metric units", category="preference")
+    result = memory.recategorize("deadbeef", "other")
+
+    assert result["recategorized"] is False
+    assert "error" in result
+
+
+# --------------------------------------------------------------------------- #
 # access_count
 # --------------------------------------------------------------------------- #
 

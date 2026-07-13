@@ -141,7 +141,7 @@ in — nothing new inherits it automatically.
 | `google_tasks.py` | Google Tasks read/write (`get_tasks`, `get_tasks_due_soon`, `create_task`, `update_task_due_date`, `complete_task`) |
 | `chrome_history.py` | Read Chrome's local history DB for a date range |
 | `youtube.py` | List videos Liked on the authorized YouTube channel in a date range (`fetch_liked_videos`) — title, channel, and description per video, via the YouTube Data API v3 and the shared Google OAuth token |
-| `memory.py` | Persistent long-term memory in two tiers — `remember` (archival, search-only), `pin` (active, injected into every system prompt), `recall` (search either tier, optionally by category), `archive` (demote active→archival), `forget` (delete). Stored in `config/wren_memory.json`; archival facts track an `access_count` |
+| `memory.py` | Persistent long-term memory in two tiers — `remember` (archival, search-only), `pin` (active, injected into every system prompt), `recall` (search either tier, optionally by category), `recategorize` (relabel a fact's category in place, keeping its id/history), `archive` (demote active→archival), `forget` (delete). Stored in `config/wren_memory.json`; archival facts track an `access_count` |
 | `skills.py` | Procedural memory (chat-only) — reusable how-to procedures composing the other tools: `list_skills`, `read_skill`, `write_skill` (create/overwrite), `delete_skill`. One Markdown file per skill under `skills/` (override with `WREN_SKILLS_DIR`); a capped title+one-line index is injected into the chat prompt so Wren knows what procedures exist, reading a body on demand. Writes are confirmation-gated |
 | `reminders.py` | Scheduled reminders — `set_reminder` (parses the time in Python via `dates.resolve_reminder_time`, not the model), `list_reminders`, `cancel_reminder`. Stored in `config/reminders.json`; the `reminder_sweep` task fires each due one as an `ntfy` phone push, then clears it. Set/cancel are confirmation-gated |
 | `background.py` | Background tasks — `run_in_background` (hand off a multi-step task that runs detached and pushes a summary when done), `list_background_jobs`, `get_job_result`. Jobs live in `config/bg_jobs.json`; the `bg_worker` task runs them. Posture is "read/draft freely, tap-to-approve consequential actions" — see the background-tasks section below. Also owns the HMAC-signed approval tokens |
@@ -227,7 +227,9 @@ chat/
   `memory.render_memory_block()`), so the prompt stays small as the archive grows;
   scheduled tasks see the active set too. `recall` searches either tier (optionally
   by category) and bumps each archival fact's `access_count`; `archive` demotes an
-  active fact back to search-only. All execute immediately except `forget` (delete
+  active fact back to search-only; `recategorize` relabels a fact's category in
+  place, preserving its id, creation date, and access count (so re-filing a fact
+  never resets its history). All execute immediately except `forget` (delete
   by id), which is confirmation-gated. See the memory tool in the tools table
   above. Wren can also search Craig's **learnings wiki** (`WIKI_VAULT_PATH`, the
   Obsidian vault ObsidianWikiAgent maintains): `read_wiki_index`,

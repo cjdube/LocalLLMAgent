@@ -56,11 +56,13 @@ from agent.tools.memory import (
     FORGET_TOOL_SCHEMA,
     PIN_TOOL_SCHEMA,
     RECALL_TOOL_SCHEMA,
+    RECATEGORIZE_TOOL_SCHEMA,
     REMEMBER_TOOL_SCHEMA,
     archive,
     forget,
     pin,
     recall,
+    recategorize,
     remember,
 )
 from agent.tools.opportunities import (
@@ -135,6 +137,7 @@ TOOLS = [
     REMEMBER_TOOL_SCHEMA,
     PIN_TOOL_SCHEMA,
     RECALL_TOOL_SCHEMA,
+    RECATEGORIZE_TOOL_SCHEMA,
     ARCHIVE_TOOL_SCHEMA,
     FORGET_TOOL_SCHEMA,
     SET_REMINDER_TOOL_SCHEMA,
@@ -174,6 +177,7 @@ DISPATCH = {
     "remember": remember,
     "pin": pin,
     "recall": recall,
+    "recategorize": recategorize,
     "archive": archive,
     "forget": forget,
     "read_wiki_index": read_wiki_index,
@@ -237,7 +241,7 @@ CONSEQUENTIAL_TOOLS = frozenset({
 # useful, and run_in_background would let a job replicate.
 UNATTENDED_EXCLUDED_TOOLS = frozenset({
     "run_in_background", "list_background_jobs", "get_job_result",
-    "remember", "pin", "archive", "forget",
+    "remember", "pin", "recategorize", "archive", "forget",
     "write_skill", "delete_skill",
 })
 
@@ -266,7 +270,7 @@ CORE_TOOL_NAMES = [
     "get_upcoming_events", "get_events_by_date", "log_calendar_event", "recolor_event",
     "get_tasks", "get_tasks_due_soon", "create_task", "update_task_due_date", "complete_task",
     "search_web",
-    "remember", "pin", "recall", "archive", "forget",
+    "remember", "pin", "recall", "recategorize", "archive", "forget",
     "set_reminder", "list_reminders", "cancel_reminder",
     "list_skills", "read_skill",
 ]

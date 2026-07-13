@@ -145,6 +145,32 @@ FORGET_TOOL_SCHEMA = {
     },
 }
 
+RECATEGORIZE_TOOL_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "recategorize",
+        "description": "Change the category tag of an already-remembered fact, keeping the fact "
+        "itself (and its id, creation date, and access count) unchanged. Use this to re-file a "
+        "fact — never forget-and-remember it just to relabel it. Get the id from a prior recall "
+        "call.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "memory_id": {
+                    "type": "string",
+                    "description": "The id of the fact to re-file, from a prior recall result.",
+                },
+                "category": {
+                    "type": "string",
+                    "enum": CATEGORIES,
+                    "description": "The new category tag for the fact.",
+                },
+            },
+            "required": ["memory_id", "category"],
+        },
+    },
+}
+
 ARCHIVE_TOOL_SCHEMA = {
     "type": "function",
     "function": {
@@ -248,6 +274,22 @@ def recall(query: str = None, category: str = None) -> dict:
         return {"count": len(memories), "memories": memories}
 
 
+def recategorize(memory_id: str, category: str) -> dict:
+    """Re-file a fact under a new category in place, preserving its id, scope,
+    created timestamp, and access_count. An empty category clears the tag."""
+    new_cat = (category or "").strip().lower() or None
+    with locked(_STORE_PATH):
+        data = _load()
+        for m in data["memories"]:
+            if m["id"] == memory_id:
+                old_cat = m.get("category")
+                m["category"] = new_cat
+                _save(data)
+                return {"recategorized": True, "id": memory_id,
+                        "from": old_cat, "to": new_cat}
+        return {"recategorized": False, "error": f"no remembered fact with id {memory_id!r}"}
+
+
 def archive(memory_id: str, memory_text: str = "") -> dict:
     with locked(_STORE_PATH):
         data = _load()
@@ -303,6 +345,10 @@ def main() -> int:
     p_recall.add_argument("--query", default=None)
     p_recall.add_argument("--category", default=None)
 
+    p_recat = sub.add_parser("recategorize")
+    p_recat.add_argument("--id", dest="memory_id", required=True)
+    p_recat.add_argument("--category", required=True)
+
     p_archive = sub.add_parser("archive")
     p_archive.add_argument("--id", dest="memory_id", required=True)
 
@@ -317,6 +363,8 @@ def main() -> int:
         result = pin(args.text, args.category)
     elif args.cmd == "recall":
         result = recall(args.query, args.category)
+    elif args.cmd == "recategorize":
+        result = recategorize(args.memory_id, args.category)
     elif args.cmd == "archive":
         result = archive(args.memory_id)
     else:

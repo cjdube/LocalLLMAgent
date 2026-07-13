@@ -451,7 +451,7 @@ TOOL_SERVICES = {
     "youtube": ("YouTube", []),  # daily_youtube_learnings-only; no chat tool
     "ntfy": ("ntfy Push", []),  # routine failure-alert channel; no chat tool
     "brief": ("Morning Brief", ["send_morning_brief"]),
-    "memory": ("Memory", ["remember", "pin", "recall", "archive", "forget"]),
+    "memory": ("Memory", ["remember", "pin", "recall", "recategorize", "archive", "forget"]),
     "wiki": ("Obsidian Wiki", ["read_wiki_index", "list_wiki_pages", "read_wiki_page",
                                "list_weekly_reviews", "read_weekly_review"]),
     "skills": ("Skills", ["list_skills", "read_skill", "write_skill", "delete_skill"]),
