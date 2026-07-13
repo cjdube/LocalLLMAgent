@@ -39,7 +39,9 @@ import pytest
 from agent import loop as _loop
 from agent.tools import notify as _notify
 from agent.tools import opportunities as _opportunities
+from tasks import _chat_transcripts as _chat_transcripts
 from tasks import _common
+from tasks import ai_chat_learnings as _ai_chat_learnings
 from tasks import opportunity_digest as _opportunity_digest
 
 
@@ -52,6 +54,17 @@ def _isolate_task_logs(tmp_path, monkeypatch):
 def _isolate_learnings_dir(tmp_path, monkeypatch):
     # learnings_file._learnings_dir() reads this env at call time.
     monkeypatch.setenv("LEARNINGS_DIR", str(tmp_path))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_ai_chat_learnings(tmp_path, monkeypatch):
+    # Redirect the Gemini-dedup store to tmp, and point both chat sources away
+    # from Craig's real data: no test may read ~/.claude session transcripts or
+    # the real Gemini drop folder, and none may write the production state store.
+    monkeypatch.setattr(_ai_chat_learnings, "STATE_PATH",
+                        tmp_path / "ai_chat_learnings_state.json")
+    monkeypatch.setattr(_chat_transcripts, "CLAUDE_PROJECTS_DIR", tmp_path / "claude_projects")
+    monkeypatch.setenv("WREN_GEMINI_CHATS_DIR", str(tmp_path / "gemini_inbox"))
 
 
 @pytest.fixture(autouse=True)
