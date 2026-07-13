@@ -22,7 +22,12 @@ from agent import prefs
 from agent.tools.calendar import get_events_in_range
 from agent.tools.chrome_history import fetch_chrome_history
 from tasks._common import notify_failure, setup_logger
-from tasks._learnings_common import compact_sites, persist_or_email, prior_day
+from tasks._learnings_common import (
+    compact_sites,
+    has_substantive_content,
+    persist_or_email,
+    prior_day,
+)
 
 # Looked up by role, not category name, so renaming a category in
 # config/preferences.json can't silently empty its bucket. Defaults are the
@@ -109,6 +114,12 @@ def main() -> int:
         logger.info(f"compacted chrome_sites to {len(chrome_sites)} of "
                     f"{chrome_result.get('total_meaningful_visits', 0)} for the prompt")
 
+        # Nothing happened yesterday worth a log — no work/meeting/community events
+        # and no (non-noise) browsing — so don't warm the model or write a file.
+        if not any(buckets.values()) and not chrome_sites:
+            logger.info("No calendar events or browsing yesterday; nothing to write")
+            return 0
+
         user_prompt = (
             f"day: {day:%B %-d, %Y}\n"
             f"work_events: {buckets['work']}\n"
@@ -125,6 +136,12 @@ def main() -> int:
             backend=backend,
         )
         logger.info(f"Drafted entry:\n{entry_text}")
+
+        # If the model found nothing relevant (every section came back "None"),
+        # skip the write rather than save an all-empty log.
+        if not has_substantive_content(entry_text):
+            logger.info("Draft had no qualifying items; nothing to write")
+            return 0
 
         persist_or_email(
             entry_text, "Daily-Chrome", day,

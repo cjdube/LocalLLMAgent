@@ -90,6 +90,17 @@ def videos_section(videos: list) -> str:
     return "\n".join(lines)
 
 
+def has_substantive_content(text: str) -> bool:
+    """True if the draft has at least one real bullet — i.e. a bullet that isn't
+    the template's "**None:**" empty-section marker. Lets a task skip writing a
+    log whose every section came back empty rather than save an all-"None" file."""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("- ") and "**None:**" not in stripped:
+            return True
+    return False
+
+
 def persist_or_email(content: str, prefix: str, day, subject: str,
                      task_name: str, logger) -> dict:
     """Write `content` to the vault as <prefix>-<day>.md; if the write fails

@@ -26,13 +26,19 @@ def test_categorize_tracks_category_colors():
 
 @pytest.fixture
 def stubbed_run(monkeypatch):
-    """Stub every collaborator for a happy-path run."""
-    seen = {"persists": []}
+    """Stub every collaborator for a happy-path run: some browsing yesterday and a
+    draft with a real bullet, so both the pre-check and the all-None post-check pass."""
+    seen = {"persists": [], "drafted": 0}
     monkeypatch.setattr(dc, "get_events_in_range", lambda *a, **k: {"events": []})
-    monkeypatch.setattr(dc, "fetch_chrome_history", lambda *a, **k: {"sites": []})
+    monkeypatch.setattr(dc, "fetch_chrome_history",
+                        lambda *a, **k: {"sites": [{"domain": "github.com", "title": "gh", "visits": 3}]})
     monkeypatch.setattr(dc, "resolve_backend", lambda key: None)
     monkeypatch.setattr(dc, "warm_model", lambda **k: True)
-    monkeypatch.setattr(dc, "complete_text", lambda **k: "## Daily Log: July 12, 2026")
+
+    def _draft(**k):
+        seen["drafted"] += 1
+        return "## Daily Log: July 12, 2026\n\n### Tools & Tech Encountered\n- **GitHub:** reviewed a PR"
+    monkeypatch.setattr(dc, "complete_text", _draft)
     monkeypatch.setattr(dc, "persist_or_email",
                         lambda content, prefix, day, subject, task_name, logger:
                         seen["persists"].append((prefix, subject, content)) or {"written": True})
@@ -46,6 +52,24 @@ def test_happy_path_persists_daily_chrome(stubbed_run):
     prefix, subject, content = stubbed_run["persists"][0]
     assert prefix == "Daily-Chrome"
     assert "Daily Log" in content
+
+
+def test_no_events_or_browsing_skips_without_calling_model(stubbed_run, monkeypatch):
+    # Nothing happened yesterday — skip early, before warming the model.
+    monkeypatch.setattr(dc, "fetch_chrome_history", lambda *a, **k: {"sites": []})
+    assert dc.main() == 0
+    assert stubbed_run["persists"] == []
+    assert stubbed_run["drafted"] == 0  # model never ran
+
+
+def test_all_none_draft_skips_the_write(stubbed_run, monkeypatch):
+    # There was browsing, but the model found nothing relevant (all sections None).
+    monkeypatch.setattr(
+        dc, "complete_text",
+        lambda **k: "## Daily Log: July 12, 2026\n\n### Tools & Tech Encountered\n"
+                    "- **None:** [No qualifying items for this section]")
+    assert dc.main() == 0
+    assert stubbed_run["persists"] == []
 
 
 def test_fetch_failure_is_a_failed_run(stubbed_run, monkeypatch):
