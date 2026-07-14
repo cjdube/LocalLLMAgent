@@ -50,11 +50,26 @@ breaks nothing. Recognized values, each expected on exactly one category:
 - `fallback` — the colorId the colorizer uses when it can't classify an event
   (`tasks/calendar_colorizer.py`)
 
-`community_keywords` — event-summary substrings (case-insensitive) routed to
-the weekly review's community bucket regardless of color (e.g. `"aarp"`).
-Empty list = bucket stays empty.
-
 ### `learnings`
+
+What the daily learnings reviews ignore. Scoped to those tasks only: the
+calendar tools and `fetch_chrome_history` still return this data, so chat can
+answer questions about it.
+
+`excluded_keywords` — subject matter kept out of the review entirely, whatever
+it's hosted on. Case-insensitive substrings, matched against:
+
+- a **calendar event summary** — the event is dropped from every bucket
+- a **browsed site's title** — the site is dropped
+- a **single page path** — that path is dropped, the site is kept
+
+The event drop is deliberately explicit rather than relying on an event failing
+every colour check: an excluded event that happened to be coloured Meetings
+would otherwise land in "Operational & Community" — exactly where it mustn't be.
+
+Substring matching is blunt on purpose (the goal is keeping a subject out of the
+vault, not classifying it), so pick distinctive terms. A short or common term
+will over-match.
 
 `excluded_domains` — domains kept out of the daily learnings reviews
 (`tasks/_learnings_common.py:compact_sites`). Volunteer-admin portals and

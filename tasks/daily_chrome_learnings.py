@@ -26,6 +26,7 @@ from tasks._learnings_common import (
     MAX_PAGES_PER_SITE,
     compact_sites,
     has_substantive_content,
+    is_excluded_text,
     persist_or_email,
     prior_day,
 )
@@ -36,13 +37,6 @@ from tasks._learnings_common import (
 _WORK_COLOR = prefs.category_color_by_role("work", "1")
 _MEETINGS_COLOR = prefs.category_color_by_role("meetings", "3")
 _APPOINTMENTS_COLOR = prefs.category_color_by_role("appointments", "6")
-
-# Events matching any of these summary keywords go to the community bucket
-# regardless of color (e.g. "aarp" for Craig's AARP volunteer work).
-_COMMUNITY_KEYWORDS = [
-    k.lower() for k in prefs.section("calendar").get("community_keywords", [])
-    if isinstance(k, str) and k
-]
 
 DRAFT_SYSTEM_PROMPT = f"""You are {prefs.user_name()}'s personal executive assistant. You write a \
 short daily log entry covering the day just completed, from the data given. You are running \
@@ -64,7 +58,7 @@ include the literal brackets):
 
 Source data you'll receive:
 - work_events: calendar events tagged Work-related (colorId {_WORK_COLOR}) — draft "What I Worked On".
-- meeting_events / appointment_events / aarp_events: draft "Operational & Community".
+- meeting_events / appointment_events: draft "Operational & Community".
 - chrome_sites: yesterday's browsing — draft "Tools & Tech Encountered" from any genuinely \
 technical/developer/AI/product sites (tools, APIs, platforms, docs, frameworks). Ignore the rest. \
 Each site's "pages" lists the specific page paths visited: use them to say what was actually being \
@@ -85,19 +79,22 @@ Output ONLY the filled-in template text, nothing else — no preamble, no explan
 
 
 def _categorize(events: list) -> dict:
-    work, meetings, appointments, aarp = [], [], [], []
+    """Bucket events by category colour, dropping any whose summary matches an
+    excluded keyword. The drop is explicit rather than a fall-through: an
+    excluded event that happens to be coloured Meetings would otherwise land in
+    "Operational & Community", which is exactly where it must not appear."""
+    work, meetings, appointments = [], [], []
     for e in events:
+        if is_excluded_text(e.get("summary", "")):
+            continue
         color = e.get("colorId")
-        summary = (e.get("summary") or "").lower()
-        if any(k in summary for k in _COMMUNITY_KEYWORDS):
-            aarp.append(e)
-        elif color == _WORK_COLOR:
+        if color == _WORK_COLOR:
             work.append(e)
         elif color == _MEETINGS_COLOR:
             meetings.append(e)
         elif color == _APPOINTMENTS_COLOR:
             appointments.append(e)
-    return {"work": work, "meetings": meetings, "appointments": appointments, "aarp": aarp}
+    return {"work": work, "meetings": meetings, "appointments": appointments}
 
 
 def main() -> int:
@@ -130,7 +127,6 @@ def main() -> int:
             f"work_events: {buckets['work']}\n"
             f"meeting_events: {buckets['meetings']}\n"
             f"appointment_events: {buckets['appointments']}\n"
-            f"aarp_events: {buckets['aarp']}\n"
             f"chrome_sites: {chrome_sites}\n"
         )
 

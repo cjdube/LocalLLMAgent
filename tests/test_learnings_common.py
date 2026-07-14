@@ -107,6 +107,46 @@ def test_compact_sites_omits_pages_when_absent(excluded):
     assert "pages" not in lc.compact_sites([_site("ai.google.dev")])[0]
 
 
+# --------------------------------------------------------------------------- #
+# is_excluded_text — subject-matter exclusions a domain can't express
+# --------------------------------------------------------------------------- #
+
+@pytest.fixture
+def excluded_kw(monkeypatch):
+    monkeypatch.setattr(lc, "_EXCLUDED_KEYWORDS", ["aarp"])
+
+
+def test_is_excluded_text_is_case_insensitive(excluded_kw):
+    assert lc.is_excluded_text("AARP Speakers Bureau")
+    assert lc.is_excluded_text("volunteering for aarp")
+    assert not lc.is_excluded_text("Gemini API pricing")
+    assert not lc.is_excluded_text("")
+
+
+def test_compact_sites_drops_site_whose_title_matches(excluded_kw):
+    # The domain is fine; the subject isn't.
+    site = _site("www.eventbrite.com")
+    site["title"] = "AARP NH Speakers Bureau — Register"
+    out = lc.compact_sites([site, _site("ai.google.dev")])
+    assert [s["domain"] for s in out] == ["ai.google.dev"]
+
+
+def test_compact_sites_drops_only_the_matching_path_not_the_site(excluded_kw):
+    # One excluded page on an otherwise reviewable site must not drop the site.
+    site = _site("www.linkedin.com")
+    site["pages"] = [{"path": "/feed/", "visits": 5},
+                     {"path": "/company/aarp/", "visits": 2}]
+    out = lc.compact_sites([site])
+    assert out[0]["pages"] == ["/feed/"]
+
+
+def test_compact_sites_no_keywords_keeps_everything(monkeypatch):
+    monkeypatch.setattr(lc, "_EXCLUDED_KEYWORDS", [])
+    site = _site("www.eventbrite.com")
+    site["title"] = "AARP NH Speakers Bureau"
+    assert len(lc.compact_sites([site])) == 1
+
+
 def test_compact_sites_no_exclusions_configured_keeps_everything(monkeypatch):
     monkeypatch.setattr(lc, "_EXCLUDED_DOMAINS", [])
     out = lc.compact_sites([_site("www.signupgenius.com")])

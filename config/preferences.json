@@ -16,11 +16,13 @@
       {"name": "Travel", "color_id": "7", "color_name": "Peacock", "hint": "/ Vacation"},
       {"name": "Appointments", "color_id": "6", "color_name": "Tangerine", "hint": "(doctor, dentist, car, etc.)", "role": "appointments"},
       {"name": "Uncategorized", "color_id": "11", "color_name": "Tomato", "hint": "(only if genuinely unable to tell)", "role": "fallback"}
-    ],
-    "community_keywords": ["aarp"]
+    ]
   },
   "learnings": {
-    "_comment": "Domains kept OUT of the daily learnings reviews only. fetch_chrome_history still returns them, so chat can answer questions about them. Matched on the domain and its subdomains, so 'sharepoint.com' covers 'aarpsharex.sharepoint.com'.",
+    "_comment": "What the daily learnings reviews ignore. Scoped to those tasks only — fetch_chrome_history and the calendar tools still return this data, so chat can answer questions about it.",
+    "_comment_keywords": "Case-insensitive substrings. A calendar event whose summary matches is dropped; so is a browsed site whose title matches, and any single page path that matches.",
+    "excluded_keywords": ["aarp"],
+    "_comment_domains": "Matched on the domain and its subdomains, so 'sharepoint.com' covers 'aarpsharex.sharepoint.com'.",
     "excluded_domains": [
       "aarp.org",
       "aarpvolunteer.my.site.com",
