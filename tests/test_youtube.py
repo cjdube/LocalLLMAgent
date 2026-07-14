@@ -133,6 +133,27 @@ def test_fetch_stops_paginating_once_past_window(monkeypatch):
     assert [v["video_id"] for v in result["videos"]] == ["B"]
 
 
+def test_fetch_windows_on_local_date_not_utc(monkeypatch):
+    # publishedAt is UTC; an evening Like carries the next UTC date. Liking at
+    # 9:20pm EDT on Jul 13 stamps 2026-07-14T01:20Z, and windowing on the raw UTC
+    # date dropped it from the Jul 13 run entirely.
+    monkeypatch.setenv("TIMEZONE", "America/New_York")
+    pages = {
+        None: {
+            "items": [
+                _item("EVENING", "2026-07-14T01:20:00Z"),  # 9:20pm Jul 13 local
+                _item("MORNING", "2026-07-13T13:00:00Z"),  # 9:00am Jul 13 local
+                _item("PRIOR", "2026-07-13T01:00:00Z"),    # 9:00pm Jul 12 local -> stop
+            ]
+        }
+    }
+    _patch_service(monkeypatch, pages)
+
+    result = fetch_liked_videos("2026-07-13", "2026-07-13")
+
+    assert [v["video_id"] for v in result["videos"]] == ["EVENING", "MORNING"]
+
+
 def test_fetch_error_degrades_to_empty_list(monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("quota exceeded")

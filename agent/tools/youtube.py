@@ -18,8 +18,10 @@ Usage:
 
 import argparse
 import sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
-from agent.dates import DATE_ARG_GUIDANCE, resolve_date
+from agent.dates import DATE_ARG_GUIDANCE, local_timezone, resolve_date
 from agent.tools._http import load_env, print_result
 from agent.tools.google_auth import build_service
 
@@ -70,6 +72,20 @@ def _video_from_item(item: dict) -> dict:
     }
 
 
+def _liked_local_date(published_at: str) -> str:
+    """The local calendar date a video was Liked on, from the UTC publishedAt.
+
+    The API stamps like-times in UTC but Craig's day boundaries are local, so a
+    video Liked at 9pm EDT carries the *next* UTC date. Comparing the raw UTC
+    date against a local day window silently drops every evening Like. Returns
+    "" for an unparseable stamp, which no window matches."""
+    try:
+        dt = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    return dt.astimezone(ZoneInfo(local_timezone())).date().isoformat()
+
+
 def fetch_liked_videos(start_date: str, end_date: str) -> dict:
     """Liked videos whose like-date falls within [start_date, end_date] inclusive.
 
@@ -98,7 +114,7 @@ def fetch_liked_videos(start_date: str, end_date: str) -> dict:
             # paginating rather than burning quota on the whole history.
             stop = False
             for item in items:
-                liked_date = item.get("snippet", {}).get("publishedAt", "")[:10]
+                liked_date = _liked_local_date(item.get("snippet", {}).get("publishedAt", ""))
                 if liked_date and liked_date < start:
                     stop = True
                     break
