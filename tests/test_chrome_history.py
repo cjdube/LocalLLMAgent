@@ -69,3 +69,100 @@ def test_requires_days_ago_or_full_range(monkeypatch):
     _capture_query(monkeypatch)
     assert "error" in ch.fetch_chrome_history()
     assert "error" in ch.fetch_chrome_history(start="2026-06-01")  # end missing
+
+
+# --------------------------------------------------------------------------- #
+# _extract_domain — the port bug that defeated NOISE_DOMAINS
+# --------------------------------------------------------------------------- #
+
+def test_extract_domain_strips_port():
+    # The bug: .netloc kept the port, so "127.0.0.1:8420" never matched the
+    # "127.0.0.1" noise entry and Craig's own dashboard looked like a real site.
+    assert ch._extract_domain("http://127.0.0.1:8420/dashboard") == "127.0.0.1"
+    assert ch._extract_domain("http://localhost:3000/x") == "localhost"
+
+
+def test_extract_domain_strips_userinfo_and_lowercases():
+    assert ch._extract_domain("https://user:pw@Example.COM/x") == "example.com"
+
+
+def test_extract_domain_of_junk_url_is_empty():
+    assert ch._extract_domain("about:blank") == ""
+    assert ch._extract_domain("") == ""
+
+
+def test_local_server_is_filtered_as_noise_now():
+    rows = [{"url": "http://127.0.0.1:8420/dashboard", "title": "Wren Dashboard", "visits": 8},
+            {"url": "https://ai.google.dev/docs", "title": "Gemini", "visits": 2}]
+    assert [s["domain"] for s in ch._filter_and_group(rows)] == ["ai.google.dev"]
+
+
+# --------------------------------------------------------------------------- #
+# _filter_and_group — per-domain page paths (opt-in, chat's shape unchanged)
+# --------------------------------------------------------------------------- #
+
+def _rows():
+    return [
+        {"url": "https://ai.google.dev/gemini-api/docs/models", "title": "Models", "visits": 9},
+        {"url": "https://ai.google.dev/gemini-api/docs/pricing", "title": "Pricing", "visits": 4},
+        {"url": "https://ai.google.dev/", "title": "Home", "visits": 3},
+        {"url": "https://tailscale.com/kb/acl", "title": "ACLs", "visits": 2},
+    ]
+
+
+def test_default_result_has_no_pages_key_so_chat_is_unchanged():
+    # A day's result is already near OLLAMA_MAX_TOOL_RESULT_CHARS; the default
+    # must not grow it.
+    sites = ch._filter_and_group(_rows())
+    assert all("pages" not in s for s in sites)
+    assert [s["domain"] for s in sites] == ["ai.google.dev", "tailscale.com"]
+
+
+def test_pages_per_domain_keeps_top_paths_by_visits():
+    sites = ch._filter_and_group(_rows(), pages_per_domain=5)
+    google = next(s for s in sites if s["domain"] == "ai.google.dev")
+    assert [p["path"] for p in google["pages"]] == [
+        "/gemini-api/docs/models", "/gemini-api/docs/pricing",
+    ]
+
+
+def test_pages_drops_query_strings():
+    rows = [{"url": "https://example.com/a/b?utm_source=spam&id=99", "title": "T", "visits": 1}]
+    sites = ch._filter_and_group(rows, pages_per_domain=5)
+    assert sites[0]["pages"] == [{"path": "/a/b", "visits": 1}]
+
+
+def test_pages_dedupes_paths_that_differ_only_by_query():
+    # Real case: LinkedIn's /in/craigdube/ was reached by three tracking urls and
+    # filled three of the five page slots.
+    rows = [
+        {"url": "https://example.com/in/x/?tr=1", "title": "P", "visits": 5},
+        {"url": "https://example.com/in/x/?tr=2", "title": "P", "visits": 3},
+        {"url": "https://example.com/feed/", "title": "F", "visits": 1},
+    ]
+    sites = ch._filter_and_group(rows, pages_per_domain=5)
+    assert [p["path"] for p in sites[0]["pages"]] == ["/in/x/", "/feed/"]
+
+
+def test_pages_respects_the_cap():
+    rows = [{"url": f"https://example.com/p{i}", "title": "T", "visits": i} for i in range(10)]
+    sites = ch._filter_and_group(rows, pages_per_domain=3)
+    assert len(sites[0]["pages"]) == 3
+
+
+def test_pages_omitted_when_only_the_homepage_was_visited():
+    # A bare "/" carries no signal the domain doesn't already give.
+    rows = [{"url": "https://example.com/", "title": "T", "visits": 1}]
+    assert "pages" not in ch._filter_and_group(rows, pages_per_domain=5)[0]
+
+
+def test_long_path_is_truncated():
+    rows = [{"url": "https://example.com/" + "a" * 500, "title": "T", "visits": 1}]
+    sites = ch._filter_and_group(rows, pages_per_domain=5)
+    assert len(sites[0]["pages"][0]["path"]) == ch._MAX_PATH_CHARS
+
+
+def test_pages_per_domain_is_not_exposed_to_the_model():
+    # Python-only knob: the schema must not offer it, or the model may set it and
+    # blow the tool-result cap in chat.
+    assert "pages_per_domain" not in ch.TOOL_SCHEMA["function"]["parameters"]["properties"]

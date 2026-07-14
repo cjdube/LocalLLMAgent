@@ -33,9 +33,18 @@ def prior_day(now: datetime | None = None) -> tuple[datetime, datetime, "datetim
 # Prompt-bounding caps. Daily volume is much smaller than the weekly run, so
 # these rarely bind — but they keep a heavy browsing day (or a link-dump video
 # description) from blowing past the local model's context window.
-MAX_CHROME_SITES = 40
+# Lowered from 40 when per-site page paths were added: each site now costs ~5x
+# the prompt space, and at 40 the draft got long enough that the small model
+# started dropping whole template sections. The tail was single-visit noise
+# anyway — the sites worth reviewing are at the top of the visit ordering.
+MAX_CHROME_SITES = 15
 MAX_YOUTUBE_VIDEOS = 25
 MAX_YOUTUBE_DESC_CHARS = 500
+
+# Page paths kept per site. The paths are what let the review say more than the
+# tab title did — "/gemini-api/docs/models" plus "/gemini-api/docs/pricing" is a
+# comparison, where the title alone is just "Gemini API".
+MAX_PAGES_PER_SITE = 4
 
 # Domains Craig doesn't want reviewed (volunteer-admin portals, M365). Scoped to
 # the learnings tasks on purpose: chrome_history.NOISE_DOMAINS would also blind
@@ -56,16 +65,23 @@ def _is_excluded(domain: str) -> bool:
 
 
 def compact_sites(sites: list) -> list:
-    """Drop excluded domains, trim to the top visited sites, and drop the full
-    `url` (redundant with `domain` and often long) before embedding in the
-    prompt. Excluding before the cap means MAX_CHROME_SITES budgets reviewable
-    sites rather than being spent on filtered ones."""
+    """Drop excluded domains, trim to the top visited sites, and replace the full
+    `url` (long, and mostly tracking query strings) with the site's top page
+    paths. Excluding before the cap means MAX_CHROME_SITES budgets reviewable
+    sites rather than being spent on filtered ones.
+
+    `pages` is present only when the caller asked fetch_chrome_history for
+    pages_per_domain > 1, so a site without it degrades to domain+title."""
     kept = [s for s in sites if not _is_excluded(s.get("domain", ""))]
     top = sorted(kept, key=lambda s: s.get("visits", 0), reverse=True)[:MAX_CHROME_SITES]
-    return [
-        {"domain": s.get("domain"), "title": s.get("title"), "visits": s.get("visits")}
-        for s in top
-    ]
+    out = []
+    for s in top:
+        entry = {"domain": s.get("domain"), "title": s.get("title"), "visits": s.get("visits")}
+        paths = [p.get("path") for p in (s.get("pages") or [])[:MAX_PAGES_PER_SITE] if p.get("path")]
+        if paths:
+            entry["pages"] = paths
+        out.append(entry)
+    return out
 
 
 def compact_videos(videos: list) -> list:

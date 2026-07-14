@@ -74,9 +74,28 @@ def _chrome_ts_to_datetime(chrome_ts: int) -> datetime:
     return datetime.fromtimestamp(unix_us / 1_000_000, tz=timezone.utc)
 
 
+# Cap on a single page path in the `pages` list; long paths are usually ids or
+# slugs whose tail carries no extra signal.
+_MAX_PATH_CHARS = 120
+
+
 def _extract_domain(url: str) -> str:
+    """The host, without port or userinfo. Uses .hostname rather than .netloc:
+    netloc keeps the port, which silently defeated the NOISE_DOMAINS match for
+    local servers — "127.0.0.1:8420" never equalled "127.0.0.1", so Craig's own
+    Wren dashboard was reported as a site he'd browsed."""
     try:
-        return urlparse(url).netloc.lower()
+        return (urlparse(url).hostname or "").lower()
+    except Exception:
+        return ""
+
+
+def _page_path(url: str) -> str:
+    """Path only — no query or fragment, truncated. The path is the signal that
+    collapsing to a bare domain throws away: "/gemini-api/docs/models" says what
+    the domain and title can't. Query strings are mostly tracking, so drop them."""
+    try:
+        return (urlparse(url).path or "")[:_MAX_PATH_CHARS]
     except Exception:
         return ""
 
@@ -109,24 +128,62 @@ def _query_history(start: datetime, end: datetime) -> list:
     return [{"url": row[0], "title": row[1] or "", "visits": row[2]} for row in rows]
 
 
-def _filter_and_group(rows: list) -> list:
+def _filter_and_group(rows: list, pages_per_domain: int = 1) -> list:
+    """One entry per domain, carrying its most-visited page's title/url/visits.
+
+    `pages_per_domain` > 1 adds a `pages` list of that domain's top paths — the
+    detail the daily learnings review needs to say more than the tab title did.
+    It defaults to 1 (no `pages` key) so the tool's result for chat is unchanged:
+    a day's output is already near OLLAMA_MAX_TOOL_RESULT_CHARS and must not grow.
+    """
     by_domain: dict = {}
     for row in rows:
         domain = _extract_domain(row["url"])
         if not domain or domain in NOISE_DOMAINS:
             continue
-        if domain not in by_domain or row["visits"] > by_domain[domain]["visits"]:
+        entry = by_domain.get(domain)
+        if entry is None:
             by_domain[domain] = {
                 "domain": domain,
                 "title": row["title"],
                 "url": row["url"],
                 "visits": row["visits"],
+                "_rows": [row],
             }
-    return sorted(by_domain.values(), key=lambda x: x["visits"], reverse=True)
+            continue
+        entry["_rows"].append(row)
+        if row["visits"] > entry["visits"]:
+            entry.update(title=row["title"], url=row["url"], visits=row["visits"])
+
+    out = []
+    for entry in by_domain.values():
+        rows_for_domain = entry.pop("_rows")
+        if pages_per_domain > 1:
+            top = sorted(rows_for_domain, key=lambda r: r["visits"], reverse=True)
+            # Dedupe by path: several urls differing only in query string collapse
+            # to one path here, and repeats would otherwise eat the page budget.
+            # A bare "/" or "" is the homepage — the domain already says that.
+            pages: dict = {}
+            for row in top:
+                path = _page_path(row["url"])
+                if path in ("", "/") or path in pages:
+                    continue
+                pages[path] = {"path": path, "visits": row["visits"]}
+                if len(pages) == pages_per_domain:
+                    break
+            if pages:
+                entry["pages"] = list(pages.values())
+        out.append(entry)
+    return sorted(out, key=lambda x: x["visits"], reverse=True)
 
 
-def fetch_chrome_history(start: str = None, end: str = None, days_ago: int = None) -> dict:
+def fetch_chrome_history(start: str = None, end: str = None, days_ago: int = None,
+                         pages_per_domain: int = 1) -> dict:
     """Callable entrypoint used by the agent loop's tool dispatcher.
+
+    `pages_per_domain` is a Python-only argument, deliberately absent from
+    TOOL_SCHEMA: the model never sees it and chat's result shape is unchanged.
+    tasks/daily_chrome_learnings.py passes it to get each domain's top paths.
 
     Day boundaries are interpreted in the system's local timezone, not UTC, so
     "June 22" means local June 22 rather than a window shifted by the UTC
@@ -161,7 +218,7 @@ def fetch_chrome_history(start: str = None, end: str = None, days_ago: int = Non
     except Exception as e:
         return {"error": f"sqlite error: {e}"}
 
-    sites = _filter_and_group(rows)
+    sites = _filter_and_group(rows, pages_per_domain=pages_per_domain)
     return {"range": f"{start_date} to {end_date}", "sites": sites, "total_meaningful_visits": len(sites)}
 
 

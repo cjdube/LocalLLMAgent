@@ -88,6 +88,25 @@ def test_compact_sites_drops_url_and_sorts_by_visits(excluded):
     assert "url" not in out[0]
 
 
+def test_compact_sites_carries_page_paths_through(excluded):
+    site = _site("ai.google.dev")
+    site["pages"] = [{"path": "/docs/models", "visits": 9}, {"path": "/docs/pricing", "visits": 4}]
+    out = lc.compact_sites([site])
+    assert out[0]["pages"] == ["/docs/models", "/docs/pricing"]
+
+
+def test_compact_sites_caps_pages_per_site(excluded, monkeypatch):
+    monkeypatch.setattr(lc, "MAX_PAGES_PER_SITE", 2)
+    site = _site("ai.google.dev")
+    site["pages"] = [{"path": f"/p{i}", "visits": i} for i in range(6)]
+    assert len(lc.compact_sites([site])[0]["pages"]) == 2
+
+
+def test_compact_sites_omits_pages_when_absent(excluded):
+    # fetch_chrome_history's default returns no `pages` — degrade to domain+title.
+    assert "pages" not in lc.compact_sites([_site("ai.google.dev")])[0]
+
+
 def test_compact_sites_no_exclusions_configured_keeps_everything(monkeypatch):
     monkeypatch.setattr(lc, "_EXCLUDED_DOMAINS", [])
     out = lc.compact_sites([_site("www.signupgenius.com")])

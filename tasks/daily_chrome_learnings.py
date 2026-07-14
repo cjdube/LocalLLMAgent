@@ -23,6 +23,7 @@ from agent.tools.calendar import get_events_in_range
 from agent.tools.chrome_history import fetch_chrome_history
 from tasks._common import notify_failure, setup_logger
 from tasks._learnings_common import (
+    MAX_PAGES_PER_SITE,
     compact_sites,
     has_substantive_content,
     persist_or_email,
@@ -65,7 +66,10 @@ Source data you'll receive:
 - work_events: calendar events tagged Work-related (colorId {_WORK_COLOR}) — draft "What I Worked On".
 - meeting_events / appointment_events / aarp_events: draft "Operational & Community".
 - chrome_sites: yesterday's browsing — draft "Tools & Tech Encountered" from any genuinely \
-technical/developer/AI/product sites (tools, APIs, platforms, docs, frameworks). Ignore the rest.
+technical/developer/AI/product sites (tools, APIs, platforms, docs, frameworks). Ignore the rest. \
+Each site's "pages" lists the specific page paths visited: use them to say what was actually being \
+looked into (several pages under /docs/pricing and /docs/models is a comparison, not just a visit). \
+Never invent detail the paths and titles don't support.
 
 Rules:
 - Professional, analytical tone. No casual language.
@@ -108,7 +112,8 @@ def main() -> int:
         logger.info(f"get_events_in_range -> {events_result}")
         buckets = _categorize(events_result.get("events", []))
 
-        chrome_result = fetch_chrome_history(start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
+        chrome_result = fetch_chrome_history(start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"),
+                                             pages_per_domain=MAX_PAGES_PER_SITE)
         logger.info(f"fetch_chrome_history -> {chrome_result}")
         chrome_sites = compact_sites(chrome_result.get("sites", []))
         logger.info(f"compacted chrome_sites to {len(chrome_sites)} of "
