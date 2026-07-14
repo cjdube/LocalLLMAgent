@@ -99,14 +99,15 @@
   .msg.user { align-self: flex-end; background: #1f2328; color: white; }
   .msg.wren { align-self: flex-start; background: #f4f4f5; }
   .msg.system { align-self: center; background: transparent; color: #9ca3af; font-size: 12px; }
+  /* .typing-dot, not .dot — .dot above is the run-history status dot. */
   .msg.typing { display: flex; align-items: center; gap: 4px; padding: 12px; }
-  .msg.typing .d { width: 6px; height: 6px; border-radius: 50%; background: #9ca3af; animation: bounce 1.2s infinite ease-in-out; }
-  .msg.typing .d:nth-child(2) { animation-delay: 0.15s; }
-  .msg.typing .d:nth-child(3) { animation-delay: 0.3s; }
+  .msg.typing .typing-dot { width: 6px; height: 6px; border-radius: 50%; background: #9ca3af; animation: bounce 1.2s infinite ease-in-out; }
+  .msg.typing .typing-dot:nth-child(2) { animation-delay: 0.15s; }
+  .msg.typing .typing-dot:nth-child(3) { animation-delay: 0.3s; }
   @keyframes bounce { 0%,60%,100% { opacity: 0.3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
   .confirm { align-self: flex-start; max-width: 92%; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 14px; padding: 11px 13px; font-size: 14px; }
   .confirm .detail { margin-top: 8px; padding: 8px 10px; background: #fff; border: 1px solid #fed7aa; border-radius: 8px; font-size: 13px; color: #6b7280; white-space: pre-wrap; max-height: 160px; overflow-y: auto; }
-  .confirm .row { margin-top: 9px; display: flex; gap: 8px; }
+  .confirm .actions { margin-top: 9px; display: flex; gap: 8px; }
   .confirm button { flex: 1; padding: 7px; border-radius: 8px; border: none; font-size: 13px; cursor: pointer; }
   .confirm .yes { background: #16a34a; color: white; }
   .confirm .no { background: #e5e7eb; color: #1f2328; }
@@ -114,6 +115,7 @@
   #input { flex: 1; padding: 10px 14px; border-radius: 20px; border: 1px solid #d0d5dd; font-size: 15px; }
   #send { padding: 0 16px; border-radius: 20px; border: none; background: #1f2328; color: white; font-size: 14px; cursor: pointer; }
   #send:disabled { opacity: 0.5; }
+  #send.stop { background: #b42318; }
 
   /* Run-detail slide-over */
   .backdrop { position: fixed; inset: 0; background: rgba(16,24,40,0.4); opacity: 0; pointer-events: none; transition: opacity 0.18s ease; z-index: 40; }
@@ -432,89 +434,10 @@ async function openRun(key, runId) {
   }
 }
 
-// --- chat dock ----------------------------------------------------------- //
-const messagesEl = document.getElementById("messages");
-const form = document.getElementById("composer");
-const input = document.getElementById("input");
-const sendBtn = document.getElementById("send");
-const GREETING = "Hi Craig, what can I do for you today?";
-
-function addMessage(role, text) {
-  const div = el("div", "msg " + role, text);
-  messagesEl.appendChild(div);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
-  return div;
-}
-function addTyping() {
-  const div = el("div", "msg wren typing");
-  div.appendChild(el("span", "d")); div.appendChild(el("span", "d")); div.appendChild(el("span", "d"));
-  messagesEl.appendChild(div);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
-  return div;
-}
-function addConfirm(summary, detail, onDecide) {
-  const div = el("div", "confirm");
-  div.appendChild(el("div", null, summary));  // model-derived text -> textContent
-  if (detail) div.appendChild(el("div", "detail", detail));  // e.g. email body; textContent
-  const row = el("div", "row");
-  const yes = el("button", "yes", "Confirm");
-  const no = el("button", "no", "Cancel");
-  row.appendChild(yes); row.appendChild(no);
-  div.appendChild(row);
-  yes.onclick = () => { onDecide(true); div.remove(); };
-  no.onclick = () => { onDecide(false); div.remove(); };
-  messagesEl.appendChild(div);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
-}
-function setBusy(b) { input.disabled = b; sendBtn.disabled = b; }
-
-// A dropped connection (laptop asleep, tailnet blip) rejects the fetch, and an
-// error page rejects .json(). Either one used to escape as an unhandled
-// rejection, leaving the typing dots animating over a permanently disabled
-// composer — indistinguishable from Wren still thinking. Route both into
-// handleResult's error path so the dots clear and the composer unlocks.
-async function postTurn(path, body, typingEl) {
-  try {
-    const resp = await fetch(path, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body) });
-    return handleResult(await resp.json(), typingEl);
-  } catch (err) {
-    handleResult({ error: "couldn't reach Wren (" + err.message + "). Your message wasn't sent — try again." }, typingEl);
-  }
-}
-
-function handleResult(result, typingEl) {
-  if (typingEl) typingEl.remove();
-  if (result.error) { addMessage("system", "Error: " + result.error); setBusy(false); return; }
-  if (result.type === "final") { addMessage("wren", result.text); setBusy(false); }
-  else if (result.type === "confirm") {
-    addConfirm(result.summary, result.detail, async (approved) => {
-      setBusy(true);
-      postTurn("/chat/confirm", { approved }, addTyping());
-    });
-    setBusy(false);
-  }
-}
-form.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const message = input.value.trim();
-  if (!message) return;
-  addMessage("user", message);
-  input.value = "";
-  setBusy(true);
-  postTurn("/chat", { message }, addTyping());
-});
-document.getElementById("newChat").addEventListener("click", async () => {
-  await fetch("/chat/new", { method: "POST" });
-  messagesEl.textContent = "";
-  addMessage("wren", GREETING);
-});
-
 // --- boot ---------------------------------------------------------------- //
 loadCapabilities();
 loadTasks();
-addMessage("wren", GREETING);
 </script>
+<script src="/static/chat-dock.js"></script>
 </body>
 </html>
