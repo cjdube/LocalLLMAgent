@@ -23,6 +23,7 @@ These rules exist because it's tempting to reach for scrapers and enrichment Saa
 - **If a signal has no legitimate source, say so** and drop or defer it — don't quietly substitute a gray-area source.
 - **Every HTTP call has an explicit timeout.** Follow the per-call `timeout=` convention in `agent/tools/`.
 - **Degrade, don't crash.** A failing source returns `{"error": ...}` and is treated as empty by callers; one dead feed must never kill a digest or scheduled task.
+- **A source's timestamps are UTC until proven otherwise; our day windows are local.** Convert before comparing or truncating — never slice an ISO stamp (`published_at[:10]`) and match it against a local calendar day. Use `local_timezone()` from `agent/dates.py`; `_liked_local_date` in `agent/tools/youtube.py` is the pattern. This has bitten three times (Chrome history `01c0718`, YouTube Likes `5607532`, and the multi-day weather forecast defensively): the two dates agree for most of the day and diverge only near the boundary — after 8pm EDT — so the bug passes review, passes a midday spot-check, and then silently misfiles or drops evening data instead of raising. Any test covering this pins `TIMEZONE` (`monkeypatch.setenv`) rather than inheriting the host's zone.
 
 ## Untrusted content boundary
 
