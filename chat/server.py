@@ -53,6 +53,7 @@ from agent.tools.notify import notify
 from agent.tools.skills import render_skills_index
 from tasks._common import setup_logger
 from tasks.morning_brief import build_and_send_brief
+from tasks.opportunity_digest import build_and_send_digest
 
 _ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(_ROOT / "config" / ".env")
@@ -87,9 +88,20 @@ def _send_morning_brief(**_) -> dict:
     return build_and_send_brief(logger=logger)
 
 
+def _send_opportunity_digest(**_) -> dict:
+    # Same binding as _send_morning_brief above: without it the digest falls
+    # back to agent.toolset's handler-less logger and a chat-triggered run's
+    # output goes nowhere.
+    return build_and_send_digest(logger=logger)
+
+
 # TOOLS and WRITE_TOOLS come straight from the shared registry; only the
-# morning-brief dispatch is overridden to bind the server's logger.
-DISPATCH = {**_BASE_DISPATCH, "send_morning_brief": _send_morning_brief}
+# brief and digest dispatches are overridden to bind the server's logger.
+DISPATCH = {
+    **_BASE_DISPATCH,
+    "send_morning_brief": _send_morning_brief,
+    "send_opportunity_digest": _send_opportunity_digest,
+}
 
 CHAT_SYSTEM_PROMPT = (
     load_persona("wren_chat.md")

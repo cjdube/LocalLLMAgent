@@ -591,6 +591,13 @@ def build_and_send_digest(logger: Optional[logging.Logger] = None) -> dict:
     send_opportunity_digest tool so both paths produce identical output."""
     log = logger or logging.getLogger("opportunity_digest")
     try:
+        # The dashboard's run history is parsed out of this log: chat/insights.py
+        # opens a run on "Starting ... run" and closes it on a "... run complete"
+        # line, so every exit path below has to emit one or the run never shows
+        # up (or hangs as "running"). Keep "->" out of both — it marks a line as
+        # tool activity to the parser.
+        log.info("Starting opportunity digest run")
+
         # Capture "today" before polling so the watermark written after a
         # successful run never skips filings made during this run.
         run_day = date.today().isoformat()
@@ -636,6 +643,7 @@ def build_and_send_digest(logger: Optional[logging.Logger] = None) -> dict:
             log.info("Nothing new — no digest sent")
             if not edgar_result.get("error"):
                 _write_edgar_watermark(run_day)
+            log.info("Opportunity digest run complete — nothing new")
             return {"sent": False, "new_items": 0}
 
         unscored = [i for i in to_report if i.get("score") is None]
@@ -653,6 +661,7 @@ def build_and_send_digest(logger: Optional[logging.Logger] = None) -> dict:
         )
         log.info(f"send_email -> {result}")
         if "error" in result:
+            log.error(f"Opportunity digest run failed: {result['error']}")
             return result
 
         opportunities.mark_digested([i["id"] for i in to_report])
@@ -669,6 +678,7 @@ def build_and_send_digest(logger: Optional[logging.Logger] = None) -> dict:
             )
 
         log.info(f"Digest sent: {len(to_report)} items, {len(high)} high-scoring")
+        log.info("Opportunity digest run complete")
         return {"sent": True, "new_items": len(to_report), "high_scoring": len(high)}
     except Exception as e:
         log.exception(f"Opportunity digest run failed: {e}")

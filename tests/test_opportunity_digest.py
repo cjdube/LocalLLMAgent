@@ -5,12 +5,14 @@ leaves items unreported (and the watermark unadvanced) so the next run
 retries, and a stalled opening is reported exactly once. All collaborators
 are monkeypatched; nothing touches the network, the model, or Gmail."""
 
+import logging
 from datetime import datetime, timedelta
 
 import pytest
 
 from agent.store import load_json
 from agent.tools import opportunities as opp
+from chat import insights
 from tasks import opportunity_digest as od
 
 
@@ -144,6 +146,74 @@ def test_send_failure_exits_nonzero_and_leaves_items_new(stubbed_run, monkeypatc
     # Nothing was marked digested and the watermark held: next run re-reports.
     assert len(opp.pending_new_items()) == 1
     assert load_json(od.STATE_PATH, {}) == {}
+
+
+# --------------------------------------------------------------------------- #
+# Dashboard run-history boundaries
+# --------------------------------------------------------------------------- #
+# The digest once logged no "Starting ... run" / "... run complete" lines, so
+# chat/insights.py parsed zero runs out of a log full of successful ones and the
+# dashboard showed "no runs" forever. These assert through the real parser, so
+# rewording either side of the contract fails loudly.
+
+@pytest.fixture
+def digest_log(tmp_path):
+    """A logger writing setup_logger's exact format to a throwaway file, plus a
+    parse() that runs it back through the dashboard's parser."""
+    path = tmp_path / "opportunity_digest.log"
+    logger = logging.getLogger(f"test_digest_{path}")
+    logger.setLevel(logging.INFO)
+    logger.handlers.clear()
+    logger.propagate = False
+    handler = logging.FileHandler(path)
+    handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    logger.addHandler(handler)
+    yield logger, lambda: insights.parse_runs(path)
+    logger.handlers.clear()
+
+
+def test_successful_run_parses_as_one_success(stubbed_run, digest_log):
+    logger, parse = digest_log
+    od.build_and_send_digest(logger=logger)
+
+    runs = parse()
+    assert len(runs) == 1
+    assert runs[0]["status"] == "success"
+    # The tool activity landed inside the run rather than being orphaned.
+    assert {c["name"] for c in runs[0]["tool_calls"]} >= {"poll_edgar", "send_email"}
+
+
+def test_nothing_new_run_closes_instead_of_hanging(stubbed_run, digest_log, monkeypatch):
+    monkeypatch.setattr(od, "poll_edgar", lambda *a: {"items": []})
+    logger, parse = digest_log
+    od.build_and_send_digest(logger=logger)
+
+    runs = parse()
+    assert len(runs) == 1
+    # Not "running": the early return needs its own completion line.
+    assert runs[0]["status"] == "success"
+
+
+def test_send_failure_parses_as_a_failed_run(stubbed_run, digest_log, monkeypatch):
+    monkeypatch.setattr(od, "send_email",
+                        lambda subject, body, html=False: {"error": "gmail 503"})
+    logger, parse = digest_log
+    od.build_and_send_digest(logger=logger)
+
+    runs = parse()
+    assert len(runs) == 1
+    assert runs[0]["status"] == "failure"
+    assert "gmail 503" in runs[0]["error"]
+
+
+def test_unexpected_exception_parses_as_a_failed_run(stubbed_run, digest_log, monkeypatch):
+    monkeypatch.setattr(od, "poll_edgar", lambda *a: 1 / 0)
+    logger, parse = digest_log
+    od.build_and_send_digest(logger=logger)
+
+    runs = parse()
+    assert len(runs) == 1
+    assert runs[0]["status"] == "failure"
 
 
 def test_unparseable_scoring_output_still_sends(stubbed_run, monkeypatch):
