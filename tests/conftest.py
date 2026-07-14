@@ -7,6 +7,23 @@ directory. Left alone, every run appends fixture rows (e.g. the daily_log tests'
 "Morning Run" on 2026-07-08) into the production logs. Redirect LOGS_DIR to a tmp
 dir for every test so the suite can never pollute real logs.
 
+A fixture alone is not enough, though. `setup_logger` resolves LOGS_DIR into an
+absolute path and hands it to a RotatingFileHandler, so redirecting LOGS_DIR only
+affects *later* calls. `chat/server.py` calls `setup_logger("wren")` at module
+level, which runs when a test module imports it — during collection, before any
+fixture has run — so the handler was already pinned to the real logs/wren.log and
+the autouse fixture below quietly did nothing. 594 fixture rows (test_server's
+"TinyCo" opportunities) reached the production log that way. Hence the module-level
+redirect: conftest is fully imported before any test module, so reassigning LOGS_DIR
+here lands ahead of every import-time setup_logger call — server.py's and any future
+module's.
+
+A monkeypatch also stops at the process boundary: test_bg_worker's idle-poll test
+spawns a real child interpreter that runs `bg_worker.main()`, and that child got the
+real logs/ no matter what the parent patched. So the redirect goes through the
+WREN_LOGS_DIR env var too, which children inherit. test_conftest.py guards both —
+that no handler in-process escapes to the real logs/, and that a child doesn't.
+
 The learnings tasks write reviews to `LEARNINGS_DIR` — Craig's Obsidian vault on
 an external drive. Tests stub the writer per-test, but redirect LEARNINGS_DIR to
 tmp_path suite-wide as the backstop, so a missed stub lands a fixture file in a
@@ -34,6 +51,10 @@ stub it to raise; test_loop's Gemini tests re-patch it per-test with a fake
 client to exercise the real adapter without a network call.
 """
 
+import os
+import tempfile
+from pathlib import Path
+
 import pytest
 
 from agent import loop as _loop
@@ -43,6 +64,14 @@ from tasks import _chat_transcripts as _chat_transcripts
 from tasks import _common
 from tasks import ai_chat_learnings as _ai_chat_learnings
 from tasks import opportunity_digest as _opportunity_digest
+
+# Both lines run at conftest import — before any test module imports a module that
+# calls setup_logger at import time. See the module docstring. The env var covers
+# child interpreters (test_bg_worker spawns one, and it ran the real main()); the
+# attribute covers this process, where _common was imported before the env was set.
+_TEST_LOGS_DIR = Path(tempfile.mkdtemp(prefix="wren-test-logs-"))
+os.environ["WREN_LOGS_DIR"] = str(_TEST_LOGS_DIR)
+_common.LOGS_DIR = _TEST_LOGS_DIR
 
 
 @pytest.fixture(autouse=True)

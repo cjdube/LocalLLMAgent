@@ -1,6 +1,7 @@
 """Shared helpers for task runners (unattended entrypoints run by launchd)."""
 
 import logging
+import os
 import sys
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
@@ -9,7 +10,10 @@ from pathlib import Path
 from agent.tools.notify import notify
 
 _ROOT = Path(__file__).resolve().parent.parent
-LOGS_DIR = _ROOT / "logs"
+# Unset in production, so this is the real logs/. The test suite sets it (see
+# tests/conftest.py) because it is the only redirect that survives into a child
+# interpreter — monkeypatching this module's attribute can't cross a subprocess.
+LOGS_DIR = Path(os.getenv("WREN_LOGS_DIR") or _ROOT / "logs")
 
 
 def setup_logger(task_name: str) -> logging.Logger:
