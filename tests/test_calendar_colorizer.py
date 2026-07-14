@@ -7,9 +7,14 @@ import logging
 import pytest
 
 from agent.tools.calendar import CATEGORY_COLORS
+from chat.insights import _is_run_success
 from tasks import calendar_colorizer as cc
 
 _LOGGER = logging.getLogger("test_calendar_colorizer")
+
+
+def _never_called(*a, **k):
+    raise AssertionError("the model must not be warmed on a day with no events")
 
 WORK = CATEGORY_COLORS["Work/LLC"][0]
 FITNESS = CATEGORY_COLORS["Fitness"][0]
@@ -73,6 +78,19 @@ def test_apply_counts_patch_failure_as_skipped(monkeypatch):
 
     assert skipped == ["Sprint planning"]
     assert updated == [("Morning run", FITNESS), ("Mystery block", FITNESS)]
+
+
+def test_quiet_day_still_logs_a_run_complete_boundary(monkeypatch, capsys):
+    # The dashboard reads run status from the log: a run that logs a start and no
+    # completion is reported as still "running" forever. The nothing-to-color
+    # early return used to do exactly that. Asserted through insights' own
+    # matcher so the two can't drift apart.
+    monkeypatch.setattr(cc, "get_events_in_range", lambda *a, **k: {"events": []})
+    monkeypatch.setattr(cc, "complete_text", _never_called)
+    monkeypatch.setattr(cc, "notify_failure", lambda *a, **k: None)
+
+    assert cc.main() == 0
+    assert any(_is_run_success(line) for line in capsys.readouterr().out.splitlines())
 
 
 def test_valid_color_ids_derive_from_category_colors():

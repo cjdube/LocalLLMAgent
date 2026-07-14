@@ -117,6 +117,7 @@ def main() -> int:
 
         if not events:
             logger.info("No events to color yesterday — nothing to do")
+            logger.info("Colorizer run complete: 0 updated, 0 skipped")
             return 0
 
         classify_input = [{"id": e["id"], "summary": e["summary"]} for e in events]

@@ -5,6 +5,7 @@ vault, or Gmail access."""
 
 import pytest
 
+from chat.insights import _is_run_success
 from tasks import daily_youtube_learnings as yt
 
 
@@ -55,6 +56,17 @@ def test_no_videos_writes_nothing(stubbed_run, monkeypatch):
     monkeypatch.setattr(yt, "fetch_liked_videos", lambda *a, **k: {"videos": []})
     assert yt.main() == 0
     assert stubbed_run["persists"] == []  # skipped the empty day
+
+
+def test_no_videos_still_logs_a_run_complete_boundary(stubbed_run, monkeypatch, capsys):
+    # The dashboard reads run status from the log: a run that logs a start and no
+    # completion is reported as still "running" forever. The empty-day early
+    # return used to do exactly that. Asserted through insights' own matcher so
+    # the two can't drift apart.
+    monkeypatch.setattr(yt, "fetch_liked_videos", lambda *a, **k: {"videos": []})
+    assert yt.main() == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert any(_is_run_success(line) for line in lines)
 
 
 def test_fetch_failure_is_a_failed_run(stubbed_run, monkeypatch):

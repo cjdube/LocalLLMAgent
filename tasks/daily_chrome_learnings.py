@@ -120,6 +120,7 @@ def main() -> int:
         # and no (non-noise) browsing — so don't warm the model or write a file.
         if not any(buckets.values()) and not chrome_sites:
             logger.info("No calendar events or browsing yesterday; nothing to write")
+            logger.info("Daily chrome learnings run complete")
             return 0
 
         user_prompt = (
@@ -142,6 +143,7 @@ def main() -> int:
         # skip the write rather than save an all-empty log.
         if not has_substantive_content(entry_text):
             logger.info("Draft had no qualifying items; nothing to write")
+            logger.info("Daily chrome learnings run complete")
             return 0
 
         persist_or_email(

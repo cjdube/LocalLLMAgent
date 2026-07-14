@@ -65,7 +65,10 @@ def main() -> int:
         videos = youtube_result.get("videos", [])
         if not videos:
             # Nothing Liked yesterday — don't litter the vault with an empty file.
+            # Still log the run-complete boundary: the dashboard reads status from
+            # the log, and a run that starts without one is shown as "running".
             logger.info("No videos Liked yesterday; nothing to write")
+            logger.info("Daily youtube learnings run complete")
             return 0
 
         backend = resolve_backend("daily_youtube_learnings")

@@ -6,6 +6,7 @@ Chrome, the vault, or Gmail."""
 import pytest
 
 from agent.tools.calendar import CATEGORY_COLORS
+from chat.insights import _is_run_success
 from tasks import _learnings_common as lc
 from tasks import daily_chrome_learnings as dc
 
@@ -97,6 +98,25 @@ def test_all_none_draft_skips_the_write(stubbed_run, monkeypatch):
                     "- **None:** [No qualifying items for this section]")
     assert dc.main() == 0
     assert stubbed_run["persists"] == []
+
+
+@pytest.mark.parametrize("quiet_day", ["no_browsing", "all_none_draft"])
+def test_skipped_runs_still_log_a_run_complete_boundary(stubbed_run, monkeypatch, capsys, quiet_day):
+    # The dashboard reads run status from the log: a run that logs a start and no
+    # completion is reported as still "running" forever. Both skip paths used to
+    # return 0 without one. Asserted through insights' own matcher so the two
+    # can't drift apart.
+    if quiet_day == "no_browsing":
+        monkeypatch.setattr(dc, "fetch_chrome_history", lambda *a, **k: {"sites": []})
+    else:
+        monkeypatch.setattr(
+            dc, "complete_text",
+            lambda **k: "## Daily Log: July 12, 2026\n\n### Tools & Tech Encountered\n"
+                        "- **None:** [No qualifying items for this section]")
+
+    assert dc.main() == 0
+    assert stubbed_run["persists"] == []
+    assert any(_is_run_success(line) for line in capsys.readouterr().out.splitlines())
 
 
 def test_fetch_failure_is_a_failed_run(stubbed_run, monkeypatch):
