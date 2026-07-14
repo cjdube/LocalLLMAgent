@@ -468,6 +468,22 @@ function addConfirm(summary, detail, onDecide) {
 }
 function setBusy(b) { input.disabled = b; sendBtn.disabled = b; }
 
+// A dropped connection (laptop asleep, tailnet blip) rejects the fetch, and an
+// error page rejects .json(). Either one used to escape as an unhandled
+// rejection, leaving the typing dots animating over a permanently disabled
+// composer — indistinguishable from Wren still thinking. Route both into
+// handleResult's error path so the dots clear and the composer unlocks.
+async function postTurn(path, body, typingEl) {
+  try {
+    const resp = await fetch(path, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body) });
+    return handleResult(await resp.json(), typingEl);
+  } catch (err) {
+    handleResult({ error: "couldn't reach Wren (" + err.message + "). Your message wasn't sent — try again." }, typingEl);
+  }
+}
+
 function handleResult(result, typingEl) {
   if (typingEl) typingEl.remove();
   if (result.error) { addMessage("system", "Error: " + result.error); setBusy(false); return; }
@@ -475,11 +491,7 @@ function handleResult(result, typingEl) {
   else if (result.type === "confirm") {
     addConfirm(result.summary, result.detail, async (approved) => {
       setBusy(true);
-      const t = addTyping();
-      const resp = await fetch("/chat/confirm", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ approved }) });
-      handleResult(await resp.json(), t);
+      postTurn("/chat/confirm", { approved }, addTyping());
     });
     setBusy(false);
   }
@@ -491,11 +503,7 @@ form.addEventListener("submit", async (e) => {
   addMessage("user", message);
   input.value = "";
   setBusy(true);
-  const t = addTyping();
-  const resp = await fetch("/chat", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message }) });
-  handleResult(await resp.json(), t);
+  postTurn("/chat", { message }, addTyping());
 });
 document.getElementById("newChat").addEventListener("click", async () => {
   await fetch("/chat/new", { method: "POST" });

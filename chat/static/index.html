@@ -212,6 +212,27 @@ function setBusy(b) {
   sendBtn.classList.toggle("stop", b);
 }
 
+// A dropped connection (laptop asleep, tailnet blip) rejects the fetch, and an
+// error page rejects .json(). Either one used to escape as an unhandled
+// rejection, leaving the typing dots animating over a permanently disabled
+// input — indistinguishable from Wren still thinking. Route both into
+// handleResult's error path so the dots clear and the input unlocks.
+async function postTurn(path, body, typingEl) {
+  try {
+    const resp = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return handleResult(await resp.json(), typingEl);
+  } catch (err) {
+    handleResult(
+      { error: `couldn't reach Wren (${err.message}). Your message wasn't sent — try again.` },
+      typingEl,
+    );
+  }
+}
+
 function handleResult(result, typingEl) {
   if (typingEl) typingEl.remove();
   if (result.error) {
@@ -228,13 +249,7 @@ function handleResult(result, typingEl) {
   } else if (result.type === "confirm") {
     addConfirm(result.summary, result.detail, async (approved) => {
       setBusy(true);
-      const confirmTyping = addTyping();
-      const resp = await fetch("/chat/confirm", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ approved }),
-      });
-      handleResult(await resp.json(), confirmTyping);
+      postTurn("/chat/confirm", { approved }, addTyping());
     });
     setBusy(false);
   }
@@ -251,13 +266,7 @@ form.addEventListener("submit", async (e) => {
   addMessage("user", message);
   input.value = "";
   setBusy(true);
-  const typingEl = addTyping();
-  const resp = await fetch("/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message }),
-  });
-  handleResult(await resp.json(), typingEl);
+  postTurn("/chat", { message }, addTyping());
 });
 
 newChatBtn.addEventListener("click", async () => {

@@ -10,6 +10,7 @@ monkeypatched. Importing chat.server runs its module-level secret check, so the
 two required secrets are stubbed into the environment before the import.
 """
 
+import logging
 import os
 import threading
 import time
@@ -303,6 +304,36 @@ def test_chat_cancelled_returns_stopped_and_rolls_back(auth_client, monkeypatch)
     history = srv.conversations[SID]
     assert len(history) == 1 and history[0]["role"] == "system"
     assert SID not in srv.cancel_events  # the turn's event was cleaned up
+
+
+def test_chat_logs_turn_start_before_advancing(auth_client, monkeypatch):
+    """The turn-start line must be written *before* advance() runs. Every other
+    per-turn line (the access log, ollama_chat) lands only once the turn
+    finishes, so without this one a request that hangs mid-turn and a request
+    that never arrived are both simply absent from the log — which is exactly
+    what made a dropped connection undiagnosable. srv.logger sets
+    propagate=False, so caplog can't see it; record off the logger itself.
+    """
+    records = []
+    handler = logging.Handler()
+    handler.emit = lambda record: records.append(record.getMessage())
+    srv.logger.addHandler(handler)
+
+    logged_by_the_time_advance_ran = []
+
+    def fake_advance(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
+                     should_cancel=None):
+        logged_by_the_time_advance_ran.extend(records)
+        return {"type": "final", "text": "done"}
+
+    monkeypatch.setattr(srv, "advance", fake_advance)
+    try:
+        resp = auth_client.post("/chat", json={"message": "hi"})
+    finally:
+        srv.logger.removeHandler(handler)
+
+    assert resp.status_code == 200
+    assert any("chat turn start" in m for m in logged_by_the_time_advance_ran)
 
 
 def test_chat_cancel_sets_active_turns_event(auth_client):

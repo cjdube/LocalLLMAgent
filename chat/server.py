@@ -472,6 +472,11 @@ def _run_turn(sid: str, history: list, checkpoint: int, cancel: threading.Event,
     # _make_load_tools); dispatch carries every real tool, gated only in schema.
     tools = tools_for(loaded_groups.get(sid, set()))
     dispatch = {**DISPATCH, "load_tools": _make_load_tools(sid, tools)}
+    # Logged before advance(), not after: every other per-turn line (the
+    # access log, ollama_chat) is written once the turn completes, so a turn
+    # that never arrives and one that hangs mid-flight looked identical — both
+    # simply absent. This line is the "the request got here" marker.
+    logger.info(f"chat {stage} start: {len(history)} messages, {len(tools)} tools")
     try:
         result = advance(history, tools, dispatch, confirm_before=WRITE_TOOLS,
                          logger=logger, should_cancel=cancel.is_set)
