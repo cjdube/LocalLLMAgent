@@ -137,7 +137,7 @@ in — nothing new inherits it automatically.
 | `calendar.py` | Google Calendar read/write (`get_upcoming_events`, `get_events_in_range`, `log_calendar_event` — idempotent via `source_id`) |
 | `email.py` | Send email via Gmail API (plain text or HTML) |
 | `learnings_file.py` | Write the weekly review to a Markdown file in the Obsidian vault (`LEARNINGS_DIR`) and read the most recent one back for carry-forward |
-| `wiki.py` | Read-only search of the learnings wiki (`WIKI_VAULT_PATH`) so Wren can answer "what did I decide about X" — `read_wiki_index`, `list_wiki_pages`, `read_wiki_page` over the concept pages built by ObsidianWikiAgent, plus `list_weekly_reviews`/`read_weekly_review` over the raw weeks. Requires the vault drive mounted |
+| `wiki.py` | Read-only search of the learnings wiki (`WIKI_VAULT_PATH`) so Wren can answer "what did I decide about X" — `read_wiki_index`, `list_wiki_pages`, `read_wiki_page` over the concept pages built by ObsidianWikiAgent. Reads the vault's `wiki/` dir only; `raw/` is a write-only drop (`LEARNINGS_DIR`) that ObsidianWikiAgent files and summarizes. Requires the vault drive mounted |
 | `google_tasks.py` | Google Tasks read/write (`get_tasks`, `get_tasks_due_soon`, `create_task`, `update_task_due_date`, `complete_task`) |
 | `chrome_history.py` | Read Chrome's local history DB for a date range |
 | `youtube.py` | List videos Liked on the authorized YouTube channel in a date range (`fetch_liked_videos`) — title, channel, and description per video, via the YouTube Data API v3 and the shared Google OAuth token |
@@ -235,8 +235,8 @@ chat/
   Obsidian vault ObsidianWikiAgent maintains): `read_wiki_index`,
   `list_wiki_pages`, `read_wiki_page` navigate the concept pages the way that
   project's own query CLI does — read the index, open the relevant page(s),
-  answer and cite them — and `list_weekly_reviews`/`read_weekly_review` fall
-  back to the raw weekly reviews for a week not yet summarized into the wiki. All
+  answer and cite them. Only the vault's `wiki/` dir is readable; its `raw/` dir
+  is a write-only handoff to ObsidianWikiAgent (see the tools table). All
   read-only; they return an error (rather than raise) if the vault drive isn't
   mounted. Beyond facts (memory) and external notes (wiki), Wren keeps
   **skills** — reusable *procedures* for multi-step tasks, composed from the

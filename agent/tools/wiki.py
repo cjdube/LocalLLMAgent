@@ -2,16 +2,22 @@
 Wren can answer "what did I decide about X" from his own notes.
 
 The vault at WIKI_VAULT_PATH is built and maintained by the sibling
-ObsidianWikiAgent project: raw/ holds the weekly reviews, wiki/ holds the
-LLM-summarized, cross-linked concept pages plus an index.md table of contents.
-These tools let the agent loop navigate that the way ObsidianWikiAgent's own
-query CLI does: read the index, open the relevant page(s), answer.
+ObsidianWikiAgent project. These tools let the agent loop navigate it the way
+ObsidianWikiAgent's own query CLI does: read the index, open the relevant
+page(s), answer.
 
 Vault layout (see ObsidianWikiAgent):
     <vault>/wiki/index.md   -- table of contents the model reads first
     <vault>/wiki/*.md       -- concept pages (excluding index.md, log.md)
-    <vault>/raw/*.md        -- raw learnings reviews: daily (Daily-Chrome-*, Daily-YouTube-*)
-                               plus older weekly ones (may cover days not yet in wiki/)
+
+wiki/ is the only part of the vault Wren reads. The sibling <vault>/raw/ is a
+write-only handoff: the daily learnings tasks drop files there via
+learnings_file.write_entry, and ObsidianWikiAgent owns everything downstream —
+it files them into subdirectories and summarizes them into wiki/ pages. Don't
+add tools that read raw/. Two of them existed and were removed: the reorganized
+layout made them silently return nothing, and they offered no capability wiki/
+doesn't, since processed reviews land there as ordinary concept pages
+(strategic-weekly-review-<date>.md).
 
 The vault lives on an external drive, so a missing vault dir is surfaced as an
 error (like learnings_file.py) rather than raising. Functions read from a single
@@ -22,8 +28,6 @@ Usage:
     python -m agent.tools.wiki read-index
     python -m agent.tools.wiki list-pages
     python -m agent.tools.wiki read-page speakers-bureau
-    python -m agent.tools.wiki list-reviews
-    python -m agent.tools.wiki read-review Daily-Chrome-2026-07-12.md
 """
 
 import argparse
@@ -94,27 +98,6 @@ def _read_wiki_page(vault: Path, name: str) -> dict:
     return {"content": path.read_text(encoding="utf-8")}
 
 
-def _list_raw_files(vault: Path) -> dict:
-    raw_dir = vault / "raw"
-    if not raw_dir.exists():
-        return {"files": []}
-    files = sorted(
-        p.name for p in raw_dir.iterdir()
-        if p.is_file() and p.suffix == ".md" and not p.name.startswith(".")
-    )
-    return {"files": files}
-
-
-def _read_raw_file(vault: Path, filename: str) -> dict:
-    try:
-        path = _safe_child(vault / "raw", filename)
-    except ValueError as e:
-        return {"error": str(e)}
-    if not path.is_file():
-        return {"error": f"weekly review '{filename}' not found"}
-    return {"content": path.read_text(encoding="utf-8", errors="replace")}
-
-
 # --- model-facing tools (no vault argument; read the configured vault) ---
 
 def read_wiki_index() -> dict:
@@ -132,18 +115,6 @@ def read_wiki_page(name: str) -> dict:
         return {"error": "name must not be empty"}
     vault, err = _require_vault()
     return err or _read_wiki_page(vault, name.strip())
-
-
-def list_weekly_reviews() -> dict:
-    vault, err = _require_vault()
-    return err or _list_raw_files(vault)
-
-
-def read_weekly_review(filename: str) -> dict:
-    if not filename or not filename.strip():
-        return {"error": "filename must not be empty"}
-    vault, err = _require_vault()
-    return err or _read_raw_file(vault, filename.strip())
 
 
 READ_WIKI_INDEX_SCHEMA = {
@@ -183,41 +154,10 @@ READ_WIKI_PAGE_SCHEMA = {
     },
 }
 
-LIST_WEEKLY_REVIEWS_SCHEMA = {
-    "type": "function",
-    "function": {
-        "name": "list_weekly_reviews",
-        "description": (
-            "List Craig's raw learnings review filenames — the daily reviews "
-            "(Daily-Chrome-<date>.md, Daily-YouTube-<date>.md) plus any older "
-            "Strategic-Weekly-Review-<date>.md. Use these for recent days not yet "
-            "summarized into the wiki."
-        ),
-        "parameters": {"type": "object", "properties": {}},
-    },
-}
-
-READ_WEEKLY_REVIEW_SCHEMA = {
-    "type": "function",
-    "function": {
-        "name": "read_weekly_review",
-        "description": "Read one raw learnings review file by filename (from list_weekly_reviews).",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "filename": {"type": "string", "description": "Filename, e.g. 'Daily-Chrome-2026-07-12.md'."},
-            },
-            "required": ["filename"],
-        },
-    },
-}
-
 WIKI_TOOL_SCHEMAS = [
     READ_WIKI_INDEX_SCHEMA,
     LIST_WIKI_PAGES_SCHEMA,
     READ_WIKI_PAGE_SCHEMA,
-    LIST_WEEKLY_REVIEWS_SCHEMA,
-    READ_WEEKLY_REVIEW_SCHEMA,
 ]
 
 
@@ -228,21 +168,14 @@ def main() -> int:
     sub.add_parser("list-pages")
     p_page = sub.add_parser("read-page")
     p_page.add_argument("name")
-    sub.add_parser("list-reviews")
-    p_review = sub.add_parser("read-review")
-    p_review.add_argument("filename")
     args = parser.parse_args()
 
     if args.cmd == "read-index":
         result = read_wiki_index()
     elif args.cmd == "list-pages":
         result = list_wiki_pages()
-    elif args.cmd == "read-page":
-        result = read_wiki_page(args.name)
-    elif args.cmd == "list-reviews":
-        result = list_weekly_reviews()
     else:
-        result = read_weekly_review(args.filename)
+        result = read_wiki_page(args.name)
 
     return print_result(result)
 

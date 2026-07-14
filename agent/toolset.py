@@ -94,9 +94,7 @@ from agent.tools.web_fetch import TOOL_SCHEMA as WEB_FETCH_SCHEMA, fetch_webpage
 from agent.tools.web_search import TOOL_SCHEMA as WEB_SEARCH_SCHEMA, search_web
 from agent.tools.wiki import (
     WIKI_TOOL_SCHEMAS,
-    list_weekly_reviews,
     list_wiki_pages,
-    read_weekly_review,
     read_wiki_index,
     read_wiki_page,
 )
@@ -183,8 +181,6 @@ DISPATCH = {
     "read_wiki_index": read_wiki_index,
     "list_wiki_pages": list_wiki_pages,
     "read_wiki_page": read_wiki_page,
-    "list_weekly_reviews": list_weekly_reviews,
-    "read_weekly_review": read_weekly_review,
     "list_skills": list_skills,
     "read_skill": read_skill,
     "write_skill": write_skill,
@@ -284,10 +280,7 @@ TOOL_GROUP_NAMES = {
         "unwatch_company", "send_opportunity_digest",
         "research_opportunity", "research_company",
     ],
-    "wiki": [
-        "read_wiki_index", "list_wiki_pages", "read_wiki_page",
-        "list_weekly_reviews", "read_weekly_review",
-    ],
+    "wiki": ["read_wiki_index", "list_wiki_pages", "read_wiki_page"],
     "background": ["run_in_background", "list_background_jobs", "get_job_result"],
     "web": ["fetch_webpage", "evaluate_app", "fetch_starred_repos"],
     "activity": ["fetch_strava", "fetch_chrome_history"],
