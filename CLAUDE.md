@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Wren is a local-first personal AI agent: a Gemma model served by Ollama on a Mac mini. Nothing about the user's day ships to a cloud model at runtime **by default** — an opt-in cloud backend (Gemini) can be selected per-task via `WREN_LLM_BACKEND` / `WREN_<TASK>_BACKEND`, which does send that task's data off-device (see [docs/llm-backend.md](docs/llm-backend.md)). Run `pytest` before calling any change to existing code done.
+Wren is a local-first personal AI agent: a Gemma model served by Ollama on a Mac mini. Nothing about the user's day ships to a cloud model at runtime **by default** — an opt-in cloud backend (Gemini) can be selected per-task via `WREN_LLM_BACKEND` / `WREN_<TASK>_BACKEND`, which does send that task's data off-device (see [docs/llm-backend.md](docs/llm-backend.md)). Run `pytest` before calling any change to existing code done — and `npm test` too if you touched `chat/static/chat-dock.js`.
 
 ## Module map
 
@@ -11,7 +11,7 @@ Wren is a local-first personal AI agent: a Gemma model served by Ollama on a Mac
 - `agent/store.py` — locked/atomic JSON store primitives used by every store under `config/`.
 - `tasks/*.py` — unattended entrypoints run by launchd; `tasks/_common.py` has `setup_logger`/`notify_failure`. `tasks/bg_worker.py` is the generic runner that polls `config/bg_jobs.json` for user-initiated background jobs with push-to-approve.
 - `launchd/` — the scheduler: one plist per task (`StartInterval` for pollers, `StartCalendarInterval` for daily/weekly jobs), logging to `logs/`.
-- `tests/` — flat pytest suite, one `test_<module>.py` per source module.
+- `tests/` — flat pytest suite, one `test_<module>.py` per source module; plus `chat-dock.test.js`, the lone JS suite (jest/jsdom, `npm test`), covering the shared browser dock.
 - `config/` — `.env` (documented in `.env.example`) plus gitignored JSON stores.
 
 ## Data sourcing policy

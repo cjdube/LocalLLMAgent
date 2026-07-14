@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+node_modules/
 config/.env
 config/google_credentials.json
 config/google_token.json

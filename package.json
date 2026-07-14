@@ -1,0 +1,18 @@
+{
+  "name": "wren",
+  "private": true,
+  "description": "JS test harness for chat/static/chat-dock.js. The project is Python; this exists only so the one shared browser script has a test suite. Run: npm test",
+  "scripts": {
+    "test": "jest"
+  },
+  "jest": {
+    "testEnvironment": "jsdom",
+    "testMatch": [
+      "<rootDir>/tests/**/*.test.js"
+    ]
+  },
+  "devDependencies": {
+    "jest": "^30.4.2",
+    "jest-environment-jsdom": "^30.4.1"
+  }
+}

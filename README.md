@@ -622,7 +622,16 @@ Run the suite from the repo root:
 .venv/bin/pytest        # or: .venv/bin/pytest -q
 ```
 
-The tests are pure/offline — they mock the model and network, so no Ollama or
+The one exception to "this project is Python" is the chat dock
+(`chat/static/chat-dock.js`), the browser script shared by the chat page and
+the dashboard's side panel. It has its own jest/jsdom suite — install with
+`npm install` and run from the repo root:
+
+```bash
+npm test
+```
+
+Both suites are pure/offline — they mock the model and network, so no Ollama or
 API keys are needed. Nearly every module has a dedicated test file (see
 `tests/`), covering error paths and edge cases as well as happy paths; the
 deliberate exception is live-API wrapper internals (Google/Strava/Tavily
