@@ -54,6 +54,28 @@ breaks nothing. Recognized values, each expected on exactly one category:
 the weekly review's community bucket regardless of color (e.g. `"aarp"`).
 Empty list = bucket stays empty.
 
+### `learnings`
+
+`excluded_domains` — domains kept out of the daily learnings reviews
+(`tasks/_learnings_common.py:compact_sites`). Volunteer-admin portals and
+Microsoft 365 live here: real activity, but not something to review.
+
+Scoped to the learnings tasks only. `fetch_chrome_history` still returns these
+sites, so chat can answer "what was I doing on the AARP portal last week?" —
+that's the difference between this list and `chrome_history.NOISE_DOMAINS`,
+which blinds the tool everywhere.
+
+An entry matches the domain **and its subdomains**, so `sharepoint.com` covers
+every tenant (`aarpsharex.sharepoint.com`) and `aarp.org` covers
+`secure.aarp.org`. It is not a substring match — `notsharepoint.com` is kept.
+Ports are stripped before matching, so `127.0.0.1` would cover
+`127.0.0.1:8420`. Empty list = nothing excluded.
+
+Note that a service's own domain isn't always enough: the AARP volunteer portal
+serves from both `aarpvolunteer.my.site.com` and `aarpvolunteer.my.salesforce.com`,
+and both are listed. After adding an entry, check a real day against it (see
+the exclusion tests in `tests/test_learnings_common.py`).
+
 ### `job_search`
 
 Drives the opportunity scout (`tasks/opportunity_digest.py`,

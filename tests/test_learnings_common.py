@@ -34,6 +34,67 @@ def test_prior_day_crosses_month_boundary():
 
 
 # --------------------------------------------------------------------------- #
+# compact_sites — the learnings-only domain exclusions
+# --------------------------------------------------------------------------- #
+
+@pytest.fixture
+def excluded(monkeypatch):
+    """_EXCLUDED_DOMAINS is built from preferences at import, so patch the list
+    itself rather than the JSON (same shape as _COMMUNITY_KEYWORDS)."""
+    monkeypatch.setattr(lc, "_EXCLUDED_DOMAINS", ["sharepoint.com", "signupgenius.com"])
+
+
+def _site(domain, visits=1):
+    return {"domain": domain, "title": f"{domain} page", "url": f"https://{domain}/x", "visits": visits}
+
+
+def test_compact_sites_drops_excluded_domain(excluded):
+    out = lc.compact_sites([_site("www.signupgenius.com"), _site("ai.google.dev")])
+    assert [s["domain"] for s in out] == ["ai.google.dev"]
+
+
+def test_compact_sites_drops_subdomains_of_excluded(excluded):
+    # The whole point of suffix matching: one entry covers every M365 tenant.
+    out = lc.compact_sites([_site("aarpsharex.sharepoint.com"), _site("ai.google.dev")])
+    assert [s["domain"] for s in out] == ["ai.google.dev"]
+
+
+def test_compact_sites_keeps_lookalike_domain(excluded):
+    # Must not match by bare substring: "notsharepoint.com" isn't a subdomain.
+    out = lc.compact_sites([_site("notsharepoint.com")])
+    assert [s["domain"] for s in out] == ["notsharepoint.com"]
+
+
+def test_compact_sites_excludes_before_the_cap(excluded, monkeypatch):
+    # An excluded site must not consume one of the MAX_CHROME_SITES slots.
+    monkeypatch.setattr(lc, "MAX_CHROME_SITES", 2)
+    out = lc.compact_sites([
+        _site("aarpsharex.sharepoint.com", visits=99),
+        _site("ai.google.dev", visits=5),
+        _site("tailscale.com", visits=3),
+    ])
+    assert [s["domain"] for s in out] == ["ai.google.dev", "tailscale.com"]
+
+
+def test_compact_sites_strips_port_before_matching(monkeypatch):
+    monkeypatch.setattr(lc, "_EXCLUDED_DOMAINS", ["127.0.0.1"])
+    out = lc.compact_sites([_site("127.0.0.1:8420"), _site("ai.google.dev")])
+    assert [s["domain"] for s in out] == ["ai.google.dev"]
+
+
+def test_compact_sites_drops_url_and_sorts_by_visits(excluded):
+    out = lc.compact_sites([_site("a.com", visits=1), _site("b.com", visits=9)])
+    assert [s["domain"] for s in out] == ["b.com", "a.com"]
+    assert "url" not in out[0]
+
+
+def test_compact_sites_no_exclusions_configured_keeps_everything(monkeypatch):
+    monkeypatch.setattr(lc, "_EXCLUDED_DOMAINS", [])
+    out = lc.compact_sites([_site("www.signupgenius.com")])
+    assert [s["domain"] for s in out] == ["www.signupgenius.com"]
+
+
+# --------------------------------------------------------------------------- #
 # safe_url / videos_section
 # --------------------------------------------------------------------------- #
 

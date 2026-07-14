@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
+from agent import prefs
 from agent.tools.calendar import _local_timezone
 from agent.tools.email import send_email
 from agent.tools.learnings_file import write_entry
@@ -36,11 +37,31 @@ MAX_CHROME_SITES = 40
 MAX_YOUTUBE_VIDEOS = 25
 MAX_YOUTUBE_DESC_CHARS = 500
 
+# Domains Craig doesn't want reviewed (volunteer-admin portals, M365). Scoped to
+# the learnings tasks on purpose: chrome_history.NOISE_DOMAINS would also blind
+# the fetch_chrome_history tool in chat, and he still wants to be able to ask
+# about these sites there.
+_EXCLUDED_DOMAINS = [
+    d.lower() for d in prefs.section("learnings").get("excluded_domains", [])
+    if isinstance(d, str) and d
+]
+
+
+def _is_excluded(domain: str) -> bool:
+    """True if `domain` is an excluded domain or a subdomain of one, so a single
+    "sharepoint.com" entry covers every tenant. The port is stripped first:
+    Chrome's netloc carries one for local servers ("127.0.0.1:8420")."""
+    host = (domain or "").lower().split(":")[0]
+    return any(host == d or host.endswith("." + d) for d in _EXCLUDED_DOMAINS)
+
 
 def compact_sites(sites: list) -> list:
-    """Trim browsing history to the top visited sites and drop the full `url`
-    (redundant with `domain` and often long) before embedding in the prompt."""
-    top = sorted(sites, key=lambda s: s.get("visits", 0), reverse=True)[:MAX_CHROME_SITES]
+    """Drop excluded domains, trim to the top visited sites, and drop the full
+    `url` (redundant with `domain` and often long) before embedding in the
+    prompt. Excluding before the cap means MAX_CHROME_SITES budgets reviewable
+    sites rather than being spent on filtered ones."""
+    kept = [s for s in sites if not _is_excluded(s.get("domain", ""))]
+    top = sorted(kept, key=lambda s: s.get("visits", 0), reverse=True)[:MAX_CHROME_SITES]
     return [
         {"domain": s.get("domain"), "title": s.get("title"), "visits": s.get("visits")}
         for s in top

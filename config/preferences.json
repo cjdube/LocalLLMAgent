@@ -19,6 +19,24 @@
     ],
     "community_keywords": ["aarp"]
   },
+  "learnings": {
+    "_comment": "Domains kept OUT of the daily learnings reviews only. fetch_chrome_history still returns them, so chat can answer questions about them. Matched on the domain and its subdomains, so 'sharepoint.com' covers 'aarpsharex.sharepoint.com'.",
+    "excluded_domains": [
+      "aarp.org",
+      "aarpvolunteer.my.site.com",
+      "aarpvolunteer.my.salesforce.com",
+      "blackbaudhosting.com",
+      "signupgenius.com",
+      "sharepoint.com",
+      "office.com",
+      "office365.com",
+      "outlook.live.com",
+      "onedrive.live.com",
+      "teams.microsoft.com",
+      "microsoftonline.com",
+      "cloud.microsoft"
+    ]
+  },
   "job_search": {
     "seniority_terms": ["vp", "vice president", "head", "director", "chief"],
     "function_terms": ["product", "engineering", "technolog"],
