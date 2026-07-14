@@ -39,7 +39,7 @@ from agent.tools._http import load_env, print_result
 
 load_env()
 
-DEFAULT_WIKI_VAULT = "/Volumes/T7/Obsidian/learnings"
+DEFAULT_WIKI_VAULT = str(Path.home() / "Documents" / "llm-wiki-learnings")
 
 
 def _vault() -> Path:

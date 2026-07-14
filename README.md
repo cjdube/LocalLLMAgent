@@ -492,10 +492,10 @@ mostly useful if the Python process fails to start at all).
      also works for public stars (add the `repo` scope only if you star private
      repos too).
    - `LEARNINGS_DIR` — directory the weekly review Markdown files are written to
-     (defaults to `/Volumes/T7/Obsidian/learnings/raw`)
+     (defaults to `~/Documents/llm-wiki-learnings/raw`)
    - `WIKI_VAULT_PATH` — root of the Obsidian vault Wren reads to answer "what did
      I decide about X" via the `wiki.py` tools (defaults to
-     `/Volumes/T7/Obsidian/learnings`; the wiki itself is built by ObsidianWikiAgent)
+     `~/Documents/llm-wiki-learnings`; the wiki itself is built by ObsidianWikiAgent)
    - `GOOGLE_TASKLIST_ID` — optional. By default `get_tasks`/`get_tasks_due_soon`
      read across every Google Tasks list on the account (tasks are commonly split
      across several named lists); set this to a specific list id to scope reads

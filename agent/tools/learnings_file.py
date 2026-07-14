@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 _ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(_ROOT / "config" / ".env")
 
-DEFAULT_LEARNINGS_DIR = "/Volumes/T7/Obsidian/learnings/raw"
+DEFAULT_LEARNINGS_DIR = str(Path.home() / "Documents" / "llm-wiki-learnings" / "raw")
 
 
 def _learnings_dir() -> Path:
