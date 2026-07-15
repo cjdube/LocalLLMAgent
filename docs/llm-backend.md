@@ -71,7 +71,7 @@ consumer next starts — there's nothing to reload live:
 
 - Key: `GEMINI_API_KEY` or `GOOGLE_API_KEY` (the SDK checks both).
 - `WREN_GEMINI_MODEL` — model id, defaults to `gemini-2.5-flash`.
-- `WREN_GEMINI_MAX_OUTPUT_TOKENS` — per-call generation cap, defaults to 4096.
+- `WREN_GEMINI_MAX_OUTPUT_TOKENS` — per-call generation cap, defaults to 8192.
 - Dependency: `google-genai` (pinned in `requirements.txt`), imported lazily so a
   purely local install never loads it.
 
