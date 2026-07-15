@@ -23,7 +23,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request, send_from_directory, session
 
-from agent.loop import TurnCancelled, advance, load_persona, resolve, with_identity
+from agent.loop import (
+    MAX_TOOL_ITERATIONS,
+    MAX_TOOL_RESULT_CHARS,
+    TurnCancelled,
+    advance,
+    load_persona,
+    resolve,
+    with_identity,
+)
 from chat.insights import (
     RunManager,
     describe_tools,
@@ -882,8 +890,54 @@ def api_run_status(task_key: str):
     return jsonify(run_manager.status(task_key))
 
 
+# Rough chars-per-token for the mix of prose and JSON that fills a prompt.
+# Deliberately generous: this is only used to catch a config that is *clearly*
+# over budget, not to police the theoretical tail of a working one. A tighter
+# ratio would fire on today's settings, which have never exceeded ~36% of
+# num_ctx in practice — a warning that cries wolf gets muted, so it wouldn't
+# survive contact with real use.
+_CHARS_PER_TOKEN = 4
+
+
+def _context_budget_warning() -> str | None:
+    """Return a warning if the configured worst-case prompt can overflow
+    num_ctx, else None.
+
+    WREN_CHAT_MAX_HISTORY_CHARS, OLLAMA_MAX_TOOL_RESULT_CHARS and OLLAMA_NUM_CTX
+    have to be raised together, and nothing couples them. _trim_history bounds
+    the history *between* turns, but a turn's tool results pile on top of that
+    ceiling inside advance() — up to MAX_TOOL_ITERATIONS of them — so the real
+    worst case is history + every tool result. Overflow doesn't raise: Ollama
+    silently drops the FRONT of the prompt, which is the system prompt (identity,
+    tool rules, pinned memories), and the model degrades into repetition loops.
+
+    That failure is near-impossible to diagnose from the symptom, so price it out
+    at startup instead. Pure (returns the text, no logging or push) so the
+    arithmetic is testable without side effects."""
+    worst_case = MAX_HISTORY_CHARS + (MAX_TOOL_ITERATIONS * MAX_TOOL_RESULT_CHARS)
+    num_ctx = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
+    capacity = num_ctx * _CHARS_PER_TOKEN
+    if worst_case <= capacity:
+        return None
+    return (
+        f"context budget over num_ctx: worst-case prompt ~{worst_case:,} chars "
+        f"(history {MAX_HISTORY_CHARS:,} + {MAX_TOOL_ITERATIONS} tool results x "
+        f"{MAX_TOOL_RESULT_CHARS:,}) vs num_ctx={num_ctx:,} (~{capacity:,} chars). "
+        f"A tool-heavy turn can silently truncate the system prompt — raise "
+        f"OLLAMA_NUM_CTX, or lower WREN_CHAT_MAX_HISTORY_CHARS / "
+        f"OLLAMA_MAX_TOOL_RESULT_CHARS."
+    )
+
+
 def main():
     logger.info(f"Starting Wren chat server on {WREN_CHAT_HOST}:{WREN_CHAT_PORT}")
+    # In main(), not at import: chat.server is imported at test-collection time,
+    # before conftest's autouse ntfy stub is in place, so a module-level push
+    # would fire a real alert at Craig's phone on every pytest run.
+    warning = _context_budget_warning()
+    if warning:
+        logger.warning(warning)
+        notify(title="Wren config", message=warning)
     app.run(host=WREN_CHAT_HOST, port=WREN_CHAT_PORT, threaded=True, debug=False)
 
 

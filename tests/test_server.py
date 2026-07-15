@@ -728,3 +728,70 @@ def test_loaded_groups_persist_across_turns_and_clear_on_new(auth_client, monkey
     # Starting a new session drops it.
     auth_client.post("/chat/new")
     assert SID not in srv.loaded_groups
+
+
+# --------------------------------------------------------------------------- #
+# Startup context-budget check
+# --------------------------------------------------------------------------- #
+
+def _budget(monkeypatch, history, num_ctx, iterations=10, result_chars=8000):
+    monkeypatch.setattr(srv, "MAX_HISTORY_CHARS", history)
+    monkeypatch.setattr(srv, "MAX_TOOL_ITERATIONS", iterations)
+    monkeypatch.setattr(srv, "MAX_TOOL_RESULT_CHARS", result_chars)
+    monkeypatch.setenv("OLLAMA_NUM_CTX", str(num_ctx))
+    return srv._context_budget_warning()
+
+
+def test_shipped_config_is_within_budget_and_stays_quiet(monkeypatch):
+    # The real config/.env values. A check that fires on the working setup would
+    # get muted, so pin that it doesn't.
+    assert _budget(monkeypatch, history=48000, num_ctx=32768) is None
+
+
+def test_raising_history_without_num_ctx_warns(monkeypatch):
+    # The exact footgun: the two knobs must move together.
+    warning = _budget(monkeypatch, history=96000, num_ctx=32768)
+    assert warning is not None
+    assert "num_ctx" in warning and "96,000" in warning
+
+
+def test_warning_names_the_knobs_to_change(monkeypatch):
+    warning = _budget(monkeypatch, history=96000, num_ctx=32768)
+    for knob in ("OLLAMA_NUM_CTX", "WREN_CHAT_MAX_HISTORY_CHARS",
+                 "OLLAMA_MAX_TOOL_RESULT_CHARS"):
+        assert knob in warning
+
+
+def test_budget_counts_tool_results_not_just_history(monkeypatch):
+    # History alone fits; it's the in-turn tool results that blow the ceiling —
+    # the whole point of the check.
+    assert _budget(monkeypatch, history=16000, num_ctx=8192, iterations=10,
+                   result_chars=8000) is not None
+    assert _budget(monkeypatch, history=16000, num_ctx=8192, iterations=1,
+                   result_chars=100) is None
+
+
+def test_main_logs_and_pushes_when_over_budget(monkeypatch, caplog):
+    # The wiring, not the arithmetic: an over-budget config must reach both
+    # surfaces. The log alone is invisible (the dashboard skips daemon logs),
+    # so the push is the part Craig actually sees.
+    pushes = []
+    monkeypatch.setattr(srv, "notify", lambda **kw: pushes.append(kw))
+    monkeypatch.setattr(srv.app, "run", lambda **kw: None)
+    monkeypatch.setattr(srv, "_context_budget_warning", lambda: "OVER BUDGET")
+
+    with caplog.at_level(logging.WARNING, logger="wren"):
+        srv.main()
+
+    assert pushes and "OVER BUDGET" in pushes[0]["message"]
+    assert any("OVER BUDGET" in r.message for r in caplog.records)
+
+
+def test_main_stays_silent_when_within_budget(monkeypatch):
+    pushes = []
+    monkeypatch.setattr(srv, "notify", lambda **kw: pushes.append(kw))
+    monkeypatch.setattr(srv.app, "run", lambda **kw: None)
+    monkeypatch.setattr(srv, "_context_budget_warning", lambda: None)
+
+    srv.main()
+    assert pushes == []
