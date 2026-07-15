@@ -29,13 +29,13 @@ def test_read_index_and_pages(tmp_path, monkeypatch):
 
 
 def test_missing_vault_errors(tmp_path, monkeypatch):
-    missing = tmp_path / "not-mounted"
+    missing = tmp_path / "missing-vault"
     monkeypatch.setenv("WIKI_VAULT_PATH", str(missing))
 
     for result in (wiki.read_wiki_index(), wiki.list_wiki_pages(),
                    wiki.read_wiki_page("x")):
         assert "error" in result and "not found" in result["error"]
-    assert not missing.exists()  # never created the mount point on the boot disk
+    assert not missing.exists()  # errored instead of creating a stray vault
 
 
 def test_missing_page(tmp_path, monkeypatch):

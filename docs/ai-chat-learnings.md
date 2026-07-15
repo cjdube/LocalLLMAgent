@@ -63,9 +63,9 @@ model call (`AI_CHAT_LEARNINGS_MAX_CHARS`, default 12000 chars, head+tail if
 longer) — a small, focused prompt the on-device model handles reliably.
 
 A day with no chats, or where every summary came back "None", writes nothing
-(keeps the vault clean). If the vault write fails — e.g. the external drive isn't
-mounted — the draft is emailed and a phone alert pushed, so an entry is never
-silently lost (same contract as the other learnings tasks).
+(keeps the vault clean). If the vault write fails — e.g. `LEARNINGS_DIR` points
+somewhere that doesn't exist — the draft is emailed and a phone alert pushed, so
+an entry is never silently lost (same contract as the other learnings tasks).
 
 ## Backfilling
 

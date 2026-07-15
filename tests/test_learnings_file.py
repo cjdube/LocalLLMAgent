@@ -22,9 +22,9 @@ def test_write_entry_names_by_prefix_and_date(tmp_path, monkeypatch):
 
 
 def test_write_entry_missing_dir_errors_without_creating(tmp_path, monkeypatch):
-    missing = tmp_path / "not-mounted"
+    missing = tmp_path / "missing-learnings-dir"
     monkeypatch.setenv("LEARNINGS_DIR", str(missing))
     result = lf.write_entry("anything", "Daily-YouTube", DAY)
 
     assert "error" in result and "not found" in result["error"]
-    assert not missing.exists()  # did NOT shadow the mount point
+    assert not missing.exists()  # errored instead of creating a stray tree

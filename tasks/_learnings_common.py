@@ -166,7 +166,7 @@ def has_substantive_content(text: str) -> bool:
 def persist_or_email(content: str, prefix: str, day, subject: str,
                      task_name: str, logger) -> dict:
     """Write `content` to the vault as <prefix>-<day>.md; if the write fails
-    (e.g. drive unmounted), email the draft instead so it's never silently lost.
+    (e.g. the vault dir is missing), email the draft instead so it's never lost.
     Both paths failing is a hard failure (alert + raise), matching the contract
     the retired weekly task established."""
     write_result = write_entry(content, prefix, day)

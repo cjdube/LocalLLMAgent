@@ -19,8 +19,9 @@ layout made them silently return nothing, and they offered no capability wiki/
 doesn't, since processed reviews land there as ordinary concept pages
 (strategic-weekly-review-<date>.md).
 
-The vault lives on an external drive, so a missing vault dir is surfaced as an
-error (like learnings_file.py) rather than raising. Functions read from a single
+A missing vault dir is surfaced as an error (like learnings_file.py) rather than
+raising, so a misconfigured WIKI_VAULT_PATH degrades to "no wiki" instead of
+breaking the chat turn that asked. Functions read from a single
 configured vault; the internal helpers take vault_path explicitly so pointing at
 another vault later is a config change, not a rewrite.
 
@@ -47,12 +48,12 @@ def _vault() -> Path:
 
 
 def _require_vault() -> tuple[Path | None, dict | None]:
-    """Return (vault, None) or (None, error) if the vault dir is missing —
-    e.g. the external drive isn't mounted. Mirrors learnings_file.py so Wren
+    """Return (vault, None) or (None, error) if the vault dir is missing — a
+    wrong WIKI_VAULT_PATH, or the vault moved. Mirrors learnings_file.py so Wren
     degrades gracefully instead of raising."""
     vault = _vault()
     if not vault.exists():
-        return None, {"error": f"learnings vault not found (drive not mounted?): {vault}"}
+        return None, {"error": f"learnings vault not found (check WIKI_VAULT_PATH): {vault}"}
     return vault, None
 
 

@@ -1,9 +1,8 @@
 """Write a learnings review to a Markdown file in Craig's Obsidian vault.
 
 The daily learnings tasks each drop a standalone .md file (one per day) into the
-vault's raw/ dir. Returns dicts (not print/exit); the target dir is an external
-drive, so a missing dir is treated as "not mounted" and surfaced as an error so
-the caller's email fallback fires.
+vault's raw/ dir. Returns dicts (not print/exit); a missing target dir is
+surfaced as an error rather than created, so the caller's email fallback fires.
 """
 
 import os
@@ -23,12 +22,12 @@ def _learnings_dir() -> Path:
 
 def write_entry(content: str, prefix: str, day) -> dict:
     """Write `content` to <prefix>-<day:%Y-%m-%d>.md in the learnings dir. Does
-    NOT create parent dirs — the target lives on an external drive, so if it's
-    unmounted we return an error (email fallback) rather than shadow the mount
-    point on the boot disk."""
+    NOT create parent dirs: a missing dir means LEARNINGS_DIR is wrong or the
+    vault moved, and mkdir-ing it would file reviews into a stray tree nobody
+    reads. Return an error instead and let the caller email the draft."""
     directory = _learnings_dir()
     if not directory.exists():
-        return {"error": f"learnings dir not found (drive not mounted?): {directory}"}
+        return {"error": f"learnings dir not found (check LEARNINGS_DIR): {directory}"}
     try:
         path = directory / f"{prefix}-{day:%Y-%m-%d}.md"
         path.write_text(content)

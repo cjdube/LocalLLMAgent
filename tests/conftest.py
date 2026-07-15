@@ -24,8 +24,8 @@ real logs/ no matter what the parent patched. So the redirect goes through the
 WREN_LOGS_DIR env var too, which children inherit. test_conftest.py guards both —
 that no handler in-process escapes to the real logs/, and that a child doesn't.
 
-The learnings tasks write reviews to `LEARNINGS_DIR` — Craig's Obsidian vault on
-an external drive. Tests stub the writer per-test, but redirect LEARNINGS_DIR to
+The learnings tasks write reviews to `LEARNINGS_DIR` — Craig's Obsidian vault
+under ~/Documents. Tests stub the writer per-test, but redirect LEARNINGS_DIR to
 tmp_path suite-wide as the backstop, so a missed stub lands a fixture file in a
 throwaway dir, never in the real vault.
 

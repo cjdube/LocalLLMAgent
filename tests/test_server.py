@@ -456,7 +456,7 @@ def test_api_system_map_shape(auth_client, tmp_path, monkeypatch):
     grouped = [t["name"] for s in data["services"] for t in s["tools"]]
     registered = [t["function"]["name"] for t in srv.TOOLS]
     assert sorted(grouped) == sorted(registered)
-    # The unmounted vault degrades to an empty wiki band, never an error.
+    # The missing vault degrades to an empty wiki band, never an error.
     assert data["memory"]["wiki_pages"] == []
     assert [m["text"] for m in data["memory"]["entries"]] == ["Crows can recognize human faces"]
     assert data["skills"] == []

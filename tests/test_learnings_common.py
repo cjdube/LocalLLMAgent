@@ -221,14 +221,14 @@ def test_persist_writes_and_sends_no_email(spy):
 
 
 def test_persist_write_failure_emails_the_draft(spy, monkeypatch):
-    monkeypatch.setattr(lc, "write_entry", lambda content, prefix, day: {"error": "drive not mounted"})
+    monkeypatch.setattr(lc, "write_entry", lambda content, prefix, day: {"error": "learnings dir not found"})
     lc.persist_or_email("body", "Daily-Chrome", date(2026, 7, 12), "subj", "daily_chrome_learnings", _LOG)
     assert spy["emails"] == [("subj", "body")]
     assert any("vault write failed" in f for f in spy["failures"])
 
 
 def test_persist_write_and_email_both_failing_raises(spy, monkeypatch):
-    monkeypatch.setattr(lc, "write_entry", lambda content, prefix, day: {"error": "drive not mounted"})
+    monkeypatch.setattr(lc, "write_entry", lambda content, prefix, day: {"error": "learnings dir not found"})
     monkeypatch.setattr(lc, "send_email", lambda subject, body: {"error": "gmail 503"})
     with pytest.raises(RuntimeError, match="both failed"):
         lc.persist_or_email("body", "Daily-Chrome", date(2026, 7, 12), "subj", "daily_chrome_learnings", _LOG)

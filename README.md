@@ -137,7 +137,7 @@ in — nothing new inherits it automatically.
 | `calendar.py` | Google Calendar read/write (`get_upcoming_events`, `get_events_in_range`, `log_calendar_event` — idempotent via `source_id`) |
 | `email.py` | Send email via Gmail API (plain text or HTML) |
 | `learnings_file.py` | Write the weekly review to a Markdown file in the Obsidian vault (`LEARNINGS_DIR`) and read the most recent one back for carry-forward |
-| `wiki.py` | Read-only search of the learnings wiki (`WIKI_VAULT_PATH`) so Wren can answer "what did I decide about X" — `read_wiki_index`, `list_wiki_pages`, `read_wiki_page` over the concept pages built by ObsidianWikiAgent. Reads the vault's `wiki/` dir only; `raw/` is a write-only drop (`LEARNINGS_DIR`) that ObsidianWikiAgent files and summarizes. Requires the vault drive mounted |
+| `wiki.py` | Read-only search of the learnings wiki (`WIKI_VAULT_PATH`) so Wren can answer "what did I decide about X" — `read_wiki_index`, `list_wiki_pages`, `read_wiki_page` over the concept pages built by ObsidianWikiAgent. Reads the vault's `wiki/` dir only; `raw/` is a write-only drop (`LEARNINGS_DIR`) that ObsidianWikiAgent files and summarizes. Requires `WIKI_VAULT_PATH` to exist |
 | `google_tasks.py` | Google Tasks read/write (`get_tasks`, `get_tasks_due_soon`, `create_task`, `update_task_due_date`, `complete_task`) |
 | `chrome_history.py` | Read Chrome's local history DB for a date range |
 | `youtube.py` | List videos Liked on the authorized YouTube channel in a date range (`fetch_liked_videos`) — title, channel, and description per video, via the YouTube Data API v3 and the shared Google OAuth token |
@@ -161,7 +161,7 @@ Every tool module is runnable standalone for testing, e.g.:
 |---|---|---|
 | `tasks/morning_brief.py` | Daily 6:00 AM | Fetches weather + next-24h calendar events + Google Tasks past due or due within 48h (via `google_tasks.get_tasks_due_soon`) + starred GitHub repos pushed to since the last brief (via `github_starred.fetch_starred_repos`, cursor persisted in `config/github_starred_state.json`), has the model write a short "at a glance" summary and a one-sentence intro for the starred-repos section, assembles a styled HTML email (weather / calendar / tasks due soon / Starred Repos sections), sends it via Gmail. The pipeline lives in `build_and_send_brief()`, shared with the chat `send_morning_brief` tool. |
 | `tasks/daily_log.py` | Daily 6:15 AM | Fetches yesterday's Strava activities and maps each one onto a Google Calendar event in plain Python — no model, since it's a pure field mapping with no natural-language step. Deduped by `source_id` (Strava activity id) so re-runs never create duplicates. |
-| `tasks/daily_chrome_learnings.py` | Daily 5:15 AM | Covers the prior day's Chrome browsing history, has the local model draft a compact Tools & Tech Encountered daily log, writes it as `Daily-Chrome-<date>.md` in `LEARNINGS_DIR` (Obsidian vault, one file per day). Each site carries its top page *paths*, so the review can say what was being looked into rather than restate the tab title. Sites and pages matching `learnings.excluded_domains` / `learnings.excluded_keywords` ([preferences](docs/preferences.md)) are skipped. Small, focused prompt so the on-device model produces a full draft. A day with no meaningful browsing (or a draft that's just "None") writes nothing. If the write fails — e.g. the external drive isn't mounted — it emails the draft instead so it's never silently lost (and pushes a phone alert). |
+| `tasks/daily_chrome_learnings.py` | Daily 5:15 AM | Covers the prior day's Chrome browsing history, has the local model draft a compact Tools & Tech Encountered daily log, writes it as `Daily-Chrome-<date>.md` in `LEARNINGS_DIR` (Obsidian vault, one file per day). Each site carries its top page *paths*, so the review can say what was being looked into rather than restate the tab title. Sites and pages matching `learnings.excluded_domains` / `learnings.excluded_keywords` ([preferences](docs/preferences.md)) are skipped. Small, focused prompt so the on-device model produces a full draft. A day with no meaningful browsing (or a draft that's just "None") writes nothing. If the write fails — e.g. `LEARNINGS_DIR` points somewhere that doesn't exist — it emails the draft instead so it's never silently lost (and pushes a phone alert). |
 | `tasks/daily_youtube_learnings.py` | Daily 5:35 AM | Covers the prior day's YouTube Liked videos: the local model writes a short synthesis of what they teach, and a deterministic, scheme-validated linked list of the exact videos (verbatim titles + URLs) is appended in Python; writes it as `Daily-YouTube-<date>.md` in `LEARNINGS_DIR`. A day with no Likes writes nothing. Same vault-write-fails → email fallback. |
 | `tasks/ai_chat_learnings.py` | Daily 4:30 AM | Covers the prior day's chats with AI agents: reads every Claude Code session active that day from `~/.claude/projects` (plus any new Gemini export dropped in `WREN_GEMINI_CHATS_DIR`), and has the local model write a brief **Accomplished / Learned** summary per session — outcomes, not the back-and-forth. Writes one `AI-Chat-Learnings-<date>.md` per day in `LEARNINGS_DIR`, one section per session. A day with no chats (or only empty summaries) writes nothing; same vault-write-fails → email fallback. Neither product has an API for past chats, so the sources are local session logs + a drop folder. `--backfill N` summarizes each of the last N days as a separate file. See [docs/ai-chat-learnings.md](docs/ai-chat-learnings.md). |
 | `tasks/calendar_colorizer.py` | Daily 5:00 PM | Fetches yesterday's calendar events, has the model guess a category per event title (Work/LLC, AARP, Fitness, Meal Prep, Domestic/Chores, Meetings, Travel, Appointments, or Uncategorized) and returns a colorId per event, then patches each event's color. Always re-classifies, even events colored by a previous run or by hand. On failure, pushes a phone alert and emails a notice. |
@@ -237,8 +237,8 @@ chat/
   project's own query CLI does — read the index, open the relevant page(s),
   answer and cite them. Only the vault's `wiki/` dir is readable; its `raw/` dir
   is a write-only handoff to ObsidianWikiAgent (see the tools table). All
-  read-only; they return an error (rather than raise) if the vault drive isn't
-  mounted. Beyond facts (memory) and external notes (wiki), Wren keeps
+  read-only; they return an error (rather than raise) if the vault dir is
+  missing. Beyond facts (memory) and external notes (wiki), Wren keeps
   **skills** — reusable *procedures* for multi-step tasks, composed from the
   other tools (e.g. "trip prep → calendar range + weather + packing notes").
   Each is a Markdown file under `skills/`; a capped title+one-line index is
@@ -403,8 +403,8 @@ working outward:
 - **Skills** — one node per `skills/*.md` procedure, on a slowly rotating
   dotted ring; click for the full step-by-step body.
 - **Memory** — a dot field grouped and color-coded by memory category, plus a
-  dimmer band of learnings-wiki page names (empty if the vault drive isn't
-  mounted); click a dot for the fact.
+  dimmer band of learnings-wiki page names (empty if the vault dir is
+  missing); click a dot for the fact.
 - **Routines** — the scheduled tasks, each with its schedule and a last-run
   status dot; hovering one lights up gold edges to the applications it talks to.
 - **Applications** — hexagons for the external services the chat tools are
