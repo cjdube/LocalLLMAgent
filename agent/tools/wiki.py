@@ -43,7 +43,7 @@ DEFAULT_WIKI_VAULT = str(Path.home() / "Documents" / "llm-wiki-learnings")
 
 
 def _vault() -> Path:
-    return Path(os.getenv("WIKI_VAULT_PATH", DEFAULT_WIKI_VAULT))
+    return Path(os.getenv("WIKI_VAULT_PATH", DEFAULT_WIKI_VAULT)).expanduser()
 
 
 def _require_vault() -> tuple[Path | None, dict | None]:

@@ -18,7 +18,7 @@ DEFAULT_LEARNINGS_DIR = str(Path.home() / "Documents" / "llm-wiki-learnings" / "
 
 
 def _learnings_dir() -> Path:
-    return Path(os.getenv("LEARNINGS_DIR", DEFAULT_LEARNINGS_DIR))
+    return Path(os.getenv("LEARNINGS_DIR", DEFAULT_LEARNINGS_DIR)).expanduser()
 
 
 def write_entry(content: str, prefix: str, day) -> dict:
