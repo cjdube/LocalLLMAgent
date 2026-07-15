@@ -178,6 +178,43 @@ def test_transient_error_retries_then_fails_after_bound(monkeypatch):
     assert calls == []  # never a bogus "Task done" push
 
 
+def test_gemini_server_error_is_transient(monkeypatch):
+    # With WREN_LLM_BACKEND=gemini the worker's blips arrive as genai errors,
+    # not requests ones. A 5xx must retry like its Ollama equivalent rather than
+    # terminally failing a job whose side effects already ran.
+    from google.genai import errors as genai_errors
+
+    failures = []
+    _capture_notify(monkeypatch)
+    monkeypatch.setattr(bg_worker, "notify_failure", lambda *a, **k: failures.append(a))
+
+    def raise_server_error(*a, **k):
+        raise genai_errors.ServerError(503, {"error": {"message": "overloaded"}})
+
+    monkeypatch.setattr(bg_worker, "advance", raise_server_error)
+    jid = background.run_in_background("research x")["id"]
+
+    assert bg_worker.main() == 0
+    assert background.get_job_result(jid)["status"] == "pending"
+    assert failures == []
+
+
+def test_gemini_client_error_is_not_transient(monkeypatch):
+    # A 4xx (bad key, malformed request) won't fix itself on the next poll.
+    from google.genai import errors as genai_errors
+
+    _capture_notify(monkeypatch)
+    monkeypatch.setattr(bg_worker, "notify_failure", lambda *a, **k: None)
+
+    def raise_client_error(*a, **k):
+        raise genai_errors.ClientError(400, {"error": {"message": "bad key"}})
+
+    monkeypatch.setattr(bg_worker, "advance", raise_client_error)
+    jid = background.run_in_background("x")["id"]
+    assert bg_worker.main() == 1
+    assert background.get_job_result(jid)["status"] == "failed"
+
+
 def test_non_transient_error_still_fails_immediately(monkeypatch):
     _capture_notify(monkeypatch)
     monkeypatch.setattr(bg_worker, "notify_failure", lambda *a, **k: None)

@@ -57,11 +57,35 @@ resolve = None
 with_identity = None
 build_and_send_brief = None
 
-# Errors worth retrying: the model runner or network being momentarily away.
-# Tool-level errors never surface here (the loop funnels them into error dicts
-# the model sees); what does is Ollama itself being unreachable mid-call.
-TRANSIENT_EXCEPTIONS = (requests.exceptions.ConnectionError, requests.exceptions.Timeout)
 MAX_TRANSIENT_ATTEMPTS = 3
+
+
+def _transient_exceptions() -> tuple:
+    """Errors worth retrying: the model runner or network being momentarily away.
+    Tool-level errors never surface here (the loop funnels them into error dicts
+    the model sees); what does is the backend itself being unreachable mid-call.
+
+    Ollama raises those through `requests`. With WREN_LLM_BACKEND=gemini — which
+    per docs/llm-backend.md routes this worker too — the same class of blip
+    arrives instead as a google.genai ServerError (5xx) or an httpx transport
+    error, and a tuple naming only the requests classes sends it to the
+    mark_failed branch: a job the Ollama path would have retried is terminally
+    failed by a hiccup, side effects already executed. ClientError (4xx — bad
+    key, malformed request) stays out on purpose; it won't fix itself in 30s.
+
+    Resolved in a function, not at import: an `except` expression is evaluated
+    when an exception actually propagates, so the idle poll — the overwhelmingly
+    common case this module keeps import-light for — never pays for the cloud
+    SDK, and a machine without it installed still works.
+    """
+    transient = [requests.exceptions.ConnectionError, requests.exceptions.Timeout]
+    try:
+        import httpx
+        from google.genai import errors as genai_errors
+    except ImportError:
+        return tuple(transient)
+    return tuple(transient + [genai_errors.ServerError, httpx.TransportError])
+
 
 # Re-push a stuck approval once its buttons' tokens have expired (see
 # background._TOKEN_MAX_AGE_S) — without this, a missed push strands the job in
@@ -204,9 +228,9 @@ def main() -> int:
         tools, dispatch = _bg_tools_and_dispatch(logger)
         _run_job(job, tools, dispatch, logger)
         return 0
-    except TRANSIENT_EXCEPTIONS as e:
-        # Ollama restarting or a network blip: leave the job actionable so the
-        # next poll retries from its last persisted point, up to a bound.
+    except _transient_exceptions() as e:
+        # The backend restarting or a network blip: leave the job actionable so
+        # the next poll retries from its last persisted point, up to a bound.
         attempts = background.bump_attempts(job["id"]) if job is not None else 0
         if job is not None and attempts < MAX_TRANSIENT_ATTEMPTS:
             logger.warning(
