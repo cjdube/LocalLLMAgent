@@ -78,6 +78,41 @@ def test_a_child_interpreter_inherits_the_logs_redirect():
     )
 
 
+def test_every_config_store_is_redirected_away_from_production():
+    # Same shape as the logs guard, for the JSON stores: the redirect is
+    # invisible, and a regression doesn't fail anything — it just quietly starts
+    # writing fixture data into config/, which is how fixture opportunities once
+    # reached the production store. Resolve the real dir from the source tree so
+    # this can't agree with a broken redirect by sharing its mistake.
+    from agent.tools import background, memory, opportunities, reminders
+    from tasks import morning_brief, opportunity_digest
+
+    real_config = Path(_common.__file__).resolve().parent.parent / "config"
+    stores = {
+        "memory._STORE_PATH": memory._STORE_PATH,
+        "background._STORE_PATH": background._STORE_PATH,
+        "reminders._STORE_PATH": reminders._STORE_PATH,
+        "opportunities._STORE_PATH": opportunities._STORE_PATH,
+        "opportunity_digest.STATE_PATH": opportunity_digest.STATE_PATH,
+        "morning_brief.STARRED_STATE_PATH": morning_brief.STARRED_STATE_PATH,
+    }
+    escaped = [f"{name} -> {p}" for name, p in stores.items()
+               if Path(p).resolve().parent == real_config]
+    assert not escaped, (
+        "these stores still point into the production config/ dir: "
+        + "; ".join(escaped)
+        + " — a test writing one clobbers real data"
+    )
+
+
+def test_wiki_vault_is_redirected_away_from_the_real_vault():
+    from agent.tools import wiki
+
+    vault = wiki._vault()
+    assert vault != Path(wiki.DEFAULT_WIKI_VAULT).expanduser(), \
+        "WIKI_VAULT_PATH still resolves to Craig's real Obsidian vault"
+
+
 def test_the_wren_logger_server_binds_at_import_is_covered():
     # chat/server.py's module-level setup_logger("wren") is the specific call that
     # defeated the autouse fixture; pin it so the guard has teeth even if the

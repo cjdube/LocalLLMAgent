@@ -44,6 +44,14 @@ config/opportunities.json. Pointing the store (and the digest watermark) at
 tmp_path for every test makes that class of miss land in a throwaway file,
 never in config/.
 
+Every other JSON store under config/ gets that same backstop, for the same
+reason (see _isolate_remaining_config_stores): wren_memory.json, bg_jobs.json,
+reminders.json, github_starred_state.json, and the WIKI_VAULT_PATH vault. All
+were per-test-redirected only — the pre-incident position opportunities.json
+was in. Adding a new store means adding it there in the same commit; the
+per-test monkeypatch stays the convention, this is what makes missing it
+harmless. (agent/prefs.py is deliberately absent: it is read-only at import.)
+
 The cloud LLM backend is a network egress like ntfy: a test that selects
 WREN_LLM_BACKEND=gemini (or forgets to stub it) must never reach Google.
 `loop._gemini_client` is the single client-construction choke point, so blanket-
@@ -58,11 +66,15 @@ from pathlib import Path
 import pytest
 
 from agent import loop as _loop
+from agent.tools import background as _background
+from agent.tools import memory as _memory
 from agent.tools import notify as _notify
 from agent.tools import opportunities as _opportunities
+from agent.tools import reminders as _reminders
 from tasks import _chat_transcripts as _chat_transcripts
 from tasks import _common
 from tasks import ai_chat_learnings as _ai_chat_learnings
+from tasks import morning_brief as _morning_brief
 from tasks import opportunity_digest as _opportunity_digest
 
 # Both lines run at conftest import — before any test module imports a module that
@@ -101,6 +113,30 @@ def _isolate_opportunity_stores(tmp_path, monkeypatch):
     monkeypatch.setattr(_opportunities, "_STORE_PATH", tmp_path / "opportunities.json")
     monkeypatch.setattr(_opportunity_digest, "STATE_PATH",
                         tmp_path / "opportunities_state.json")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_remaining_config_stores(tmp_path, monkeypatch):
+    # The rest of the JSON stores under config/, given the same blanket backstop
+    # as opportunities.json above and for the same reason — each is redirected
+    # per-test today, which is exactly the position opportunities.json was in
+    # when a surviving thread wrote fixture data over the production file. The
+    # stakes here are higher than a stale digest: wren_memory.json holds pinned
+    # facts injected into every future system prompt, and bg_jobs.json/
+    # reminders.json drive real side effects (re-run jobs, duplicate pushes).
+    #
+    # Each path is deliberately NOT created: a missing file is the stores' empty
+    # state, so an unstubbed read degrades to "no data" rather than inheriting
+    # whatever a previous test wrote.
+    monkeypatch.setattr(_memory, "_STORE_PATH", tmp_path / "wren_memory.json")
+    monkeypatch.setattr(_background, "_STORE_PATH", tmp_path / "bg_jobs.json")
+    monkeypatch.setattr(_reminders, "_STORE_PATH", tmp_path / "reminders.json")
+    monkeypatch.setattr(_morning_brief, "STARRED_STATE_PATH",
+                        tmp_path / "github_starred_state.json")
+    # wiki.py resolves this env on every _vault() call. Craig's real vault is a
+    # readable path on this machine, so without the redirect a wiki test that
+    # forgets to stub reads his actual notes into a fixture assertion.
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path / "wiki_vault"))
 
 
 class _StubNtfyResponse:
