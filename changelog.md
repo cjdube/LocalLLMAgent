@@ -1,3 +1,4 @@
+* 2026-07-15 - Stop jest scanning worktree package.json copies as a duplicate haste module
 * 2026-07-14 - Drop the wiki tools that read raw/ — it's a write-only handoff
 * 2026-07-14 - Add a jest/jsdom suite for the shared chat dock
 * 2026-07-14 - Refactor the two chat docks into one shared script

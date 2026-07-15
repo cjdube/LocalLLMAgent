@@ -9,6 +9,9 @@
     "testEnvironment": "jsdom",
     "testMatch": [
       "<rootDir>/tests/**/*.test.js"
+    ],
+    "modulePathIgnorePatterns": [
+      "<rootDir>/.claude/worktrees/"
     ]
   },
   "devDependencies": {
