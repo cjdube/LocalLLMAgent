@@ -420,6 +420,33 @@ def test_gemini_hoists_system_and_pairs_tool_result(monkeypatch):
     assert fr.response == {"temp": 70}
 
 
+def test_gemini_pairing_survives_a_dropped_batched_call(monkeypatch):
+    # advance() drops batched calls after a confirm-gated one, so an assistant
+    # turn can emit two calls and produce only one result. The orphaned name must
+    # not leak into the next turn: pairing is positional (canonical tool messages
+    # carry no call id), so a stale name would mislabel every later result.
+    captured = _patch_gemini(monkeypatch, [[_FakeChunk(parts=[_FakePart(text="ok")])]])
+    messages = [
+        {"role": "user", "content": "send it and check the weather"},
+        # Two calls emitted; only send_email's result comes back (fetch_weather dropped).
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"function": {"name": "send_email", "arguments": {"subject": "hi"}}},
+            {"function": {"name": "fetch_weather", "arguments": {"city": "Boston"}}}]},
+        {"role": "tool", "content": '{"sent": true}'},
+        # A later, unrelated turn: its result must pair with ITS call.
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"function": {"name": "list_reminders", "arguments": {}}}]},
+        {"role": "tool", "content": '{"reminders": []}'},
+    ]
+
+    loop._gemini_chat(messages, tools=[])
+
+    responses = [p.function_response for c in captured["calls"][0]["contents"]
+                 for p in c.parts if getattr(p, "function_response", None)]
+    assert [r.name for r in responses] == ["send_email", "list_reminders"]
+    assert responses[1].response == {"reminders": []}
+
+
 def test_gemini_should_cancel_interrupts(monkeypatch):
     stream = [_FakeChunk(parts=[_FakePart(text="partial")]), _FakeChunk(parts=[])]
     _patch_gemini(monkeypatch, [stream])

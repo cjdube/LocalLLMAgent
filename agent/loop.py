@@ -289,8 +289,13 @@ def _coerce_response(content) -> dict:
 def _gemini_contents(messages: list[dict]):
     """Translate canonical messages into (system_instruction, contents) for the
     Gemini SDK. System turns are hoisted out; assistant tool_calls become
-    functionCall parts and each following `tool` result is paired (FIFO) with its
-    call name to build the matching functionResponse."""
+    functionCall parts and each following `tool` result is paired (FIFO, within
+    the emitting assistant turn) with its call name to build the matching
+    functionResponse.
+
+    The canonical `tool` message carries no call id (see _execute_tool_call), so
+    pairing is positional — hence the per-turn reset below rather than a global
+    FIFO queue."""
     from google.genai import types
 
     system_parts: list[str] = []
@@ -308,6 +313,14 @@ def _gemini_contents(messages: list[dict]):
             parts = []
             if m.get("content"):
                 parts.append(types.Part.from_text(text=m["content"]))
+            # Reset, don't extend: pending_names holds only the calls from THIS
+            # assistant turn. advance() drops any batched calls after a
+            # confirm-gated one, so a turn can emit two calls and yield one
+            # result — extending would leave the orphan name in the queue and
+            # every later result would pop the wrong name, silently mislabelling
+            # the rest of the conversation. Resetting confines that to the turn
+            # where the drop happened.
+            pending_names = []
             for call in m.get("tool_calls") or []:
                 fn = call["function"]
                 args = fn.get("arguments") or {}
