@@ -167,7 +167,10 @@ def fetch_claude_sessions(start: datetime, end: datetime,
 
 
 def gemini_dir() -> Path:
-    return Path(os.getenv("WREN_GEMINI_CHATS_DIR", DEFAULT_GEMINI_DIR))
+    # expanduser: .env.example documents this as a ~-prefixed path, and without
+    # expansion a literal "~/..." dir never exists — fetch_gemini_chats would
+    # silently return [] forever rather than reading the drop folder.
+    return Path(os.getenv("WREN_GEMINI_CHATS_DIR", DEFAULT_GEMINI_DIR)).expanduser()
 
 
 def fetch_gemini_chats(processed: dict, max_chars: int = DEFAULT_MAX_CHARS) -> list[dict]:

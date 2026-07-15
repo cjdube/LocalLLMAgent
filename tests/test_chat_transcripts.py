@@ -5,6 +5,7 @@ never touch the real ~/.claude transcripts or Craig's vault."""
 import json
 import os
 from datetime import date, datetime, timezone
+from pathlib import Path
 
 from tasks import _chat_transcripts as ct
 
@@ -82,6 +83,15 @@ def test_fetch_gemini_chats_unprocessed_and_dedup():
 
 def test_fetch_gemini_chats_empty_when_folder_absent():
     assert ct.fetch_gemini_chats({}) == []
+
+
+def test_gemini_dir_expands_a_tilde_path(monkeypatch):
+    # .env.example documents this var with a ~ prefix. Unexpanded, the literal
+    # "~/..." dir never exists and every dropped chat is silently skipped.
+    monkeypatch.setenv("WREN_GEMINI_CHATS_DIR", "~/Documents/llm-wiki-learnings/gemini_inbox")
+    resolved = ct.gemini_dir()
+    assert "~" not in str(resolved)
+    assert resolved == Path.home() / "Documents" / "llm-wiki-learnings" / "gemini_inbox"
 
 
 def test_compact_trims_the_middle():
