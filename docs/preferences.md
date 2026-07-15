@@ -44,11 +44,15 @@ import).
 from what you call your categories, so renaming "Work/LLC" to "Consulting"
 breaks nothing. Recognized values, each expected on exactly one category:
 
-- `work`, `meetings`, `appointments` — the weekly review's event buckets
-  (`tasks/weekly_learnings.py`)
 - `fitness` — the color Strava activities are logged with (`tasks/daily_log.py`)
 - `fallback` — the colorId the colorizer uses when it can't classify an event
   (`tasks/calendar_colorizer.py`)
+- `work`, `meetings`, `appointments` — **legacy, no consumer.** These were the
+  weekly review's event buckets; the weekly review was split into the daily
+  learnings tasks, which then dropped calendar bucketing entirely. Kept on their
+  categories (and asserted by `tests/test_prefs.py`) so the tags are already in
+  place if event bucketing returns. Nothing reads them today — retagging or
+  removing them changes no behavior.
 
 ### `learnings`
 
@@ -117,8 +121,8 @@ overrides.
   `tasks/opportunity_digest.py`) — SEC Form D mechanics, not a preference;
   anyone scouting the same source wants the same filter.
 - **"Craig" in tool-schema description strings and module docstrings**
-  (~40 mentions across `agent/tools/*.py`) and the weekly review's Obsidian
-  template/section rules in `tasks/weekly_learnings.py` — a mechanical later
+  (~40 mentions across `agent/tools/*.py`) and the daily reviews' Obsidian
+  template/section rules in `tasks/daily_*_learnings.py` — a mechanical later
   sweep; the persona-bearing prompt openings already use `user_name`.
 - **`agent/identity.md` / `agent/wren.md` / `agent/wren_chat.md`** — already
   data (committed Markdown loaded into system prompts); edit them directly.

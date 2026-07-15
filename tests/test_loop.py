@@ -431,15 +431,15 @@ def test_gemini_should_cancel_interrupts(monkeypatch):
 
 def test_resolve_backend_precedence(monkeypatch):
     monkeypatch.delenv("WREN_LLM_BACKEND", raising=False)
-    monkeypatch.delenv("WREN_WEEKLY_LEARNINGS_BACKEND", raising=False)
-    assert loop.resolve_backend("weekly_learnings") is None
+    monkeypatch.delenv("WREN_DAILY_CHROME_LEARNINGS_BACKEND", raising=False)
+    assert loop.resolve_backend("daily_chrome_learnings") is None
 
     monkeypatch.setenv("WREN_LLM_BACKEND", "ollama")
-    assert loop.resolve_backend("weekly_learnings") == "ollama"
+    assert loop.resolve_backend("daily_chrome_learnings") == "ollama"
 
     # per-task var wins over the global default
-    monkeypatch.setenv("WREN_WEEKLY_LEARNINGS_BACKEND", "gemini")
-    assert loop.resolve_backend("weekly_learnings") == "gemini"
+    monkeypatch.setenv("WREN_DAILY_CHROME_LEARNINGS_BACKEND", "gemini")
+    assert loop.resolve_backend("daily_chrome_learnings") == "gemini"
 
 
 def test_llm_chat_dispatch_and_unknown_backend(monkeypatch):

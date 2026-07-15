@@ -60,8 +60,8 @@ def calendar_categories() -> list:
 
 def category_color_by_role(role: str, default: str) -> str:
     """colorId of the first category tagged with `role`, decoupling operational
-    lookups (weekly buckets, fitness logging, colorizer fallback) from the
-    personal category names, which a cloner is free to rename."""
+    lookups (fitness logging, colorizer fallback) from the personal category
+    names, which a cloner is free to rename."""
     return next((c["color_id"] for c in calendar_categories()
                  if c.get("role") == role), default)
 

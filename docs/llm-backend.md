@@ -32,13 +32,18 @@ Two environment variables in `config/.env`, resolved as
   cloud, where quality matters most and latency is invisible.
 
 `<TASK_KEY>` is the uppercased task/module name. Wired task keys:
-`WEEKLY_LEARNINGS`, `OPPORTUNITY_DIGEST`, `MORNING_BRIEF`, `CALENDAR_COLORIZER`,
-`RESEARCH`, `EVALUATE_APP`.
+`DAILY_CHROME_LEARNINGS`, `DAILY_YOUTUBE_LEARNINGS`, `AI_CHAT_LEARNINGS`,
+`OPPORTUNITY_DIGEST`, `MORNING_BRIEF`, `CALENDAR_COLORIZER`, `RESEARCH`,
+`EVALUATE_APP`.
+
+Only these keys do anything: `resolve_backend` builds the variable name from the
+key its caller passes, so a `WREN_<ANYTHING>_BACKEND` that doesn't match a call
+site above is silently inert rather than an error.
 
 ```
-# chat + bg_worker stay local; only weekly_learnings goes to the cloud
+# chat + bg_worker stay local; only the Chrome learnings review goes to the cloud
 WREN_LLM_BACKEND=ollama
-WREN_WEEKLY_LEARNINGS_BACKEND=gemini
+WREN_DAILY_CHROME_LEARNINGS_BACKEND=gemini
 ```
 
 `chat/server.py` and `tasks/bg_worker.py` deliberately have no per-task wiring —
@@ -57,7 +62,7 @@ consumer next starts — there's nothing to reload live:
   run, so tasks need no restart — the next run picks up the change.)
 - **Scheduled tasks** — nothing to do; the change applies on the task's next run.
   To exercise it immediately, run the task by hand, e.g.
-  `python -m tasks.weekly_learnings`.
+  `python -m tasks.daily_chrome_learnings`.
 - **Verify** — the dashboard's identity line shows the active chat backend
   (e.g. `gemini-2.5-flash (gemini)`); task logs under `logs/` show a
   `gemini_chat model=…` line when a task ran on the cloud backend.
