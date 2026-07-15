@@ -469,7 +469,7 @@ ROUTINE_USES = {
     "morning_brief": ["google_calendar", "gmail", "github", "google_tasks", "weather", "ntfy"],
     "daily_log": ["google_calendar", "strava", "ntfy"],
     "calendar_colorizer": ["google_calendar", "gmail", "ntfy"],
-    "daily_chrome_learnings": ["google_calendar", "chrome", "gmail", "ntfy"],
+    "daily_chrome_learnings": ["chrome", "gmail", "ntfy"],
     "daily_youtube_learnings": ["youtube", "gmail", "ntfy"],
     "opportunity_digest": ["opportunities", "gmail", "ntfy"],
 }
