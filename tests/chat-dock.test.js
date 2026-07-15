@@ -292,4 +292,29 @@ describe("new chat", () => {
     expect(remaining).toHaveLength(1);
     expect(remaining[0].textContent).toContain("Hi Craig");
   });
+
+  test("unlocks the composer when started mid-turn", async () => {
+    // /chat/new cancels the running turn server-side, so its postTurn never
+    // returns to clear the busy state. Without the client-side reset the dock
+    // sits showing "Stop" forever on a fresh session that can't be typed into.
+    pendingTurn();
+    submit("hello");
+    expect(sendBtn().textContent).toBe("Stop");
+
+    document.getElementById("newChat").click();
+    await settle();
+    expect(sendBtn().textContent).not.toBe("Stop");
+    expect(input().disabled).toBe(false);
+  });
+
+  test("a failed /chat/new still resets the dock", async () => {
+    global.fetch = jest.fn(() => Promise.reject(new Error("offline")));
+    document.getElementById("newChat").click();
+    await settle();
+    // The rejected fetch must not skip the reset — the thread still clears and
+    // re-greets rather than leaving a half-reset dock.
+    expect(messages().children).toHaveLength(1);
+    expect(lastMessage()).toContain("Hi Craig");
+    expect(sendBtn().textContent).not.toBe("Stop");
+  });
 });

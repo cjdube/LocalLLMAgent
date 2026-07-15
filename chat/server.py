@@ -626,6 +626,15 @@ def chat_new():
     if not _authenticated():
         return jsonify({"error": "not authenticated"}), 401
     sid = _session_id()
+    # Cancel any turn still running for this sid before clearing its state.
+    # Without this the orphaned turn keeps its reference to the old history and
+    # runs to completion: it can still park a pending_confirmation on what the
+    # user now sees as a fresh session (a confirm card for a request whose
+    # context is gone), and it holds the sid's one turn slot, so the next /chat
+    # gets 409'd until it drains. The turn's own handler pops cancel_events.
+    event = cancel_events.get(sid)
+    if event is not None:
+        event.set()
     conversations.pop(sid, None)
     pending_confirmations.pop(sid, None)
     loaded_groups.pop(sid, None)

@@ -351,6 +351,23 @@ def test_chat_cancel_with_no_active_turn_is_noop(auth_client):
     assert resp.get_json()["cancelling"] is False
 
 
+def test_chat_new_cancels_a_running_turn(auth_client):
+    # Starting a fresh chat while a turn is still running must stop it, or the
+    # orphan keeps the sid's turn slot (409ing the next /chat) and can still
+    # park a confirmation on the now-empty session.
+    event = srv.cancel_events[SID] = threading.Event()
+    resp = auth_client.post("/chat/new")
+    assert resp.status_code == 200
+    assert event.is_set()
+
+
+def test_chat_new_with_no_running_turn_still_clears(auth_client):
+    srv.conversations[SID] = [{"role": "user", "content": "hi"}]
+    resp = auth_client.post("/chat/new")
+    assert resp.status_code == 200
+    assert SID not in srv.conversations
+
+
 def test_chat_confirm_without_pending_is_400(auth_client):
     resp = auth_client.post("/chat/confirm", json={"approved": True})
     assert resp.status_code == 400

@@ -162,8 +162,14 @@
     postTurn("/chat", { message }, addTyping());
   });
 
-  newChatBtn.addEventListener("click", async () => {
-    await fetch("/chat/new", { method: "POST" });
+  newChatBtn.addEventListener("click", () => {
+    // /chat/new cancels a running turn server-side, so that turn's postTurn
+    // never returns to clear the busy state — reset it here or the composer
+    // stays locked showing "Stop" on a session that can't be typed into.
+    // Deliberately not awaited: the reset must not hinge on the round-trip
+    // landing, or a slow/failed request reintroduces the same stuck dock.
+    fetch("/chat/new", { method: "POST" }).catch(() => {});
+    setBusy(false);
     messagesEl.replaceChildren();
     addMessage("wren", GREETING);
   });
