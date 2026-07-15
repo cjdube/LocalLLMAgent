@@ -71,6 +71,15 @@ def fetch_webpage(url: str = "", api_key: str = None, **_) -> dict:
     url = (url or "").strip()
     # The url may come from the model or a search result, so scheme-validate it
     # (javascript:/file:/data: must not reach the fetcher).
+    #
+    # There is deliberately no *host* allowlist, and that's only safe because of
+    # how this tool fetches: we POST the url to Firecrawl (SCRAPE_URL, a fixed
+    # host) and their infrastructure retrieves it. This process never issues a
+    # request to the model-supplied url, so "http://localhost:8420/..." or
+    # "http://169.254.169.254/..." reaches Firecrawl's network, not Craig's
+    # tailnet or this Mac. If this is ever refactored to fetch the url directly
+    # (requests.get(url)), that property is gone and this becomes a real SSRF
+    # into the tailnet — add a host allowlist in the same commit.
     try:
         scheme = urlparse(url).scheme
     except ValueError:
