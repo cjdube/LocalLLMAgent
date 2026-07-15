@@ -47,10 +47,18 @@ Each site's "pages" lists the specific page paths visited: use them to say what 
 looked into (several pages under /docs/pricing and /docs/models is a comparison, not just a visit). \
 Never invent detail the paths and titles don't support.
 
+Ranking chrome_sites — the list is ordered by visit count, which is NOT a measure of importance:
+- Prefer focused engagement (a specific article read, a cluster of docs paths on one topic) over \
+habitual navigation (sites opened daily out of routine — repo dashboards, mail, your own dashboards).
+- A low "visits" number is never a reason to skip a site. One deliberately-read article is stronger \
+signal than eight visits to a homepage.
+- Prefer the subject matter over the tool that hosted it, so a topic researched across several sites \
+reads as one line of inquiry rather than several unrelated bullets.
+
 Rules:
 - Professional, analytical tone. No casual language.
 - Bold the tool name at the start of each bullet (use **name** markdown).
-- 1-3 bullets. Explain significance, not just what happened.
+- 3-6 bullets. Explain significance, not just what happened.
 - If there is no real source data, use exactly one bullet: \
 "**None:** [No qualifying items for this section]".
 - NEVER include fitness (runs, yoga, gym, walks), social (book club, coffee, meals), travel, \
