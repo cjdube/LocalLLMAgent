@@ -28,31 +28,19 @@ Usage:
     python -m tasks.log_inspector
 """
 
-import os
 import sys
 from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
-from urllib.parse import urlsplit
-
-import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent.tools._http import load_env
-from agent.tools.notify import notify
+from agent.tools.notify import notify, ntfy_health
 from chat.insights import _LINE_RE, _parse_ts, _read_lines, discover_tasks, parse_runs
 from tasks import _common
 from tasks._common import notify_failure, setup_logger
 
 WINDOW_HOURS = 24
-
-# The push channel probe has to be an ACTIVE check, not a log scan. July 2026:
-# ntfy was down for four days and not one line was logged about it, because
-# nothing happened to need pushing — no task failed, no reminder came due. A
-# dead channel is invisible until you try to use it, and by then the alert is
-# the thing being lost. So ask it directly, every morning.
-NTFY_HEALTH_TIMEOUT_S = 5
 
 # A run still marked "running" this long after it started never logged an end —
 # the process died without raising (SIGKILL, OOM), which no error line records.
@@ -180,28 +168,6 @@ def _task_outcomes(now: datetime) -> dict[str, list[str]]:
     return out
 
 
-def _ntfy_health() -> str | None:
-    """-> an error string if Wren's push channel is down, else None.
-
-    Deliberately hits ntfy's /v1/health rather than publishing: a probe that
-    pushed would either alert the phone every morning or need a throwaway topic.
-    """
-    load_env()
-    url = os.getenv("NTFY_URL")
-    if not url:
-        return None  # push is switched off on purpose (see README) — not a fault
-    parts = urlsplit(url)
-    try:
-        resp = requests.get(f"{parts.scheme}://{parts.netloc}/v1/health",
-                            timeout=NTFY_HEALTH_TIMEOUT_S)
-        resp.raise_for_status()
-        if not resp.json().get("healthy"):
-            return "ntfy reachable but reports unhealthy"
-    except Exception as e:
-        return f"ntfy unreachable: {e}"
-    return None
-
-
 def _by_source(findings: list[dict]) -> str:
     counts = Counter(f["source"] for f in findings)
     return ", ".join(f"{src}({n})" for src, n in counts.most_common())
@@ -257,7 +223,8 @@ def main() -> int:
         # does, hence the note.
         findings = _scan_lines(now)
         outcomes = _task_outcomes(now)
-        channel_error = _ntfy_health()
+        # "off" (push deliberately disabled) reports no error, same as healthy.
+        channel_error = ntfy_health()["error"]
 
         # " -> " on purpose: insights.py treats it as the marker for a data line
         # (see _parse_runs_uncached), so a quoted message containing "failed" or

@@ -191,6 +191,12 @@ mini behind Tailscale keeps alerts private and off the public internet;
 inject fake notifications. Set `NTFY_URL` and `NTFY_TOKEN` in `config/.env`
 (see Setup).
 
+The dashboard header carries a live `push up` / `push down` pill so you can tell
+the channel is alive without waiting for the 8am log inspector's check. It
+probes ntfy's health endpoint, so it reports that the **server is reachable** —
+not that `NTFY_TOKEN` is still valid for the topic. A revoked token shows `push
+up` and still fails every publish; testing that would mean sending a real push.
+
 ## Wren — ad hoc chat
 
 `chat/server.py` is a small always-on Flask app so Craig can talk to Wren

@@ -52,9 +52,11 @@ Daemons (chat server, `bg_worker`, `reminder_sweep`) are skipped — they emit n
 run boundaries. Weekly tasks (any plist with a `Weekday` key) are skipped for
 `missing`, since a 24h window can't tell "didn't run" from "isn't due."
 
-**Signal C — the push channel probe** (`_ntfy_health`). Asks ntfy's
-`/v1/health` whether it's alive. This one is an *active* check rather than a log
-scan, and it exists because of a specific failure:
+**Signal C — the push channel probe** (`ntfy_health`, in `agent/tools/notify.py`
+— the push channel's own module, since the dashboard's live `push up` pill runs
+the same probe). Asks ntfy's `/v1/health` whether it's alive. This one is an
+*active* check rather than a log scan, and it exists because of a specific
+failure:
 
 > On 2026-07-11 the Mac rebooted, colima failed to restart, and ntfy was down
 > for **four days**. Not one line was logged about it — because nothing happened

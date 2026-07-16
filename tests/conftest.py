@@ -54,9 +54,11 @@ throwaway dir, never in the real vault.
 Those same `main()` calls also reach `notify_failure` on a failure path (e.g.
 strava_download's partial-failure alert), which POSTs to the real ntfy server when
 NTFY_URL is configured — firing an actual push to Craig's phone every test run.
-Stub the single push egress (agent.tools.notify.requests.post) for every test
-so the suite can never send a real alert; test_notify.py re-patches it per-test
-to exercise the real code.
+Stub the push egress (agent.tools.notify.requests.post) for every test so the suite
+can never send a real alert; test_notify.py re-patches it per-test to exercise the
+real code. `requests.get` is stubbed alongside it: ntfy_health() probes the live
+server, and it load_env()s the real config/.env to find it, so the dashboard's
+health endpoint would otherwise reach the real box from a server test.
 
 The opportunities store gets the same blanket protection as the logs: tests
 isolate it by monkeypatching `opportunities._STORE_PATH`, but a research
@@ -206,10 +208,26 @@ class _StubNtfyResponse:
     def raise_for_status(self):
         pass
 
+    def json(self):
+        return {"healthy": True}  # ntfy_health's /v1/health body
+
 
 @pytest.fixture(autouse=True)
-def _block_ntfy_push(monkeypatch):
+def _block_ntfy_egress(monkeypatch):
+    """Stub BOTH verbs the ntfy module speaks — post (publish) and get (health).
+
+    post: notify() fires a real push at Craig's phone on every task-failure path
+    a test exercises. get: ntfy_health() probes the real ntfy server, and it
+    calls load_env() first, so it reads the REAL config/.env — a test hitting
+    /api/health/ntfy would reach the live box over the network no matter what
+    the test set in the environment.
+
+    The get stub is why this fixture is no longer named _block_ntfy_push: the
+    module's egress is two verbs now, and only the post one was ever guarded.
+    test_notify.py re-patches both per-test to exercise the real code.
+    """
     monkeypatch.setattr(_notify.requests, "post", lambda *a, **k: _StubNtfyResponse())
+    monkeypatch.setattr(_notify.requests, "get", lambda *a, **k: _StubNtfyResponse())
 
 
 @pytest.fixture(autouse=True)

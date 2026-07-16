@@ -57,7 +57,7 @@ from agent.tools import background
 from agent.tools import opportunities
 from agent.tools.memory import recall
 from agent.tools.research import research_opportunity
-from agent.tools.notify import notify
+from agent.tools.notify import notify, ntfy_health
 from agent.tools.skills import render_skills_index
 from tasks._common import setup_logger
 from tasks.morning_brief import build_and_send_brief
@@ -845,6 +845,18 @@ def api_run_detail(task_key: str, run_id: str):
     if run is None:
         return jsonify({"error": "unknown run"}), 404
     return jsonify(run)
+
+
+@app.route("/api/health/ntfy", methods=["GET"])
+def api_health_ntfy():
+    """Live push-channel probe for the dashboard pill. The log inspector's
+    check runs once at 8am and reports by email; this answers "is push up
+    right now" — the question you have after restarting the ntfy container.
+
+    Server reachability only, not token validity — see ntfy_health()."""
+    if not _authenticated():
+        return jsonify({"error": "not authenticated"}), 401
+    return jsonify(ntfy_health())
 
 
 @app.route("/api/capabilities", methods=["GET"])

@@ -63,6 +63,7 @@ EMAIL_CALL = {"function": {"name": "send_email", "arguments": {"subject": "Hi", 
     ("get", "/api/runs/morning_brief", {}),
     ("get", "/api/runs/morning_brief/someid", {}),
     ("get", "/api/capabilities", {}),
+    ("get", "/api/health/ntfy", {}),
     ("post", "/api/run/morning_brief", {}),
     ("get", "/api/run/morning_brief/status", {}),
     ("get", "/api/memories", {}),
@@ -795,3 +796,19 @@ def test_main_stays_silent_when_within_budget(monkeypatch):
 
     srv.main()
     assert pushes == []
+
+
+# --------------------------------------------------------------------------- #
+# Push-channel health (the dashboard pill)
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("health", [
+    {"state": "ok", "error": None},
+    {"state": "down", "error": "ntfy unreachable: refused"},
+    {"state": "off", "error": None},
+])
+def test_health_ntfy_passes_probe_result_through(auth_client, monkeypatch, health):
+    monkeypatch.setattr(srv, "ntfy_health", lambda: health)
+    resp = auth_client.get("/api/health/ntfy")
+    assert resp.status_code == 200
+    assert resp.get_json() == health

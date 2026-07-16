@@ -12,16 +12,10 @@ Log lines are built relative to an explicit `now` rather than hardcoded, so the
 from datetime import datetime, timedelta
 
 import pytest
-import requests
 
 from tasks import _common, log_inspector
 
 NOW = datetime(2026, 7, 16, 8, 0, 0)
-
-# Captured before the autouse _healthy_channel fixture stubs it out. The probe
-# tests below must exercise the real function — calling the stub would make them
-# pass vacuously.
-_REAL_NTFY_HEALTH = log_inspector._ntfy_health
 
 
 def _line(when: datetime, level: str, msg: str) -> str:
@@ -44,8 +38,10 @@ def _no_real_tasks(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _healthy_channel(monkeypatch):
-    """No real ntfy probe unless a test opts in — _ntfy_health does real network."""
-    monkeypatch.setattr(log_inspector, "_ntfy_health", lambda: None)
+    """No real ntfy probe unless a test opts in — ntfy_health does real network.
+    (The probe itself lives in agent/tools/notify.py and is tested there.)"""
+    monkeypatch.setattr(log_inspector, "ntfy_health",
+                        lambda: {"state": "ok", "error": None})
 
 
 @pytest.fixture
@@ -311,10 +307,11 @@ def test_dead_channel_is_reported_even_when_everything_else_is_clean(monkeypatch
 
     ntfy was down four days and not one line was logged about it, because
     nothing needed pushing. A log scan cannot see this — only an active probe
-    can, which is why _ntfy_health exists.
+    can, which is why ntfy_health exists.
     """
-    monkeypatch.setattr(log_inspector, "_ntfy_health",
-                        lambda: "ntfy unreachable: Connection refused")
+    monkeypatch.setattr(log_inspector, "ntfy_health",
+                        lambda: {"state": "down",
+                                 "error": "ntfy unreachable: Connection refused"})
     # No error lines anywhere: the logs are spotless, the channel is dead.
     assert log_inspector.main() == 0
     assert len(pushes) == 1
@@ -325,46 +322,20 @@ def test_dead_channel_is_reported_even_when_everything_else_is_clean(monkeypatch
 def test_dead_channel_alert_goes_out_with_email_fallback(monkeypatch, pushes):
     """The alert about the dead channel can only arrive by email — the push
     carrying it is the thing that's broken."""
-    monkeypatch.setattr(log_inspector, "_ntfy_health", lambda: "ntfy unreachable: refused")
+    monkeypatch.setattr(log_inspector, "ntfy_health",
+                        lambda: {"state": "down", "error": "ntfy unreachable: refused"})
     assert log_inspector.main() == 0
     assert pushes[0]["email_fallback"] is True
 
 
-def test_unset_ntfy_url_is_not_a_fault(monkeypatch):
-    """Push deliberately disabled (README) must not read as an outage."""
-    monkeypatch.delenv("NTFY_URL", raising=False)
-    monkeypatch.setattr(log_inspector, "load_env", lambda: None)
-    assert _REAL_NTFY_HEALTH() is None
-
-
-def test_unreachable_ntfy_is_detected(monkeypatch):
-    monkeypatch.setattr(log_inspector, "load_env", lambda: None)
-    monkeypatch.setenv("NTFY_URL", "http://box:2586/wren-alerts")
-
-    def boom(url, timeout=None):
-        raise requests.exceptions.ConnectionError("Connection refused")
-
-    monkeypatch.setattr(log_inspector.requests, "get", boom)
-    assert "unreachable" in _REAL_NTFY_HEALTH()
-
-
-def test_healthy_ntfy_probes_the_health_endpoint_not_the_topic(monkeypatch):
-    """A probe that published would alert the phone every single morning."""
-    monkeypatch.setattr(log_inspector, "load_env", lambda: None)
-    monkeypatch.setenv("NTFY_URL", "http://box:2586/wren-alerts")
-    seen = {}
-
-    class _Resp:
-        def raise_for_status(self): pass
-        def json(self): return {"healthy": True}
-
-    def fake_get(url, timeout=None):
-        seen["url"] = url
-        return _Resp()
-
-    monkeypatch.setattr(log_inspector.requests, "get", fake_get)
-    assert _REAL_NTFY_HEALTH() is None
-    assert seen["url"] == "http://box:2586/v1/health"  # base + health, not the topic
+def test_disabled_push_is_not_a_fault(monkeypatch, pushes):
+    """Push deliberately switched off (README) must not read as an outage. The
+    probe reports "off" with no error; this task reports faults, so it stays
+    quiet. (The probe's own three states are tested in test_notify.py.)"""
+    monkeypatch.setattr(log_inspector, "ntfy_health",
+                        lambda: {"state": "off", "error": None})
+    assert log_inspector.main() == 0
+    assert pushes == []
 
 
 # --------------------------------------------------------------------------- #

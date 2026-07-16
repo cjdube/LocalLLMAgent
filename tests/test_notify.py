@@ -1,12 +1,12 @@
-"""Tests for the ntfy push tool. requests.post is monkeypatched, so no network
-runs — the tests exercise the missing-config guard, header/body assembly, and
-the never-raise error contract."""
+"""Tests for the ntfy push tool. requests.post/get are monkeypatched, so no
+network runs — the tests exercise the missing-config guard, header/body
+assembly, the never-raise error contract, and ntfy_health's three states."""
 
 import requests
 
 from agent.tools import email as email_mod
 from agent.tools import notify as notify_mod
-from agent.tools.notify import notify
+from agent.tools.notify import notify, ntfy_health
 
 
 class _FakeResp:
@@ -186,3 +186,79 @@ def test_actions_publish_as_json_to_base_url(monkeypatch):
     assert captured["json"]["actions"] == actions
     assert captured["json"]["priority"] == 4              # "high" -> int
     assert captured["headers"]["Authorization"] == "Bearer tk_x"
+
+
+# --------------------------------------------------------------------------- #
+# ntfy_health — the dashboard pill's probe (and the log inspector's 8am check)
+# --------------------------------------------------------------------------- #
+
+class _FakeHealthResp:
+    def __init__(self, body=None, status=200):
+        self._body = body if body is not None else {"healthy": True}
+        self.status_code = status
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.exceptions.HTTPError(f"HTTP {self.status_code}", response=self)
+
+    def json(self):
+        return self._body
+
+
+def _capture_get(monkeypatch, resp=None, raises=None):
+    """Wire requests.get to capture its call and return resp (or raise).
+    Also no-op load_env so a real config/.env can't override the test's env."""
+    monkeypatch.setattr(notify_mod, "load_env", lambda: None)
+    captured = {}
+
+    def fake_get(url, timeout=None):
+        captured.update(url=url, timeout=timeout)
+        if raises is not None:
+            raise raises
+        return resp or _FakeHealthResp()
+
+    monkeypatch.setattr(notify_mod.requests, "get", fake_get)
+    return captured
+
+
+def test_health_off_when_url_unset_without_probing(monkeypatch):
+    monkeypatch.setattr(notify_mod, "load_env", lambda: None)
+    monkeypatch.delenv("NTFY_URL", raising=False)
+    # A stub that would blow up if called, proving we never reach the network.
+    monkeypatch.setattr(notify_mod.requests, "get", lambda *a, **k: 1 / 0)
+
+    # "off" is push switched off on purpose (see README), so it carries no
+    # error — the log inspector reads `error` alone and must stay quiet here.
+    assert ntfy_health() == {"state": "off", "error": None}
+
+
+def test_health_ok_probes_base_url_not_topic(monkeypatch):
+    monkeypatch.setenv("NTFY_URL", "http://box.ts.net:2586/wren-alerts")
+    captured = _capture_get(monkeypatch)
+
+    assert ntfy_health() == {"state": "ok", "error": None}
+    # /v1/health hangs off the server root; the topic path would 404.
+    assert captured["url"] == "http://box.ts.net:2586/v1/health"
+    assert captured["timeout"] == notify_mod._HEALTH_TIMEOUT_S
+
+
+def test_health_down_when_server_reports_unhealthy(monkeypatch):
+    monkeypatch.setenv("NTFY_URL", "http://box.ts.net:2586/wren-alerts")
+    _capture_get(monkeypatch, resp=_FakeHealthResp({"healthy": False}))
+
+    result = ntfy_health()
+
+    assert result["state"] == "down"
+    assert "unhealthy" in result["error"]
+
+
+def test_health_down_when_unreachable_never_raises(monkeypatch):
+    monkeypatch.setenv("NTFY_URL", "http://box.ts.net:2586/wren-alerts")
+    _capture_get(monkeypatch, raises=requests.exceptions.ConnectionError("refused"))
+
+    # Same never-raise contract as notify(): the 8am inspector and the dashboard
+    # endpoint both call this on a path where an exception would be the bug.
+    result = ntfy_health()
+
+    assert result["state"] == "down"
+    assert "ntfy unreachable" in result["error"] and "refused" in result["error"]

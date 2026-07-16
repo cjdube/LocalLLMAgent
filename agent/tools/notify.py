@@ -33,6 +33,13 @@ _MAX_MESSAGE_CHARS = 500
 # publish path (used when action buttons are attached).
 _PRIORITY_INT = {"max": 5, "urgent": 5, "high": 4, "default": 3, "low": 2, "min": 1}
 
+# The push channel probe has to be an ACTIVE check, not a log scan. July 2026:
+# ntfy was down for four days and not one line was logged about it, because
+# nothing happened to need pushing — no task failed, no reminder came due. A
+# dead channel is invisible until you try to use it, and by then the alert is
+# the thing being lost. So ask it directly.
+_HEALTH_TIMEOUT_S = 5
+
 
 def _fallback_email(message: str, title: str | None, error: str) -> dict:
     """Best-effort email for a push that didn't send. Same "don't lose it" shape
@@ -109,6 +116,39 @@ def notify(
         return result
 
     return {"ok": True}
+
+
+def ntfy_health() -> dict:
+    """Is the push channel up? -> {"state": "ok"|"down"|"off", "error": str|None}.
+
+    Hits ntfy's /v1/health rather than publishing: a probe that pushed would
+    either alert the phone on every check or need a throwaway topic.
+
+    This proves the ntfy SERVER is reachable — not that NTFY_TOKEN is still
+    valid for the topic. The server runs auth-default-access: deny-all, so a
+    revoked token reports "ok" here and 403s on every real publish. Testing
+    auth means publishing, which buzzes the phone; callers must not word this
+    as "push works".
+
+    "off" (NTFY_URL unset) is not a fault — push is switched off on purpose
+    (see README) — so `error` is None for both "off" and "ok". Callers that
+    only report faults can read `error` and ignore `state`.
+    """
+    load_env()
+    url = os.getenv("NTFY_URL")
+    if not url:
+        return {"state": "off", "error": None}
+
+    parts = urlsplit(url)
+    try:
+        resp = requests.get(f"{parts.scheme}://{parts.netloc}/v1/health",
+                            timeout=_HEALTH_TIMEOUT_S)
+        resp.raise_for_status()
+        if not resp.json().get("healthy"):
+            return {"state": "down", "error": "ntfy reachable but reports unhealthy"}
+    except Exception as e:
+        return {"state": "down", "error": f"ntfy unreachable: {e}"}
+    return {"state": "ok", "error": None}
 
 
 def main() -> int:

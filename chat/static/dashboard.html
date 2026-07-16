@@ -40,6 +40,8 @@
   .pill .glow { width: 7px; height: 7px; border-radius: 50%; background: #17b26a; }
   .pill.down { background: #fef3f2; color: #b42318; }
   .pill.down .glow { background: #f04438; }
+  .pill.off { background: #f2f4f7; color: #667085; }
+  .pill.off .glow { background: #98a2b3; }
 
   main { flex: 1; display: flex; min-height: 0; }
   .left { flex: 1; min-width: 0; overflow-y: auto; padding: 20px 18px; display: flex; flex-direction: column; gap: 22px; }
@@ -151,6 +153,7 @@
     <span class="spacer"></span>
     <a class="nav" href="/map">map</a>
     <span id="serverPill" class="pill"><span class="glow"></span>server running</span>
+    <span id="pushPill" class="pill off"><span class="glow"></span>push …</span>
   </header>
 
   <main>
@@ -264,6 +267,46 @@ function renderCapDetail(detail, tool) {
     detail.appendChild(el("div", "param", "No parameters."));
   }
   detail.classList.add("show");
+}
+
+// --- push channel health -------------------------------------------------- //
+// "push up" means the ntfy server answered its health check — NOT that a push
+// would deliver (a revoked token still reads healthy). Don't reword it to imply
+// more than that.
+const PUSH_PILL = {
+  ok:   { cls: "pill",     text: "push up" },
+  down: { cls: "pill down", text: "push down" },
+  off:  { cls: "pill off",  text: "push off" },
+};
+
+function setPushPill(cls, text, title) {
+  const pill = document.getElementById("pushPill");
+  pill.className = cls;
+  pill.title = title || "";
+  pill.textContent = "";
+  pill.appendChild(el("span", "glow"));
+  pill.appendChild(document.createTextNode(text));
+}
+
+async function loadPushHealth() {
+  // Every path that isn't a real verdict from the probe must say "unknown", not
+  // guess. Defaulting a missing state to "off" reads as "you turned push off on
+  // purpose" — a confident lie about the one thing this pill exists to answer.
+  // fetch() does NOT reject on 401, so an expired session arrives here as a
+  // JSON error body with no `state`, not as an exception.
+  let health;
+  try {
+    health = await api("/api/health/ntfy");
+  } catch (e) {
+    setPushPill("pill off", "push ?", "could not reach Wren to check");
+    return;
+  }
+  const state = PUSH_PILL[health && health.state];
+  if (!state) {
+    setPushPill("pill off", "push ?", health.error || "could not check the push channel");
+    return;
+  }
+  setPushPill(state.cls, state.text, health.error);
 }
 
 // --- scheduled tasks table ---------------------------------------------- //
@@ -437,6 +480,7 @@ async function openRun(key, runId) {
 // --- boot ---------------------------------------------------------------- //
 loadCapabilities();
 loadTasks();
+loadPushHealth();
 </script>
 <script src="/static/chat-dock.js"></script>
 </body>
