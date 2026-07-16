@@ -12,8 +12,12 @@ import logging
 import os
 import subprocess
 import sys
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+import pytest
+
+from chat import insights
 from tasks import _common
 
 os.environ.setdefault("WREN_CHAT_TOKEN", "test-token")
@@ -111,6 +115,37 @@ def test_wiki_vault_is_redirected_away_from_the_real_vault():
     vault = wiki._vault()
     assert vault != Path(wiki.DEFAULT_WIKI_VAULT).expanduser(), \
         "WIKI_VAULT_PATH still resolves to Craig's real Obsidian vault"
+
+
+def test_a_handler_on_the_real_logs_dir_is_refused():
+    # The backstop behind the redirects: they move the path, this refuses the
+    # write. Without it, a redirect's absence is silent — which is how a
+    # test_server run appended 36 fixture rows to the production wren.log on
+    # 2026-07-14, five minutes after the redirect landed. Build the handler
+    # setup_logger builds, at the path it would have used.
+    with pytest.raises(RuntimeError, match="production log"):
+        RotatingFileHandler(_REAL_LOGS_DIR / "wren.log", maxBytes=2_000_000, backupCount=3)
+
+
+def test_the_refusal_covers_plain_file_handlers_too():
+    # Patched onto FileHandler rather than RotatingFileHandler so a future module
+    # that reaches for logging's plain handler is covered without a code change.
+    with pytest.raises(RuntimeError, match="production log"):
+        logging.FileHandler(_REAL_LOGS_DIR / "anything.log")
+
+
+def test_the_refusal_leaves_handlers_outside_the_real_logs_dir_alone(tmp_path):
+    # The block must be narrow: every task logger in the suite builds a handler
+    # under tmp_path, and they all have to keep working.
+    handler = RotatingFileHandler(tmp_path / "wren.log")
+    handler.close()
+
+
+def test_insights_logs_dir_is_redirected_away_from_production():
+    # insights resolves logs/ on its own — not via _common.LOGS_DIR or WREN_LOGS_DIR
+    # — and run_task_now opens <task>.launchd.log there for append before spawning
+    # the real task module. It was the one logs/ path with no redirect at all.
+    assert Path(insights.LOGS_DIR).resolve() != _REAL_LOGS_DIR
 
 
 def test_the_wren_logger_server_binds_at_import_is_covered():

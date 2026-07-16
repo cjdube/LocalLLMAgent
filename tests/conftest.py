@@ -24,6 +24,28 @@ real logs/ no matter what the parent patched. So the redirect goes through the
 WREN_LOGS_DIR env var too, which children inherit. test_conftest.py guards both —
 that no handler in-process escapes to the real logs/, and that a child doesn't.
 
+A redirect alone is still only as good as its own presence, though, and its
+absence is silent. On 2026-07-14, five minutes *after* the redirect below landed,
+a 36-line `pytest tests/test_server.py` run appended straight into the production
+logs/wren.log — the throttle's RFC 5737 IPs, "model exploded", the TinyCo
+opportunity rows. Nothing failed; the rows just showed up, and were only noticed
+two days later when the log inspector started classifying every [ERROR] line as an
+overnight failure. Removing the three redirect lines reproduces that block exactly,
+which is the whole problem: the guard protects the suite only while it is in
+effect, and the moment it isn't — deleted, reordered behind a new import-time
+setup_logger, or bypassed by a module that resolves logs/ on its own — the failure
+mode is silent pollution rather than a red test. So the redirect is backed by a
+hard block: `_forbid_production_log_handlers` makes opening any log file in the
+real logs/ raise at handler construction. A missed redirect then fails loudly, in
+the test that caused it, instead of being discovered in the log two days later.
+
+`chat/insights.py` is why the block covers more than `_common`: it resolves its own
+`LOGS_DIR = _ROOT / "logs"`, independently of `_common.LOGS_DIR` and of the env var,
+and `run_task_now` opens `<task>.launchd.log` there for append before spawning the
+real task module. It was never redirected — the exact "a module that resolves logs/
+on its own" case. It is redirected below now, and the block is what would have made
+that gap audible.
+
 The learnings tasks write reviews to `LEARNINGS_DIR` — Craig's Obsidian vault
 under ~/Documents. Tests stub the writer per-test, but redirect LEARNINGS_DIR to
 tmp_path suite-wide as the backstop, so a missed stub lands a fixture file in a
@@ -59,6 +81,7 @@ stub it to raise; test_loop's Gemini tests re-patch it per-test with a fake
 client to exercise the real adapter without a network call.
 """
 
+import logging
 import os
 import tempfile
 from pathlib import Path
@@ -72,11 +95,16 @@ from agent.tools import memory as _memory
 from agent.tools import notify as _notify
 from agent.tools import opportunities as _opportunities
 from agent.tools import reminders as _reminders
+from chat import insights as _insights
 from tasks import _chat_transcripts as _chat_transcripts
 from tasks import _common
 from tasks import ai_chat_learnings as _ai_chat_learnings
 from tasks import morning_brief as _morning_brief
 from tasks import opportunity_digest as _opportunity_digest
+
+# Resolved from the source tree rather than from any redirect, so it still names
+# the real directory when a redirect is the thing that's broken.
+_REAL_LOGS_DIR = Path(_common.__file__).resolve().parent.parent / "logs"
 
 # Both lines run at conftest import — before any test module imports a module that
 # calls setup_logger at import time. See the module docstring. The env var covers
@@ -87,9 +115,43 @@ os.environ["WREN_LOGS_DIR"] = str(_TEST_LOGS_DIR)
 _common.LOGS_DIR = _TEST_LOGS_DIR
 
 
+def _forbid_production_log_handlers() -> None:
+    """Make a log handler on the real logs/ raise instead of quietly appending.
+
+    The backstop behind every logs/ redirect above (see the module docstring):
+    those move the path, this refuses the write. Patched onto FileHandler, which
+    RotatingFileHandler — what setup_logger actually builds — constructs through.
+
+    Installed at import, permanently and process-wide, for the same reason the
+    redirect is: setup_logger runs at *import* time in chat/server.py, so a
+    fixture is already too late to see it. Nothing legitimately writes into the
+    real logs/ during a test run, so there is nothing to let through.
+    """
+    original_init = logging.FileHandler.__init__
+
+    def _guarded_init(self, filename, *args, **kwargs):
+        if Path(filename).resolve().parent == _REAL_LOGS_DIR:
+            raise RuntimeError(
+                f"a test tried to open the production log {filename} — the logs/ "
+                "redirect in tests/conftest.py is not in effect for whatever built "
+                "this handler. Fixture rows would have gone into Craig's real logs "
+                "(and the 8am log inspector would report them as overnight failures)."
+            )
+        return original_init(self, filename, *args, **kwargs)
+
+    logging.FileHandler.__init__ = _guarded_init
+
+
+_forbid_production_log_handlers()
+
+
 @pytest.fixture(autouse=True)
 def _isolate_task_logs(tmp_path, monkeypatch):
     monkeypatch.setattr(_common, "LOGS_DIR", tmp_path)
+    # insights resolves logs/ itself and opens <task>.launchd.log there for append
+    # (run_task_now), so _common's redirect never covered it. Reads resolve it at
+    # call time, so the fixture is enough — there is no import-time binding here.
+    monkeypatch.setattr(_insights, "LOGS_DIR", tmp_path)
 
 
 @pytest.fixture(autouse=True)
