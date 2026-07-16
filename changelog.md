@@ -1,3 +1,4 @@
+* 2026-07-16 - Stop colima giving up after one failed start — it took the push channel down for 4 days unnoticed
 * 2026-07-16 - Add a log inspector — Wren's logs already recorded the model struggling; nothing read them back
 * 2026-07-16 - Correct the scheduled-task table's stale times and order it by clock
 * 2026-07-16 - Rename daily_log to strava_download — the name is the capability, not the cadence

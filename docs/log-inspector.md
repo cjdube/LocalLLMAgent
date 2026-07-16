@@ -30,9 +30,9 @@ couldn't report that the model is down**, which is the failure it most needs to
 report. If Ollama is hung, `complete_text()` would hang with it. Keeping the
 inspector model-free makes it the most reliable component in the system.
 
-## The two signals
+## The three signals
 
-Neither subsumes the other.
+None subsumes the others.
 
 **Signal A — the line scan** (`_scan_lines`). Reads every `logs/*.log` in the
 window and classifies each `[LEVEL] message` line. This is what went wrong.
@@ -51,6 +51,25 @@ started. Absence of evidence is the signal. Three outcomes:
 Daemons (chat server, `bg_worker`, `reminder_sweep`) are skipped — they emit no
 run boundaries. Weekly tasks (any plist with a `Weekday` key) are skipped for
 `missing`, since a 24h window can't tell "didn't run" from "isn't due."
+
+**Signal C — the push channel probe** (`_ntfy_health`). Asks ntfy's
+`/v1/health` whether it's alive. This one is an *active* check rather than a log
+scan, and it exists because of a specific failure:
+
+> On 2026-07-11 the Mac rebooted, colima failed to restart, and ntfy was down
+> for **four days**. Not one line was logged about it — because nothing happened
+> to need pushing. No task failed; no reminder came due. **A dead push channel
+> is invisible to a log scan until something tries to use it, and by then the
+> alert is the thing being lost.**
+
+So the inspector asks directly, every morning. It probes `/v1/health` rather
+than publishing, since a probe that published would alert the phone daily or
+need a throwaway topic. An unset `NTFY_URL` is *not* a fault — it means push is
+switched off on purpose.
+
+This finding is reported first in the rollup and always at `high` priority. It
+can only ever reach you by **email**, since the push carrying it is by
+definition the thing that's broken — see the fallback below.
 
 ## The classifier is default-open
 
@@ -84,7 +103,13 @@ filter; an unrecognised warning still reports, verbatim.
 | `result trimmed:` | The tool-result cap working as designed. |
 | `login throttled` | The rate limiter working as designed. |
 | `bg_resolve: rejected invalid or expired` | Expected — a stale ntfy button was tapped. |
-| `push failed, will retry` | `reminder_sweep` retries on its own. |
+
+`push failed, will retry` **used to be on this list** ("`reminder_sweep` retries
+on its own — transient and self-healing"). The July 2026 outage disproved that:
+over four days it was neither, and suppressing it hid the only passive signal
+there was. It now reports. The rollup counts rather than lists, so even a 60s
+retry loop collapses to one `N warnings: reminder_sweep(N)` line — which is the
+general lesson: **suppress noise by summarising it, not by discarding it.**
 
 To tune: add a substring to `NOISE` to silence a pattern, or to `STRAIN_LABELS`
 to give it a friendly name in the rollup. Adding to `NOISE` is the only way to
@@ -117,11 +142,16 @@ anymore, so their lines can never re-enter a 24h window.
 raw lines**:
 
 ```
+PUSH CHANNEL DOWN: ntfy unreachable: Connection refused
 2 failed: morning_brief, ai_chat_learnings
 1 didn't run: strava_download
 Model strain: 5x repetition loop, 1x context overflow
 2 error lines: wren(2)
 ```
+
+The rollup is sent with `email_fallback=True`: it fires once a day and nothing
+retries it, so a push that doesn't land means the findings are simply lost —
+and the case where the push fails is precisely the case worth hearing about.
 
 Per-line detail goes to `logs/log_inspector.log` and renders in the dashboard's
 run-detail view. Those detail lines carry a ` -> ` marker on purpose: `insights.py`

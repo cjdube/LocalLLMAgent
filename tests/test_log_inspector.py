@@ -12,10 +12,16 @@ Log lines are built relative to an explicit `now` rather than hardcoded, so the
 from datetime import datetime, timedelta
 
 import pytest
+import requests
 
 from tasks import _common, log_inspector
 
 NOW = datetime(2026, 7, 16, 8, 0, 0)
+
+# Captured before the autouse _healthy_channel fixture stubs it out. The probe
+# tests below must exercise the real function — calling the stub would make them
+# pass vacuously.
+_REAL_NTFY_HEALTH = log_inspector._ntfy_health
 
 
 def _line(when: datetime, level: str, msg: str) -> str:
@@ -34,6 +40,12 @@ def _run(when: datetime, label: str, *body: str) -> list[str]:
 def _no_real_tasks(monkeypatch):
     """Signal B off unless a test opts in. Also the guard described above."""
     monkeypatch.setattr(log_inspector, "discover_tasks", lambda: [])
+
+
+@pytest.fixture(autouse=True)
+def _healthy_channel(monkeypatch):
+    """No real ntfy probe unless a test opts in — _ntfy_health does real network."""
+    monkeypatch.setattr(log_inspector, "_ntfy_health", lambda: None)
 
 
 @pytest.fixture
@@ -103,11 +115,20 @@ def test_warm_model_failure_is_critical_despite_warning_level():
     "tool_call get_events_by_date result trimmed: 4654 chars over the 8000 cap",
     "login throttled for 127.0.0.1, retry after 29s",
     "bg_resolve: rejected invalid or expired token",
-    "reminder ff596625 push failed, will retry: down",
 ])
 def test_noise_is_never_reported(msg):
     _write_log("wren.log", _line(NOW - timedelta(hours=1), "WARNING", msg))
     assert log_inspector._scan_lines(NOW) == []
+
+
+def test_repeated_push_failures_are_not_noise():
+    """Regression for the July 2026 outage: these were suppressed as 'transient
+    and self-healing'. Over four days they were neither, and they were the only
+    signal we had."""
+    _write_log("reminder_sweep.log",
+               _line(NOW - timedelta(hours=1), "WARNING",
+                     "reminder ff596625 push failed, will retry: connection refused"))
+    assert len(log_inspector._scan_lines(NOW)) == 1
 
 
 def test_info_lines_are_ignored():
@@ -279,6 +300,71 @@ def test_rollup_stays_within_the_ntfy_cap():
     summary = log_inspector._rollup(outcomes, findings)
     assert len(summary) < 500
     assert summary.startswith("8 failed:")
+
+
+# --------------------------------------------------------------------------- #
+# Push-channel health — the outage that started all this
+# --------------------------------------------------------------------------- #
+
+def test_dead_channel_is_reported_even_when_everything_else_is_clean(monkeypatch, pushes):
+    """The July 2026 outage in one test.
+
+    ntfy was down four days and not one line was logged about it, because
+    nothing needed pushing. A log scan cannot see this — only an active probe
+    can, which is why _ntfy_health exists.
+    """
+    monkeypatch.setattr(log_inspector, "_ntfy_health",
+                        lambda: "ntfy unreachable: Connection refused")
+    # No error lines anywhere: the logs are spotless, the channel is dead.
+    assert log_inspector.main() == 0
+    assert len(pushes) == 1
+    assert pushes[0]["message"].startswith("PUSH CHANNEL DOWN:")
+    assert pushes[0]["priority"] == "high"
+
+
+def test_dead_channel_alert_goes_out_with_email_fallback(monkeypatch, pushes):
+    """The alert about the dead channel can only arrive by email — the push
+    carrying it is the thing that's broken."""
+    monkeypatch.setattr(log_inspector, "_ntfy_health", lambda: "ntfy unreachable: refused")
+    assert log_inspector.main() == 0
+    assert pushes[0]["email_fallback"] is True
+
+
+def test_unset_ntfy_url_is_not_a_fault(monkeypatch):
+    """Push deliberately disabled (README) must not read as an outage."""
+    monkeypatch.delenv("NTFY_URL", raising=False)
+    monkeypatch.setattr(log_inspector, "load_env", lambda: None)
+    assert _REAL_NTFY_HEALTH() is None
+
+
+def test_unreachable_ntfy_is_detected(monkeypatch):
+    monkeypatch.setattr(log_inspector, "load_env", lambda: None)
+    monkeypatch.setenv("NTFY_URL", "http://box:2586/wren-alerts")
+
+    def boom(url, timeout=None):
+        raise requests.exceptions.ConnectionError("Connection refused")
+
+    monkeypatch.setattr(log_inspector.requests, "get", boom)
+    assert "unreachable" in _REAL_NTFY_HEALTH()
+
+
+def test_healthy_ntfy_probes_the_health_endpoint_not_the_topic(monkeypatch):
+    """A probe that published would alert the phone every single morning."""
+    monkeypatch.setattr(log_inspector, "load_env", lambda: None)
+    monkeypatch.setenv("NTFY_URL", "http://box:2586/wren-alerts")
+    seen = {}
+
+    class _Resp:
+        def raise_for_status(self): pass
+        def json(self): return {"healthy": True}
+
+    def fake_get(url, timeout=None):
+        seen["url"] = url
+        return _Resp()
+
+    monkeypatch.setattr(log_inspector.requests, "get", fake_get)
+    assert _REAL_NTFY_HEALTH() is None
+    assert seen["url"] == "http://box:2586/v1/health"  # base + health, not the topic
 
 
 # --------------------------------------------------------------------------- #

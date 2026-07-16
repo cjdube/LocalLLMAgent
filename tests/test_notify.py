@@ -4,6 +4,7 @@ the never-raise error contract."""
 
 import requests
 
+from agent.tools import email as email_mod
 from agent.tools import notify as notify_mod
 from agent.tools.notify import notify
 
@@ -78,6 +79,87 @@ def test_network_exception_never_raises(monkeypatch):
     _capture_post(monkeypatch, raises=requests.exceptions.ConnectionError("refused"))
     result = notify("hi")
     assert "error" in result
+
+
+# --------------------------------------------------------------------------- #
+# email fallback — so a dead push channel can't silently swallow an alert
+# --------------------------------------------------------------------------- #
+
+def _capture_email(monkeypatch):
+    """Capture the fallback's send_email. _fallback_email imports it inside the
+    function, so patching the email module is what that call resolves — and it
+    overrides conftest's suite-wide _block_email_send guard for these tests."""
+    sent = []
+
+    def fake_send(subject, body):
+        sent.append({"subject": subject, "body": body})
+        return {"message_id": "m1"}
+
+    monkeypatch.setattr(email_mod, "send_email", fake_send)
+    return sent
+
+
+def test_failed_push_falls_back_to_email(monkeypatch):
+    monkeypatch.setenv("NTFY_URL", "http://box.ts.net:2586/wren-alerts")
+    _capture_post(monkeypatch, raises=requests.exceptions.ConnectionError("refused"))
+    sent = _capture_email(monkeypatch)
+
+    result = notify("brief failed", title="Wren", email_fallback=True)
+
+    assert "error" in result                      # still reports the push failure
+    assert result["email_fallback"] == {"message_id": "m1"}
+    assert len(sent) == 1
+    assert "brief failed" in sent[0]["body"]
+    assert "push failed" in sent[0]["subject"]
+    assert "refused" in sent[0]["body"]           # why it didn't land
+
+
+def test_fallback_is_off_by_default(monkeypatch):
+    """reminder_sweep retries a failed push every 60s — a default-on fallback
+    would have emailed thousands of times during the July 2026 outage."""
+    monkeypatch.setenv("NTFY_URL", "http://box.ts.net:2586/wren-alerts")
+    _capture_post(monkeypatch, raises=requests.exceptions.ConnectionError("refused"))
+    sent = _capture_email(monkeypatch)
+
+    result = notify("a reminder")
+
+    assert "error" in result
+    assert sent == []
+    assert "email_fallback" not in result
+
+
+def test_successful_push_never_emails(monkeypatch):
+    monkeypatch.setenv("NTFY_URL", "http://box.ts.net:2586/wren-alerts")
+    _capture_post(monkeypatch)
+    sent = _capture_email(monkeypatch)
+
+    assert notify("hi", email_fallback=True) == {"ok": True}
+    assert sent == []
+
+
+def test_unset_url_does_not_email(monkeypatch):
+    """An unset NTFY_URL means push is switched off on purpose, not broken."""
+    monkeypatch.setattr(notify_mod, "load_env", lambda: None)
+    monkeypatch.delenv("NTFY_URL", raising=False)
+    sent = _capture_email(monkeypatch)
+
+    result = notify("hi", email_fallback=True)
+
+    assert "error" in result
+    assert sent == []
+
+
+def test_email_failure_never_raises(monkeypatch):
+    """The fallback must not mask the push failure it's reporting."""
+    monkeypatch.setenv("NTFY_URL", "http://box.ts.net:2586/wren-alerts")
+    _capture_post(monkeypatch, raises=requests.exceptions.ConnectionError("refused"))
+    monkeypatch.setattr(email_mod, "send_email",
+                        lambda **k: (_ for _ in ()).throw(RuntimeError("gmail down")))
+
+    result = notify("hi", title="T", email_fallback=True)
+
+    assert "error" in result                                  # the original failure survives
+    assert "gmail down" in result["email_fallback"]["error"]
 
 
 def test_actions_publish_as_json_to_base_url(monkeypatch):

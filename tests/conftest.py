@@ -67,6 +67,7 @@ import pytest
 
 from agent import loop as _loop
 from agent.tools import background as _background
+from agent.tools import email as _email
 from agent.tools import memory as _memory
 from agent.tools import notify as _notify
 from agent.tools import opportunities as _opportunities
@@ -147,6 +148,19 @@ class _StubNtfyResponse:
 @pytest.fixture(autouse=True)
 def _block_ntfy_push(monkeypatch):
     monkeypatch.setattr(_notify.requests, "post", lambda *a, **k: _StubNtfyResponse())
+
+
+@pytest.fixture(autouse=True)
+def _block_email_send(monkeypatch):
+    # notify(email_fallback=True) sends a real Gmail message when a push fails,
+    # which put an egress path behind the *failure* branch of a function whose
+    # error paths tests exercise on purpose (test_notify.py). Without this, those
+    # tests mail Craig every run. Patched on the module so notify's call-time
+    # lookup resolves the stub; callers that bound `send_email` at import (e.g.
+    # morning_brief) still stub their own, as they always have.
+    def _no_real_email(*a, **k):
+        raise RuntimeError("real Gmail send blocked in tests — stub send_email")
+    monkeypatch.setattr(_email, "send_email", _no_real_email)
 
 
 @pytest.fixture(autouse=True)

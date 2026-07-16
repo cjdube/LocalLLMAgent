@@ -179,7 +179,12 @@ browser tab can't reach out while an emailed failure notice gets buried — each
 task pushes a one-line alert to Craig's phone if its run fails, via a
 self-hosted [ntfy](https://ntfy.sh) server (`agent/tools/notify.py`). The push
 is best-effort: a notify outage is logged and swallowed so it can never mask
-the underlying task failure. It's failures-only (no "success" pings), and
+the underlying task failure. Alerts that fire once and are gone if they don't
+land — `notify_failure` and the log inspector's rollup — pass
+`email_fallback=True`, so a dead push channel can't silently swallow them.
+It's opt-in per call rather than the default because `reminder_sweep` retries a
+failed push every 60s, which would turn an outage into thousands of emails.
+It's failures-only (no "success" pings), and
 leaving `NTFY_URL` unset simply disables it. Self-hosting on the always-on Mac
 mini behind Tailscale keeps alerts private and off the public internet;
 `auth-default-access: deny-all` plus a publish token means nobody else can
@@ -554,8 +559,29 @@ mostly useful if the Python process fails to start at all).
    Linux container in a lightweight VM (colima — no Docker Desktop needed):
    ```bash
    brew install colima docker
-   brew services start colima          # starts the VM now + restarts at login
    ```
+   **Don't use `brew services start colima` to keep it up.** Homebrew's plist
+   sets `KeepAlive.SuccessfulExit=true`, which means *relaunch only after a
+   clean exit* — so a colima start that **fails** is never retried. That is
+   exactly what happened on 2026-07-11: the Mac rebooted, colima's VM died
+   mid-shutdown leaving stale state, the boot-time start failed with `vz driver
+   is running but host agent is not` (exit 1), launchd gave up, and the push
+   channel was down for four days. Nobody noticed, because nothing happened to
+   need pushing. Use the replacement service instead — `KeepAlive=true` (retry
+   on failure too) plus a wrapper that clears the stale state a crash leaves
+   behind, which a bare retry cannot do:
+   ```bash
+   brew services stop colima           # hand off from Homebrew, if it's running
+   cp launchd/infra/com.craigdube.colima.plist ~/Library/LaunchAgents/
+   launchctl load ~/Library/LaunchAgents/com.craigdube.colima.plist
+   ```
+   To stop colima deliberately, unload it — `colima stop` alone won't stick,
+   since launchd immediately brings it back:
+   ```bash
+   launchctl unload ~/Library/LaunchAgents/com.craigdube.colima.plist
+   ```
+   The `log_inspector` task actively probes this channel every morning, because
+   a dead one is invisible to any log scan until something tries to use it.
    Create config + data dirs under your home (colima mounts `$HOME` into the
    VM, so the container can read them) and a `server.yml`:
    ```bash

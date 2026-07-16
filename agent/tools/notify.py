@@ -34,21 +34,50 @@ _MAX_MESSAGE_CHARS = 500
 _PRIORITY_INT = {"max": 5, "urgent": 5, "high": 4, "default": 3, "low": 2, "min": 1}
 
 
+def _fallback_email(message: str, title: str | None, error: str) -> dict:
+    """Best-effort email for a push that didn't send. Same "don't lose it" shape
+    as _learnings_common.persist_or_email's failed-vault-write fallback.
+
+    Imported locally so notify() stays importable (and cheap) without pulling in
+    the Google client stack on the overwhelmingly common success path."""
+    from agent.tools.email import send_email
+
+    try:
+        return send_email(
+            subject=f"[push failed] {title or 'Wren alert'}",
+            body=f"{message}\n\n--\nntfy did not deliver this push: {error}",
+        )
+    except Exception as e:  # never let the fallback mask the original failure
+        return {"error": str(e)}
+
+
 def notify(
     message: str,
     title: str | None = None,
     priority: str | None = None,
     actions: list | None = None,
+    email_fallback: bool = False,
 ) -> dict:
     """POST a notification to the configured ntfy topic. Returns {"ok": True}
     on success or {"error": ...} — never raises.
 
     When `actions` (ntfy action buttons) are given, publishes as JSON to the
     server's base URL (the only form that carries buttons) rather than posting
-    the plaintext body to the topic URL."""
+    the plaintext body to the topic URL.
+
+    `email_fallback` emails the message if the push fails, so an ntfy outage
+    can't silently swallow an alert. It is opt-in per call, NOT the default, and
+    that asymmetry is deliberate: reminder_sweep retries a failed push every 60s,
+    so a blanket fallback would have sent thousands of emails per pending
+    reminder during the four-day July 2026 outage. Turn it on for one-shot
+    alerts that are lost if they don't land (notify_failure, the log inspector's
+    rollup); leave it off for anything retried or anything whose value is in the
+    action buttons an email can't carry (bg_worker's push-to-approve)."""
     load_env()
     url = os.getenv("NTFY_URL")
     if not url:
+        # Deliberately no fallback: an unset NTFY_URL means push is switched
+        # off on purpose (see README), not that delivery failed.
         return {"error": "NTFY_URL not set in config/.env"}
 
     token = os.getenv("NTFY_TOKEN")
@@ -74,7 +103,10 @@ def notify(
             resp = requests.post(url, data=body.encode("utf-8"), headers=headers, timeout=_TIMEOUT_S)
         resp.raise_for_status()
     except Exception as e:
-        return http_error(e, phase="notify")
+        result = http_error(e, phase="notify")
+        if email_fallback:
+            result["email_fallback"] = _fallback_email(body, title, result["error"])
+        return result
 
     return {"ok": True}
 

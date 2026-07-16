@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Replaces Homebrew's homebrew.mxcl.colima service.
+
+  Homebrew's plist gives up permanently after one failed start:
+
+      <key>KeepAlive</key>
+      <dict><key>SuccessfulExit</key><true/></dict>
+
+  which means "relaunch only if it exited SUCCESSFULLY". colima exited 1 after
+  the Jul 11 2026 reboot, so launchd never retried and Wren's push channel was
+  down for four days. KeepAlive=true below means "keep this running, full stop"
+  — the actual contract for a service that's meant to always be up.
+
+  colima-start.sh clears the stale instance state first; without it a retry
+  would just re-run the same failing command every 60s forever.
+
+  This lives OUTSIDE launchd/ proper (in launchd/infra/) on purpose:
+  chat/insights.py:discover_tasks globs launchd/*.plist non-recursively, so
+  keeping it a directory down means colima doesn't show up as a Wren task in
+  the dashboard.
+
+  Install:
+      brew services stop colima     # hand off from Homebrew first
+      cp launchd/infra/com.craigdube.colima.plist ~/Library/LaunchAgents/
+      launchctl load ~/Library/LaunchAgents/com.craigdube.colima.plist
+
+  To stop colima deliberately, unload it — `colima stop` alone won't stick,
+  because launchd will bring it straight back:
+      launchctl unload ~/Library/LaunchAgents/com.craigdube.colima.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.craigdube.colima</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/craigdube/Projects/LocalLLMAgent/launchd/infra/colima-start.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/craigdube</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Always up. Unlike Homebrew's SuccessfulExit=true, this retries after a
+         FAILED start too — the case that actually took ntfy down. -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Don't hot-loop if colima is genuinely broken; the VM takes ~20s to boot
+         anyway, so a 60s floor between attempts costs nothing. -->
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+
+    <key>StandardOutPath</key>
+    <string>/opt/homebrew/var/log/colima.log</string>
+    <key>StandardErrorPath</key>
+    <string>/opt/homebrew/var/log/colima.log</string>
+</dict>
+</plist>

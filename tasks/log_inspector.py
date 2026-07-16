@@ -28,19 +28,31 @@ Usage:
     python -m tasks.log_inspector
 """
 
+import os
 import sys
 from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlsplit
+
+import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from agent.tools._http import load_env
 from agent.tools.notify import notify
 from chat.insights import _LINE_RE, _parse_ts, _read_lines, discover_tasks, parse_runs
 from tasks import _common
 from tasks._common import notify_failure, setup_logger
 
 WINDOW_HOURS = 24
+
+# The push channel probe has to be an ACTIVE check, not a log scan. July 2026:
+# ntfy was down for four days and not one line was logged about it, because
+# nothing happened to need pushing — no task failed, no reminder came due. A
+# dead channel is invisible until you try to use it, and by then the alert is
+# the thing being lost. So ask it directly, every morning.
+NTFY_HEALTH_TIMEOUT_S = 5
 
 # A run still marked "running" this long after it started never logged an end —
 # the process died without raising (SIGKILL, OOM), which no error line records.
@@ -54,7 +66,11 @@ NOISE = (
     "result trimmed:",                          # the tool-result cap working as designed
     "login throttled",                          # the rate limiter working as designed
     "bg_resolve: rejected invalid or expired",  # expected: a stale ntfy button was tapped
-    "push failed, will retry",                  # reminder_sweep retries on its own
+    # "push failed, will retry" was here, on the theory that reminder_sweep's
+    # retry makes it self-healing. The July 2026 outage killed that theory: over
+    # four days it was neither transient nor self-healing, and suppressing it
+    # hid the one signal we did have. The rollup reports by count, so even a
+    # 60s retry loop collapses to a single "N warnings: reminder_sweep(N)" line.
 )
 
 # WARNING-level lines that are really outages, not warnings.
@@ -164,14 +180,41 @@ def _task_outcomes(now: datetime) -> dict[str, list[str]]:
     return out
 
 
+def _ntfy_health() -> str | None:
+    """-> an error string if Wren's push channel is down, else None.
+
+    Deliberately hits ntfy's /v1/health rather than publishing: a probe that
+    pushed would either alert the phone every morning or need a throwaway topic.
+    """
+    load_env()
+    url = os.getenv("NTFY_URL")
+    if not url:
+        return None  # push is switched off on purpose (see README) — not a fault
+    parts = urlsplit(url)
+    try:
+        resp = requests.get(f"{parts.scheme}://{parts.netloc}/v1/health",
+                            timeout=NTFY_HEALTH_TIMEOUT_S)
+        resp.raise_for_status()
+        if not resp.json().get("healthy"):
+            return "ntfy reachable but reports unhealthy"
+    except Exception as e:
+        return f"ntfy unreachable: {e}"
+    return None
+
+
 def _by_source(findings: list[dict]) -> str:
     counts = Counter(f["source"] for f in findings)
     return ", ".join(f"{src}({n})" for src, n in counts.most_common())
 
 
-def _rollup(outcomes: dict[str, list[str]], findings: list[dict]) -> str:
+def _rollup(outcomes: dict[str, list[str]], findings: list[dict],
+            channel_error: str | None = None) -> str:
     """The push body: counts, never raw lines — notify() truncates at 500 chars."""
     lines = []
+    if channel_error:
+        # First line on purpose: this one only ever arrives by email (the push
+        # carrying it is, by definition, the thing that's broken).
+        lines.append(f"PUSH CHANNEL DOWN: {channel_error}")
     for kind, prefix in (("failed", "failed"), ("stalled", "stalled"), ("missing", "didn't run")):
         keys = outcomes[kind]
         if keys:
@@ -192,9 +235,11 @@ def _rollup(outcomes: dict[str, list[str]], findings: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _is_urgent(outcomes: dict[str, list[str]], findings: list[dict]) -> bool:
+def _is_urgent(outcomes: dict[str, list[str]], findings: list[dict],
+               channel_error: str | None = None) -> bool:
     return bool(
-        outcomes["failed"] or outcomes["stalled"] or outcomes["missing"]
+        channel_error
+        or outcomes["failed"] or outcomes["stalled"] or outcomes["missing"]
         or any(f["severity"] == "critical" for f in findings)
     )
 
@@ -212,6 +257,7 @@ def main() -> int:
         # does, hence the note.
         findings = _scan_lines(now)
         outcomes = _task_outcomes(now)
+        channel_error = _ntfy_health()
 
         # " -> " on purpose: insights.py treats it as the marker for a data line
         # (see _parse_runs_uncached), so a quoted message containing "failed" or
@@ -221,21 +267,29 @@ def main() -> int:
         for kind, keys in outcomes.items():
             for key in keys:
                 logger.info(f"task {kind} -> {key}")
+        if channel_error:
+            logger.info(f"push channel -> {channel_error}")
 
-        summary = _rollup(outcomes, findings)
+        summary = _rollup(outcomes, findings, channel_error)
         if not summary:
             logger.info(f"No issues in the last {WINDOW_HOURS}h")
             logger.info("Log inspector run complete")
             return 0
 
         logger.info(f"pushing rollup -> {summary!r}")
+        # email_fallback: this rollup fires once a day and nothing retries it,
+        # so a failed push means the findings are simply lost — and the case
+        # where the push fails is exactly the case worth hearing about.
         result = notify(
             message=summary,
             title="Wren: overnight issues",
-            priority="high" if _is_urgent(outcomes, findings) else "default",
+            priority="high" if _is_urgent(outcomes, findings, channel_error) else "default",
+            email_fallback=True,
         )
         if result.get("error"):
             logger.warning(f"Rollup push via ntfy did not send: {result['error']}")
+            fallback = result.get("email_fallback") or {}
+            logger.info(f"email fallback -> {fallback}")
 
         logger.info("Log inspector run complete")
         return 0

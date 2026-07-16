@@ -47,12 +47,17 @@ def notify_failure(task_name: str, detail: object, logger: logging.Logger = None
     """Push a one-line failure alert for a scheduled task (best-effort).
 
     Swallows any error from the push itself so an ntfy outage can never mask
-    the original task failure — the failure is already logged by the caller."""
+    the original task failure — the failure is already logged by the caller.
+
+    Falls back to email if the push doesn't land: this alert fires once and is
+    gone if it doesn't arrive, and nothing retries it. (ntfy was down for four
+    days in July 2026 without anyone noticing.)"""
     try:
         result = notify(
             message=f"{task_name} failed: {detail}",
             title=f"Wren: {task_name} failed",
             priority="high",
+            email_fallback=True,
         )
         if logger and result.get("error"):
             logger.warning(f"Failure push via ntfy did not send: {result['error']}")
