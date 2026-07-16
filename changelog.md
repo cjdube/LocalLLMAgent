@@ -1,3 +1,4 @@
+* 2026-07-16 - Add a log inspector — Wren's logs already recorded the model struggling; nothing read them back
 * 2026-07-16 - Correct the scheduled-task table's stale times and order it by clock
 * 2026-07-16 - Rename daily_log to strava_download — the name is the capability, not the cadence
 * 2026-07-15 - Stop jest scanning worktree package.json copies as a duplicate haste module
