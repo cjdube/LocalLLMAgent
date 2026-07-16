@@ -250,7 +250,7 @@ def _parse_ts(ts: str) -> datetime | None:
 
 
 def _is_run_start(msg: str) -> bool:
-    # "Starting morning brief run", "Starting daily log RERUN for 2026-07-02".
+    # "Starting morning brief run", "Starting Strava download RERUN for 2026-07-02".
     # Deliberately excludes "Starting Wren chat server on port 8420".
     low = msg.lower()
     return low.startswith("starting ") and ("run" in low or "rerun" in low)
@@ -467,7 +467,7 @@ TOOL_SERVICES = {
 # task gains or loses an integration.
 ROUTINE_USES = {
     "morning_brief": ["google_calendar", "gmail", "github", "google_tasks", "weather", "ntfy"],
-    "daily_log": ["google_calendar", "strava", "ntfy"],
+    "strava_download": ["google_calendar", "strava", "ntfy"],
     "calendar_colorizer": ["google_calendar", "gmail", "ntfy"],
     "daily_chrome_learnings": ["chrome", "gmail", "ntfy"],
     "daily_youtube_learnings": ["youtube", "gmail", "ntfy"],

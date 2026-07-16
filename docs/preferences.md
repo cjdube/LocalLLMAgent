@@ -44,7 +44,7 @@ import).
 from what you call your categories, so renaming "Work/LLC" to "Consulting"
 breaks nothing. Recognized values, each expected on exactly one category:
 
-- `fitness` — the color Strava activities are logged with (`tasks/daily_log.py`)
+- `fitness` — the color Strava activities are logged with (`tasks/strava_download.py`)
 - `fallback` — the colorId the colorizer uses when it can't classify an event
   (`tasks/calendar_colorizer.py`)
 - `work`, `meetings`, `appointments` — **legacy, no consumer.** These were the

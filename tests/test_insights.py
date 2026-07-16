@@ -84,7 +84,7 @@ def test_next_run_weekday_monday():
 
 def test_is_run_start_matches_run_and_rerun():
     assert insights._is_run_start("Starting morning brief run")
-    assert insights._is_run_start("Starting daily log RERUN for 2026-07-02")
+    assert insights._is_run_start("Starting Strava download RERUN for 2026-07-02")
 
 
 def test_is_run_start_excludes_server_boot():

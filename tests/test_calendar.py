@@ -1,5 +1,5 @@
 """Tests for agent/tools/calendar.py's source_id dedupe — the mechanism behind
-the README's "re-runs never create duplicates" guarantee for daily_log. The
+the README's "re-runs never create duplicates" guarantee for strava_download. The
 Google service is a stub; per the project's live-API precedent everything else
 in this module stays untested."""
 

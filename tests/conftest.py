@@ -1,9 +1,9 @@
 """Shared pytest fixtures.
 
-Task-runner tests exercise `main()` (daily_log, bg_worker, opportunity_digest,
+Task-runner tests exercise `main()` (strava_download, bg_worker, opportunity_digest,
 reminder_sweep, daily_chrome_learnings, daily_youtube_learnings), and `main()`
 calls `setup_logger`, which writes to `tasks._common.LOGS_DIR` — the real `logs/`
-directory. Left alone, every run appends fixture rows (e.g. the daily_log tests'
+directory. Left alone, every run appends fixture rows (e.g. the strava_download tests'
 "Morning Run" on 2026-07-08) into the production logs. Redirect LOGS_DIR to a tmp
 dir for every test so the suite can never pollute real logs.
 
@@ -30,7 +30,7 @@ tmp_path suite-wide as the backstop, so a missed stub lands a fixture file in a
 throwaway dir, never in the real vault.
 
 Those same `main()` calls also reach `notify_failure` on a failure path (e.g.
-daily_log's partial-failure alert), which POSTs to the real ntfy server when
+strava_download's partial-failure alert), which POSTs to the real ntfy server when
 NTFY_URL is configured — firing an actual push to Craig's phone every test run.
 Stub the single push egress (agent.tools.notify.requests.post) for every test
 so the suite can never send a real alert; test_notify.py re-patches it per-test

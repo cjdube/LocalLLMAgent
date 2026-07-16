@@ -1,11 +1,11 @@
-"""Tests for the deterministic Strava-to-calendar field-map in tasks.daily_log.
+"""Tests for the deterministic Strava-to-calendar field-map in tasks.strava_download.
 
 fetch_strava and log_calendar_event are monkeypatched, so no network runs —
 the tests exercise the mapping, the overnight-rollover guard, the skip/error
 paths, and the source_id idempotency contract.
 """
 
-from tasks import daily_log
+from tasks import strava_download
 
 
 def _activity(**overrides) -> dict:
@@ -37,7 +37,7 @@ def _patch(monkeypatch, *, activities=None, error=None):
             "activities": activities,
         }
 
-    monkeypatch.setattr(daily_log, "fetch_strava", lambda date: fetch_result)
+    monkeypatch.setattr(strava_download, "fetch_strava", lambda date: fetch_result)
 
     calls = []
 
@@ -45,30 +45,30 @@ def _patch(monkeypatch, *, activities=None, error=None):
         calls.append(kwargs)
         return {"event_id": f"evt-{len(calls)}", "html_link": "https://cal/x"}
 
-    monkeypatch.setattr(daily_log, "log_calendar_event", fake_log)
+    monkeypatch.setattr(strava_download, "log_calendar_event", fake_log)
     return calls
 
 
 def test_maps_activity_fields_to_event(monkeypatch):
     calls = _patch(monkeypatch, activities=[_activity()])
-    assert daily_log.main() == 0
+    assert strava_download.main() == 0
     assert len(calls) == 1
     call = calls[0]
     assert call["summary"] == "Morning Run"
     assert call["start"] == "2026-07-08T08:00:00"
     assert call["end"] == "2026-07-08T08:45:00"
-    assert call["color_id"] == daily_log.FITNESS_COLOR_ID == "4"
+    assert call["color_id"] == strava_download.FITNESS_COLOR_ID == "4"
 
 
 def test_source_id_is_the_real_strava_id_as_string(monkeypatch):
     calls = _patch(monkeypatch, activities=[_activity(strava_id=98765)])
-    assert daily_log.main() == 0
+    assert strava_download.main() == 0
     assert calls[0]["source_id"] == "98765"
 
 
 def test_zero_activities_writes_nothing(monkeypatch):
     calls = _patch(monkeypatch, activities=[])
-    assert daily_log.main() == 0
+    assert strava_download.main() == 0
     assert calls == []
 
 
@@ -80,7 +80,7 @@ def test_missing_times_skips_that_activity_only(monkeypatch):
             _activity(strava_id=2, name="Evening Ride"),
         ],
     )
-    assert daily_log.main() == 0
+    assert strava_download.main() == 0
     assert len(calls) == 1
     assert calls[0]["summary"] == "Evening Ride"
 
@@ -90,7 +90,7 @@ def test_overnight_activity_rolls_end_date_forward(monkeypatch):
         monkeypatch,
         activities=[_activity(start_time="23:30", end_time="00:15")],
     )
-    assert daily_log.main() == 0
+    assert strava_download.main() == 0
     assert calls[0]["start"] == "2026-07-08T23:30:00"
     assert calls[0]["end"] == "2026-07-09T00:15:00"
 
@@ -99,8 +99,8 @@ def test_fetch_error_returns_failure_and_writes_nothing(monkeypatch):
     calls = _patch(monkeypatch, error="Strava token refresh failed (401)")
     # Neutralize the failure push so the test never hits a real ntfy server
     # (config/.env may define NTFY_URL on the dev/prod machine).
-    monkeypatch.setattr(daily_log, "notify_failure", lambda *a, **k: None)
-    assert daily_log.main() == 1
+    monkeypatch.setattr(strava_download, "notify_failure", lambda *a, **k: None)
+    assert strava_download.main() == 1
     assert calls == []
 
 
@@ -110,19 +110,19 @@ def test_fetch_error_returns_failure_and_writes_nothing(monkeypatch):
 
 def test_partial_failure_pushes_alert_but_exits_zero(monkeypatch):
     alerts = []
-    monkeypatch.setattr(daily_log, "notify_failure",
+    monkeypatch.setattr(strava_download, "notify_failure",
                         lambda name, detail, logger=None: alerts.append(str(detail)))
     # One good activity, one with no start_time (skipped by _log_activity).
     _patch(monkeypatch, activities=[_activity(), _activity(strava_id=999, start_time=None)])
 
-    assert daily_log.main() == 0  # the logged one is done; re-runs can't duplicate it
+    assert strava_download.main() == 0  # the logged one is done; re-runs can't duplicate it
     assert any("1 of 2" in a for a in alerts)  # ...but the miss is pushed, not silent
 
 
 def test_full_success_pushes_no_alert(monkeypatch):
     alerts = []
-    monkeypatch.setattr(daily_log, "notify_failure",
+    monkeypatch.setattr(strava_download, "notify_failure",
                         lambda name, detail, logger=None: alerts.append(str(detail)))
     _patch(monkeypatch, activities=[_activity()])
-    assert daily_log.main() == 0
+    assert strava_download.main() == 0
     assert alerts == []

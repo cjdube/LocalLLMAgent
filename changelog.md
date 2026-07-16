@@ -1,3 +1,4 @@
+* 2026-07-16 - Rename daily_log to strava_download — the name is the capability, not the cadence
 * 2026-07-15 - Stop jest scanning worktree package.json copies as a duplicate haste module
 * 2026-07-14 - Drop the wiki tools that read raw/ — it's a write-only handoff
 * 2026-07-14 - Add a jest/jsdom suite for the shared chat dock

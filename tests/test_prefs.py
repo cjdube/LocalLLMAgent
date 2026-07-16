@@ -33,7 +33,7 @@ def test_calendar_categories_complete():
 
 def test_calendar_roles_present():
     roles = [c.get("role") for c in prefs.calendar_categories() if c.get("role")]
-    # daily_log needs fitness, calendar_colorizer needs exactly one fallback.
+    # strava_download needs fitness, calendar_colorizer needs exactly one fallback.
     # work/meetings/appointments have no consumer since calendar bucketing was
     # dropped from the learnings tasks; pinned as legacy (see docs/preferences.md).
     for role in ("work", "meetings", "appointments", "fitness"):

@@ -9,7 +9,7 @@ path. Mirrors the fetch -> iterate -> write -> summarize shape of the sibling
 task tasks/calendar_colorizer.py.
 
 Usage:
-    python -m tasks.daily_log
+    python -m tasks.strava_download
 """
 
 import json
@@ -73,8 +73,8 @@ def _log_activity(activity: dict, logger) -> bool:
 
 
 def main() -> int:
-    logger = setup_logger("daily_log")
-    logger.info("Starting daily log run")
+    logger = setup_logger("strava_download")
+    logger.info("Starting Strava download run")
 
     try:
         result = fetch_strava(date="yesterday")
@@ -85,7 +85,7 @@ def main() -> int:
         activities = result.get("activities", [])
         if not activities:
             logger.info("No Strava activities yesterday — nothing to log")
-            logger.info("Daily log run complete")
+            logger.info("Strava download run complete")
             return 0
 
         logged = 0
@@ -100,16 +100,16 @@ def main() -> int:
             # alert. Still exit 0 — the logged ones are done, and re-runs
             # can't duplicate them (source_id dedupe) — but push the miss.
             notify_failure(
-                "daily_log",
+                "strava_download",
                 f"{len(activities) - logged} of {len(activities)} activities "
-                "failed to log — see logs/daily_log.log",
+                "failed to log — see logs/strava_download.log",
                 logger,
             )
-        logger.info("Daily log run complete")
+        logger.info("Strava download run complete")
         return 0
     except Exception as e:
-        logger.exception(f"Daily log run failed: {e}")
-        notify_failure("daily_log", e, logger)
+        logger.exception(f"Strava download run failed: {e}")
+        notify_failure("strava_download", e, logger)
         return 1
 
 

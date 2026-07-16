@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.craigdube.localllmagent.dailylog</string>
+    <string>com.craigdube.localllmagent.stravadownload</string>
 
     <key>ProgramArguments</key>
     <array>
         <string>/Users/craigdube/Projects/LocalLLMAgent/.venv/bin/python</string>
         <string>-m</string>
-        <string>tasks.daily_log</string>
+        <string>tasks.strava_download</string>
     </array>
 
     <key>WorkingDirectory</key>
@@ -24,9 +24,9 @@
     </dict>
 
     <key>StandardOutPath</key>
-    <string>/Users/craigdube/Projects/LocalLLMAgent/logs/daily_log.launchd.log</string>
+    <string>/Users/craigdube/Projects/LocalLLMAgent/logs/strava_download.launchd.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/craigdube/Projects/LocalLLMAgent/logs/daily_log.launchd.log</string>
+    <string>/Users/craigdube/Projects/LocalLLMAgent/logs/strava_download.launchd.log</string>
 
     <key>RunAtLoad</key>
     <false/>

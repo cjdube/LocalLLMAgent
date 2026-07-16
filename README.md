@@ -38,7 +38,7 @@ model name is just `OLLAMA_MODEL` in `config/.env`. Swap models with
 swap: the **chat server** relies on Ollama's tool-calling protocol (`tools` /
 `tool_calls`), so a model with weak tool-calling support may not drive it
 reliably — the scheduled tasks only need plain text completion (or, for
-`daily_log`, no model at all).
+`strava_download`, no model at all).
 
 **The backend is swappable too.** All model calls route through one seam
 (`agent/loop.py:_llm_chat`), which defaults to local Ollama but can be pointed at
@@ -160,7 +160,7 @@ Every tool module is runnable standalone for testing, e.g.:
 | Task | Schedule | What it does |
 |---|---|---|
 | `tasks/morning_brief.py` | Daily 6:00 AM | Fetches weather + next-24h calendar events + Google Tasks past due or due within 48h (via `google_tasks.get_tasks_due_soon`) + starred GitHub repos pushed to since the last brief (via `github_starred.fetch_starred_repos`, cursor persisted in `config/github_starred_state.json`), has the model write a short "at a glance" summary and a one-sentence intro for the starred-repos section, assembles a styled HTML email (weather / calendar / tasks due soon / Starred Repos sections), sends it via Gmail. The pipeline lives in `build_and_send_brief()`, shared with the chat `send_morning_brief` tool. |
-| `tasks/daily_log.py` | Daily 6:15 AM | Fetches yesterday's Strava activities and maps each one onto a Google Calendar event in plain Python — no model, since it's a pure field mapping with no natural-language step. Deduped by `source_id` (Strava activity id) so re-runs never create duplicates. |
+| `tasks/strava_download.py` | Daily 6:15 AM | Fetches yesterday's Strava activities and maps each one onto a Google Calendar event in plain Python — no model, since it's a pure field mapping with no natural-language step. Deduped by `source_id` (Strava activity id) so re-runs never create duplicates. |
 | `tasks/daily_chrome_learnings.py` | Daily 5:15 AM | Covers the prior day's Chrome browsing history, has the local model draft a compact Tools & Tech Encountered daily log, writes it as `Daily-Chrome-<date>.md` in `LEARNINGS_DIR` (Obsidian vault, one file per day). Each site carries its top page *paths*, so the review can say what was being looked into rather than restate the tab title. Sites and pages matching `learnings.excluded_domains` / `learnings.excluded_keywords` ([preferences](docs/preferences.md)) are skipped. Small, focused prompt so the on-device model produces a full draft. A day with no meaningful browsing (or a draft that's just "None") writes nothing. If the write fails — e.g. `LEARNINGS_DIR` points somewhere that doesn't exist — it emails the draft instead so it's never silently lost (and pushes a phone alert). |
 | `tasks/daily_youtube_learnings.py` | Daily 5:35 AM | Covers the prior day's YouTube Liked videos: the local model writes a short synthesis of what they teach, and a deterministic, scheme-validated linked list of the exact videos (verbatim titles + URLs) is appended in Python; writes it as `Daily-YouTube-<date>.md` in `LEARNINGS_DIR`. A day with no Likes writes nothing. Same vault-write-fails → email fallback. |
 | `tasks/ai_chat_learnings.py` | Daily 4:30 AM | Covers the prior day's chats with AI agents: reads every Claude Code session active that day from `~/.claude/projects` (plus any new Gemini export dropped in `WREN_GEMINI_CHATS_DIR`), and has the local model write a brief **Accomplished / Learned** summary per session — outcomes, not the back-and-forth. Writes one `AI-Chat-Learnings-<date>.md` per day in `LEARNINGS_DIR`, one section per session. A day with no chats (or only empty summaries) writes nothing; same vault-write-fails → email fallback. Neither product has an API for past chats, so the sources are local session logs + a drop folder. `--backfill N` summarizes each of the last N days as a separate file. See [docs/ai-chat-learnings.md](docs/ai-chat-learnings.md). |
@@ -358,7 +358,7 @@ on the right so you can talk to Wren while watching a run:
   the existing `/chat` endpoints (confirmation prompts appear inline in the dock).
 
 **Run now runs the real task, side effects and all** — `morning_brief` sends the
-actual email, `daily_log`/`calendar_colorizer` write real calendar events —
+actual email, `strava_download`/`calendar_colorizer` write real calendar events —
 exactly what the schedule does, just now. The button asks for a click-through
 confirm and refuses a second concurrent run of the same task. It's a read-only
 window otherwise: schedules are still edited by hand in the `.plist` files
@@ -525,7 +525,7 @@ mostly useful if the Python process fails to start at all).
 5. Test each task manually before trusting the schedule:
    ```bash
    .venv/bin/python -m tasks.morning_brief
-   .venv/bin/python -m tasks.daily_log
+   .venv/bin/python -m tasks.strava_download
    .venv/bin/python -m tasks.daily_chrome_learnings
    .venv/bin/python -m tasks.daily_youtube_learnings
    .venv/bin/python -m tasks.calendar_colorizer
@@ -694,7 +694,7 @@ steer the model. The blast radius is contained by design:
 - **`morning_brief`, the daily learnings tasks, and `calendar_colorizer`** use the
   tool-free `complete_text` path — the model only writes narrative prose, it
   never calls a tool, so injected instructions have nothing to actuate.
-  **`daily_log`** goes further and uses no model at all: it's a deterministic
+  **`strava_download`** goes further and uses no model at all: it's a deterministic
   Python field-map from Strava activity to calendar event, so there's no prompt
   for injected activity text to hijack.
 - All model output rendered to HTML is `html.escape`d and any URL is
@@ -730,7 +730,7 @@ steer the model. The blast radius is contained by design:
 The model can actuate a **consequential** write only with an explicit human
 "yes": a tap in chat (`advance()`/`confirm_before`), or a phone approval for a
 background task's external/irreversible action. The prose scheduled tasks keep
-the model out of the write path entirely (`complete_text`; `daily_log`'s
+the model out of the write path entirely (`complete_text`; `strava_download`'s
 deterministic Python field-map, which replaced an earlier `run_agent` path fed
 by Strava activity *names*). The one place the model actuates a write
 *unattended* is a background task performing a **reversible, internal** write to
