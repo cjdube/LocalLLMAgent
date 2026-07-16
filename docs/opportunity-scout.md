@@ -1,7 +1,7 @@
 # The opportunity scout — how it works
 
 The fractional-work opportunity scout finds leads for Vibe Foundry from free,
-ToS-clean sources, has the local model score them, and emails a daily digest.
+ToS-clean sources, has the local model score them, and emails a weekly digest.
 This page explains the full lifecycle: when it runs, what it looks at, how the
 list is built, what triage does, and how deduping and scoring behave over
 time.
@@ -15,7 +15,7 @@ page). It deliberately does NOT scrape LinkedIn or use paid data SaaS — see
 
 ## When does it run?
 
-Every morning at 7:30 via launchd
+Weekly, Sundays at 9:00 PM, via launchd
 (`launchd/com.craigdube.localllmagent.opportunitydigest.plist`). You can also
 ask Wren in chat to "send the opportunity digest" anytime — the chat tool
 (`send_opportunity_digest`) runs the exact same pipeline
@@ -27,11 +27,19 @@ Three sources, each polled fresh every run. Each degrades to empty on error —
 one dead feed never kills the digest.
 
 1. **SEC EDGAR Form D filings** ("just funded") from companies headquartered
-   in New England (`OPP_STATES`, default `MA,NH,ME,VT,RI,CT`). Only filings
+   in the watched states (`OPP_STATES`, default `MA,NH,ME`). Only filings
    since the last successful run are requested, tracked by a watermark date in
    `config/opportunities_state.json`. Fund/trust/SPV/series-LLC paperwork is
    filtered out by name (`_FUND_NAME_RE`), and multiple same-day filings by
    one filer collapse into a single entry with an "(N filings)" count.
+
+   Each state is paged until EDGAR's own reported hit total is exhausted, with
+   `_EDGAR_MAX_PAGES` (300 filings/state) as a safety cap so a long catch-up
+   can't fire unbounded requests. EDGAR returns newest-first, so hitting that
+   cap would mean the *oldest* filings in the window went unseen — rather than
+   advancing the watermark past them, the poll reports the oldest date it
+   actually reached and the watermark holds there, so the remainder is picked
+   up (and deduped) next run. Hitting the cap logs a warning.
 2. **The ATS watchlist** — the public job boards of companies added to the
    watchlist, filtered to product/eng leadership titles (VP/Head/Director/
    CPO/CTO of product or engineering). Four ATSes are supported; the board
@@ -63,11 +71,12 @@ opening — that's the "stalled exec search" signal the scout was built for.
 
 Everything in `new` becomes the digest:
 
-1. The model scores the *unscored* ones (up to `MAX_SCORE_ITEMS = 40` per
-   run, to bound the prompt for the small local model) — a 1–10 fit rating
-   plus a one-line outreach angle, in a defensively parsed `id|score|angle`
-   line format. Items past the cap, or lines the model skips/garbles, simply
-   stay unscored; they still appear, sorted last in their section, with no
+1. The model scores the *unscored* ones — a 1–10 fit rating plus a one-line
+   outreach angle, in a defensively parsed `id|score|angle` line format.
+   Scoring runs in batches of `MAX_SCORE_ITEMS = 40` (one model call each) to
+   bound each prompt for the small local model; every item gets scored, however
+   many batches that takes. Lines the model skips or garbles simply stay
+   unscored; those items still appear, sorted last in their section, with no
    score badge.
 2. Python assembles the three-section HTML email (🆕 Just Funded / ⏳ Stalled
    Searches / 👋 Hiring Signals) — the model never formats the digest.
@@ -129,7 +138,7 @@ by name from chat, nothing persisted.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `OPP_STATES` | `MA,NH,ME,VT,RI,CT` | EDGAR headquarters-state filter |
+| `OPP_STATES` | `MA,NH,ME` | EDGAR headquarters-state filter |
 | `OPP_STALLED_DAYS` | `45` | Days open before a watched leadership posting flags as a stalled search |
 | `OPP_SCORE_THRESHOLD` | `8` | Minimum score that triggers an ntfy push |
 | `WREN_PUBLIC_URL` | unset | Base URL for the digest footer's link to `/opportunities`; footer omitted when unset |

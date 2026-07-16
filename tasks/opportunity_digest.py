@@ -1,9 +1,10 @@
-"""Gather fractional-work opportunity signals and email the daily Opportunity
-Digest. Non-interactive — run by launchd each morning.
+"""Gather fractional-work opportunity signals and email the weekly Opportunity
+Digest. Non-interactive — run by launchd each Sunday evening.
 
 Three signals from free, ToS-clean sources (see CLAUDE.md's data sourcing
 policy — no LinkedIn scraping, no paid data SaaS):
-  - funded: new SEC Form D filings in New England (EDGAR full-text search API)
+  - funded: new SEC Form D filings in the watched states (EDGAR full-text
+    search API)
   - hiring: product/eng leadership openings on watched companies' public
     Greenhouse/Lever/Ashby boards, plus HN "Who is hiring" posts
   - stalled_search: a watched leadership opening still unfilled after
@@ -61,13 +62,24 @@ HN_SEARCH_URL = "https://hn.algolia.com/api/v1/search_by_date"
 _EDGAR_UA = f"Wren opportunity scout ({os.getenv('BRIEF_TO_EMAIL', 'contact unset')})"
 
 _TIMEOUT_S = 15
-# EDGAR full-text search pages are fixed at 10 hits; 5 pages per state bounds
-# a runaway window (e.g. first run after a long gap) at 50 filings per state.
-_EDGAR_MAX_PAGES = 5
+# EDGAR returns up to 100 hits per request and `from` strides by that much —
+# NOT 10, which an earlier version of this poller assumed. With a stride of 10
+# against 100-hit pages it re-fetched the same hits five times over and still
+# bottomed out around 140 filings/state.
+_EDGAR_PAGE_SIZE = 100
+# Paging normally stops when the state's own reported hit total is exhausted;
+# this is only a safety cap so a runaway window (first run after a long gap)
+# can't fire unbounded requests. 300/state is ~5x the busiest observed week, so
+# it should never bite in normal operation — and when it does, poll_edgar
+# reports back rather than silently dropping what it didn't reach.
+_EDGAR_MAX_PAGES = 3
+# Cold-start window when no watermark exists yet: roughly the schedule's
+# cadence (weekly), so a fresh install doesn't open with a half-empty digest.
+_EDGAR_DEFAULT_LOOKBACK_DAYS = 7
 _HN_MAX_PAGES = 3
-# Cap on items sent to the local model for scoring in one run — a burst
-# (first-ever run, busy Form D day) shouldn't build an unbounded prompt.
-# Unscored overflow items still reach the digest, just without a score line.
+# Batch size for scoring — a burst (first-ever run, busy Form D week) shouldn't
+# build one unbounded prompt, so items are scored in chunks of this many per
+# model call. Every item still gets scored; only the prompt size is bounded.
 MAX_SCORE_ITEMS = 40
 _SNIPPET_CHARS = 300
 
@@ -148,25 +160,46 @@ def poll_edgar(start_date: str, end_date: str, states: list) -> dict:
     """New Form D filings with a principal place of business in `states`,
     filed within [start_date, end_date] (YYYY-MM-DD). Same-day filings by one
     filer (CIK) collapse to a single item with a filing count — a filer's
-    paperwork volume is one signal, not many."""
+    paperwork volume is one signal, not many.
+
+    Each state is paged (_EDGAR_PAGE_SIZE at a time) until EDGAR's own reported
+    hit total is exhausted or _EDGAR_MAX_PAGES bites. EDGAR returns
+    newest-first, so hitting that cap means the OLDEST filings in the window
+    went unseen. That's reported back as "oldest_fetched" — the oldest date
+    actually reached, across only the states that truncated — so the caller can
+    hold the watermark there and pick the remainder up next run instead of
+    skipping past it.
+
+    Returns {"items": [...]}, optionally with "oldest_fetched", or
+    {"error": ...}."""
     headers = {"User-Agent": _EDGAR_UA}
     grouped: dict = {}  # (cik, file_date) -> item
+    truncated_dates = []
     try:
         for state in states:
+            state_fetched, state_total, state_oldest = 0, 0, None
             for page in range(_EDGAR_MAX_PAGES):
                 params = {
                     "forms": "D",
                     "startdt": start_date,
                     "enddt": end_date,
                     "locationCodes": state,
-                    "from": page * 10,
+                    "from": page * _EDGAR_PAGE_SIZE,
                 }
                 resp = requests.get(EDGAR_SEARCH_URL, params=params,
                                     headers=headers, timeout=_TIMEOUT_S)
                 resp.raise_for_status()
-                hits = resp.json().get("hits", {}).get("hits", [])
+                payload = resp.json().get("hits", {})
+                hits = payload.get("hits", [])
+                state_total = (payload.get("total") or {}).get("value", 0)
+                state_fetched += len(hits)
                 for hit in hits:
                     src = hit.get("_source", {})
+                    file_date = src.get("file_date", "")
+                    # Coverage is about what EDGAR returned, not what we kept,
+                    # so track the oldest date before the fund-name filter.
+                    if file_date and (state_oldest is None or file_date < state_oldest):
+                        state_oldest = file_date
                     adsh = src.get("adsh", "")
                     names = src.get("display_names") or [""]
                     # "Acme Inc  (CIK 0001234567)" -> "Acme Inc"
@@ -175,7 +208,6 @@ def poll_edgar(start_date: str, end_date: str, states: list) -> dict:
                         continue
                     ciks = src.get("ciks") or [""]
                     cik = ciks[0].lstrip("0") or "0"
-                    file_date = src.get("file_date", "")
                     key = (cik, file_date)
                     if key in grouped:
                         grouped[key]["filings"] += 1
@@ -195,8 +227,14 @@ def poll_edgar(start_date: str, end_date: str, states: list) -> dict:
                         "location": locations[0],
                         "posted_at": file_date,
                     }
-                if len(hits) < 10:
+                if len(hits) < _EDGAR_PAGE_SIZE:
                     break
+            # Only a state that actually ran out of pages holds the watermark
+            # back. A fully-paged state has already reached start_date, so
+            # folding its oldest date in would clamp to start_date itself and
+            # the window would never advance.
+            if state_oldest and state_fetched < state_total:
+                truncated_dates.append(state_oldest)
     except (requests.exceptions.RequestException, ValueError) as e:
         return {"error": f"EDGAR poll failed: {e}"}
     items = []
@@ -205,7 +243,10 @@ def poll_edgar(start_date: str, end_date: str, states: list) -> dict:
         if filings > 1:
             item["title"] += f" ({filings} filings)"
         items.append(item)
-    return {"items": items}
+    result = {"items": items}
+    if truncated_dates:
+        result["oldest_fetched"] = min(truncated_dates)
+    return result
 
 
 # Titles worth flagging on a watched board, built from the term lists in
@@ -452,17 +493,21 @@ def _parse_scores(text: str, valid_ids: set) -> dict:
 
 
 def score_items(items: list, logger: Optional[logging.Logger] = None) -> dict:
-    to_score = items[:MAX_SCORE_ITEMS]
-    if not to_score:
-        return {}
-    raw = complete_text(
-        system_prompt=SCORING_SYSTEM_PROMPT,
-        user_prompt=f"leads: {json.dumps(_compact_for_scoring(to_score))}",
-        backend=resolve_backend("opportunity_digest"),
-    )
-    if logger:
-        logger.info(f"scoring output ->\n{raw}")
-    return _parse_scores(raw, {i["id"] for i in to_score})
+    """Score every item, MAX_SCORE_ITEMS at a time — one model call per batch so
+    a busy week's leads all get scored without any single prompt growing
+    unbounded."""
+    scores = {}
+    for start in range(0, len(items), MAX_SCORE_ITEMS):
+        batch = items[start:start + MAX_SCORE_ITEMS]
+        raw = complete_text(
+            system_prompt=SCORING_SYSTEM_PROMPT,
+            user_prompt=f"leads: {json.dumps(_compact_for_scoring(batch))}",
+            backend=resolve_backend("opportunity_digest"),
+        )
+        if logger:
+            logger.info(f"scoring output ->\n{raw}")
+        scores.update(_parse_scores(raw, {i["id"] for i in batch}))
+    return scores
 
 
 # ---- digest ----------------------------------------------------------------
@@ -602,13 +647,23 @@ def build_and_send_digest(logger: Optional[logging.Logger] = None) -> dict:
         # successful run never skips filings made during this run.
         run_day = date.today().isoformat()
         edgar_start = _read_edgar_watermark() or (
-            date.today() - timedelta(days=3)
+            date.today() - timedelta(days=_EDGAR_DEFAULT_LOOKBACK_DAYS)
         ).isoformat()
 
         edgar_result = poll_edgar(edgar_start, run_day, _states())
         log.info(f"poll_edgar({edgar_start}..{run_day}) -> "
                  f"{len(edgar_result.get('items', []))} items, "
                  f"error={edgar_result.get('error')}")
+        # A truncated poll never reached the oldest filings in the window, so
+        # the watermark holds where coverage actually ends — advancing it to
+        # run_day would skip them for good.
+        edgar_watermark = edgar_result.get("oldest_fetched") or run_day
+        if "oldest_fetched" in edgar_result:
+            log.warning(
+                f"EDGAR poll hit the {_EDGAR_MAX_PAGES}-page-per-state safety "
+                f"cap; holding watermark at {edgar_watermark} (instead of "
+                f"{run_day}) so the remainder gets re-polled next run"
+            )
 
         watchlist = opportunities.get_watchlist()
         ats_result = poll_ats(watchlist)
@@ -642,7 +697,7 @@ def build_and_send_digest(logger: Optional[logging.Logger] = None) -> dict:
         if not to_report:
             log.info("Nothing new — no digest sent")
             if not edgar_result.get("error"):
-                _write_edgar_watermark(run_day)
+                _write_edgar_watermark(edgar_watermark)
             log.info("Opportunity digest run complete — nothing new")
             return {"sent": False, "new_items": 0}
 
@@ -666,7 +721,7 @@ def build_and_send_digest(logger: Optional[logging.Logger] = None) -> dict:
 
         opportunities.mark_digested([i["id"] for i in to_report])
         if not edgar_result.get("error"):
-            _write_edgar_watermark(run_day)
+            _write_edgar_watermark(edgar_watermark)
 
         high = [i for i in to_report if (i.get("score") or 0) >= _score_threshold()]
         if high:

@@ -60,6 +60,39 @@ def test_parse_scores_empty_and_none():
 
 
 # --------------------------------------------------------------------------- #
+# score_items
+# --------------------------------------------------------------------------- #
+
+def test_score_items_batches_overflow_instead_of_dropping_it(monkeypatch):
+    """Overflow past the cap used to reach the digest unscored and then get
+    marked 'digested' — losing its score/angle for good. Every item gets
+    scored now, one bounded prompt per batch."""
+    monkeypatch.setattr(od, "MAX_SCORE_ITEMS", 2)
+    items = [{"id": f"edgar:{n}", "signal": "funded", "company": f"Co {n}",
+              "title": "Form D filed 2026-07-10"} for n in range(5)]
+
+    calls = []
+
+    def fake_complete(**k):
+        # Answer only the ids in THIS prompt — a real model call is stateless.
+        ids = [i["id"] for i in items if f'"{i["id"]}"' in k["user_prompt"]]
+        calls.append(ids)
+        return "\n".join(f"{i}|7|Angle for {i}" for i in ids)
+
+    monkeypatch.setattr(od, "complete_text", fake_complete)
+
+    scores = od.score_items(items)
+    assert len(scores) == 5                       # nothing dropped
+    assert [len(c) for c in calls] == [2, 2, 1]   # ceil(5/2) bounded prompts
+
+
+def test_score_items_with_nothing_to_score_makes_no_model_call(monkeypatch):
+    monkeypatch.setattr(od, "complete_text",
+                        lambda **k: pytest.fail("should not call the model"))
+    assert od.score_items([]) == {}
+
+
+# --------------------------------------------------------------------------- #
 # build_and_send_digest / main contracts
 # --------------------------------------------------------------------------- #
 
@@ -136,6 +169,37 @@ def test_dead_source_degrades_and_holds_its_watermark(stubbed_run, monkeypatch):
     assert "TinyCo" in stubbed_run["emails"][0][1]
     # EDGAR failed, so its window must NOT advance — those days get re-polled.
     assert load_json(od.STATE_PATH, {}) == {}
+
+
+def test_truncated_edgar_holds_watermark_at_oldest_fetched(stubbed_run, monkeypatch):
+    """A truncated poll never saw the oldest filings in its window, so the
+    watermark holds where coverage ended rather than skipping past them."""
+    monkeypatch.setattr(od, "poll_edgar",
+                        lambda start, end, states: {"items": [_edgar_item()],
+                                                    "oldest_fetched": "2026-07-10"})
+    assert od.main() == 0
+    assert len(stubbed_run["emails"]) == 1  # what it DID fetch still goes out
+    assert load_json(od.STATE_PATH, {})["edgar_window_start"] == "2026-07-10"
+
+
+def test_truncated_edgar_holds_watermark_on_the_nothing_new_path(stubbed_run, monkeypatch):
+    # The early return has its own watermark write — it needs the clamp too.
+    monkeypatch.setattr(od, "poll_edgar",
+                        lambda *a: {"items": [], "oldest_fetched": "2026-07-11"})
+    assert od.build_and_send_digest() == {"sent": False, "new_items": 0}
+    assert load_json(od.STATE_PATH, {})["edgar_window_start"] == "2026-07-11"
+
+
+def test_truncated_edgar_with_no_older_hits_holds_without_regressing(stubbed_run, monkeypatch):
+    """Known residual: if one day's filings alone exceed the safety cap, the
+    clamp can't advance. It must HOLD (re-poll the same window next run), never
+    skip ahead — pinned so a future refactor can't start silently dropping."""
+    od._write_edgar_watermark("2026-07-09")
+    monkeypatch.setattr(od, "poll_edgar",
+                        lambda start, end, states: {"items": [_edgar_item()],
+                                                    "oldest_fetched": start})
+    assert od.main() == 0
+    assert load_json(od.STATE_PATH, {})["edgar_window_start"] == "2026-07-09"
 
 
 def test_send_failure_exits_nonzero_and_leaves_items_new(stubbed_run, monkeypatch):
@@ -416,14 +480,93 @@ def _edgar_hit(adsh, name, cik, date="2026-07-10"):
 
 
 class _EdgarResp:
-    def __init__(self, hits):
+    def __init__(self, hits, total=None):
         self._hits = hits
+        # None omits the key entirely — EDGAR always sends it, but poll_edgar
+        # must not assume so.
+        self._total = total
 
     def raise_for_status(self):
         pass
 
     def json(self):
-        return {"hits": {"hits": self._hits}}
+        hits = {"hits": self._hits}
+        if self._total is not None:
+            hits["total"] = {"value": self._total, "relation": "eq"}
+        return {"hits": hits}
+
+
+def _page_of(n, date, start_cik):
+    """n distinct operating-company hits, all filed on `date`."""
+    return [_edgar_hit(f"0001-26-{start_cik + i:06d}", f"Startup {start_cik + i}",
+                       f"{start_cik + i:010d}", date)
+            for i in range(n)]
+
+
+# Real EDGAR pages at 100; shrink it so fixtures stay readable.
+@pytest.fixture
+def small_pages(monkeypatch):
+    monkeypatch.setattr(od, "_EDGAR_PAGE_SIZE", 10)
+
+
+def test_poll_edgar_strides_by_a_full_page(small_pages, monkeypatch):
+    """`from` must advance by the page size. Striding by less re-fetches hits
+    already seen (the old stride of 10 against 100-hit pages pulled each hit
+    five times) and caps total reach far below the page budget."""
+    froms = []
+
+    def fake_get(url, params=None, **k):
+        froms.append(params["from"])
+        page = params["from"] // 10
+        # 2 full pages then a short one: 24 hits total.
+        if page < 2:
+            return _EdgarResp(_page_of(10, "2026-07-16", 100 + page * 10), total=24)
+        return _EdgarResp(_page_of(4, "2026-07-15", 200), total=24)
+
+    monkeypatch.setattr(od.requests, "get", fake_get)
+
+    result = od.poll_edgar("2026-07-09", "2026-07-16", ["MA"])
+    assert froms == [0, 10, 20]        # not [0, 1, 2] and not [0, 10, 20, 30...]
+    assert len(result["items"]) == 24  # every hit reached, none double-counted
+    assert "oldest_fetched" not in result  # total exhausted: nothing missed
+
+
+def test_poll_edgar_flags_truncation_with_the_oldest_date_it_reached(
+        small_pages, monkeypatch):
+    """Hitting the safety cap must report where coverage actually ends —
+    EDGAR is newest-first, so the unseen filings are the OLDEST ones."""
+    monkeypatch.setattr(od, "_EDGAR_MAX_PAGES", 2)
+
+    def fake_get(url, params=None, **k):
+        date = "2026-07-16" if params["from"] == 0 else "2026-07-15"
+        return _EdgarResp(_page_of(10, date, 100 + params["from"]), total=500)
+
+    monkeypatch.setattr(od.requests, "get", fake_get)
+
+    result = od.poll_edgar("2026-07-09", "2026-07-16", ["MA"])
+    # Reached back to the 15th only — NOT start_date, and not run_day.
+    assert result["oldest_fetched"] == "2026-07-15"
+
+
+def test_poll_edgar_truncation_clamp_ignores_untruncated_states(
+        small_pages, monkeypatch):
+    """The clamp must come only from states that truncated. A fully-paged
+    state has already reached start_date, so folding its oldest date in would
+    collapse the clamp to start_date and the window would never advance."""
+    monkeypatch.setattr(od, "_EDGAR_MAX_PAGES", 2)
+
+    def fake_get(url, params=None, **k):
+        if params["locationCodes"] == "MA":       # truncates at the 2-page cap
+            date = "2026-07-16" if params["from"] == 0 else "2026-07-15"
+            return _EdgarResp(_page_of(10, date, 100 + params["from"]), total=500)
+        # ME: one short page, fully exhausted, dated back at start_date.
+        return _EdgarResp(_page_of(2, "2026-07-09", 900), total=2)
+
+    monkeypatch.setattr(od.requests, "get", fake_get)
+
+    result = od.poll_edgar("2026-07-09", "2026-07-16", ["MA", "ME"])
+    # ME's older 07-09 is ignored: it truncated nothing.
+    assert result["oldest_fetched"] == "2026-07-15"
 
 
 def test_poll_edgar_collapses_same_day_filings_per_filer(monkeypatch):
