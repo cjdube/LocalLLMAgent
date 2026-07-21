@@ -69,6 +69,7 @@ EMAIL_CALL = {"function": {"name": "send_email", "arguments": {"subject": "Hi", 
     ("get", "/api/memories", {}),
     ("get", "/api/system_map", {}),
     ("get", "/api/opportunities", {}),
+    ("get", "/api/starred", {}),
     ("post", "/api/opportunities/abc/status", {"json": {"status": "interested"}}),
     ("post", "/api/opportunities/watchlist", {"json": {"company": "X"}}),
     ("delete", "/api/opportunities/watchlist/abc", {}),
@@ -86,6 +87,35 @@ def test_security_headers_present(client):
     assert resp.headers["X-Content-Type-Options"] == "nosniff"
     assert resp.headers["Referrer-Policy"] == "no-referrer"
     assert "frame-ancestors 'none'" in resp.headers["Content-Security-Policy"]
+
+
+# --------------------------------------------------------------------------- #
+# /api/starred — live repo list merged with cached blurbs
+# --------------------------------------------------------------------------- #
+
+def test_api_starred_merges_cached_blurb_and_falls_back_to_description(auth_client, monkeypatch):
+    from agent.store import atomic_write_json
+    monkeypatch.setattr(srv, "fetch_starred_repos", lambda: {"repos": [
+        {"full_name": "a/one", "description": "desc one", "language": "Rust"},
+        {"full_name": "b/two", "description": "desc two", "language": "Go"},
+    ]})
+    # a/one is cached; b/two is not, so it falls back to its GitHub description.
+    atomic_write_json(srv.starred_blurbs.BLURBS_PATH,
+                      {"a/one": {"blurb": "cached blurb", "generated_at": "x"}})
+
+    resp = auth_client.get("/api/starred")
+    assert resp.status_code == 200
+    repos = {r["full_name"]: r["blurb"] for r in resp.get_json()["repos"]}
+    assert repos == {"a/one": "cached blurb", "b/two": "desc two"}
+
+
+def test_api_starred_passes_fetch_error_through(auth_client, monkeypatch):
+    monkeypatch.setattr(srv, "fetch_starred_repos", lambda: {"error": "rate limited"})
+    resp = auth_client.get("/api/starred")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["error"] == "rate limited"
+    assert body["repos"] == []
 
 
 # --------------------------------------------------------------------------- #

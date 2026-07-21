@@ -12,6 +12,7 @@ config/reminders.json
 config/bg_jobs.json
 config/opportunities.json
 config/opportunities_state.json
+config/starred_blurbs.json
 config/*.lock
 config/*.corrupt-*
 logs/*.log

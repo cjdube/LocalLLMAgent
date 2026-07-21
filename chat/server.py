@@ -53,12 +53,15 @@ from agent.toolset import (
     render_toolgroups_index,
     tools_for,
 )
+from agent.store import load_json
 from agent.tools import background
 from agent.tools import opportunities
+from agent.tools.github_starred import fetch_starred_repos
 from agent.tools.memory import recall
 from agent.tools.research import research_opportunity
 from agent.tools.notify import notify, ntfy_health
 from agent.tools.skills import render_skills_index
+from tasks import starred_blurbs
 from tasks._common import setup_logger
 from tasks.morning_brief import build_and_send_brief
 from tasks.opportunity_digest import build_and_send_digest
@@ -684,6 +687,32 @@ def api_opportunities():
         return jsonify({"error": "not authenticated"}), 401
     return jsonify({"items": opportunities.all_items(),
                     "watchlist": opportunities.get_watchlist()})
+
+
+@app.route("/starred", methods=["GET"])
+def starred_page():
+    if not _authenticated():
+        return LOGIN_PAGE.format(error="")
+    return send_from_directory(STATIC_DIR, "starred.html")
+
+
+@app.route("/api/starred", methods=["GET"])
+def api_starred():
+    """Live list of starred repos, each with its cached "what it does" blurb
+    (falling back to the repo's GitHub description for any not yet cached by
+    tasks/starred_blurbs.py). The model never runs on this request path — the
+    blurbs are read from the store — so the page stays instant."""
+    if not _authenticated():
+        return jsonify({"error": "not authenticated"}), 401
+    result = fetch_starred_repos()
+    if "error" in result:
+        return jsonify({"repos": [], "error": result["error"]})
+    blurbs = load_json(starred_blurbs.BLURBS_PATH, {})
+    repos = result.get("repos", [])
+    for r in repos:
+        cached = blurbs.get(r["full_name"], {}).get("blurb")
+        r["blurb"] = cached or r.get("description") or ""
+    return jsonify({"repos": repos})
 
 
 def _start_research(item: dict) -> None:

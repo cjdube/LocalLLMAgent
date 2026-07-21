@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wren Starred</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="alternate icon" type="image/png" href="/static/favicon-32.png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    color: #1f2328;
+    background: #f4f4f5;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    background: #ffffff;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  header img.logo { height: 38px; width: 38px; border-radius: 9px; display: block; }
+  header h1 { font-size: 17px; margin: 0; }
+  header .sub { font-size: 13px; color: #9ca3af; }
+  header .spacer { flex: 1; }
+  header a.nav { font-size: 13px; color: #6b7280; text-decoration: none; margin-left: 12px; }
+  header a.nav:hover { color: #1f2328; }
+
+  main { max-width: 960px; margin: 0 auto; padding: 20px 18px 40px; }
+  .section-label { font-size: 13px; font-weight: 600; color: #6b7280; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: baseline; }
+  .section-label .hint { font-weight: 400; font-size: 12px; color: #9ca3af; }
+  .empty { color: #9ca3af; font-size: 13px; padding: 14px 16px; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; }
+
+  table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden; }
+  thead th { text-align: left; background: #fafafa; color: #6b7280; font-weight: 600; font-size: 11px; padding: 9px 12px; border-bottom: 1px solid #eef0f2; }
+  tbody td { padding: 12px; font-size: 13px; border-top: 1px solid #f1f2f4; vertical-align: top; }
+  td.repo { font-weight: 600; white-space: nowrap; }
+  td.repo a { color: #2563eb; text-decoration: none; }
+  td.lang { color: #4b5563; white-space: nowrap; }
+  td.blurb { color: #374151; line-height: 1.5; }
+  td.updated { color: #9ca3af; white-space: nowrap; }
+</style>
+</head>
+<body>
+  <header>
+    <img class="logo" src="/static/favicon.svg" alt="Wren">
+    <h1>Wren</h1>
+    <span class="sub">starred</span>
+    <span class="spacer"></span>
+    <a class="nav" href="/">chat</a>
+    <a class="nav" href="/dashboard">dashboard</a>
+    <a class="nav" href="/memories">memories</a>
+    <a class="nav" href="/opportunities">opportunities</a>
+    <a class="nav" href="/map">map</a>
+  </header>
+
+  <main>
+    <div class="section-label">Starred repos <span id="hint" class="hint"></span></div>
+    <div id="wrap">Loading…</div>
+  </main>
+
+<script>
+async function api(path, opts) { return (await fetch(path, opts)).json(); }
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;  // textContent only — never innerHTML
+  return e;
+}
+function fmtTs(ts) {
+  if (!ts) return "";
+  const d = new Date(ts);
+  if (isNaN(d)) return ts;
+  return d.toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
+}
+// Repo URLs come from the GitHub API — only link http(s), mirroring the
+// server-side _safe_url guard.
+function safeHref(url) { return /^https?:\/\//i.test(url || "") ? url : null; }
+
+function repoRow(r) {
+  const tr = el("tr");
+
+  const repo = el("td", "repo");
+  const href = safeHref(r.html_url);
+  if (href) {
+    const a = el("a", null, r.full_name || r.name);
+    a.href = href; a.target = "_blank"; a.rel = "noopener noreferrer";
+    repo.appendChild(a);
+  } else {
+    repo.textContent = r.full_name || r.name;
+  }
+  tr.appendChild(repo);
+
+  tr.appendChild(el("td", "lang", r.language || "—"));
+  tr.appendChild(el("td", "blurb", r.blurb || ""));
+  tr.appendChild(el("td", "updated", fmtTs(r.pushed_at)));
+  return tr;
+}
+
+async function load() {
+  const wrap = document.getElementById("wrap");
+  const data = await api("/api/starred");
+  if (data.error) {
+    wrap.textContent = "";
+    wrap.appendChild(el("div", "empty", "Starred repos unavailable: " + data.error));
+    return;
+  }
+  const repos = data.repos || [];
+  document.getElementById("hint").textContent = `${repos.length}`;
+  if (!repos.length) {
+    wrap.textContent = "";
+    wrap.appendChild(el("div", "empty", "No starred repos."));
+    return;
+  }
+
+  const table = el("table");
+  const thead = el("thead");
+  const htr = el("tr");
+  ["Repo", "Language", "What it does", "Last updated"].forEach(h => htr.appendChild(el("th", null, h)));
+  thead.appendChild(htr);
+  table.appendChild(thead);
+  const tbody = el("tbody");
+  repos.forEach(r => tbody.appendChild(repoRow(r)));
+  table.appendChild(tbody);
+
+  wrap.textContent = "";
+  wrap.appendChild(table);
+}
+
+load();
+</script>
+</body>
+</html>

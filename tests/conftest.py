@@ -103,6 +103,7 @@ from tasks import _common
 from tasks import ai_chat_learnings as _ai_chat_learnings
 from tasks import morning_brief as _morning_brief
 from tasks import opportunity_digest as _opportunity_digest
+from tasks import starred_blurbs as _starred_blurbs
 
 # Resolved from the source tree rather than from any redirect, so it still names
 # the real directory when a redirect is the thing that's broken.
@@ -198,6 +199,10 @@ def _isolate_remaining_config_stores(tmp_path, monkeypatch):
     monkeypatch.setattr(_reminders, "_STORE_PATH", tmp_path / "reminders.json")
     monkeypatch.setattr(_morning_brief, "STARRED_STATE_PATH",
                         tmp_path / "github_starred_state.json")
+    # The /starred view's cached blurbs. server.py reads this path off the
+    # starred_blurbs module at call time, so this one redirect covers both the
+    # task that writes it and the API route that reads it.
+    monkeypatch.setattr(_starred_blurbs, "BLURBS_PATH", tmp_path / "starred_blurbs.json")
     # wiki.py resolves this env on every _vault() call. Craig's real vault is a
     # readable path on this machine, so without the redirect a wiki test that
     # forgets to stub reads his actual notes into a fixture assertion.

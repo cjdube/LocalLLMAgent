@@ -168,6 +168,26 @@ def _repo_changes(full_name: str, since_dt: datetime, headers: dict) -> str:
     return ""
 
 
+def fetch_readme(full_name: str, api_key: str = None) -> str:
+    """Best-effort raw README text for a repo, or "" on any failure/404.
+
+    Never raises: a missing or unreadable README just means no README-derived
+    summary for that repo, not a failed run — same degrade-don't-crash posture
+    as _repo_changes. Callers truncate the (potentially large) text themselves
+    before feeding it to the model. `Accept: application/vnd.github.raw` returns
+    the decoded file body directly, so no base64 decode is needed here."""
+    api_key = resolve_key("GITHUB_TOKEN", api_key)
+    if not api_key:
+        return ""
+    headers = {"Authorization": f"token {api_key}", "Accept": "application/vnd.github.raw"}
+    try:
+        resp = requests.get(f"{API_ROOT}/repos/{full_name}/readme", headers=headers, timeout=15)
+        resp.raise_for_status()
+        return resp.text
+    except requests.exceptions.RequestException:
+        return ""
+
+
 def _parse(raw: list, since_dt: datetime = None) -> list:
     repos = []
     for r in raw:
