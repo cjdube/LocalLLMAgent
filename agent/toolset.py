@@ -73,6 +73,7 @@ from agent.tools.opportunities import (
     watch_company,
 )
 from agent.tools.research import RESEARCH_TOOL_SCHEMAS, research_company, research_opportunity
+from agent.tools.schedule import LIST_SCHEDULED_TASKS_TOOL_SCHEMA, list_scheduled_tasks
 from agent.tools.reminders import (
     CANCEL_REMINDER_TOOL_SCHEMA,
     LIST_REMINDERS_TOOL_SCHEMA,
@@ -141,6 +142,7 @@ TOOLS = [
     SET_REMINDER_TOOL_SCHEMA,
     LIST_REMINDERS_TOOL_SCHEMA,
     CANCEL_REMINDER_TOOL_SCHEMA,
+    LIST_SCHEDULED_TASKS_TOOL_SCHEMA,
     RUN_IN_BACKGROUND_TOOL_SCHEMA,
     LIST_BG_JOBS_TOOL_SCHEMA,
     GET_JOB_RESULT_TOOL_SCHEMA,
@@ -188,6 +190,7 @@ DISPATCH = {
     "set_reminder": set_reminder,
     "list_reminders": list_reminders,
     "cancel_reminder": cancel_reminder,
+    "list_scheduled_tasks": list_scheduled_tasks,
     "run_in_background": run_in_background,
     "list_background_jobs": list_background_jobs,
     "get_job_result": get_job_result,
@@ -268,6 +271,7 @@ CORE_TOOL_NAMES = [
     "search_web",
     "remember", "pin", "recall", "recategorize", "archive", "forget",
     "set_reminder", "list_reminders", "cancel_reminder",
+    "list_scheduled_tasks",
     "list_skills", "read_skill",
 ]
 

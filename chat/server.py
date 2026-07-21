@@ -157,7 +157,12 @@ CHAT_SYSTEM_PROMPT = (
     "time yourself, and the reminder text as message. It fires once as a phone "
     "notification. Use list_reminders to see what's pending and cancel_reminder "
     "(with an id from list_reminders) to drop one; setting and cancelling pause "
-    "for confirmation like the other write actions."
+    "for confirmation like the other write actions. "
+    "You run your own scheduled tasks on a timer — the automated jobs like the "
+    "morning brief, the daily learnings, and the weekly digests. Use "
+    "list_scheduled_tasks when Craig asks what tasks you run, what's scheduled, "
+    "or when something next runs; that's your own operating schedule, distinct "
+    "from Craig's Google Tasks and his reminders."
 )
 
 def _system_message_content() -> str:
