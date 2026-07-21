@@ -144,6 +144,7 @@ in — nothing new inherits it automatically.
 | `memory.py` | Persistent long-term memory in two tiers — `remember` (archival, search-only), `pin` (active, injected into every system prompt), `recall` (search either tier, optionally by category), `recategorize` (relabel a fact's category in place, keeping its id/history), `archive` (demote active→archival), `forget` (delete). Stored in `config/wren_memory.json`; archival facts track an `access_count` |
 | `skills.py` | Procedural memory (chat-only) — reusable how-to procedures composing the other tools: `list_skills`, `read_skill`, `write_skill` (create/overwrite), `delete_skill`. One Markdown file per skill under `skills/` (override with `WREN_SKILLS_DIR`); a capped title+one-line index is injected into the chat prompt so Wren knows what procedures exist, reading a body on demand. Writes are confirmation-gated |
 | `reminders.py` | Scheduled reminders — `set_reminder` (parses the time in Python via `dates.resolve_reminder_time`, not the model), `list_reminders`, `cancel_reminder`. Stored in `config/reminders.json`; the `reminder_sweep` task fires each due one as an `ntfy` phone push, then clears it. Set/cancel are confirmation-gated |
+| `schedule.py` | Read-only view of Wren's *own* launchd-scheduled tasks (`list_scheduled_tasks`) — the same schedule/next-run/last-status data the dashboard shows, so chat can answer "what do you run?" / "what's next?". Reuses the `chat.insights` dashboard data layer; distinct from Craig's Google Tasks and reminders |
 | `background.py` | Background tasks — `run_in_background` (hand off a multi-step task that runs detached and pushes a summary when done), `list_background_jobs`, `get_job_result`. Jobs live in `config/bg_jobs.json`; the `bg_worker` task runs them. Posture is "read/draft freely, tap-to-approve consequential actions" — see the background-tasks section below. Also owns the HMAC-signed approval tokens |
 | `opportunities.py` | Opportunity signal store for the fractional-work scout — `list_opportunities`, `update_opportunity` (mark interested/dismissed), `watch_company`/`unwatch_company`. The `opportunity_digest` task fills it; full lifecycle in [docs/opportunity-scout.md](docs/opportunity-scout.md) |
 | `research.py` | Company research — a fixed pipeline (not a freeform agent task): bounded Tavily searches summarized by the model into a fixed-template brief. `research_opportunity` enriches and persists onto a scout item (see [docs/opportunity-scout.md](docs/opportunity-scout.md)); `research_company` researches ANY company by name and returns the brief directly — the general-purpose verb chat and skills compose. Read-only against the outside world; web snippets are treated as untrusted display text |
@@ -192,10 +193,10 @@ mini behind Tailscale keeps alerts private and off the public internet;
 inject fake notifications. Set `NTFY_URL` and `NTFY_TOKEN` in `config/.env`
 (see Setup).
 
-The dashboard header carries a live `push up` / `push down` pill so you can tell
+The dashboard header carries a live `ntfy up` / `ntfy down` pill so you can tell
 the channel is alive without waiting for the 8am log inspector's check. It
 probes ntfy's health endpoint, so it reports that the **server is reachable** —
-not that `NTFY_TOKEN` is still valid for the topic. A revoked token shows `push
+not that `NTFY_TOKEN` is still valid for the topic. A revoked token shows `ntfy
 up` and still fails every publish; testing that would mean sending a real push.
 
 ## Wren — ad hoc chat

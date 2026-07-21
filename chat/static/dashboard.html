@@ -152,7 +152,7 @@
     <span class="spacer"></span>
     <nav id="wren-nav" class="wren-nav"></nav>
     <span id="serverPill" class="pill"><span class="glow"></span>server running</span>
-    <span id="pushPill" class="pill off"><span class="glow"></span>push …</span>
+    <span id="pushPill" class="pill off"><span class="glow"></span>ntfy …</span>
   </header>
 
   <main>
@@ -269,13 +269,14 @@ function renderCapDetail(detail, tool) {
 }
 
 // --- push channel health -------------------------------------------------- //
-// "push up" means the ntfy server answered its health check — NOT that a push
-// would deliver (a revoked token still reads healthy). Don't reword it to imply
-// more than that.
+// "ntfy up" means the ntfy server answered its health check — NOT that a push
+// would deliver (a revoked token still reads healthy). The label names the
+// server on purpose, since that's the exact scope of what the probe knows;
+// don't reword it to imply delivery.
 const PUSH_PILL = {
-  ok:   { cls: "pill",     text: "push up" },
-  down: { cls: "pill down", text: "push down" },
-  off:  { cls: "pill off",  text: "push off" },
+  ok:   { cls: "pill",     text: "ntfy up" },
+  down: { cls: "pill down", text: "ntfy down" },
+  off:  { cls: "pill off",  text: "ntfy off" },
 };
 
 function setPushPill(cls, text, title) {
@@ -297,12 +298,12 @@ async function loadPushHealth() {
   try {
     health = await api("/api/health/ntfy");
   } catch (e) {
-    setPushPill("pill off", "push ?", "could not reach Wren to check");
+    setPushPill("pill off", "ntfy ?", "could not reach Wren to check");
     return;
   }
   const state = PUSH_PILL[health && health.state];
   if (!state) {
-    setPushPill("pill off", "push ?", health.error || "could not check the push channel");
+    setPushPill("pill off", "ntfy ?", health.error || "could not check the push channel");
     return;
   }
   setPushPill(state.cls, state.text, health.error);
