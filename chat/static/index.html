@@ -7,6 +7,7 @@
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="alternate icon" type="image/png" href="/static/favicon-32.png">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="stylesheet" href="/static/nav.css">
 <style>
   * { box-sizing: border-box; }
   body {
@@ -20,13 +21,16 @@
   }
   header {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    padding: 14px 16px;
+    gap: 10px;
+    padding: 12px 16px;
     background: #ffffff;
     border-bottom: 1px solid #e5e7eb;
   }
+  header img.logo { height: 38px; width: 38px; border-radius: 9px; display: block; }
   header h1 { font-size: 17px; margin: 0; }
+  header .sub { font-size: 13px; color: #9ca3af; }
+  header .spacer { flex: 1; }
   header button {
     background: none;
     border: 1px solid #d0d5dd;
@@ -127,7 +131,11 @@
 </head>
 <body>
   <header>
+    <img class="logo" src="/static/favicon.svg" alt="Wren">
     <h1>Wren</h1>
+    <span class="sub">chat</span>
+    <span class="spacer"></span>
+    <nav id="wren-nav" class="wren-nav"></nav>
     <button id="newChat">New chat</button>
   </header>
   <div id="messages"></div>
@@ -137,5 +145,6 @@
   </form>
 
 <script src="/static/chat-dock.js"></script>
+<script src="/static/nav.js"></script>
 </body>
 </html>

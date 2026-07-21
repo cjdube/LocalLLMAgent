@@ -666,10 +666,17 @@ Run the suite from the repo root:
 .venv/bin/pytest        # or: .venv/bin/pytest -q
 ```
 
-The one exception to "this project is Python" is the chat dock
-(`chat/static/chat-dock.js`), the browser script shared by the chat page and
-the dashboard's side panel. It has its own jest/jsdom suite — install with
-`npm install` and run from the repo root:
+The one exception to "this project is Python" is a pair of shared browser
+scripts. `chat/static/chat-dock.js` is the chat dock shared by the chat page and
+the dashboard's side panel. `chat/static/nav.js` renders the top-nav menu on
+every view from one canonical list, with `chat/static/nav.css` owning its look
+and mobile-wrap behavior — so the menu stays consistent instead of drifting per
+page. **Adding a new view?** Give its page three things and it inherits the menu
+automatically: `<link rel="stylesheet" href="/static/nav.css">` in the head, a
+`<nav id="wren-nav" class="wren-nav"></nav>` mount in the header, and
+`<script src="/static/nav.js"></script>` before `</body>`; then add the view to
+the `VIEWS` list in `nav.js` so every page links to it. Both scripts have their
+own jest/jsdom suite — install with `npm install` and run from the repo root:
 
 ```bash
 npm test

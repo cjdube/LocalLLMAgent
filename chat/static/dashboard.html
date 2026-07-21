@@ -7,6 +7,7 @@
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="alternate icon" type="image/png" href="/static/favicon-32.png">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="stylesheet" href="/static/nav.css">
 <style>
   * { box-sizing: border-box; }
   body {
@@ -30,8 +31,6 @@
   header h1 { font-size: 17px; margin: 0; }
   header .sub { font-size: 13px; color: #9ca3af; }
   header .spacer { flex: 1; }
-  header a.nav { font-size: 13px; color: #6b7280; text-decoration: none; }
-  header a.nav:hover { color: #1f2328; }
   .pill {
     display: inline-flex; align-items: center; gap: 6px;
     font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 20px;
@@ -143,11 +142,6 @@
     main { flex-direction: column; }
     .dock { flex: none; width: auto; min-width: 0; border-left: none; border-top: 1px solid #e5e7eb; height: 50vh; }
   }
-
-  @media (max-width: 600px) {
-    header { flex-wrap: wrap; row-gap: 8px; }
-    header .spacer { flex-basis: 100%; }
-  }
 </style>
 </head>
 <body>
@@ -156,8 +150,7 @@
     <h1>Wren</h1>
     <span class="sub">dashboard</span>
     <span class="spacer"></span>
-    <a class="nav" href="/starred">starred</a>
-    <a class="nav" href="/map">map</a>
+    <nav id="wren-nav" class="wren-nav"></nav>
     <span id="serverPill" class="pill"><span class="glow"></span>server running</span>
     <span id="pushPill" class="pill off"><span class="glow"></span>push …</span>
   </header>
@@ -489,5 +482,6 @@ loadTasks();
 loadPushHealth();
 </script>
 <script src="/static/chat-dock.js"></script>
+<script src="/static/nav.js"></script>
 </body>
 </html>

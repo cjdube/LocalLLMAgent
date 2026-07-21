@@ -7,6 +7,7 @@
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="alternate icon" type="image/png" href="/static/favicon-32.png">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="stylesheet" href="/static/nav.css">
 <style>
   * { box-sizing: border-box; }
   body {
@@ -17,6 +18,8 @@
     display: flex;
     flex-direction: column;
     height: 100vh;
+    --nav-fg: #7c86a3;
+    --nav-fg-active: #e8eaf2;
   }
   header {
     display: flex;
@@ -30,8 +33,6 @@
   header h1 { font-size: 17px; margin: 0; color: #e8eaf2; }
   header .sub { font-size: 13px; color: #565d75; }
   header .spacer { flex: 1; }
-  header a.nav { font-size: 13px; color: #7c86a3; text-decoration: none; margin-left: 14px; }
-  header a.nav:hover { color: #e8eaf2; }
 
   main { flex: 1; display: flex; min-height: 0; position: relative; }
   #stage {
@@ -111,11 +112,6 @@
       max-height: 42%; flex-shrink: 0;
     }
   }
-
-  @media (max-width: 600px) {
-    header { flex-wrap: wrap; row-gap: 8px; }
-    header .spacer { flex-basis: 100%; }
-  }
 </style>
 </head>
 <body>
@@ -124,11 +120,7 @@
     <h1>Wren</h1>
     <span class="sub">system map</span>
     <span class="spacer"></span>
-    <a class="nav" href="/">chat</a>
-    <a class="nav" href="/dashboard">dashboard</a>
-    <a class="nav" href="/memories">memories</a>
-    <a class="nav" href="/opportunities">opportunities</a>
-    <a class="nav" href="/starred">starred</a>
+    <nav id="wren-nav" class="wren-nav"></nav>
   </header>
 
   <main>
@@ -568,5 +560,6 @@ async function load() {
 
 load();
 </script>
+<script src="/static/nav.js"></script>
 </body>
 </html>

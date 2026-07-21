@@ -1,0 +1,13 @@
+/* Shared top-nav for every Wren view. Single source of truth for the menu's
+   look and its responsive (wrap-on-mobile) behavior; the link list itself
+   lives in nav.js. Light pages use the defaults below; a dark page (the map)
+   just sets --nav-fg / --nav-fg-active on its own <body>. */
+.wren-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+.wren-nav a { font-size: 13px; color: var(--nav-fg, #6b7280); text-decoration: none; }
+.wren-nav a:hover { color: var(--nav-fg-active, #1f2328); }
+.wren-nav .active { font-size: 13px; color: var(--nav-fg-active, #1f2328); font-weight: 600; }
+
+@media (max-width: 600px) {
+  header { flex-wrap: wrap; row-gap: 8px; }
+  header .spacer { flex-basis: 100%; }
+}

@@ -7,6 +7,7 @@
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="alternate icon" type="image/png" href="/static/favicon-32.png">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="stylesheet" href="/static/nav.css">
 <style>
   * { box-sizing: border-box; }
   body {
@@ -27,8 +28,6 @@
   header h1 { font-size: 17px; margin: 0; }
   header .sub { font-size: 13px; color: #9ca3af; }
   header .spacer { flex: 1; }
-  header a.nav { font-size: 13px; color: #6b7280; text-decoration: none; margin-left: 12px; }
-  header a.nav:hover { color: #1f2328; }
 
   main { max-width: 960px; margin: 0 auto; padding: 20px 18px 40px; }
   .section-label { font-size: 13px; font-weight: 600; color: #6b7280; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: baseline; }
@@ -43,11 +42,6 @@
   td.lang { color: #4b5563; white-space: nowrap; }
   td.blurb { color: #374151; line-height: 1.5; }
   td.updated { color: #9ca3af; white-space: nowrap; }
-
-  @media (max-width: 600px) {
-    header { flex-wrap: wrap; row-gap: 8px; }
-    header .spacer { flex-basis: 100%; }
-  }
 </style>
 </head>
 <body>
@@ -56,11 +50,7 @@
     <h1>Wren</h1>
     <span class="sub">starred</span>
     <span class="spacer"></span>
-    <a class="nav" href="/">chat</a>
-    <a class="nav" href="/dashboard">dashboard</a>
-    <a class="nav" href="/memories">memories</a>
-    <a class="nav" href="/opportunities">opportunities</a>
-    <a class="nav" href="/map">map</a>
+    <nav id="wren-nav" class="wren-nav"></nav>
   </header>
 
   <main>
@@ -138,5 +128,6 @@ async function load() {
 
 load();
 </script>
+<script src="/static/nav.js"></script>
 </body>
 </html>
