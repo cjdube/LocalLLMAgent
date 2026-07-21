@@ -271,7 +271,13 @@ def recall(query: str = None, category: str = None) -> dict:
                     touched = True
             if touched:
                 _save(data)
-        return {"count": len(memories), "memories": memories}
+        # Return records with an explicit scope so callers — the /memories page
+        # and, especially, the small chat model asked to list memories — never
+        # have to guess at a missing field (a legacy record without one defaults
+        # to active, matching render_memory_block). Copies, so a bare listing
+        # doesn't rewrite the store.
+        normalized = [{**m, "scope": m.get("scope", "active")} for m in memories]
+        return {"count": len(normalized), "memories": normalized}
 
 
 def recategorize(memory_id: str, category: str) -> dict:

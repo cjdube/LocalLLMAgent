@@ -119,6 +119,16 @@ def test_pin_saves_as_active():
     assert m["scope"] == "active"
 
 
+def test_recall_normalizes_missing_scope_to_active():
+    # A legacy record saved before scope existed has no scope field. recall()
+    # must hand it back with an explicit scope so callers (notably the small
+    # chat model asked to list memories) don't have to guess — matching how
+    # render_memory_block / the /memories page already default it.
+    memory._save({"memories": [{"id": "legacy1", "text": "an old fact"}]})
+    m = memory.recall()["memories"][0]
+    assert m["scope"] == "active"
+
+
 def test_recall_returns_both_active_and_archival():
     memory.pin("Craig prefers metric units")
     memory.remember("Crows can recognize human faces")
