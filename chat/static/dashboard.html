@@ -143,6 +143,11 @@
     main { flex-direction: column; }
     .dock { flex: none; width: auto; min-width: 0; border-left: none; border-top: 1px solid #e5e7eb; height: 50vh; }
   }
+
+  @media (max-width: 600px) {
+    header { flex-wrap: wrap; row-gap: 8px; }
+    header .spacer { flex-basis: 100%; }
+  }
 </style>
 </head>
 <body>

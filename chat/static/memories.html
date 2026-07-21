@@ -49,6 +49,11 @@
   td.created { color: #6b7280; white-space: nowrap; }
 
   .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 20px; white-space: nowrap; background: #f2f4f7; color: #667085; }
+
+  @media (max-width: 600px) {
+    header { flex-wrap: wrap; row-gap: 8px; }
+    header .spacer { flex-basis: 100%; }
+  }
 </style>
 </head>
 <body>
