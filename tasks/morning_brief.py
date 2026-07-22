@@ -343,6 +343,16 @@ def build_and_send_brief(logger: Optional[logging.Logger] = None) -> dict:
         return {"error": str(e)}
 
 
+def brief_dispatch(logger: Optional[logging.Logger] = None):
+    """A send_morning_brief dispatch callable bound to `logger` (and ignoring any
+    stray kwargs the model emits). The default toolset registry, the chat server,
+    and the background worker each need this same wrapper differing only in the
+    logger they bind, so defining it once here keeps the three in sync."""
+    def _send(**_) -> dict:
+        return build_and_send_brief(logger=logger)
+    return _send
+
+
 def main() -> int:
     logger = setup_logger("morning_brief")
     result = build_and_send_brief(logger=logger)

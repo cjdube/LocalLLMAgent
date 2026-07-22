@@ -54,8 +54,8 @@ from chat.routes_dashboard import dashboard_bp
 from chat.routes_opportunities import opportunities_bp
 from tasks import starred_blurbs
 from tasks._common import setup_logger
-from tasks.morning_brief import build_and_send_brief
-from tasks.opportunity_digest import build_and_send_digest
+from tasks.morning_brief import brief_dispatch
+from tasks.opportunity_digest import digest_dispatch
 
 _ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(_ROOT / "config" / ".env")
@@ -83,26 +83,17 @@ if not WREN_CHAT_TOKEN or not FLASK_SECRET_KEY:
         "run safely."
     )
 
-def _send_morning_brief(**_) -> dict:
-    # Bound here so the chat-triggered brief logs to the "wren" logger rather
-    # than agent.toolset._send_morning_brief's default of none. Accepts/ignores
-    # stray kwargs in case the model hallucinates an argument.
-    return build_and_send_brief(logger=logger)
+logger = setup_logger("wren")
+logger.setLevel(logging.INFO)
 
-
-def _send_opportunity_digest(**_) -> dict:
-    # Same binding as _send_morning_brief above: without it the digest falls
-    # back to agent.toolset's handler-less logger and a chat-triggered run's
-    # output goes nowhere.
-    return build_and_send_digest(logger=logger)
-
-
-# TOOLS and WRITE_TOOLS come straight from the shared registry; only the
-# brief and digest dispatches are overridden to bind the server's logger.
+# TOOLS and WRITE_TOOLS come straight from the shared registry; only the brief
+# and digest dispatches are overridden to bind the server's "wren" logger (via
+# the shared factories) so a chat-triggered run logs to the right file rather
+# than agent.toolset's handler-less default.
 DISPATCH = {
     **_BASE_DISPATCH,
-    "send_morning_brief": _send_morning_brief,
-    "send_opportunity_digest": _send_opportunity_digest,
+    "send_morning_brief": brief_dispatch(logger),
+    "send_opportunity_digest": digest_dispatch(logger),
 }
 
 CHAT_SYSTEM_PROMPT = (
@@ -228,9 +219,6 @@ def _security_headers(resp):
     resp.headers.setdefault("Referrer-Policy", "no-referrer")
     return resp
 
-
-logger = setup_logger("wren")
-logger.setLevel(logging.INFO)
 
 # In-memory only, per the "fresh session" design — lost on server restart.
 conversations: dict[str, list[dict]] = {}

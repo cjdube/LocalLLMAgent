@@ -740,6 +740,15 @@ def build_and_send_digest(logger: Optional[logging.Logger] = None) -> dict:
         return {"error": str(e)}
 
 
+def digest_dispatch(logger: Optional[logging.Logger] = None):
+    """A send_opportunity_digest dispatch callable bound to `logger` (ignoring
+    stray model kwargs) — the digest counterpart to morning_brief.brief_dispatch,
+    so the toolset registry and the chat server bind it the same way."""
+    def _send(**_) -> dict:
+        return build_and_send_digest(logger=logger)
+    return _send
+
+
 def main() -> int:
     logger = setup_logger("opportunity_digest")
     result = build_and_send_digest(logger=logger)

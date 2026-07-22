@@ -4,12 +4,14 @@ Wren is a local-first personal AI agent: a Gemma model served by Ollama on a Mac
 
 ## Module map
 
-- `chat/server.py` — Flask chat server (phone-reachable UI + API); pauses on gated writes for tap-to-confirm.
-- `agent/loop.py` — model interface: `advance()` (tool-calling loop), `complete_text()` (one-shot, tool-free — what scheduled tasks use). Both route through the `_llm_chat` backend seam (`_ollama_chat` / `_gemini_chat`); backends translate to/from their provider format internally so callers speak one canonical shape.
+- `chat/server.py` — Flask chat server (phone-reachable UI + API); pauses on gated writes for tap-to-confirm. The read-only dashboard/scheduler API and the opportunities triage API are Flask blueprints (`chat/routes_dashboard.py`, `chat/routes_opportunities.py`); `LoginThrottle` and the shared `_authenticated` check live in `chat/login_throttle.py` / `chat/auth.py`.
+- `chat/insights.py` — the chat server's no-Flask dashboard data layer: launchd-schedule discovery, run-log parsing, capabilities, and the `/map` system map. Standalone-runnable and unit-testable.
+- `agent/loop.py` — model interface: `advance()` (tool-calling loop), `complete_text()` (one-shot, tool-free — what scheduled tasks use). Both route through the `_llm_chat` backend seam; the default `_ollama_chat` lives here, the opt-in Gemini backend in `agent/backends/gemini.py`. Backends translate to/from their provider format internally so callers speak one canonical shape.
+- `agent/backends/` — LLM backend adapters behind the `_llm_chat` seam (currently `gemini.py`); each translates the canonical message/tool shape to/from its provider.
 - `agent/toolset.py` — the single tool registry (`TOOLS`, `DISPATCH`) and gating sets (`WRITE_TOOLS`, `CONSEQUENTIAL_TOOLS`, `UNATTENDED_EXCLUDED_TOOLS`), shared by the chat server and background runs.
 - `agent/tools/*.py` — one module per capability (weather, strava, email, notify, wiki, skills, …).
 - `agent/store.py` — locked/atomic JSON store primitives used by every store under `config/`.
-- `tasks/*.py` — unattended entrypoints run by launchd; `tasks/_common.py` has `setup_logger`/`notify_failure`. `tasks/bg_worker.py` is the generic runner that polls `config/bg_jobs.json` for user-initiated background jobs with push-to-approve.
+- `tasks/*.py` — unattended entrypoints run by launchd; `tasks/_common.py` has `setup_logger`/`notify_failure`, and `tasks/_learnings_common.py` the shared gather→persist→email helpers for the two daily-learnings tasks. `tasks/bg_worker.py` is the generic runner that polls `config/bg_jobs.json` for user-initiated background jobs with push-to-approve.
 - `launchd/` — the scheduler: one plist per task (`StartInterval` for pollers, `StartCalendarInterval` for daily/weekly jobs), logging to `logs/`.
 - `tests/` — flat pytest suite, one `test_<module>.py` per source module; plus `chat-dock.test.js`, the lone JS suite (jest/jsdom, `npm test`), covering the shared browser dock.
 - `config/` — `.env` (documented in `.env.example`) plus gitignored JSON stores.

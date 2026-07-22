@@ -55,7 +55,7 @@ toolset = None
 advance = None
 resolve = None
 with_identity = None
-build_and_send_brief = None
+brief_dispatch = None
 
 MAX_TRANSIENT_ATTEMPTS = 3
 
@@ -97,7 +97,7 @@ def _load_agent_stack() -> None:
     """Populate the lazy module globals above. Called only when a job is
     actually going to run; the idle poll never pays the googleapiclient
     import chain."""
-    global toolset, advance, resolve, with_identity, build_and_send_brief
+    global toolset, advance, resolve, with_identity, brief_dispatch
     import agent.loop
     import agent.toolset
     import tasks.morning_brief
@@ -109,8 +109,8 @@ def _load_agent_stack() -> None:
         resolve = agent.loop.resolve
     if with_identity is None:
         with_identity = agent.loop.with_identity
-    if build_and_send_brief is None:
-        build_and_send_brief = tasks.morning_brief.build_and_send_brief
+    if brief_dispatch is None:
+        brief_dispatch = tasks.morning_brief.brief_dispatch
 
 BG_SYSTEM_PROMPT = (
     "You are completing a task Craig handed off to run in the background, "
@@ -132,7 +132,7 @@ def _bg_tools_and_dispatch(logger):
     excluded = toolset.UNATTENDED_EXCLUDED_TOOLS
     tools = [t for t in toolset.TOOLS if t["function"]["name"] not in excluded]
     dispatch = {k: v for k, v in toolset.DISPATCH.items() if k not in excluded}
-    dispatch["send_morning_brief"] = lambda **_: build_and_send_brief(logger=logger)
+    dispatch["send_morning_brief"] = brief_dispatch(logger)
     return tools, dispatch
 
 

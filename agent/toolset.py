@@ -99,20 +99,8 @@ from agent.tools.wiki import (
     read_wiki_index,
     read_wiki_page,
 )
-from tasks.morning_brief import SEND_BRIEF_TOOL_SCHEMA, build_and_send_brief
-from tasks.opportunity_digest import SEND_DIGEST_TOOL_SCHEMA, build_and_send_digest
-
-
-def _send_morning_brief(**_) -> dict:
-    # Default dispatch entry (no logger). The chat server and the background
-    # worker each override this with their own logger-bound version so the brief
-    # run logs to the right file. Accepts/ignores stray kwargs for the model.
-    return build_and_send_brief()
-
-
-def _send_opportunity_digest(**_) -> dict:
-    # Same no-logger default-dispatch shape as _send_morning_brief above.
-    return build_and_send_digest()
+from tasks.morning_brief import SEND_BRIEF_TOOL_SCHEMA, brief_dispatch
+from tasks.opportunity_digest import SEND_DIGEST_TOOL_SCHEMA, digest_dispatch
 
 
 TOOLS = [
@@ -168,7 +156,7 @@ DISPATCH = {
     "search_web": search_web,
     "fetch_webpage": fetch_webpage,
     "fetch_starred_repos": fetch_starred_repos,
-    "send_morning_brief": _send_morning_brief,
+    "send_morning_brief": brief_dispatch(),
     "get_tasks": get_tasks,
     "get_tasks_due_soon": get_tasks_due_soon,
     "create_task": create_task,
@@ -198,7 +186,7 @@ DISPATCH = {
     "update_opportunity": update_opportunity,
     "watch_company": watch_company,
     "unwatch_company": unwatch_company,
-    "send_opportunity_digest": _send_opportunity_digest,
+    "send_opportunity_digest": digest_dispatch(),
     # Read-only against the outside world (web searches + an internal cached
     # brief), so ungated like search_web.
     "research_opportunity": research_opportunity,
