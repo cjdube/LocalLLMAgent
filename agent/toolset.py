@@ -210,6 +210,16 @@ DISPATCH = {
 WRITE_TOOLS = frozenset({
     "log_calendar_event", "send_email", "recolor_event", "send_morning_brief",
     "create_task", "update_task_due_date", "complete_task", "forget",
+    # remember/pin/recategorize are gated alongside forget: chat turns ingest
+    # untrusted web/search content inline, and a pinned fact is injected into
+    # every future system prompt (memory.render_memory_block), so an injected
+    # "pin that ..." must not write memory without Craig's tap. This mirrors the
+    # UNATTENDED_EXCLUDED_TOOLS ban on the same tools in background runs.
+    # Tradeoff to revisit if the per-save tap gets bothersome: gate these only
+    # after a turn has actually pulled untrusted web content, rather than always
+    # — more complex, deferred until the friction is felt (README documents this
+    # for Craig too, under the memory section).
+    "remember", "pin", "recategorize",
     "write_skill", "delete_skill", "set_reminder", "cancel_reminder",
     "run_in_background", "update_opportunity", "watch_company",
     "unwatch_company", "send_opportunity_digest",
@@ -426,6 +436,12 @@ def describe_call(call: dict) -> str:
     if name == "forget":
         label = args.get("memory_text") or args.get("memory_id", "?")
         return f'Delete memory "{label}"'
+    if name == "remember":
+        return f'Remember "{args.get("text", "")}"'
+    if name == "pin":
+        return f'Pin memory "{args.get("text", "")}" (kept in mind every conversation)'
+    if name == "recategorize":
+        return f'Re-file memory {args.get("memory_id", "?")} under "{args.get("category", "")}"'
     if name == "write_skill":
         return f'Save skill "{args.get("name", "")}"'
     if name == "delete_skill":
@@ -439,6 +455,15 @@ def describe_call(call: dict) -> str:
                 f'({args.get("ats", "?")}/{args.get("slug", "?")})')
     if name == "unwatch_company":
         return f'Stop watching "{args.get("watch_id", "")}"'
+    if name == "set_reminder":
+        return f'Set reminder "{args.get("message", "")}" for {args.get("when", "?")}'
+    if name == "cancel_reminder":
+        return f'Cancel reminder {args.get("reminder_id", "?")}'
+    if name == "run_in_background":
+        task = (args.get("task") or "").strip()
+        if len(task) > 120:
+            task = task[:120].rstrip() + "…"
+        return f'Run in the background: "{task}"'
     return f"{name}({json.dumps(args)})"
 
 

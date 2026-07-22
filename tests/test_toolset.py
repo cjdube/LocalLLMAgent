@@ -156,3 +156,51 @@ def test_non_email_write_has_no_detail():
 def test_unknown_tool_falls_back_to_generic_description():
     call = {"function": {"name": "mystery_tool", "arguments": {"x": 1}}}
     assert toolset.describe_call(call) == 'mystery_tool({"x": 1})'
+
+
+# --------------------------------------------------------------------------- #
+# Memory writes are confirm-gated: chat ingests untrusted web/search content
+# inline, and a pinned fact is injected into every future system prompt, so an
+# injected "pin that ..." must pause for Craig's tap instead of auto-executing.
+# --------------------------------------------------------------------------- #
+
+def test_memory_writes_are_confirm_gated():
+    assert {"remember", "pin", "recategorize"} <= toolset.WRITE_TOOLS
+
+
+def test_every_write_tool_has_a_specific_describer():
+    # Every confirm-gated tool must render a purpose-built card, not the generic
+    # "name(json)" fallback: a blank or wrong confirmation summary for a write
+    # action would let it slip through unnoticed on the tap-to-approve surface.
+    # Table-driven over WRITE_TOOLS so a newly-gated tool without a describer
+    # fails here instead of shipping a mystery card.
+    for name in sorted(toolset.WRITE_TOOLS):
+        summary = toolset.describe_call({"function": {"name": name, "arguments": {}}})
+        assert summary and not summary.startswith(f"{name}("), name
+
+
+def test_write_describers_read_cleanly():
+    def summary(name, **args):
+        return toolset.describe_call({"function": {"name": name, "arguments": args}})
+
+    # Memory writes (gated in S1).
+    assert "Remember" in summary("remember", text="Crows hold grudges") \
+        and "Crows hold grudges" in summary("remember", text="Crows hold grudges")
+    assert "Pin" in summary("pin", text="Craig prefers metric") \
+        and "Craig prefers metric" in summary("pin", text="Craig prefers metric")
+    recat = summary("recategorize", memory_id="a1b2c3d4", category="preference")
+    assert "a1b2c3d4" in recat and "preference" in recat
+
+    # Reminder and background writes (describers added alongside this test).
+    rem = summary("set_reminder", message="Call the dentist", when="tomorrow 9am")
+    assert "Call the dentist" in rem and "tomorrow 9am" in rem
+    assert "z9y8x7" in summary("cancel_reminder", reminder_id="z9y8x7")
+    assert "research Acme" in summary("run_in_background", task="research Acme")
+
+
+def test_run_in_background_describer_truncates_a_long_task():
+    long_task = "investigate " * 40
+    summary = toolset.describe_call(
+        {"function": {"name": "run_in_background", "arguments": {"task": long_task}}})
+    assert summary.endswith('…"')
+    assert len(summary) < len(long_task)
