@@ -645,13 +645,16 @@ def research_spy(monkeypatch):
     a tmp-store's fixture data and saved it over the production store when
     the path monkeypatch was undone mid-write. No test may spawn it."""
     from agent.tools import opportunities as opp
+    from chat import routes_opportunities
     started = []
 
     def fake_start(item):
         started.append(item["id"])
         opp.set_research(item["id"], {"status": "pending", "summary": None})
 
-    monkeypatch.setattr(srv, "_start_research", fake_start)
+    # _start_research now lives on the opportunities blueprint module, where the
+    # triage routes call it — stub it there so no real research thread spawns.
+    monkeypatch.setattr(routes_opportunities, "_start_research", fake_start)
     return started
 
 
@@ -838,7 +841,9 @@ def test_main_stays_silent_when_within_budget(monkeypatch):
     {"state": "off", "error": None},
 ])
 def test_health_ntfy_passes_probe_result_through(auth_client, monkeypatch, health):
-    monkeypatch.setattr(srv, "ntfy_health", lambda: health)
+    # /api/health/ntfy now lives on the dashboard blueprint; patch it there.
+    from chat import routes_dashboard
+    monkeypatch.setattr(routes_dashboard, "ntfy_health", lambda: health)
     resp = auth_client.get("/api/health/ntfy")
     assert resp.status_code == 200
     assert resp.get_json() == health

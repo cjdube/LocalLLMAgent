@@ -32,16 +32,6 @@ from agent.loop import (
     resolve,
     with_identity,
 )
-from chat.insights import (
-    RunManager,
-    describe_tools,
-    discover_tasks,
-    next_run,
-    parse_run_detail,
-    parse_runs,
-    system_map,
-    task_by_key,
-)
 from agent.toolset import (
     DISPATCH as _BASE_DISPATCH,
     TOOL_GROUPS,
@@ -55,12 +45,13 @@ from agent.toolset import (
 )
 from agent.store import load_json
 from agent.tools import background
-from agent.tools import opportunities
 from agent.tools.github_starred import fetch_starred_repos
-from agent.tools.memory import recall
-from agent.tools.research import research_opportunity
-from agent.tools.notify import notify, ntfy_health
+from agent.tools.notify import notify
 from agent.tools.skills import render_skills_index
+from chat.auth import _authenticated
+from chat.login_throttle import LoginThrottle
+from chat.routes_dashboard import dashboard_bp
+from chat.routes_opportunities import opportunities_bp
 from tasks import starred_blurbs
 from tasks._common import setup_logger
 from tasks.morning_brief import build_and_send_brief
@@ -208,6 +199,12 @@ app.config["MAX_CONTENT_LENGTH"] = 256 * 1024
 app.config["SESSION_COOKIE_SECURE"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
+# The read-only dashboard/scheduler API and the opportunities triage API live in
+# their own blueprint modules (see chat/routes_dashboard.py,
+# chat/routes_opportunities.py); the conversation engine and auth stay here.
+app.register_blueprint(dashboard_bp)
+app.register_blueprint(opportunities_bp)
+
 @app.after_request
 def _security_headers(resp):
     """Defense-in-depth response headers on the one network-adjacent surface.
@@ -282,9 +279,6 @@ def _evict_idle_sessions() -> None:
         loaded_groups.pop(sid, None)
         _session_last_active.pop(sid, None)
 
-# Triggers scheduled tasks on demand for the dashboard's "Run now" button.
-run_manager = RunManager()
-
 LOGIN_PAGE = """<!DOCTYPE html>
 <html><head><title>Wren</title><meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
@@ -302,74 +296,6 @@ button {{ width: 100%; padding: 12px; font-size: 16px; background: #1f2328; colo
 <input type="password" name="token" placeholder="Access token" autofocus>
 <button type="submit">Enter</button>
 </form></body></html>"""
-
-
-class LoginThrottle:
-    """Per-client failed-login limiter — defense-in-depth on the one
-    internet-adjacent surface. The 256-bit token is the real defense (brute
-    force is infeasible), so this only aims to blunt automated guessing, not to
-    lock the box down. After MAX_FAILURES failures inside WINDOW_S a client is
-    locked out for a backoff that doubles on repeat offenses (capped at
-    MAX_LOCKOUT_S), then the counter resets — short enough that the single
-    legitimate user fat-fingering the token isn't durably self-DoSed.
-
-    Keyed by caller identity (see _client_ip): behind `tailscale serve` most
-    requests arrive from loopback, so this is coarse, but it still slows a
-    proxied guessing loop. `clock` is injectable for tests."""
-
-    MAX_FAILURES = 5
-    WINDOW_S = 300
-    BASE_LOCKOUT_S = 30
-    MAX_LOCKOUT_S = 900
-    # Failed-only keys are otherwise never removed (success is the only other
-    # cleanup), so a scanner cycling addresses could grow _state without bound.
-    # Past this size, record_failure first drops entries that are neither
-    # locked out nor inside an active failure window.
-    MAX_TRACKED = 1000
-
-    def __init__(self, clock=time.monotonic):
-        self._clock = clock
-        self._lock = threading.Lock()
-        self._state: dict[str, dict] = {}
-
-    def _sweep_stale(self, now: float) -> None:
-        # Caller holds self._lock.
-        stale = [
-            k for k, e in self._state.items()
-            if e["locked_until"] <= now and now - e["window_start"] > self.WINDOW_S
-        ]
-        for k in stale:
-            del self._state[k]
-
-    def retry_after(self, key: str) -> float:
-        """Seconds the caller must still wait, or 0 if an attempt is allowed now."""
-        now = self._clock()
-        with self._lock:
-            entry = self._state.get(key)
-            if not entry:
-                return 0.0
-            return max(0.0, entry["locked_until"] - now)
-
-    def record_failure(self, key: str) -> None:
-        now = self._clock()
-        with self._lock:
-            if len(self._state) >= self.MAX_TRACKED:
-                self._sweep_stale(now)
-            entry = self._state.get(key)
-            if not entry or now - entry["window_start"] > self.WINDOW_S:
-                entry = {"failures": 0, "window_start": now, "lockouts": 0, "locked_until": 0.0}
-            entry["failures"] += 1
-            if entry["failures"] >= self.MAX_FAILURES:
-                entry["lockouts"] += 1
-                backoff = min(self.BASE_LOCKOUT_S * 2 ** (entry["lockouts"] - 1), self.MAX_LOCKOUT_S)
-                entry["locked_until"] = now + backoff
-                entry["failures"] = 0
-                entry["window_start"] = now
-            self._state[key] = entry
-
-    def record_success(self, key: str) -> None:
-        with self._lock:
-            self._state.pop(key, None)
 
 
 def _client_ip() -> str:
@@ -390,10 +316,6 @@ def _client_ip() -> str:
 
 # Rate-limits failed /login attempts per client (defense-in-depth; see class).
 login_throttle = LoginThrottle()
-
-
-def _authenticated() -> bool:
-    return bool(session.get("authenticated"))
 
 
 def _session_id() -> str:
@@ -689,14 +611,6 @@ def opportunities_page():
     return send_from_directory(STATIC_DIR, "opportunities.html")
 
 
-@app.route("/api/opportunities", methods=["GET"])
-def api_opportunities():
-    if not _authenticated():
-        return jsonify({"error": "not authenticated"}), 401
-    return jsonify({"items": opportunities.all_items(),
-                    "watchlist": opportunities.get_watchlist()})
-
-
 @app.route("/starred", methods=["GET"])
 def starred_page():
     if not _authenticated():
@@ -721,79 +635,6 @@ def api_starred():
         cached = blurbs.get(r["full_name"], {}).get("blurb")
         r["blurb"] = cached or r.get("description") or ""
     return jsonify({"repos": repos})
-
-
-def _start_research(item: dict) -> None:
-    """Kick off the research pipeline for one opportunity on a daemon thread —
-    a couple of Tavily searches plus a local-model summary takes a minute or
-    two, far too long to hold the page's request open. The pending marker is
-    written synchronously so the page shows "researching…" on its next load;
-    the thread overwrites it with done/failed and pings the phone (the whole
-    point of async: Craig has usually navigated away by the time it lands)."""
-    opportunities.set_research(item["id"], {"status": "pending", "summary": None})
-
-    def run():
-        result = research_opportunity(item["id"])
-        if "error" in result:
-            logger.warning(f"research {item['id']} failed: {result['error']}")
-            notify(title="Wren: research failed", message=f"{item['company']}: {result['error']}")
-        else:
-            logger.info(f"research {item['id']} done")
-            notify(title="Wren: research ready",
-                   message=f"{item['company']} brief is on the opportunities page.")
-
-    threading.Thread(target=run, daemon=True, name=f"research-{item['id']}").start()
-
-
-@app.route("/api/opportunities/<item_id>/status", methods=["POST"])
-def api_opportunity_status(item_id: str):
-    """Triage from the /opportunities page — same store call the chat's
-    update_opportunity tool makes, so the two surfaces can't drift apart.
-    Marking an item interested auto-starts research on it (once)."""
-    if not _authenticated():
-        return jsonify({"error": "not authenticated"}), 401
-    status = (request.get_json(silent=True) or {}).get("status", "")
-    result = opportunities.update_opportunity(item_id, status)
-    logger.info(f"opportunities page: {item_id} -> {status!r}: {result}")
-    if "error" not in result and status == "interested":
-        item = opportunities.get_item(item_id)
-        if item is not None and not item.get("research"):
-            _start_research(item)
-    return jsonify(result), (200 if "error" not in result else 400)
-
-
-@app.route("/api/opportunities/<item_id>/research", methods=["POST"])
-def api_opportunity_research(item_id: str):
-    """The page's manual Research button (also the retry after a failure)."""
-    if not _authenticated():
-        return jsonify({"error": "not authenticated"}), 401
-    item = opportunities.get_item(item_id)
-    if item is None:
-        return jsonify({"error": f"no opportunity with id {item_id!r}"}), 400
-    if (item.get("research") or {}).get("status") == "pending":
-        return jsonify({"status": "pending", "note": "already researching"})
-    _start_research(item)
-    return jsonify({"status": "pending"}), 202
-
-
-@app.route("/api/opportunities/watchlist", methods=["POST"])
-def api_watch_company():
-    if not _authenticated():
-        return jsonify({"error": "not authenticated"}), 401
-    body = request.get_json(silent=True) or {}
-    result = opportunities.watch_company(
-        body.get("company", ""), body.get("ats", ""), body.get("slug", ""))
-    logger.info(f"opportunities page: watch {body}: {result}")
-    return jsonify(result), (200 if "error" not in result else 400)
-
-
-@app.route("/api/opportunities/watchlist/<watch_id>", methods=["DELETE"])
-def api_unwatch_company(watch_id: str):
-    if not _authenticated():
-        return jsonify({"error": "not authenticated"}), 401
-    result = opportunities.unwatch_company(watch_id)
-    logger.info(f"opportunities page: unwatch {watch_id}: {result}")
-    return jsonify(result), (200 if "error" not in result else 400)
 
 
 @app.route("/api/bg/resolve", methods=["POST"])
@@ -828,115 +669,6 @@ def bg_resolve():
         else:
             notify(title="Denied", message="🚫 Denied — Wren will skip that action.")
     return jsonify({"ok": applied, "job": payload["job"], "decision": payload["decision"]})
-
-
-def _run_summary(run: dict | None) -> dict | None:
-    """The slice of a run the Overview needs — omits the heavy tool_calls/error."""
-    if run is None:
-        return None
-    return {k: run[k] for k in ("id", "start", "end", "duration_s", "status", "summary")}
-
-
-@app.route("/api/schedules", methods=["GET"])
-def api_schedules():
-    if not _authenticated():
-        return jsonify({"error": "not authenticated"}), 401
-    out = []
-    for task in discover_tasks():
-        runs = [] if task["is_daemon"] else parse_runs(task["log_path"], limit=10)
-        out.append({
-            "key": task["key"],
-            "display_name": task["display_name"],
-            "human_schedule": task["human_schedule"],
-            "is_daemon": task["is_daemon"],
-            "next_run": next_run(task["schedule"]),
-            "last_run": _run_summary(runs[0] if runs else None),
-            "recent_statuses": [r["status"] for r in runs],
-        })
-    return jsonify({"tasks": out})
-
-
-@app.route("/api/runs/<task_key>", methods=["GET"])
-def api_runs(task_key: str):
-    if not _authenticated():
-        return jsonify({"error": "not authenticated"}), 401
-    task = task_by_key(task_key)
-    if task is None:
-        return jsonify({"error": "unknown task"}), 404
-    runs = parse_runs(task["log_path"], limit=50)
-    return jsonify({
-        "task": {"key": task["key"], "display_name": task["display_name"],
-                 "human_schedule": task["human_schedule"], "is_daemon": task["is_daemon"]},
-        "runs": [_run_summary(r) for r in runs],
-    })
-
-
-@app.route("/api/runs/<task_key>/<run_id>", methods=["GET"])
-def api_run_detail(task_key: str, run_id: str):
-    if not _authenticated():
-        return jsonify({"error": "not authenticated"}), 401
-    task = task_by_key(task_key)
-    if task is None:
-        return jsonify({"error": "unknown task"}), 404
-    run = parse_run_detail(task["log_path"], run_id)
-    if run is None:
-        return jsonify({"error": "unknown run"}), 404
-    return jsonify(run)
-
-
-@app.route("/api/health/ntfy", methods=["GET"])
-def api_health_ntfy():
-    """Live push-channel probe for the dashboard pill. The log inspector's
-    check runs once at 8am and reports by email; this answers "is push up
-    right now" — the question you have after restarting the ntfy container.
-
-    Server reachability only, not token validity — see ntfy_health()."""
-    if not _authenticated():
-        return jsonify({"error": "not authenticated"}), 401
-    return jsonify(ntfy_health())
-
-
-@app.route("/api/capabilities", methods=["GET"])
-def api_capabilities():
-    if not _authenticated():
-        return jsonify({"error": "not authenticated"}), 401
-    return jsonify({"tools": describe_tools(TOOLS, WRITE_TOOLS)})
-
-
-@app.route("/api/system_map", methods=["GET"])
-def api_system_map():
-    if not _authenticated():
-        return jsonify({"error": "not authenticated"}), 401
-    return jsonify(system_map(TOOLS, WRITE_TOOLS))
-
-
-@app.route("/api/memories", methods=["GET"])
-def api_memories():
-    if not _authenticated():
-        return jsonify({"error": "not authenticated"}), 401
-    data = recall()
-    active = [m for m in data["memories"] if m.get("scope", "active") == "active"]
-    archival = [m for m in data["memories"] if m.get("scope", "active") == "archival"]
-    archival.sort(key=lambda m: m.get("access_count", 0), reverse=True)
-    return jsonify({"active": active, "archival": archival})
-
-
-@app.route("/api/run/<task_key>", methods=["POST"])
-def api_run(task_key: str):
-    if not _authenticated():
-        return jsonify({"error": "not authenticated"}), 401
-    result = run_manager.start(task_key)
-    logger.info(f"dashboard run-now {task_key} -> {result}")
-    return jsonify(result), (200 if result.get("ok") else 409)
-
-
-@app.route("/api/run/<task_key>/status", methods=["GET"])
-def api_run_status(task_key: str):
-    if not _authenticated():
-        return jsonify({"error": "not authenticated"}), 401
-    if task_by_key(task_key) is None:
-        return jsonify({"error": "unknown task"}), 404
-    return jsonify(run_manager.status(task_key))
 
 
 # Rough chars-per-token for the mix of prose and JSON that fills a prompt.
