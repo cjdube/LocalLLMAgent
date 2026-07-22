@@ -1,5 +1,7 @@
 """Tests for the pure string helpers in agent.tools.github_starred."""
 
+import requests
+
 from agent.tools import github_starred as gh
 
 
@@ -89,3 +91,63 @@ def test_truncate_long_text_adds_ellipsis_on_word_boundary():
 def test_parse_since_normalizes_trailing_z():
     dt = gh._parse_since("2026-06-01T00:00:00Z")
     assert dt.year == 2026 and dt.tzinfo is not None
+
+
+# --------------------------------------------------------------------------- #
+# fetch_latest_release (degrade-don't-crash)
+# --------------------------------------------------------------------------- #
+
+class _Resp:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._payload
+
+
+def test_fetch_latest_release_happy_path(monkeypatch):
+    monkeypatch.setattr(gh, "resolve_key", lambda *a, **k: "tok")
+    monkeypatch.setattr(gh.requests, "get", lambda *a, **k: _Resp({
+        "tag_name": "v1.3.0",
+        "name": "Release 1.3.0",
+        "published_at": "2026-07-01T00:00:00Z",
+        "html_url": "https://github.com/o/r/releases/tag/v1.3.0",
+    }))
+    assert gh.fetch_latest_release("o/r") == {
+        "tag": "v1.3.0",
+        "name": "Release 1.3.0",
+        "published_at": "2026-07-01T00:00:00Z",
+        "html_url": "https://github.com/o/r/releases/tag/v1.3.0",
+    }
+
+
+def test_fetch_latest_release_name_falls_back_to_tag(monkeypatch):
+    monkeypatch.setattr(gh, "resolve_key", lambda *a, **k: "tok")
+    monkeypatch.setattr(gh.requests, "get", lambda *a, **k: _Resp({
+        "tag_name": "v2", "name": None, "published_at": None, "html_url": "",
+    }))
+    assert gh.fetch_latest_release("o/r")["name"] == "v2"
+
+
+def test_fetch_latest_release_no_key_returns_empty(monkeypatch):
+    monkeypatch.setattr(gh, "resolve_key", lambda *a, **k: None)
+    assert gh.fetch_latest_release("o/r") == {}
+
+
+def test_fetch_latest_release_404_returns_empty(monkeypatch):
+    monkeypatch.setattr(gh, "resolve_key", lambda *a, **k: "tok")
+
+    def _raise(*a, **k):
+        raise requests.exceptions.RequestException("404")
+
+    monkeypatch.setattr(gh.requests, "get", _raise)
+    assert gh.fetch_latest_release("o/r") == {}
+
+
+def test_fetch_latest_release_missing_tag_returns_empty(monkeypatch):
+    monkeypatch.setattr(gh, "resolve_key", lambda *a, **k: "tok")
+    monkeypatch.setattr(gh.requests, "get", lambda *a, **k: _Resp({"name": "no tag"}))
+    assert gh.fetch_latest_release("o/r") == {}

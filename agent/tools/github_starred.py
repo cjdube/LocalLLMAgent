@@ -188,6 +188,35 @@ def fetch_readme(full_name: str, api_key: str = None) -> str:
         return ""
 
 
+def fetch_latest_release(full_name: str, api_key: str = None) -> dict:
+    """Best-effort latest published release for a repo, or {} on any failure/404.
+
+    Never raises: a repo with no releases (404) or an unreachable API just means
+    no version to show for that repo, not a failed run — same degrade-don't-crash
+    posture as fetch_readme. Returns {tag, name, published_at, html_url}; only
+    releases are considered (not bare tags), so a repo that doesn't publish
+    releases simply yields no version."""
+    api_key = resolve_key("GITHUB_TOKEN", api_key)
+    if not api_key:
+        return {}
+    headers = {"Authorization": f"token {api_key}", "Accept": "application/vnd.github+json"}
+    try:
+        resp = requests.get(f"{API_ROOT}/repos/{full_name}/releases/latest", headers=headers, timeout=15)
+        resp.raise_for_status()
+        r = resp.json()
+    except (requests.exceptions.RequestException, ValueError):
+        return {}
+    tag = r.get("tag_name")
+    if not tag:
+        return {}
+    return {
+        "tag": tag,
+        "name": r.get("name") or tag,
+        "published_at": r.get("published_at"),
+        "html_url": r.get("html_url", ""),
+    }
+
+
 def _parse(raw: list, since_dt: datetime = None) -> list:
     repos = []
     for r in raw:

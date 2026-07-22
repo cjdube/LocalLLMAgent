@@ -109,6 +109,32 @@ def test_api_starred_merges_cached_blurb_and_falls_back_to_description(auth_clie
     assert repos == {"a/one": "cached blurb", "b/two": "desc two"}
 
 
+def test_api_starred_merges_cached_release_with_new_badge(auth_client, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    from agent.store import atomic_write_json
+    monkeypatch.setattr(srv, "fetch_starred_repos", lambda: {"repos": [
+        {"full_name": "a/recent", "description": "d", "language": "Rust"},
+        {"full_name": "b/old", "description": "d", "language": "Go"},
+        {"full_name": "c/none", "description": "d", "language": "C"},
+    ]})
+    recent = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    old = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+    atomic_write_json(srv.starred_releases.RELEASES_PATH, {
+        "a/recent": {"tag": "v1.3", "name": "1.3", "published_at": recent, "html_url": "u"},
+        "b/old": {"tag": "v0.9", "name": "0.9", "published_at": old, "html_url": "u"},
+    })
+
+    resp = auth_client.get("/api/starred")
+    assert resp.status_code == 200
+    repos = {r["full_name"]: r for r in resp.get_json()["repos"]}
+    assert repos["a/recent"]["latest_release"]["tag"] == "v1.3"
+    assert repos["a/recent"]["release_is_new"] is True
+    assert repos["b/old"]["release_is_new"] is False        # released, but outside the window
+    assert repos["c/none"]["latest_release"] is None         # no cached release
+    assert repos["c/none"]["release_is_new"] is False
+
+
 def test_api_starred_passes_fetch_error_through(auth_client, monkeypatch):
     monkeypatch.setattr(srv, "fetch_starred_repos", lambda: {"error": "rate limited"})
     resp = auth_client.get("/api/starred")

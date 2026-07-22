@@ -15,7 +15,7 @@ import sys
 import threading
 import time
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -52,7 +52,7 @@ from chat.auth import _authenticated
 from chat.login_throttle import LoginThrottle
 from chat.routes_dashboard import dashboard_bp
 from chat.routes_opportunities import opportunities_bp
-from tasks import starred_blurbs
+from tasks import starred_blurbs, starred_releases
 from tasks._common import setup_logger
 from tasks.morning_brief import brief_dispatch
 from tasks.opportunity_digest import digest_dispatch
@@ -606,22 +606,47 @@ def starred_page():
     return send_from_directory(STATIC_DIR, "starred.html")
 
 
+# A release cut within this many days is badged "new" on /starred. Recency —
+# rather than per-visit "seen" tracking — keeps the endpoint a pure read: no
+# mutating GET, no seen-state store.
+RECENT_RELEASE_DAYS = 30
+
+
+def _release_is_new(published_at: str) -> bool:
+    """True if the release was published within RECENT_RELEASE_DAYS. Compares
+    timezone-aware UTC on both sides — GitHub timestamps are UTC, and we never
+    slice the ISO string against a local calendar day (per the timestamp policy);
+    a missing or unparseable timestamp is simply not new."""
+    if not published_at:
+        return False
+    try:
+        published_dt = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return datetime.now(timezone.utc) - published_dt <= timedelta(days=RECENT_RELEASE_DAYS)
+
+
 @app.route("/api/starred", methods=["GET"])
 def api_starred():
     """Live list of starred repos, each with its cached "what it does" blurb
     (falling back to the repo's GitHub description for any not yet cached by
-    tasks/starred_blurbs.py). The model never runs on this request path — the
-    blurbs are read from the store — so the page stays instant."""
+    tasks/starred_blurbs.py) and its cached latest release (tasks/starred_releases.py).
+    The model never runs on this request path — the blurbs and releases are read
+    from their stores — so the page stays instant."""
     if not _authenticated():
         return jsonify({"error": "not authenticated"}), 401
     result = fetch_starred_repos()
     if "error" in result:
         return jsonify({"repos": [], "error": result["error"]})
     blurbs = load_json(starred_blurbs.BLURBS_PATH, {})
+    releases = load_json(starred_releases.RELEASES_PATH, {})
     repos = result.get("repos", [])
     for r in repos:
         cached = blurbs.get(r["full_name"], {}).get("blurb")
         r["blurb"] = cached or r.get("description") or ""
+        release = releases.get(r["full_name"])
+        r["latest_release"] = release or None
+        r["release_is_new"] = bool(release) and _release_is_new(release.get("published_at"))
     return jsonify({"repos": repos})
 
 

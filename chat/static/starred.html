@@ -41,6 +41,10 @@
   td.repo a { color: #2563eb; text-decoration: none; }
   td.lang { color: #4b5563; white-space: nowrap; }
   td.blurb { color: #374151; line-height: 1.5; }
+  td.release { color: #4b5563; white-space: nowrap; }
+  td.release a { color: #2563eb; text-decoration: none; }
+  td.release .date { color: #9ca3af; font-size: 12px; }
+  .badge { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 999px; background: #dcfce7; color: #166534; font-size: 11px; font-weight: 600; }
   td.updated { color: #9ca3af; white-space: nowrap; }
 </style>
 </head>
@@ -92,8 +96,26 @@ function repoRow(r) {
 
   tr.appendChild(el("td", "lang", r.language || "—"));
   tr.appendChild(el("td", "blurb", r.blurb || ""));
+  tr.appendChild(releaseCell(r));
   tr.appendChild(el("td", "updated", fmtTs(r.pushed_at)));
   return tr;
+}
+
+function releaseCell(r) {
+  const td = el("td", "release");
+  const rel = r.latest_release;
+  if (!rel || !rel.tag) { td.textContent = "—"; return td; }
+  const href = safeHref(rel.html_url);
+  if (href) {
+    const a = el("a", null, rel.tag);
+    a.href = href; a.target = "_blank"; a.rel = "noopener noreferrer";
+    td.appendChild(a);
+  } else {
+    td.appendChild(document.createTextNode(rel.tag));
+  }
+  if (rel.published_at) td.appendChild(el("span", "date", " · " + fmtTs(rel.published_at)));
+  if (r.release_is_new) td.appendChild(el("span", "badge", "🆕 new"));
+  return td;
 }
 
 async function load() {
@@ -115,7 +137,7 @@ async function load() {
   const table = el("table");
   const thead = el("thead");
   const htr = el("tr");
-  ["Repo", "Language", "What it does", "Last updated"].forEach(h => htr.appendChild(el("th", null, h)));
+  ["Repo", "Language", "What it does", "Latest release", "Last updated"].forEach(h => htr.appendChild(el("th", null, h)));
   thead.appendChild(htr);
   table.appendChild(thead);
   const tbody = el("tbody");

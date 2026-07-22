@@ -13,6 +13,7 @@ config/bg_jobs.json
 config/opportunities.json
 config/opportunities_state.json
 config/starred_blurbs.json
+config/starred_releases.json
 config/*.lock
 config/*.corrupt-*
 logs/*.log
