@@ -429,6 +429,16 @@ def test_routine_uses_reference_defined_services():
             assert key in insights.TOOL_SERVICES, f"{task_key} uses unknown service {key!r}"
 
 
+def test_every_scheduled_routine_has_routine_uses():
+    # Drift guard for the hand-maintained ROUTINE_USES map: adding a scheduled
+    # task (a non-daemon launchd plist) without declaring the services it touches
+    # here leaves it floating with no edges on the /map view. Reads the real
+    # launchd/ plists — no production runtime state is touched.
+    scheduled = {t["key"] for t in insights.discover_tasks() if not t["is_daemon"]}
+    undeclared = scheduled - set(insights.ROUTINE_USES)
+    assert not undeclared, f"routines missing from ROUTINE_USES: {sorted(undeclared)}"
+
+
 def test_every_registered_chat_tool_is_mapped_to_a_service():
     # Drift guard for the hard-coded TOOL_SERVICES map: registering a new tool
     # in chat/server.py without mapping it here should fail loudly, not let the

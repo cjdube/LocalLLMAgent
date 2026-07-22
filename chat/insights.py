@@ -472,7 +472,11 @@ ROUTINE_USES = {
     "calendar_colorizer": ["google_calendar", "gmail", "ntfy"],
     "daily_chrome_learnings": ["chrome", "gmail", "ntfy"],
     "daily_youtube_learnings": ["youtube", "gmail", "ntfy"],
+    "ai_chat_learnings": ["gmail", "ntfy"],  # source is local chat files; gmail = persist_or_email fallback
     "opportunity_digest": ["opportunities", "gmail", "ntfy"],
+    "starred_blurbs": ["github", "ntfy"],
+    "starred_releases": ["github", "ntfy"],
+    "log_inspector": ["gmail", "ntfy"],  # rollup push via ntfy, email fallback on ntfy outage
 }
 
 # Keep the payload bounded: memory texts are truncated for the map (the detail
