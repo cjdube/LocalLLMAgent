@@ -24,7 +24,7 @@ import).
 
 | Key | Used by | Purpose |
 |---|---|---|
-| `user_name` | scoring/research/colorizer/weekly-review prompts | The name the LLM prompts refer to |
+| `user_name` | scoring/research/colorizer/daily-learnings prompts | The name the LLM prompts refer to |
 | `positioning` | `tasks/opportunity_digest.py` scoring prompt, `agent/tools/research.py` brief prompt | One noun phrase: who you are professionally ("a fractional product/engineering leader (Vibe Foundry)") |
 | `engagement_model` | `tasks/opportunity_digest.py` scoring prompt | One verb phrase completing "…who <engagement_model>." — how you engage with companies |
 

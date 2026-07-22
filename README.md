@@ -136,7 +136,7 @@ in — nothing new inherits it automatically.
 | `strava.py` | Strava activities via the Strava API (own OAuth app), for a given date. Run `--authorize` once to mint a refresh token |
 | `calendar.py` | Google Calendar read/write (`get_upcoming_events`, `get_events_in_range`, `log_calendar_event` — idempotent via `source_id`) |
 | `email.py` | Send email via Gmail API (plain text or HTML) |
-| `learnings_file.py` | Write the weekly review to a Markdown file in the Obsidian vault (`LEARNINGS_DIR`) and read the most recent one back for carry-forward |
+| `learnings_file.py` | Write a daily learnings review to a Markdown file in the Obsidian vault (`LEARNINGS_DIR`), one file per day |
 | `wiki.py` | Read-only search of the learnings wiki (`WIKI_VAULT_PATH`) so Wren can answer "what did I decide about X" — `read_wiki_index`, `list_wiki_pages`, `read_wiki_page` over the concept pages built by ObsidianWikiAgent. Reads the vault's `wiki/` dir only; `raw/` is a write-only drop (`LEARNINGS_DIR`) that ObsidianWikiAgent files and summarizes. Requires `WIKI_VAULT_PATH` to exist |
 | `google_tasks.py` | Google Tasks read/write (`get_tasks`, `get_tasks_due_soon`, `create_task`, `update_task_due_date`, `complete_task`) |
 | `chrome_history.py` | Read Chrome's local history DB for a date range |
@@ -516,7 +516,7 @@ mostly useful if the Python process fails to start at all).
      option; a scopeless [classic](https://github.com/settings/tokens/new) token
      also works for public stars (add the `repo` scope only if you star private
      repos too).
-   - `LEARNINGS_DIR` — directory the weekly review Markdown files are written to
+   - `LEARNINGS_DIR` — directory the daily learnings Markdown files are written to
      (defaults to `~/Documents/llm-wiki-learnings/raw`)
    - `WIKI_VAULT_PATH` — root of the Obsidian vault Wren reads to answer "what did
      I decide about X" via the `wiki.py` tools (defaults to
