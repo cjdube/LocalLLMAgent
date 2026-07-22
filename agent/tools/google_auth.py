@@ -75,6 +75,17 @@ def get_credentials() -> Credentials:
         creds_path = _ROOT / os.getenv("GOOGLE_CREDENTIALS_PATH", "config/google_credentials.json")
         token_path = _ROOT / os.getenv("GOOGLE_TOKEN_PATH", "config/google_token.json")
 
+        # The OAuth client-secret file is placed by hand (downloaded from Google
+        # Cloud Console) and defaults to a world-readable 0644 — unlike every
+        # other secret file in config/, which is 0600. Tighten it to owner-only
+        # on read so a re-download can't silently leave it group/world-readable,
+        # matching the token_path.write_text() below that already chmods 0o600.
+        if creds_path.exists():
+            try:
+                os.chmod(creds_path, 0o600)
+            except OSError:
+                pass
+
         creds = _CACHED_CREDS
         if creds is None and token_path.exists():
             creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
