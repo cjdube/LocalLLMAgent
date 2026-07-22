@@ -11,6 +11,7 @@ import logging
 import pytest
 
 from agent import loop
+from agent.backends import gemini as gemini_backend
 
 
 class _FakeResponse:
@@ -348,7 +349,9 @@ def _patch_gemini(monkeypatch, responses, captured=None):
     _gemini_client() constructions a multi-turn advance() makes."""
     captured = captured if captured is not None else {}
     client = _FakeGeminiClient(responses, captured)
-    monkeypatch.setattr(loop, "_gemini_client", lambda timeout=None: client)
+    # _gemini_client now lives on the Gemini backend module, where _gemini_chat
+    # resolves it — patch it there.
+    monkeypatch.setattr(gemini_backend, "_gemini_client", lambda timeout=None: client)
     return captured
 
 

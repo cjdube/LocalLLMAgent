@@ -78,9 +78,10 @@ harmless. (agent/prefs.py is deliberately absent: it is read-only at import.)
 
 The cloud LLM backend is a network egress like ntfy: a test that selects
 WREN_LLM_BACKEND=gemini (or forgets to stub it) must never reach Google.
-`loop._gemini_client` is the single client-construction choke point, so blanket-
-stub it to raise; test_loop's Gemini tests re-patch it per-test with a fake
-client to exercise the real adapter without a network call.
+`agent.backends.gemini._gemini_client` is the single client-construction choke
+point (the backend adapter _gemini_chat resolves it there), so blanket-stub it
+to raise; test_loop's Gemini tests re-patch it per-test with a fake client to
+exercise the real adapter without a network call.
 """
 
 import logging
@@ -91,6 +92,7 @@ from pathlib import Path
 import pytest
 
 from agent import loop as _loop
+from agent.backends import gemini as _gemini_backend
 from agent.tools import background as _background
 from agent.tools import email as _email
 from agent.tools import memory as _memory
@@ -251,5 +253,7 @@ def _block_email_send(monkeypatch):
 @pytest.fixture(autouse=True)
 def _block_gemini_client(monkeypatch):
     def _no_real_gemini(*a, **k):
-        raise RuntimeError("real Gemini client blocked in tests — stub loop._gemini_client")
-    monkeypatch.setattr(_loop, "_gemini_client", _no_real_gemini)
+        raise RuntimeError(
+            "real Gemini client blocked in tests — stub "
+            "agent.backends.gemini._gemini_client")
+    monkeypatch.setattr(_gemini_backend, "_gemini_client", _no_real_gemini)
