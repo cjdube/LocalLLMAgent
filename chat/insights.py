@@ -446,7 +446,7 @@ TOOL_SERVICES = {
     "strava": ("Strava", ["fetch_strava"]),
     "weather": ("OpenWeatherMap", ["fetch_weather"]),
     "web_search": ("Tavily Search", ["search_web", "research_company"]),
-    "firecrawl": ("Firecrawl", ["fetch_webpage", "evaluate_app"]),
+    "firecrawl": ("Firecrawl", ["fetch_webpage", "evaluate_app", "evaluate_against"]),
     "github": ("GitHub", ["fetch_starred_repos"]),
     "youtube": ("YouTube", []),  # daily_youtube_learnings-only; no chat tool
     "ntfy": ("ntfy Push", []),  # routine failure-alert channel; no chat tool
@@ -472,6 +472,9 @@ ROUTINE_USES = {
     "calendar_colorizer": ["google_calendar", "gmail", "ntfy"],
     "daily_chrome_learnings": ["chrome", "gmail", "ntfy"],
     "daily_youtube_learnings": ["youtube", "gmail", "ntfy"],
+    # Cross-source: yesterday's browsing + Likes matched against the wiki and the
+    # opportunity watchlist; gmail = notify's email fallback when the push fails.
+    "daily_synthesis": ["chrome", "youtube", "wiki", "opportunities", "gmail", "ntfy"],
     "ai_chat_learnings": ["gmail", "ntfy"],  # source is local chat files; gmail = persist_or_email fallback
     "opportunity_digest": ["opportunities", "gmail", "ntfy"],
     "starred_blurbs": ["github", "ntfy"],

@@ -33,6 +33,7 @@ Usage:
 
 import argparse
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -41,6 +42,22 @@ from agent.tools._http import load_env, print_result
 load_env()
 
 DEFAULT_WIKI_VAULT = str(Path.home() / "Documents" / "llm-wiki-learnings")
+
+# A "lens" is an ordinary wiki page that opts in as one of Craig's standards
+# rubrics by declaring `lens: true` in its YAML frontmatter — the thing
+# evaluate_against judges a target against. Nothing else distinguishes it from a
+# concept page, so the marker is how Wren tells his lenses from his 180-odd
+# notes. Keep the injected index cheap (same budget reasoning as the skills
+# index): the chat prompt already crowds num_ctx.
+MAX_INDEX_LENSES = 8
+MAX_INDEX_CHARS = 600
+
+# Frontmatter lives at the very top; read only a bounded head to classify a page
+# without pulling whole bodies for all of them every turn.
+_HEAD_CHARS = 2048
+_FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
+_LENS_RE = re.compile(r"^\s*lens:\s*true\s*$", re.IGNORECASE | re.MULTILINE)
+_DESC_RE = re.compile(r"^\s*description:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
 
 
 def _vault() -> Path:
@@ -99,6 +116,33 @@ def _read_wiki_page(vault: Path, name: str) -> dict:
     return {"content": path.read_text(encoding="utf-8")}
 
 
+def _lens_meta(head: str) -> dict | None:
+    """If `head` (a page's leading bytes) declares `lens: true` in its
+    frontmatter, return {"description": ...}; else None. The description is the
+    frontmatter line, used for the injected index — not the page body."""
+    m = _FRONTMATTER_RE.search(head)
+    if not m or not _LENS_RE.search(m.group(1)):
+        return None
+    desc = _DESC_RE.search(m.group(1))
+    return {"description": desc.group(1).strip() if desc else ""}
+
+
+def _list_lenses(vault: Path) -> list:
+    """Every wiki page marked `lens: true`, as {name, description} rows. Reads
+    only each page's head to classify it, so scanning the whole vault stays
+    cheap enough to run per chat turn."""
+    lenses = []
+    for name in _list_wiki_pages(vault)["pages"]:
+        try:
+            head = (vault / "wiki" / name).read_text(encoding="utf-8")[:_HEAD_CHARS]
+        except OSError:
+            continue
+        meta = _lens_meta(head)
+        if meta is not None:
+            lenses.append({"name": name[:-3], "description": meta["description"]})
+    return lenses
+
+
 # --- model-facing tools (no vault argument; read the configured vault) ---
 
 def read_wiki_index() -> dict:
@@ -116,6 +160,41 @@ def read_wiki_page(name: str) -> dict:
         return {"error": "name must not be empty"}
     vault, err = _require_vault()
     return err or _read_wiki_page(vault, name.strip())
+
+
+def list_lenses() -> dict:
+    """The evaluation lenses in the vault — pages marked `lens: true`. Degrades
+    to no lenses if the vault is missing (this feeds the prompt build, which must
+    never break on a misconfigured vault)."""
+    vault, err = _require_vault()
+    if err:
+        return {"lenses": []}
+    return {"lenses": _list_lenses(vault)}
+
+
+def render_lenses_index() -> str:
+    """The capped 'name: description' block injected into the chat system prompt
+    so Wren knows which pages are Craig's standards lenses (and their exact
+    names, to pass as evaluate_against's lens_page). "" when there are none.
+    Mirrors skills.render_skills_index."""
+    lenses = list_lenses()["lenses"]
+    if not lenses:
+        return ""
+    lines, total = [], 0
+    for lens in lenses[:MAX_INDEX_LENSES]:
+        line = f"- {lens['name']}: {lens['description']}" if lens["description"] else f"- {lens['name']}"
+        if total + len(line) > MAX_INDEX_CHARS:
+            break
+        lines.append(line)
+        total += len(line)
+    if not lines:
+        return ""
+    return (
+        "Evaluation lenses (Craig's own standards pages). When he asks to evaluate, "
+        "critique, or review something against his standards, principles, or "
+        "philosophy, call evaluate_against with the matching lens_page:\n"
+        + "\n".join(lines)
+    )
 
 
 READ_WIKI_INDEX_SCHEMA = {

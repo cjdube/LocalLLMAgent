@@ -38,6 +38,7 @@ from agent.tools.calendar import (
 from agent.tools.chrome_history import TOOL_SCHEMA as CHROME_SCHEMA, fetch_chrome_history
 from agent.tools.email import TOOL_SCHEMA as EMAIL_SCHEMA, send_email_tool
 from agent.tools.evaluate_app import TOOL_SCHEMA as EVALUATE_APP_SCHEMA, evaluate_app
+from agent.tools.evaluate_against import TOOL_SCHEMA as EVALUATE_AGAINST_SCHEMA, evaluate_against
 from agent.tools.github_starred import TOOL_SCHEMA as GITHUB_STARRED_SCHEMA, fetch_starred_repos
 from agent.tools.google_tasks import (
     COMPLETE_TASK_TOOL_SCHEMA,
@@ -140,6 +141,7 @@ TOOLS = [
     SEND_DIGEST_TOOL_SCHEMA,
     *RESEARCH_TOOL_SCHEMAS,
     EVALUATE_APP_SCHEMA,
+    EVALUATE_AGAINST_SCHEMA,
 ]
 
 DISPATCH = {
@@ -193,6 +195,8 @@ DISPATCH = {
     "research_company": research_company,
     # Read-only like the research tools: fetches + analyzes a page, writes nothing.
     "evaluate_app": evaluate_app,
+    # Read-only: loads a wiki lens page + the target, analyzes, writes nothing.
+    "evaluate_against": evaluate_against,
 }
 
 WRITE_TOOLS = frozenset({
@@ -284,7 +288,7 @@ TOOL_GROUP_NAMES = {
     ],
     "wiki": ["read_wiki_index", "list_wiki_pages", "read_wiki_page"],
     "background": ["run_in_background", "list_background_jobs", "get_job_result"],
-    "web": ["fetch_webpage", "evaluate_app", "fetch_starred_repos"],
+    "web": ["fetch_webpage", "evaluate_app", "evaluate_against", "fetch_starred_repos"],
     "activity": ["fetch_strava", "fetch_chrome_history"],
     "authoring": ["write_skill", "delete_skill"],
     "brief": ["send_morning_brief", "send_email"],

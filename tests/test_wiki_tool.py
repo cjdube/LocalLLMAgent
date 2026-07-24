@@ -70,3 +70,53 @@ def test_empty_name_rejected(tmp_path, monkeypatch):
     _build_vault(tmp_path)
 
     assert "error" in wiki.read_wiki_page("   ")
+
+
+# --- lens discovery ---------------------------------------------------------
+
+def _add_lens(root, name, description="my standards", body="Ship small."):
+    (root / "wiki" / f"{name}.md").write_text(
+        f"---\nlens: true\ndescription: {description}\n---\n\n{body}"
+    )
+
+
+def test_list_lenses_only_returns_marked_pages(tmp_path, monkeypatch):
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)  # speakers-bureau has no frontmatter — not a lens
+    _add_lens(tmp_path, "product-principles", description="product standards")
+
+    lenses = wiki.list_lenses()["lenses"]
+    assert lenses == [{"name": "product-principles", "description": "product standards"}]
+
+
+def test_plain_frontmatter_without_lens_marker_is_not_a_lens(tmp_path, monkeypatch):
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    # A page with a description but no `lens: true` must not be picked up.
+    (tmp_path / "wiki" / "agent-safety.md").write_text(
+        "---\ndescription: notes on agent safety\n---\n\nbody"
+    )
+    assert wiki.list_lenses()["lenses"] == []
+
+
+def test_render_lenses_index_lists_names_and_descriptions(tmp_path, monkeypatch):
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    _add_lens(tmp_path, "product-principles", description="product standards")
+
+    block = wiki.render_lenses_index()
+    assert "evaluate_against" in block
+    assert "- product-principles: product standards" in block
+
+
+def test_render_lenses_index_empty_without_lenses(tmp_path, monkeypatch):
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    assert wiki.render_lenses_index() == ""
+
+
+def test_list_lenses_degrades_on_missing_vault(tmp_path, monkeypatch):
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path / "missing"))
+    # No vault → no lenses, and the prompt-build render must not raise.
+    assert wiki.list_lenses() == {"lenses": []}
+    assert wiki.render_lenses_index() == ""

@@ -52,6 +52,7 @@ from agent.tools import background
 from agent.tools.github_starred import compare_versions, fetch_starred_repos
 from agent.tools.notify import notify
 from agent.tools.skills import render_skills_index
+from agent.tools.wiki import render_lenses_index
 from chat.auth import _authenticated
 from chat.login_throttle import LoginThrottle
 from chat.routes_dashboard import dashboard_bp
@@ -176,6 +177,13 @@ def _system_message_content() -> str:
     skills_index = render_skills_index()
     if skills_index:
         dated += "\n\n" + skills_index
+    # The evaluation-lenses index: which wiki pages are Craig's standards rubrics,
+    # so the model passes the right lens_page to evaluate_against instead of
+    # guessing a slug. Rendered per turn so a lens added mid-session shows up next
+    # turn (same as the skills index).
+    lenses_index = render_lenses_index()
+    if lenses_index:
+        dated += "\n\n" + lenses_index
     # The loadable tool-group index: the deferred groups' schemas aren't sent
     # every turn, so this tells the model what it can pull in with load_tools.
     dated += "\n\n" + render_toolgroups_index()
