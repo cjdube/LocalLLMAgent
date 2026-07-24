@@ -40,9 +40,15 @@ include the literal brackets):
 ### Tools & Tech Encountered
 - **[Tool/Technology]:** [How it was used or encountered and the resulting capability]
 
+### Product & Strategy
+- **[Topic/Concept]:** [What the reading covered and why it matters for product work]
+
 Source data you'll receive:
-- chrome_sites: yesterday's browsing — draft "Tools & Tech Encountered" from any genuinely \
-technical/developer/AI/product sites (tools, APIs, platforms, docs, frameworks). Ignore the rest. \
+- chrome_sites: yesterday's browsing. Draft two sections from it. "Tools & Tech Encountered" from \
+genuinely technical/developer/AI/product sites (tools, APIs, platforms, docs, frameworks); "Product \
+& Strategy" from product-management reading — product strategy, discovery, prioritization, \
+roadmapping, positioning, growth, metrics, and PM best-practices articles or newsletters (this \
+section is about ideas and practices, not tools). Ignore anything that fits neither section. \
 Each site's "pages" lists the specific page paths visited: use them to say what was actually being \
 looked into (several pages under /docs/pricing and /docs/models is a comparison, not just a visit). \
 Never invent detail the paths and titles don't support.
@@ -57,9 +63,9 @@ reads as one line of inquiry rather than several unrelated bullets.
 
 Rules:
 - Professional, analytical tone. No casual language.
-- Bold the tool name at the start of each bullet (use **name** markdown).
-- 3-6 bullets. Explain significance, not just what happened.
-- If there is no real source data, use exactly one bullet: \
+- Bold the tool or topic name at the start of each bullet (use **name** markdown).
+- 2-4 bullets per section. Explain significance, not just what happened.
+- If a section has no qualifying items, use exactly one bullet under it: \
 "**None:** [No qualifying items for this section]".
 - NEVER include fitness (runs, yoga, gym, walks), social (book club, coffee, meals), travel, \
 or personal/household tasks — even if they appear in the data.

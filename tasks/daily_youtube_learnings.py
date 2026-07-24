@@ -2,8 +2,8 @@
 (one file per day). Non-interactive — run by launchd every morning, covering the
 prior day's Liked videos.
 
-Craig deliberately Likes AI/tooling videos, so the day's Likes are a clean signal
-for what he chose to learn. The model writes a short synthesis of what the videos
+Craig deliberately Likes AI/tooling and product-management videos, so the day's
+Likes are a clean signal for what he chose to learn. The model writes a short synthesis of what the videos
 teach; a deterministic, scheme-validated linked list of the exact videos is
 appended in Python. A day with no Likes writes nothing (keeps the vault clean).
 
@@ -23,8 +23,8 @@ from tasks._common import notify_failure, setup_logger
 from tasks._learnings_common import persist_or_email, prior_day, videos_section
 
 DRAFT_SYSTEM_PROMPT = f"""You are {prefs.user_name()}'s personal executive assistant. You write a \
-short thematic synthesis of the AI/technical YouTube videos he Liked yesterday — the videos he \
-chose to learn from. You are running unattended — infer everything from the data given.
+short thematic synthesis of the AI/technical and product-management YouTube videos he Liked \
+yesterday — the videos he chose to learn from. You are running unattended — infer everything from the data given.
 
 Use EXACTLY this template, filling in the bracketed parts (do not add extra sections, do not
 include the literal brackets):
