@@ -100,6 +100,10 @@
   .msg.user { align-self: flex-end; background: #1f2328; color: white; }
   .msg.wren { align-self: flex-start; background: #f4f4f5; }
   .msg.system { align-self: center; background: transparent; color: #9ca3af; font-size: 12px; }
+  .msg.wren.escalated .badge { display: block; font-size: 10px; font-weight: 600; color: #7c3aed; margin-bottom: 3px; }
+  .escalate { align-self: flex-start; margin: -4px 0 2px; padding: 4px 9px; font-size: 12px; background: #fff; color: #4b5563; border: 1px solid #d0d5dd; border-radius: 8px; cursor: pointer; }
+  .escalate:hover { background: #f3f0fb; color: #7c3aed; border-color: #ddd0f5; }
+  .escalate:disabled { opacity: 0.5; cursor: default; }
   /* .typing-dot, not .dot — .dot above is the run-history status dot. */
   .msg.typing { display: flex; align-items: center; gap: 4px; padding: 12px; }
   .msg.typing .typing-dot { width: 6px; height: 6px; border-radius: 50%; background: #9ca3af; animation: bounce 1.2s infinite ease-in-out; }

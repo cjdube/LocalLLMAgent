@@ -11,6 +11,7 @@ agent.loop import time) never pulls the cloud SDK on the common local-only path;
 TurnCancelled is imported from agent.loop lazily for the same reason (and to
 keep the import one-way — agent.loop imports this module, not vice versa)."""
 
+import base64
 import json
 import logging
 import os
@@ -77,7 +78,18 @@ def _gemini_contents(messages: list[dict]):
                         args = json.loads(args)
                     except (ValueError, TypeError):
                         args = {"_raw": args}
-                parts.append(types.Part.from_function_call(name=fn["name"], args=args))
+                part = types.Part.from_function_call(name=fn["name"], args=args)
+                # Replay the thought_signature captured in _gemini_chat: Gemini's
+                # thinking models stamp each functionCall with an opaque signature and
+                # reject a follow-up turn whose prior functionCall has lost it ("Function
+                # call is missing a thought_signature"). Only present when this call came
+                # from Gemini itself — a call replayed from another backend (e.g. an
+                # escalated turn's truncated history) has none, and none is required
+                # because that call isn't in the model turns we send back.
+                sig = call.get("thought_signature")
+                if sig:
+                    part.thought_signature = base64.b64decode(sig)
+                parts.append(part)
                 pending_names.append(fn["name"])
             if parts:
                 contents.append(types.Content(role="model", parts=parts))
@@ -179,8 +191,16 @@ def _gemini_chat(
                     content_parts.append(p.text)
                 fc = getattr(p, "function_call", None)
                 if fc:
-                    tool_calls.append(
-                        {"function": {"name": fc.name, "arguments": dict(fc.args or {})}})
+                    tc = {"function": {"name": fc.name, "arguments": dict(fc.args or {})}}
+                    # Carry Gemini's per-functionCall thought_signature through the
+                    # canonical shape so _gemini_contents can echo it back next turn
+                    # (thinking models require it, or the follow-up 400s). base64 keeps
+                    # the message JSON-serializable for _message_chars/_trim_history.
+                    # Absent when thinking is off — nothing to carry.
+                    sig = getattr(p, "thought_signature", None)
+                    if sig:
+                        tc["thought_signature"] = base64.b64encode(sig).decode()
+                    tool_calls.append(tc)
         if cand and getattr(cand, "finish_reason", None):
             finish_reason = cand.finish_reason
         um = getattr(chunk, "usage_metadata", None)

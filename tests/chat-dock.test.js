@@ -318,3 +318,83 @@ describe("new chat", () => {
     expect(sendBtn().textContent).not.toBe("Stop");
   });
 });
+
+describe("frontier escalation", () => {
+  const escBtn = () => document.querySelector(".escalate");
+  const LOCAL = { type: "final", text: "local answer", escalate_to: "gemini-2.5-flash (gemini)" };
+
+  test("a local reply that can be escalated offers a redo button", async () => {
+    resolvesWith(LOCAL);
+    submit("hello");
+    await settle();
+    expect(escBtn()).not.toBeNull();
+    expect(escBtn().textContent).toContain("Redo with gemini-2.5-flash");
+  });
+
+  test("a local reply with no escalate_to offers no button", async () => {
+    resolvesWith({ type: "final", text: "local answer" });
+    submit("hello");
+    await settle();
+    expect(escBtn()).toBeNull();
+  });
+
+  test("clicking redo posts to /chat/escalate and locks the composer", async () => {
+    resolvesWith(LOCAL);
+    submit("hello");
+    await settle();
+
+    pendingTurn();
+    escBtn().click();
+    expect(global.fetch).toHaveBeenLastCalledWith("/chat/escalate", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({}),
+    }));
+    expect(dots()).toHaveLength(3);
+    expect(input().disabled).toBe(true);
+  });
+
+  test("an escalated reply is badged and offers no further redo", async () => {
+    resolvesWith(LOCAL);
+    submit("hello");
+    await settle();
+
+    resolvesWith({ type: "final", text: "frontier answer", escalated: true,
+                   model_label: "gemini-2.5-flash (gemini)" });
+    escBtn().click();
+    await settle();
+    const badge = document.querySelector(".msg.wren.escalated .badge");
+    expect(badge).not.toBeNull();
+    expect(badge.textContent).toContain("⚡");
+    expect(badge.textContent).toContain("gemini-2.5-flash");
+    // The frontier reply carries no fresh redo button; the one that launched it
+    // is spent (disabled), so the same turn can't be escalated twice.
+    expect(document.querySelectorAll(".escalate")).toHaveLength(1);
+    expect(escBtn().disabled).toBe(true);
+  });
+
+  test("a new message clears the prior redo button", async () => {
+    resolvesWith(LOCAL);
+    submit("hello");
+    await settle();
+    expect(escBtn()).not.toBeNull();
+
+    resolvesWith({ ...LOCAL, text: "another" });
+    submit("again");
+    await settle();
+    // Exactly one — the old button was cleared when the new turn began.
+    expect(document.querySelectorAll(".escalate")).toHaveLength(1);
+  });
+
+  test("a failed escalation re-enables the button — the local answer is unchanged", async () => {
+    resolvesWith(LOCAL);
+    submit("hello");
+    await settle();
+
+    global.fetch = jest.fn(() => Promise.reject(new TypeError("Failed to fetch")));
+    escBtn().click();
+    await settle();
+    expect(escBtn().disabled).toBe(false);  // retry is valid
+    expect(input().disabled).toBe(false);
+    expect(lastMessage()).toContain("couldn't reach Wren");
+  });
+});

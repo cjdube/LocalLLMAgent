@@ -58,6 +58,11 @@
   .msg.user { align-self: flex-end; background: #1f2328; color: white; }
   .msg.wren { align-self: flex-start; background: #ffffff; border: 1px solid #e5e7eb; }
   .msg.system { align-self: center; background: transparent; color: #9ca3af; font-size: 13px; }
+  .msg.wren.escalated { border-color: #ddd0f5; }
+  .msg.wren.escalated .badge { display: block; font-size: 11px; font-weight: 600; color: #7c3aed; margin-bottom: 4px; }
+  .escalate { align-self: flex-start; margin: -6px 0 2px; padding: 5px 11px; font-size: 13px; background: #ffffff; color: #4b5563; border: 1px solid #d0d5dd; border-radius: 8px; cursor: pointer; }
+  .escalate:hover { background: #f3f0fb; color: #7c3aed; border-color: #ddd0f5; }
+  .escalate:disabled { opacity: 0.5; cursor: default; }
   .msg.typing { display: flex; align-items: center; gap: 4px; padding: 14px; }
   .msg.typing .typing-dot {
     width: 6px;

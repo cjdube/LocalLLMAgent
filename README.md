@@ -47,6 +47,14 @@ a cloud model (Gemini) via `WREN_LLM_BACKEND` — globally, or per-task with
 cloud. This sends that task's data off-device, the opposite of the local-first
 default, so it's opt-in. See [docs/llm-backend.md](docs/llm-backend.md).
 
+**Chat can escalate a weak answer to a frontier model, by hand.** When Craig
+judges a local reply too weak, a "Redo with the frontier model" button re-runs
+that turn on a configured cloud backend (`WREN_ESCALATION_BACKEND`, provider-
+neutral) — one deliberate, badged, logged tap. There's no automatic router: Craig
+is the router, and every escalation is recorded to `config/escalations.json` as
+the paired dataset that would justify one later. See
+[docs/frontier-escalation.md](docs/frontier-escalation.md).
+
 Every chat call sets the context window explicitly via `OLLAMA_NUM_CTX`
 (default 8192) rather than leaving it to Ollama's small default, which would
 silently truncate the front of the prompt (where the system prompt lives). Each

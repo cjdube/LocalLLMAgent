@@ -23,11 +23,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request, send_from_directory, session
 
+from agent.escalations import record_escalation
 from agent.loop import (
     MAX_TOOL_ITERATIONS,
     MAX_TOOL_RESULT_CHARS,
     TurnCancelled,
+    active_model_label,
     advance,
+    escalation_available,
+    escalation_backend,
     load_persona,
     resolve,
     with_identity,
@@ -223,6 +227,11 @@ def _security_headers(resp):
 # In-memory only, per the "fresh session" design — lost on server restart.
 conversations: dict[str, list[dict]] = {}
 pending_confirmations: dict[str, dict] = {}
+# When a write paused for confirmation was reached during an escalated (frontier)
+# turn, this holds that turn's backend so the /chat/confirm continuation stays on
+# the frontier model rather than silently dropping back to the local one. Keyed
+# by sid, set only for escalated turns, popped when the confirmation is consumed.
+pending_backends: dict[str, str] = {}
 # Which deferred tool groups each session has activated (via keyword pre-load or
 # a load_tools call). Persists across turns so a group loaded once stays loaded
 # — including across the /chat/confirm continuation, which rebuilds the toolset.
@@ -264,6 +273,7 @@ def _evict_idle_sessions() -> None:
             continue  # a turn is somehow still running; leave it alone
         conversations.pop(sid, None)
         pending_confirmations.pop(sid, None)
+        pending_backends.pop(sid, None)
         loaded_groups.pop(sid, None)
         _session_last_active.pop(sid, None)
 
@@ -387,14 +397,18 @@ def _make_load_tools(sid: str, tools: list[dict]):
 
 
 def _run_turn(sid: str, history: list, checkpoint: int, cancel: threading.Event,
-              stage: str = "turn"):
+              stage: str = "turn", backend: str | None = None):
     """Advance the session's conversation and shape the HTTP response — the
     shared back half of /chat and /chat/confirm. On cancel or failure the
     history is rolled back to `checkpoint` so the next turn starts clean; for
     /chat/confirm the checkpoint sits after the resolved tool result, which
     therefore survives the rollback (see that route's comment). `cancel` is
     the Event _begin_turn registered for this sid; it is always deregistered
-    on the way out, which also releases the session's one-turn slot."""
+    on the way out, which also releases the session's one-turn slot.
+
+    `backend` is None for a normal (local) turn and set only when a /chat/confirm
+    continues an escalated turn — so the frontier turn's continuation stays on
+    the frontier model."""
     # Chat sends only the always-loaded core plus this session's activated
     # groups, not the whole registry — keeps the small model's context lean. The
     # tools list is mutable so a mid-turn load_tools call can extend it (see
@@ -406,9 +420,13 @@ def _run_turn(sid: str, history: list, checkpoint: int, cancel: threading.Event,
     # that never arrives and one that hangs mid-flight looked identical — both
     # simply absent. This line is the "the request got here" marker.
     logger.info(f"chat {stage} start: {len(history)} messages, {len(tools)} tools")
+    # Only pass backend when set: a normal turn omits it so advance() applies its
+    # own local default (and existing test doubles that don't accept the kwarg
+    # keep working).
+    backend_kwargs = {"backend": backend} if backend else {}
     try:
         result = advance(history, tools, dispatch, confirm_before=WRITE_TOOLS,
-                         logger=logger, should_cancel=cancel.is_set)
+                         logger=logger, should_cancel=cancel.is_set, **backend_kwargs)
     except TurnCancelled:
         del history[checkpoint:]  # discard the stopped turn so the next one starts clean
         logger.info(f"chat {stage} cancelled by user")
@@ -422,7 +440,23 @@ def _run_turn(sid: str, history: list, checkpoint: int, cancel: threading.Event,
 
     if result["type"] == "confirm":
         pending_confirmations[sid] = result["call"]
-    return jsonify(_call_response(result))
+        # A frontier turn that pauses for a second confirm keeps its backend, so
+        # the next continuation stays on the frontier model too.
+        if backend:
+            pending_backends[sid] = backend
+        return jsonify(_call_response(result))
+
+    resp = _call_response(result)
+    if result["type"] == "final":
+        if backend:
+            # An escalated turn continued through a confirmation: badge its final.
+            resp["escalated"] = True
+            resp["model_label"] = active_model_label(backend)
+        elif escalation_available():
+            # A local reply: tell the client it can be redone on the frontier
+            # model, so the dock can offer the escalation button on this message.
+            resp["escalate_to"] = active_model_label(escalation_backend())
+    return jsonify(resp)
 
 
 @app.route("/", methods=["GET"])
@@ -477,6 +511,7 @@ def chat():
     # otherwise its unanswered tool_call would leave the history malformed.
     pending = pending_confirmations.pop(sid, None)
     if pending is not None:
+        pending_backends.pop(sid, None)
         resolve(history, pending, False, DISPATCH, logger=logger)
 
     # (Re)build the system message every turn, not just on session start, so a
@@ -523,6 +558,9 @@ def chat_confirm():
     if call is None:
         cancel_events.pop(sid, None)  # release the turn slot taken above
         return jsonify({"error": "no pending action"}), 400
+    # Set only when the paused write belonged to an escalated turn; continue that
+    # turn on the same frontier backend rather than dropping back to local.
+    backend = pending_backends.pop(sid, None)
 
     _session_last_active[sid] = time.time()
     history = conversations.setdefault(sid, [])
@@ -533,7 +571,108 @@ def chat_confirm():
     resolve(history, call, approved, DISPATCH, logger=logger)
 
     checkpoint = len(history)
-    return _run_turn(sid, history, checkpoint, cancel, stage="continuation")
+    return _run_turn(sid, history, checkpoint, cancel, stage="continuation", backend=backend)
+
+
+def _last_user_index(history: list) -> int | None:
+    """Index of the most recent user message, or None if there isn't one — the
+    turn an escalation re-runs."""
+    for i in range(len(history) - 1, -1, -1):
+        if history[i].get("role") == "user":
+            return i
+    return None
+
+
+def _local_reply_text(history: list, after: int) -> str:
+    """The local model's reply to the user turn at `after` — the assistant
+    content following it, joined. Captured only for the escalation log (the
+    paired 'weak local answer' half of the dataset)."""
+    parts = [m.get("content") or "" for m in history[after + 1:]
+             if m.get("role") == "assistant"]
+    return "\n".join(p for p in parts if p).strip()
+
+
+@app.route("/chat/escalate", methods=["POST"])
+def chat_escalate():
+    """Re-run the last turn on the configured frontier backend — the manual
+    "redo with the frontier model" button. Craig is the router: this fires only
+    on a deliberate tap, ships the current conversation off-device, logs the
+    escalation, and badges the reply. See docs/frontier-escalation.md.
+
+    The frontier turn runs on a COPY of the history truncated to the last user
+    request, so a failed escalation leaves the local answer intact — on screen
+    and as context for the next turn. Only a success commits the new history."""
+    if not _authenticated():
+        return jsonify({"error": "not authenticated"}), 401
+    backend = escalation_backend()
+    if not escalation_available():
+        return jsonify({"error": "no frontier backend is configured for escalation"}), 400
+
+    sid = _session_id()
+    cancel = _begin_turn(sid)
+    if cancel is None:
+        return jsonify({"error": "a turn is already running for this session"}), 409
+
+    history = conversations.get(sid, [])
+    # A write awaiting confirmation would leave the history mid-tool_call; decline
+    # it first (as /chat does for a new message) so the re-run starts well-formed.
+    pending = pending_confirmations.pop(sid, None)
+    if pending is not None:
+        pending_backends.pop(sid, None)
+        resolve(history, pending, False, DISPATCH, logger=logger)
+
+    last_user = _last_user_index(history)
+    if last_user is None:
+        cancel_events.pop(sid, None)  # release the turn slot taken above
+        return jsonify({"error": "nothing to redo yet"}), 400
+
+    _session_last_active[sid] = time.time()
+    request_text = history[last_user].get("content") or ""
+    local_reply = _local_reply_text(history, last_user)
+    # Work on a copy truncated to the user request — advance() appends onto this,
+    # never the live history, so a failure below can't disturb the local answer.
+    working = list(history[: last_user + 1])
+    # Approximate size shipped off-device, for the log (deterministic char/4
+    # estimate — the provider's own token count isn't returned to us here).
+    prompt_tokens = sum(_message_chars(m) for m in working) // _CHARS_PER_TOKEN
+    label = active_model_label(backend)
+
+    tools = tools_for(loaded_groups.get(sid, set()))
+    dispatch = {**DISPATCH, "load_tools": _make_load_tools(sid, tools)}
+    logger.info("chat escalate start: backend=%s ~%d prompt tokens, %d tools",
+                backend, prompt_tokens, len(tools))
+    try:
+        result = advance(working, tools, dispatch, confirm_before=WRITE_TOOLS,
+                         backend=backend, logger=logger, should_cancel=cancel.is_set)
+    except TurnCancelled:
+        logger.info("chat escalate cancelled by user")
+        return jsonify({"type": "cancelled"})  # working discarded; local answer intact
+    except Exception as e:
+        logger.exception(f"chat escalate failed: {e}")
+        record_escalation(request=request_text, local_reply=local_reply,
+                          prompt_tokens=prompt_tokens, backend=backend, model=label,
+                          outcome=f"error:{e}")
+        # 502: the local answer is untouched on screen — surface the failure, no
+        # silent fallback to the reply the user just judged too weak.
+        return jsonify({"error": f"the frontier model couldn't be reached ({e}). "
+                                 "Your local answer is unchanged."}), 502
+    finally:
+        cancel_events.pop(sid, None)
+
+    # Success (a final answer, or a write paused for confirmation): commit the
+    # frontier history and log the escalation.
+    conversations[sid] = working
+    record_escalation(request=request_text, local_reply=local_reply,
+                      prompt_tokens=prompt_tokens, backend=backend, model=label,
+                      outcome="ok")
+    if result["type"] == "confirm":
+        pending_confirmations[sid] = result["call"]
+        pending_backends[sid] = backend  # continue on the frontier after confirm
+        return jsonify(_call_response(result))
+    resp = _call_response(result)
+    resp["escalated"] = True
+    resp["model_label"] = label
+    return jsonify(resp)
 
 
 @app.route("/chat/cancel", methods=["POST"])
@@ -566,6 +705,7 @@ def chat_new():
         event.set()
     conversations.pop(sid, None)
     pending_confirmations.pop(sid, None)
+    pending_backends.pop(sid, None)
     loaded_groups.pop(sid, None)
     _session_last_active.pop(sid, None)
     return jsonify({"ok": True})

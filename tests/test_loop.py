@@ -5,6 +5,7 @@ logs the effective context window plus the actual prompt token count, warning
 when the prompt reaches the ceiling (likely front-truncation).
 """
 
+import base64
 import json as _json
 import logging
 
@@ -305,9 +306,10 @@ class _FakeFC:
 
 
 class _FakePart:
-    def __init__(self, text=None, function_call=None):
+    def __init__(self, text=None, function_call=None, thought_signature=None):
         self.text = text
         self.function_call = function_call
+        self.thought_signature = thought_signature
 
 
 class _FakeUsage:
@@ -371,6 +373,57 @@ def test_gemini_backend_reassembles_text_and_tool_calls(monkeypatch):
     # canonical shape: arguments is a dict, so _execute_tool_call is unchanged
     assert message["tool_calls"] == [
         {"function": {"name": "search_web", "arguments": {"query": "x"}}}]
+
+
+def test_gemini_captures_thought_signature_on_tool_calls(monkeypatch):
+    # Thinking models stamp each functionCall with an opaque thought_signature; it
+    # must be carried through the canonical shape (base64, to stay JSON-serializable)
+    # so it can be echoed back next turn.
+    stream = [_FakeChunk(parts=[_FakePart(
+        function_call=_FakeFC("fetch_webpage", {"url": "x"}),
+        thought_signature=b"sig-bytes")], usage=_FakeUsage(5, 3))]
+    _patch_gemini(monkeypatch, [stream])
+
+    message = loop._gemini_chat([{"role": "user", "content": "summarize x"}], tools=[])
+    tc = message["tool_calls"][0]
+    assert tc["function"]["name"] == "fetch_webpage"
+    assert tc["thought_signature"] == base64.b64encode(b"sig-bytes").decode()
+    # Still JSON-serializable — it flows through _message_chars / _trim_history.
+    _json.dumps(tc)
+
+
+def test_gemini_replays_thought_signature_into_the_functioncall_part(monkeypatch):
+    # The follow-up turn must re-attach the signature to the model's functionCall
+    # Part, or Gemini 400s ("Function call is missing a thought_signature"). This is
+    # the second-round-trip failure that broke escalating a tool-using turn.
+    captured = _patch_gemini(monkeypatch, [[_FakeChunk(parts=[_FakePart(text="ok")])]])
+    messages = [
+        {"role": "user", "content": "summarize x"},
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"function": {"name": "fetch_webpage", "arguments": {"url": "x"}},
+             "thought_signature": base64.b64encode(b"sig-bytes").decode()}]},
+        {"role": "tool", "content": '{"text": "..."}'},
+    ]
+
+    loop._gemini_chat(messages, tools=[])
+    model_part = captured["calls"][0]["contents"][1].parts[0]
+    assert model_part.thought_signature == b"sig-bytes"  # decoded back to bytes
+
+
+def test_gemini_tolerates_a_tool_call_without_a_thought_signature(monkeypatch):
+    # Thinking off (or a call replayed from another backend) → no signature to
+    # replay, and none is set. Must not crash.
+    captured = _patch_gemini(monkeypatch, [[_FakeChunk(parts=[_FakePart(text="ok")])]])
+    messages = [
+        {"role": "user", "content": "weather?"},
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"function": {"name": "fetch_weather", "arguments": {"city": "Boston"}}}]},
+        {"role": "tool", "content": '{"temp": 70}'},
+    ]
+
+    loop._gemini_chat(messages, tools=[])
+    model_part = captured["calls"][0]["contents"][1].parts[0]
+    assert model_part.thought_signature is None
 
 
 def test_gemini_disables_thinking_and_sets_output_cap_by_default(monkeypatch):

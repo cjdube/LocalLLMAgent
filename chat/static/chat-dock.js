@@ -91,6 +91,45 @@
     scrollToEnd();
   }
 
+  // The escalate button ("Redo with the frontier model") lives on the most
+  // recent local reply only — a new turn or an escalation clears any previous
+  // one, so exactly one is ever present.
+  function clearEscalateButtons() {
+    messagesEl.querySelectorAll(".escalate").forEach((b) => b.remove());
+  }
+
+  // Set while an escalation is in flight so a failure (or a cancel) can re-enable
+  // the button it was launched from: the local answer is unchanged, so a retry
+  // is valid. A successful escalation leaves the button spent (disabled).
+  let pendingEscalateBtn = null;
+
+  function renderFinal(result) {
+    const div = addMessage("wren", result.text);
+    if (result.escalated) {
+      // An off-device reply — badge it so a long thread never blurs which
+      // answers came from the frontier model.
+      div.classList.add("escalated");
+      const badge = document.createElement("span");
+      badge.className = "badge";
+      badge.textContent = "⚡ " + (result.model_label || "frontier model");
+      div.prepend(badge);
+    } else if (result.escalate_to) {
+      // A local reply the server says can be redone on the frontier model.
+      const btn = document.createElement("button");
+      btn.className = "escalate";
+      btn.textContent = "Redo with " + result.escalate_to;
+      btn.onclick = () => {
+        if (busy) return;
+        btn.disabled = true;
+        pendingEscalateBtn = btn;
+        setBusy(true);
+        postTurn("/chat/escalate", {}, addTyping());
+      };
+      messagesEl.appendChild(btn);
+      scrollToEnd();
+    }
+  }
+
   // While a turn is running the Send button becomes a Stop button (it stays
   // enabled so it can cancel); the input is disabled until the turn ends.
   let busy = false;
@@ -126,13 +165,17 @@
     if (typingEl) typingEl.remove();
     if (result.error) {
       addMessage("system", "Error: " + result.error);
+      // A failed escalation leaves the local answer intact, so let it be retried.
+      if (pendingEscalateBtn) { pendingEscalateBtn.disabled = false; pendingEscalateBtn = null; }
       setBusy(false);
       return;
     }
     if (result.type === "final") {
-      addMessage("wren", result.text);
+      pendingEscalateBtn = null;  // a successful escalation leaves its button spent
+      renderFinal(result);
       setBusy(false);
     } else if (result.type === "cancelled") {
+      if (pendingEscalateBtn) { pendingEscalateBtn.disabled = false; pendingEscalateBtn = null; }
       addMessage("system", "Stopped.");
       setBusy(false);
     } else if (result.type === "confirm") {
@@ -156,6 +199,7 @@
     }
     const message = input.value.trim();
     if (!message) return;
+    clearEscalateButtons();  // a new turn supersedes the last reply's redo offer
     addMessage("user", message);
     input.value = "";
     setBusy(true);

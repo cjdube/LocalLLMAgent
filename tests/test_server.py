@@ -29,6 +29,7 @@ def client():
     srv.app.config["TESTING"] = True
     srv.conversations.clear()
     srv.pending_confirmations.clear()
+    srv.pending_backends.clear()
     srv.loaded_groups.clear()
     srv.cancel_events.clear()
     srv._session_last_active.clear()
@@ -57,6 +58,7 @@ EMAIL_CALL = {"function": {"name": "send_email", "arguments": {"subject": "Hi", 
 @pytest.mark.parametrize("method,path,kwargs", [
     ("post", "/chat", {"json": {"message": "hi"}}),
     ("post", "/chat/confirm", {"json": {"approved": True}}),
+    ("post", "/chat/escalate", {}),
     ("post", "/chat/cancel", {}),
     ("post", "/chat/new", {}),
     ("get", "/api/schedules", {}),
@@ -873,3 +875,165 @@ def test_health_ntfy_passes_probe_result_through(auth_client, monkeypatch, healt
     resp = auth_client.get("/api/health/ntfy")
     assert resp.status_code == 200
     assert resp.get_json() == health
+
+
+# --------------------------------------------------------------------------- #
+# /chat/escalate — manual "redo with the frontier model"
+# --------------------------------------------------------------------------- #
+
+from agent import escalations
+from agent.store import load_json
+
+
+def _escalation_rows():
+    return load_json(escalations._STORE_PATH, {"escalations": []})["escalations"]
+
+
+@pytest.fixture
+def frontier_configured(monkeypatch):
+    """A configured, credentialled frontier backend, so escalation_available()
+    is true and the button/endpoint are live."""
+    monkeypatch.setenv("WREN_ESCALATION_BACKEND", "gemini")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+
+def _seed_completed_turn():
+    srv.conversations[SID] = [
+        {"role": "system", "content": "s"},
+        {"role": "user", "content": "summarize my week"},
+        {"role": "assistant", "content": "weak local answer"},
+    ]
+
+
+def _frontier_advance(text="strong frontier answer"):
+    """A fake advance that stands in for the frontier backend: appends a final
+    assistant turn and returns it. Accepts `backend` — the escalation path passes
+    it, unlike the local-turn doubles elsewhere in this file."""
+    def fake(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
+             should_cancel=None, backend=None):
+        fake.backend = backend
+        messages.append({"role": "assistant", "content": text})
+        return {"type": "final", "text": text}
+    return fake
+
+
+def test_escalate_requires_a_configured_backend(auth_client):
+    # No WREN_ESCALATION_BACKEND set — the endpoint refuses rather than pretending.
+    _seed_completed_turn()
+    resp = auth_client.post("/chat/escalate")
+    assert resp.status_code == 400
+    assert "no frontier backend" in resp.get_json()["error"]
+    assert SID not in srv.cancel_events  # the turn slot it briefly took is released
+
+
+def test_escalate_reruns_last_turn_and_badges_it(auth_client, monkeypatch, frontier_configured):
+    _seed_completed_turn()
+    monkeypatch.setattr(srv, "advance", _frontier_advance())
+
+    resp = auth_client.post("/chat/escalate")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["type"] == "final"
+    assert body["text"] == "strong frontier answer"
+    assert body["escalated"] is True
+    assert "gemini" in body["model_label"]
+
+    # The weak local reply was dropped; the committed history re-runs the same
+    # user request and ends on the frontier answer.
+    roles = [(m["role"], m.get("content")) for m in srv.conversations[SID]]
+    assert roles == [("system", "s"), ("user", "summarize my week"),
+                     ("assistant", "strong frontier answer")]
+
+
+def test_escalate_logs_the_paired_record(auth_client, monkeypatch, frontier_configured):
+    _seed_completed_turn()
+    monkeypatch.setattr(srv, "advance", _frontier_advance())
+
+    auth_client.post("/chat/escalate")
+    rows = _escalation_rows()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["request"] == "summarize my week"
+    assert row["local_reply"] == "weak local answer"  # the paired half of the dataset
+    assert row["backend"] == "gemini"
+    assert row["outcome"] == "ok"
+    assert row["prompt_tokens"] > 0
+
+
+def test_escalate_runs_on_the_frontier_backend(auth_client, monkeypatch, frontier_configured):
+    _seed_completed_turn()
+    fake = _frontier_advance()
+    monkeypatch.setattr(srv, "advance", fake)
+    auth_client.post("/chat/escalate")
+    assert fake.backend == "gemini"  # advance() was told to use the frontier backend
+
+
+def test_escalate_with_nothing_to_redo_is_400(auth_client, frontier_configured):
+    srv.conversations[SID] = [{"role": "system", "content": "s"}]  # no user turn yet
+    resp = auth_client.post("/chat/escalate")
+    assert resp.status_code == 400
+    assert "nothing to redo" in resp.get_json()["error"]
+    assert SID not in srv.cancel_events  # slot released, no stuck session
+
+
+def test_escalate_failure_keeps_the_local_answer_and_logs_the_error(
+        auth_client, monkeypatch, frontier_configured):
+    _seed_completed_turn()
+    before = list(srv.conversations[SID])
+
+    def boom(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
+             should_cancel=None, backend=None):
+        raise RuntimeError("frontier unreachable")
+
+    monkeypatch.setattr(srv, "advance", boom)
+    resp = auth_client.post("/chat/escalate")
+    assert resp.status_code == 502
+    assert "unchanged" in resp.get_json()["error"]
+    # The local answer survives — the failed frontier turn ran on a copy.
+    assert srv.conversations[SID] == before
+    # ...and the failure is recorded for the audit trail.
+    rows = _escalation_rows()
+    assert rows[-1]["outcome"].startswith("error:")
+    assert rows[-1]["local_reply"] == "weak local answer"
+
+
+def test_escalate_while_turn_running_is_409(auth_client, frontier_configured):
+    _seed_completed_turn()
+    srv.cancel_events[SID] = threading.Event()  # a turn is mid-flight
+    resp = auth_client.post("/chat/escalate")
+    assert resp.status_code == 409
+    assert SID in srv.cancel_events  # the running turn's event was not clobbered
+
+
+def test_escalate_paused_write_continues_on_the_frontier(auth_client, monkeypatch, frontier_configured):
+    # A frontier turn that hits a write gate parks the confirmation AND remembers
+    # its backend, so /chat/confirm resumes on the frontier model, not local.
+    _seed_completed_turn()
+
+    def wants_to_write(messages, tools, dispatch, confirm_before=frozenset(),
+                       logger=None, should_cancel=None, backend=None):
+        return {"type": "confirm", "call": EMAIL_CALL}
+
+    monkeypatch.setattr(srv, "advance", wants_to_write)
+    resp = auth_client.post("/chat/escalate")
+    assert resp.status_code == 200
+    assert resp.get_json()["type"] == "confirm"
+    assert srv.pending_confirmations[SID] == EMAIL_CALL
+    assert srv.pending_backends[SID] == "gemini"
+
+
+def test_local_final_advertises_escalation_when_configured(auth_client, monkeypatch, frontier_configured):
+    monkeypatch.setattr(srv, "advance",
+                        lambda *a, **k: {"type": "final", "text": "local answer"})
+    resp = auth_client.post("/chat", json={"message": "hi"})
+    assert resp.status_code == 200
+    # The dock uses escalate_to to decide whether to offer the redo button.
+    assert "gemini" in resp.get_json()["escalate_to"]
+
+
+def test_local_final_omits_escalation_when_not_configured(auth_client, monkeypatch):
+    # No frontier backend configured → no redo affordance advertised.
+    monkeypatch.setattr(srv, "advance",
+                        lambda *a, **k: {"type": "final", "text": "local answer"})
+    resp = auth_client.post("/chat", json={"message": "hi"})
+    assert "escalate_to" not in resp.get_json()

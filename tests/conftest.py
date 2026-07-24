@@ -91,6 +91,7 @@ from pathlib import Path
 
 import pytest
 
+from agent import escalations as _escalations
 from agent import loop as _loop
 from agent.backends import gemini as _gemini_backend
 from agent.tools import background as _background
@@ -210,6 +211,11 @@ def _isolate_remaining_config_stores(tmp_path, monkeypatch):
     # the starred_releases module at call time, so this one redirect covers both
     # the task that writes it and the API route that reads it.
     monkeypatch.setattr(_starred_releases, "RELEASES_PATH", tmp_path / "starred_releases.json")
+    # The manual frontier-escalation log (chat's "redo with the frontier model").
+    # Server-side only, but redirected here for the same reason as the rest: a
+    # missed per-test stub lands fixture escalation rows in the real store, never
+    # config/escalations.json. See docs/frontier-escalation.md.
+    monkeypatch.setattr(_escalations, "_STORE_PATH", tmp_path / "escalations.json")
     # wiki.py resolves this env on every _vault() call. Craig's real vault is a
     # readable path on this machine, so without the redirect a wiki test that
     # forgets to stub reads his actual notes into a fixture assertion.
@@ -253,6 +259,17 @@ def _block_email_send(monkeypatch):
     def _no_real_email(*a, **k):
         raise RuntimeError("real Gmail send blocked in tests — stub send_email")
     monkeypatch.setattr(_email, "send_email", _no_real_email)
+
+
+@pytest.fixture(autouse=True)
+def _neutralize_escalation_backend(monkeypatch):
+    # chat.server load_dotenv()s the real config/.env at import, so a developer who
+    # has WREN_ESCALATION_BACKEND set in their .env would otherwise make chat
+    # escalation "configured" for every test — flipping escalate_to onto local
+    # replies and the /chat/escalate 400. Default it off so the suite doesn't
+    # depend on ambient config; test_server's frontier_configured fixture opts
+    # back in where it's exercised.
+    monkeypatch.delenv("WREN_ESCALATION_BACKEND", raising=False)
 
 
 @pytest.fixture(autouse=True)

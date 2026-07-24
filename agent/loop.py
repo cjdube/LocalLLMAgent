@@ -253,6 +253,30 @@ def active_model_label(backend: Optional[str] = None) -> str:
     return f"{os.getenv('OLLAMA_MODEL', 'gemma4')} ({b})"
 
 
+def escalation_backend() -> Optional[str]:
+    """The frontier backend the chat 'redo with the frontier model' button
+    escalates to, from WREN_ESCALATION_BACKEND (lowercased), or None when unset.
+
+    Deliberately its OWN variable rather than WREN_LLM_BACKEND: in a local-first
+    setup the global default is 'ollama', which names no frontier target, so
+    reusing it couldn't say where an escalation should go. Provider-neutral by
+    design — see docs/frontier-escalation.md."""
+    b = os.getenv("WREN_ESCALATION_BACKEND")
+    return b.strip().lower() if b and b.strip() else None
+
+
+def escalation_available() -> bool:
+    """True only when escalation is configured AND the target provider's
+    credentials are present — the gate for offering the escalation button, so a
+    tap can't be a guaranteed failure. An unset backend, or one whose key is
+    missing (or whose provider this function doesn't yet know how to verify),
+    means the button is simply not shown. Adding a provider adds a branch here."""
+    b = escalation_backend()
+    if b in ("gemini", "google"):
+        return bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"))
+    return False
+
+
 def _llm_chat(
     messages: list[dict],
     backend: Optional[str] = None,
