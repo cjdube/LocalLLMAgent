@@ -137,6 +137,36 @@ def test_api_starred_merges_cached_release_with_new_badge(auth_client, monkeypat
     assert repos["c/none"]["release_is_new"] is False
 
 
+def test_api_starred_merges_installed_version_and_update_flag(auth_client, monkeypatch):
+    from agent.store import atomic_write_json
+    monkeypatch.setattr(srv, "fetch_starred_repos", lambda: {"repos": [
+        {"full_name": "a/outdated", "description": "d", "language": "Rust"},
+        {"full_name": "b/current", "description": "d", "language": "Go"},
+        {"full_name": "c/untracked", "description": "d", "language": "C"},
+        {"full_name": "d/broken", "description": "d", "language": "C"},
+    ]})
+    atomic_write_json(srv.starred_releases.RELEASES_PATH, {
+        "a/outdated": {"tag": "v1.3.0", "name": "1.3.0", "published_at": None, "html_url": "u"},
+        "b/current": {"tag": "v2.0.0", "name": "2.0.0", "published_at": None, "html_url": "u"},
+    })
+    atomic_write_json(srv.starred_installed.INSTALLED_PATH, {
+        "a/outdated": {"version": "1.1.0", "source": "cmd", "error": None},
+        "b/current": {"version": "v2.0.0", "source": "manual", "error": None},
+        "d/broken": {"version": None, "source": "cmd", "error": "FileNotFoundError: rtk"},
+    })
+
+    resp = auth_client.get("/api/starred")
+    assert resp.status_code == 200
+    repos = {r["full_name"]: r for r in resp.get_json()["repos"]}
+    assert repos["a/outdated"]["installed_version"] == "1.1.0"
+    assert repos["a/outdated"]["update_available"] is True       # 1.1.0 < v1.3.0
+    assert repos["b/current"]["update_available"] is False        # v2.0.0 == v2.0.0
+    assert repos["c/untracked"]["installed_version"] is None      # not tracked
+    assert repos["c/untracked"]["update_available"] is None
+    assert repos["d/broken"]["installed_version"] is None
+    assert repos["d/broken"]["installed_error"] == "FileNotFoundError: rtk"
+
+
 def test_api_starred_passes_fetch_error_through(auth_client, monkeypatch):
     monkeypatch.setattr(srv, "fetch_starred_repos", lambda: {"error": "rate limited"})
     resp = auth_client.get("/api/starred")

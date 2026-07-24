@@ -45,7 +45,9 @@
   td.release a { color: #2563eb; text-decoration: none; }
   td.release .date { color: #9ca3af; font-size: 12px; }
   .badge { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 999px; background: #dcfce7; color: #166534; font-size: 11px; font-weight: 600; }
-  td.updated { color: #9ca3af; white-space: nowrap; }
+  .badge.update { background: #fef3c7; color: #92400e; }
+  td.installed { color: #4b5563; white-space: nowrap; }
+  td.installed .warn { color: #b45309; font-size: 12px; cursor: help; }
 </style>
 </head>
 <body>
@@ -97,8 +99,31 @@ function repoRow(r) {
   tr.appendChild(el("td", "lang", r.language || "—"));
   tr.appendChild(el("td", "blurb", r.blurb || ""));
   tr.appendChild(releaseCell(r));
-  tr.appendChild(el("td", "updated", fmtTs(r.pushed_at)));
+  tr.appendChild(installedCell(r));
   return tr;
+}
+
+// The installed version Craig tracks for a repo (only repos in
+// starred_installed.json have one). An amber "update available" badge shows
+// when the server placed that version behind the latest release; a resolution
+// failure (e.g. a broken version command) shows a muted warning with the
+// server-side error as its tooltip. textContent only, never innerHTML.
+function installedCell(r) {
+  const td = el("td", "installed");
+  const v = r.installed_version;
+  if (!v) {
+    if (r.installed_error) {
+      const w = el("span", "warn", "⚠ check failed");
+      w.title = r.installed_error;
+      td.appendChild(w);
+    } else {
+      td.textContent = "—";
+    }
+    return td;
+  }
+  td.appendChild(document.createTextNode(v));
+  if (r.update_available === true) td.appendChild(el("span", "badge update", "update available"));
+  return td;
 }
 
 function releaseCell(r) {
@@ -137,7 +162,7 @@ async function load() {
   const table = el("table");
   const thead = el("thead");
   const htr = el("tr");
-  ["Repo", "Language", "What it does", "Latest release", "Last updated"].forEach(h => htr.appendChild(el("th", null, h)));
+  ["Repo", "Language", "What it does", "Latest release", "Installed"].forEach(h => htr.appendChild(el("th", null, h)));
   thead.appendChild(htr);
   table.appendChild(thead);
   const tbody = el("tbody");

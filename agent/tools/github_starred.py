@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import requests
+from packaging.version import InvalidVersion, Version
 
 from agent.tools._http import http_error, load_env, missing_key_error, print_result, resolve_key
 
@@ -215,6 +216,34 @@ def fetch_latest_release(full_name: str, api_key: str = None) -> dict:
         "published_at": r.get("published_at"),
         "html_url": r.get("html_url", ""),
     }
+
+
+def _version_core(raw: str) -> str:
+    """Strip any leading non-digit prefix down to the first digit so differing
+    tag schemes normalize to a comparable core: 'skill-v4.0.2' -> '4.0.2',
+    'app-v0.2.0' -> '0.2.0', 'v2.11.0' -> '2.11.0', '0.6.4' -> '0.6.4'. Returns
+    '' for a version with no numeric part (nothing comparable)."""
+    if not raw:
+        return ""
+    m = re.search(r"\d[\w.+-]*", raw.strip())
+    return m.group(0) if m else ""
+
+
+def compare_versions(installed: str, latest: str):
+    """Is `installed` behind `latest`? True = outdated, False = current/ahead,
+    None = can't tell. Both tags are normalized to a numeric core first (so the
+    installed string and the GitHub release tag compare across schemes like
+    'v0.43.0' vs '0.43.0'), then parsed with packaging.version. Deliberately
+    conservative: a missing or unparseable version on either side returns None
+    rather than guessing from a string diff, so a repo with an odd tag scheme
+    never raises a false 'update available'."""
+    ci, cl = _version_core(installed), _version_core(latest)
+    if not ci or not cl:
+        return None
+    try:
+        return Version(ci) < Version(cl)
+    except InvalidVersion:
+        return None
 
 
 def _parse(raw: list, since_dt: datetime = None) -> list:

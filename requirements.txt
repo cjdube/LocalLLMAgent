@@ -13,6 +13,10 @@ flask==3.1.3
 # tokens, also pulled in by Flask).
 httplib2==0.32.0
 itsdangerous==2.2.0
+# packaging.version (github_starred.compare_versions, /starred "Installed"
+# column) — a direct runtime import, otherwise present only transitively via
+# pytest, so pin it rather than rely on a dev dep being installed.
+packaging==26.2
 # Optional cloud backend (WREN_LLM_BACKEND=gemini). Imported lazily, only when
 # that backend is selected, so a purely local (Ollama) install never loads it.
 google-genai==2.11.0

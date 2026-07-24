@@ -140,7 +140,7 @@ in — nothing new inherits it automatically.
 | `web_search.py` | Web search via Tavily API |
 | `web_fetch.py` | Fetch one web page as clean markdown via the Firecrawl API (`fetch_webpage`) — search finds pages, this reads one. Content is untrusted, scheme-validated, and capped (`WEB_FETCH_MAX_CHARS`) |
 | `evaluate_app.py` | Strategic teardown of a product from its website URL (`evaluate_app`) — a fixed pipeline (Firecrawl fetch → deterministic compaction → one model call) producing a skeptical VC-style analysis: hidden risks, adoption friction, missing technical constraints. See [docs/app-evaluator.md](docs/app-evaluator.md) |
-| `github_starred.py` | List starred GitHub repos, optionally filtered to those pushed to since a given timestamp, with a `recent_changes` summary (release notes or recent commit subjects) per matched repo; `fetch_readme` returns a repo's raw README (best-effort, feeds the `/starred` blurbs); `fetch_latest_release` returns a repo's latest published release (best-effort, feeds the `/starred` release-awareness column) |
+| `github_starred.py` | List starred GitHub repos, optionally filtered to those pushed to since a given timestamp, with a `recent_changes` summary (release notes or recent commit subjects) per matched repo; `fetch_readme` returns a repo's raw README (best-effort, feeds the `/starred` blurbs); `fetch_latest_release` returns a repo's latest published release (best-effort, feeds the `/starred` release-awareness column); `compare_versions` normalizes two tag strings to a numeric core and reports whether an installed version is behind a release (feeds the `/starred` "Installed" column) |
 | `strava.py` | Strava activities via the Strava API (own OAuth app), for a given date. Run `--authorize` once to mint a refresh token |
 | `calendar.py` | Google Calendar read/write (`get_upcoming_events`, `get_events_in_range`, `log_calendar_event` — idempotent via `source_id`) |
 | `email.py` | Send email via Gmail API (plain text or HTML) |
@@ -176,6 +176,7 @@ Every tool module is runnable standalone for testing, e.g.:
 | `tasks/opportunity_digest.py` | Weekly Sundays at 9:00 PM | The fractional-work opportunity scout. Polls three free, ToS-clean sources — new SEC Form D filings in the watched states (MA/NH/ME), leadership openings on watched ATS boards (Greenhouse/Lever/Ashby/iCIMS, flagging stalled searches), and the current HN "Who is hiring" thread — dedupes them into `config/opportunities.json`, has the model score fractional-operator fit, and emails a three-section Opportunity Digest (ntfy push for high scores; nothing new → no email). Full lifecycle — sources, dedupe/watermark behavior, triage semantics, scoring — in [docs/opportunity-scout.md](docs/opportunity-scout.md). |
 | `tasks/starred_blurbs.py` | Weekly Sundays at 8:00 PM | Caches a one-line "what it does" blurb for each starred GitHub repo, for the `/starred` view. One isolated model call per repo summarizes its README (`github_starred.fetch_readme`, truncated) into a plain sentence, cached in `config/starred_blurbs.json` keyed by `full_name`; a missing README or unusable output falls back to the repo's GitHub description. Blurbs are generated once per repo (only newly-starred repos each run) and de-starred repos are pruned; `--refresh` regenerates all. See [docs/starred.md](docs/starred.md). |
 | `tasks/starred_releases.py` | Daily 8:00 PM | Caches each starred GitHub repo's latest published release (`github_starred.fetch_latest_release`) in `config/starred_releases.json` keyed by `full_name`, for the `/starred` view's release-awareness column. No model — pure GitHub reads, fanned over a small pool. Repos with no releases get no entry; the whole cache is rewritten from the live star list each run, so de-starred repos are pruned. Daily (not weekly) so a new version shows up promptly. See [docs/starred.md](docs/starred.md). |
+| `tasks/starred_installed.py` | Daily 8:10 PM | Resolves the installed version of each repo Craig tracks in `config/starred_installed.json` (a hand-edited map of `full_name` → `version_cmd` to run or a static `version`), caching `{version, source, error}` in `config/starred_installed_versions.json` for the `/starred` view's "Installed" column. Runs `version_cmd`s locally with no shell and a timeout; no model. The cache is rewritten from the config each run, so removing a repo prunes it. See [docs/starred.md](docs/starred.md). |
 | `tasks/log_inspector.py` | Daily 8:00 AM | Watches Wren's own logs — the only task that does. Scans the last 24h of `logs/*.log` for errors and for the small model's strain signals (a prompt that overflowed `num_ctx` and lost the system prompt off the front, a generation that hit `num_predict` mid-repetition-loop), and separately checks via `parse_runs()` that every scheduled task actually ran and finished — catching the ones a line scan can't see, like a task that crashed before logging or that launchd never fired. Pure Python, no model: a health check that called the model couldn't report that the model is down. Quiet by default — a push (a counts rollup, since ntfy truncates at 500 chars) always means something needs attention. See [docs/log-inspector.md](docs/log-inspector.md). |
 | `tasks/calendar_colorizer.py` | Daily 5:00 PM | Fetches yesterday's calendar events, has the model guess a category per event title (Work/LLC, AARP, Fitness, Meal Prep, Domestic/Chores, Meetings, Travel, Appointments, or Uncategorized) and returns a colorId per event, then patches each event's color. Always re-classifies, even events colored by a previous run or by hand. On failure, pushes a phone alert and emails a notice. |
 
@@ -422,15 +423,17 @@ and everything else about the scout's lifecycle — is documented in
 
 `http://127.0.0.1:8420/starred` (same auth as the dashboard) is a table of
 Craig's starred GitHub repos — **Repo · Language · What it does · Latest release
-· Last updated** — sorted by most-recently-pushed. Backed by `GET /api/starred`,
-which fetches the repo list live and merges in each repo's cached "what it does"
-blurb (falling back to its GitHub description for any repo not yet cached) and its
-cached latest release, badged **🆕 new** when cut within the last 30 days. Both
-caches are written by scheduled tasks (`tasks/starred_blurbs.py`,
-`tasks/starred_releases.py`), so the model never runs on the page's request path.
-Release awareness surfaces new upstream versions only — it does not know whether a
-repo is installed locally, and Wren never runs an upgrade. See
-[docs/starred.md](docs/starred.md).
+· Installed** — sorted by most-recently-pushed. Backed by
+`GET /api/starred`, which fetches the repo list live and merges in each repo's
+cached "what it does" blurb (falling back to its GitHub description for any repo
+not yet cached), its cached latest release (badged **🆕 new** when cut within the
+last 30 days), and Craig's cached installed version (badged **update available**
+when it's behind the latest release). The three caches are written by scheduled
+tasks (`tasks/starred_blurbs.py`, `tasks/starred_releases.py`,
+`tasks/starred_installed.py`), so the model never runs on the page's request path.
+Installed-version tracking is opt-in per repo — Craig lists the repos he has (and
+how to read each one's version) in `config/starred_installed.json`; Wren never
+runs an upgrade. See [docs/starred.md](docs/starred.md).
 
 ### System map
 

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.craigdube.localllmagent.starredinstalled</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/craigdube/Projects/LocalLLMAgent/.venv/bin/python</string>
+        <string>-m</string>
+        <string>tasks.starred_installed</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/craigdube/Projects/LocalLLMAgent</string>
+
+    <!-- launchd's default PATH is just /usr/bin:/bin:/usr/sbin:/sbin, so a
+         version_cmd such as "rtk" (installed under Homebrew or Cargo) would not
+         be found. Give the resolver the same bin dirs an interactive shell has;
+         a tool outside these can still be referenced by absolute path in
+         config/starred_installed.json. -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/Users/craigdube/.cargo/bin:/Users/craigdube/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>20</integer>
+        <key>Minute</key>
+        <integer>10</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/craigdube/Projects/LocalLLMAgent/logs/starred_installed.launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/craigdube/Projects/LocalLLMAgent/logs/starred_installed.launchd.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

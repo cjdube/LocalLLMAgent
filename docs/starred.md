@@ -1,17 +1,19 @@
 # The starred view — how it works
 
 The `/starred` view lists Craig's starred GitHub repos as a table — **Repo ·
-Language · What it does · Latest release · Last updated** — sorted by
+Language · What it does · Latest release · Installed** — sorted by
 most-recently-pushed. The "what it does" blurb is written by the local model from
-each repo's README and cached; the "latest release" column is filled from a
-separate cache. Both are precomputed by scheduled tasks, so the page loads
-instantly and the model never sits on the request path.
+each repo's README and cached; the "latest release" and "installed" columns are
+filled from separate caches. All are precomputed by scheduled tasks, so the page
+loads instantly and the model never sits on the request path.
 
 Code: `chat/static/starred.html` + the `/starred` and `/api/starred` routes in
 `chat/server.py` (the view), `tasks/starred_blurbs.py` (the cached-blurb job),
-`tasks/starred_releases.py` (the cached-release job), and `fetch_starred_repos` /
-`fetch_readme` / `fetch_latest_release` in `agent/tools/github_starred.py` (the
-GitHub data). Needs `GITHUB_TOKEN` (already used by the morning brief).
+`tasks/starred_releases.py` (the cached-release job), `tasks/starred_installed.py`
+(the installed-version job), and `fetch_starred_repos` / `fetch_readme` /
+`fetch_latest_release` / `compare_versions` in `agent/tools/github_starred.py`
+(the GitHub data and version comparison). Needs `GITHUB_TOKEN` (already used by
+the morning brief).
 
 ## The page
 
@@ -79,11 +81,58 @@ weekly blurbs, so a new version shows up promptly. No model, so no backend knob.
 python -m tasks.starred_releases
 ```
 
-**Boundary.** This surfaces new *upstream* versions. It does **not** know whether
-Craig has a repo installed (via Homebrew or a local clone), and Wren never runs an
-upgrade — `brew upgrade` / `git pull` stay Craig's to run. Homebrew is already the
-update mechanism for brew-installed software (`brew outdated` / `brew upgrade`);
-this page is the *awareness* layer, not an installer.
+**Boundary.** This surfaces new *upstream* versions. Whether Craig has a repo
+installed — and at what version — is tracked separately (see below); Wren still
+never runs an upgrade (`brew upgrade` / `git pull` stay Craig's to run). This page
+is the *awareness* layer, not an installer.
+
+## Installed-version tracking
+
+The "Installed" column answers the other half of the question — *"and am I behind
+it?"* Only the repos Craig actually has installed are tracked, and only because he
+lists them: `config/starred_installed.json` (hand-edited, gitignored) maps a repo
+`full_name` to how to read its installed version. Each entry is one of two shapes:
+
+```json
+{
+  "rtk-ai/rtk":        {"version_cmd": "rtk --version"},
+  "mattpocock/skills": {"version": "v1.1.0"}
+}
+```
+
+- **`version_cmd`** — a command Wren runs to read the current version. The daily
+  task runs it (no shell, split with `shlex`, 10-second timeout) and extracts the
+  first version-looking token from its output (stdout *or* stderr). The command
+  string comes from Craig's own config, not from any model or web content.
+- **`version`** — a static version Craig maintains by hand. The only option for
+  file-based skills or hosted services with no version command.
+
+`tasks/starred_installed.py` resolves every entry and caches
+`{version, source, error, checked_at}` in `config/starred_installed_versions.json`
+keyed by `full_name`, so `/api/starred` reads a plain store and never runs a
+subprocess on the request path. `/api/starred` then merges it in and computes
+`update_available` with `compare_versions`, which normalizes both the installed
+string and the latest release tag to a numeric core (so `0.43.0` compares against
+`v0.43.0`, and `skill-v4.0.2` against `skill-v4.1.0`) and parses them with
+`packaging.version`. It is deliberately conservative: an unparseable or missing
+version on either side yields *no* badge rather than a false "update available".
+
+The page renders the installed version, an amber **update available** badge when
+it's behind the latest release, and a muted **⚠ check failed** (with the error as
+its tooltip) when a `version_cmd` didn't resolve. Repos with no entry simply show
+a blank cell — the column is opt-in per repo.
+
+`config/starred_installed.example.json` is a copy-and-edit starting point. The
+whole cache is rewritten from the source each run, so removing a repo from the
+config prunes it. Runs **daily** at 8:10 PM via
+`launchd/com.craigdube.localllmagent.starredinstalled.plist`. The plist sets a
+`PATH` covering Homebrew/Cargo/`~/.local/bin` because launchd's default `PATH` is
+minimal; a tool outside those dirs can be given by absolute path in the config.
+No model, so no backend knob.
+
+```
+python -m tasks.starred_installed
+```
 
 ## Limitations
 

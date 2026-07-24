@@ -107,6 +107,7 @@ from tasks import ai_chat_learnings as _ai_chat_learnings
 from tasks import morning_brief as _morning_brief
 from tasks import opportunity_digest as _opportunity_digest
 from tasks import starred_blurbs as _starred_blurbs
+from tasks import starred_installed as _starred_installed
 from tasks import starred_releases as _starred_releases
 
 # Resolved from the source tree rather than from any redirect, so it still names
@@ -211,6 +212,13 @@ def _isolate_remaining_config_stores(tmp_path, monkeypatch):
     # the starred_releases module at call time, so this one redirect covers both
     # the task that writes it and the API route that reads it.
     monkeypatch.setattr(_starred_releases, "RELEASES_PATH", tmp_path / "starred_releases.json")
+    # The /starred view's installed-version tracking: the hand-edited source
+    # (SOURCE_PATH — Craig's real config, which a test must never read) and the
+    # task-written resolved cache (INSTALLED_PATH). server.py reads the cache off
+    # the module at call time, so redirecting both here covers the task and the
+    # API route, and keeps the version-command runner pointed at a throwaway file.
+    monkeypatch.setattr(_starred_installed, "SOURCE_PATH", tmp_path / "starred_installed.json")
+    monkeypatch.setattr(_starred_installed, "INSTALLED_PATH", tmp_path / "starred_installed_versions.json")
     # The manual frontier-escalation log (chat's "redo with the frontier model").
     # Server-side only, but redirected here for the same reason as the rest: a
     # missed per-test stub lands fixture escalation rows in the real store, never

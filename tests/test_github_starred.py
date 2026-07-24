@@ -94,6 +94,49 @@ def test_parse_since_normalizes_trailing_z():
 
 
 # --------------------------------------------------------------------------- #
+# _version_core / compare_versions
+# --------------------------------------------------------------------------- #
+
+def test_version_core_strips_scheme_prefixes():
+    assert gh._version_core("skill-v4.0.2") == "4.0.2"
+    assert gh._version_core("app-v0.2.0") == "0.2.0"
+    assert gh._version_core("v2.11.0") == "2.11.0"
+    assert gh._version_core("0.6.4") == "0.6.4"
+
+
+def test_version_core_empty_when_no_digits():
+    assert gh._version_core("nightly") == ""
+    assert gh._version_core("") == ""
+    assert gh._version_core(None) == ""
+
+
+def test_compare_versions_outdated_when_behind():
+    # Installed core is behind the latest release tag -> True (update available).
+    assert gh.compare_versions("0.43.0", "v0.44.0") is True
+    assert gh.compare_versions("skill-v4.0.2", "skill-v4.1.0") is True
+
+
+def test_compare_versions_current_when_equal_across_schemes():
+    # A bare installed version matches the release's v-prefixed tag.
+    assert gh.compare_versions("0.43.0", "v0.43.0") is False
+
+
+def test_compare_versions_false_when_ahead():
+    assert gh.compare_versions("v2.0.0", "v1.9.9") is False
+
+
+def test_compare_versions_none_when_either_missing():
+    assert gh.compare_versions(None, "v1.0") is None
+    assert gh.compare_versions("v1.0", None) is None
+    assert gh.compare_versions("", "v1.0") is None
+
+
+def test_compare_versions_none_when_unparseable():
+    # A version with no numeric core is uncomparable -> None, never a false True.
+    assert gh.compare_versions("nightly", "v1.0.0") is None
+
+
+# --------------------------------------------------------------------------- #
 # fetch_latest_release (degrade-don't-crash)
 # --------------------------------------------------------------------------- #
 

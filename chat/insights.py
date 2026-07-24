@@ -476,6 +476,7 @@ ROUTINE_USES = {
     "opportunity_digest": ["opportunities", "gmail", "ntfy"],
     "starred_blurbs": ["github", "ntfy"],
     "starred_releases": ["github", "ntfy"],
+    "starred_installed": ["ntfy"],  # runs local version commands + reads local config; no external source
     "log_inspector": ["gmail", "ntfy"],  # rollup push via ntfy, email fallback on ntfy outage
 }
 

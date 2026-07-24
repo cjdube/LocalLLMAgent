@@ -49,14 +49,14 @@ from agent.toolset import (
 )
 from agent.store import load_json
 from agent.tools import background
-from agent.tools.github_starred import fetch_starred_repos
+from agent.tools.github_starred import compare_versions, fetch_starred_repos
 from agent.tools.notify import notify
 from agent.tools.skills import render_skills_index
 from chat.auth import _authenticated
 from chat.login_throttle import LoginThrottle
 from chat.routes_dashboard import dashboard_bp
 from chat.routes_opportunities import opportunities_bp
-from tasks import starred_blurbs, starred_releases
+from tasks import starred_blurbs, starred_installed, starred_releases
 from tasks._common import setup_logger
 from tasks.morning_brief import brief_dispatch
 from tasks.opportunity_digest import digest_dispatch
@@ -770,9 +770,11 @@ def _release_is_new(published_at: str) -> bool:
 def api_starred():
     """Live list of starred repos, each with its cached "what it does" blurb
     (falling back to the repo's GitHub description for any not yet cached by
-    tasks/starred_blurbs.py) and its cached latest release (tasks/starred_releases.py).
-    The model never runs on this request path — the blurbs and releases are read
-    from their stores — so the page stays instant."""
+    tasks/starred_blurbs.py), its cached latest release (tasks/starred_releases.py),
+    and Craig's cached installed version (tasks/starred_installed.py) with an
+    update-available flag when that version is behind the latest release. The
+    model never runs on this request path — the blurbs, releases, and installed
+    versions are read from their stores — so the page stays instant."""
     if not _authenticated():
         return jsonify({"error": "not authenticated"}), 401
     result = fetch_starred_repos()
@@ -780,6 +782,7 @@ def api_starred():
         return jsonify({"repos": [], "error": result["error"]})
     blurbs = load_json(starred_blurbs.BLURBS_PATH, {})
     releases = load_json(starred_releases.RELEASES_PATH, {})
+    installed = load_json(starred_installed.INSTALLED_PATH, {})
     repos = result.get("repos", [])
     for r in repos:
         cached = blurbs.get(r["full_name"], {}).get("blurb")
@@ -787,6 +790,14 @@ def api_starred():
         release = releases.get(r["full_name"])
         r["latest_release"] = release or None
         r["release_is_new"] = bool(release) and _release_is_new(release.get("published_at"))
+        # Installed version (only the repos Craig tracks in starred_installed.json
+        # have an entry). update_available is True only when we can confidently
+        # place the installed version behind the latest release tag; a missing
+        # side or an uncomparable scheme leaves it None (no false alarm).
+        inst = installed.get(r["full_name"]) or {}
+        r["installed_version"] = inst.get("version")
+        r["installed_error"] = inst.get("error")
+        r["update_available"] = compare_versions(inst.get("version"), (release or {}).get("tag"))
     return jsonify({"repos": repos})
 
 
