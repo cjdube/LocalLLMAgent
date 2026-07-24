@@ -16,10 +16,10 @@ lives in `chat/server.py`.
 ## Core vs. groups
 
 - **Core** (`CORE_TOOLS`) — always sent: weather, calendar (read + log +
-  recolor), Google Tasks, web search, memory (remember/pin/recall/archive/
-  forget), reminders, and skills **read** (the skills index is rendered into the
-  prompt every turn and tells the model to `read_skill`). Plus the `load_tools`
-  meta-tool itself.
+  recolor), Google Tasks, web search, memory (remember/pin/recall/recategorize/
+  archive/forget), reminders, the scheduled-task list (`list_scheduled_tasks`),
+  and skills **read** (the skills index is rendered into the prompt every turn
+  and tells the model to `read_skill`). Plus the `load_tools` meta-tool itself.
 - **Groups** (`TOOL_GROUPS`) — loaded on demand:
   - `opportunities` — fractional-work scout, watchlist, company research
   - `wiki` — the learnings wiki
