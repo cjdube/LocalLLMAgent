@@ -132,3 +132,69 @@ def test_list_lenses_degrades_on_missing_vault(tmp_path, monkeypatch):
     # No vault → no lenses, and the prompt-build render must not raise.
     assert wiki.list_lenses() == {"lenses": []}
     assert wiki.render_lenses_index() == ""
+
+
+# --- truncation is logged, not silent ---------------------------------------
+
+class _FakeLogger:
+    def __init__(self):
+        self.warnings = []
+
+    def warning(self, msg):
+        self.warnings.append(msg)
+
+
+def test_char_budget_truncation_warns_with_counts_and_names(tmp_path, monkeypatch):
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    # Three lenses whose descriptions each eat ~half the budget: the char cap
+    # bites well before MAX_INDEX_LENSES, which is the case that bit in practice.
+    for name in ("aaa-lens", "bbb-lens", "ccc-lens"):
+        _add_lens(tmp_path, name, description="x" * 300)
+
+    log = _FakeLogger()
+    block = wiki.render_lenses_index(log)
+
+    # Only the first fits; the other two are dropped from the prompt entirely.
+    assert "aaa-lens" in block and "bbb-lens" not in block and "ccc-lens" not in block
+    assert len(log.warnings) == 1
+    warning = log.warnings[0]
+    assert "1 of 3 lenses" in warning
+    assert "bbb-lens" in warning and "ccc-lens" in warning
+    assert str(wiki.MAX_INDEX_CHARS) in warning
+
+
+def test_lens_cap_truncation_names_the_count_cap(tmp_path, monkeypatch):
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    # Descriptions short enough that the budget never binds — only the count does.
+    for i in range(wiki.MAX_INDEX_LENSES + 2):
+        _add_lens(tmp_path, f"lens-{i:02d}", description="short")
+
+    log = _FakeLogger()
+    wiki.render_lenses_index(log)
+
+    assert len(log.warnings) == 1
+    warning = log.warnings[0]
+    assert f"{wiki.MAX_INDEX_LENSES}-lens cap" in warning
+    assert f"{wiki.MAX_INDEX_LENSES} of {wiki.MAX_INDEX_LENSES + 2} lenses" in warning
+
+
+def test_no_warning_when_every_lens_fits(tmp_path, monkeypatch):
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    _add_lens(tmp_path, "product-principles", description="product standards")
+
+    log = _FakeLogger()
+    assert "product-principles" in wiki.render_lenses_index(log)
+    assert log.warnings == []
+
+
+def test_truncation_without_a_logger_does_not_raise(tmp_path, monkeypatch):
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    for name in ("aaa-lens", "bbb-lens"):
+        _add_lens(tmp_path, name, description="x" * 300)
+
+    # The prompt build must never break on a logger-less call (the CLI path).
+    assert "aaa-lens" in wiki.render_lenses_index()

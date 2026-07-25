@@ -181,7 +181,7 @@ def _system_message_content() -> str:
     # so the model passes the right lens_page to evaluate_against instead of
     # guessing a slug. Rendered per turn so a lens added mid-session shows up next
     # turn (same as the skills index).
-    lenses_index = render_lenses_index()
+    lenses_index = render_lenses_index(logger)
     if lenses_index:
         dated += "\n\n" + lenses_index
     # The loadable tool-group index: the deferred groups' schemas aren't sent

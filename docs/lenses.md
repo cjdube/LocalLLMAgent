@@ -58,11 +58,18 @@ that length exhaust the 600-char budget, not eight. Writing lens descriptions at
 that length silently lowers the real cap to well under `MAX_INDEX_LENSES`.
 
 The truncation is a `break`, not a `continue`: the first line that would overflow
-ends the list, so every lens after it disappears from the prompt with no warning
-and no log line. Those lenses still work when named explicitly (in the CLI, or if
-Craig names the page in chat) — Wren just won't know to offer them. This is a
-silent degrade of exactly the kind `CLAUDE.md` warns about; it's tolerated here
-only because the prompt build must never raise.
+ends the list, so every lens after it disappears from the prompt. Those lenses
+still work when named explicitly (in the CLI, or if Craig names the page in
+chat) — Wren just won't know to offer them.
+
+That would be a silent degrade of exactly the kind `CLAUDE.md` warns about, so
+it isn't silent: `render_lenses_index(logger)` logs a WARNING naming which cap
+bit, how many of how many lenses made it, the character total, and the dropped
+page names. `chat/server.py` passes its logger; the logger is optional so the
+CLI path can't break on it. The index is rendered per turn, so a standing drop
+warns every turn — `log_inspector` is default-open on WARNINGs and collapses
+identical ones into a count, so this surfaces as a daily finding rather than a
+push per chat turn.
 
 The cheap fix is short descriptions. A description only has to answer *when do I
 reach for this lens* — around 80 characters is plenty, and keeps the count cap

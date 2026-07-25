@@ -201,11 +201,18 @@ def list_lenses() -> dict:
     return {"lenses": _list_lenses(vault)}
 
 
-def render_lenses_index() -> str:
+def render_lenses_index(logger=None) -> str:
     """The capped 'name: description' block injected into the chat system prompt
     so Wren knows which pages are Craig's standards lenses (and their exact
     names, to pass as evaluate_against's lens_page). "" when there are none.
-    Mirrors skills.render_skills_index."""
+    Mirrors skills.render_skills_index.
+
+    A lens dropped by either cap is invisible to Wren, who then never offers it —
+    a silent degrade, so it's logged at WARNING with the counts and the names
+    (CLAUDE.md). MAX_INDEX_CHARS is usually the cap that bites: descriptions run
+    ~150-200 chars, so ~3 exhaust the budget well before MAX_INDEX_LENSES.
+    Rendered per turn, so a persistent drop repeats every turn; log_inspector
+    collapses identical warnings into a count rather than pushing each one."""
     lenses = list_lenses()["lenses"]
     if not lenses:
         return ""
@@ -216,6 +223,17 @@ def render_lenses_index() -> str:
             break
         lines.append(line)
         total += len(line)
+    if len(lines) < len(lenses) and logger:
+        # Only ever a truncated prefix, so the dropped ones are the tail.
+        dropped = [lens["name"] for lens in lenses[len(lines):]]
+        cause = (f"the {MAX_INDEX_CHARS}-char budget"
+                 if len(lines) < min(len(lenses), MAX_INDEX_LENSES)
+                 else f"the {MAX_INDEX_LENSES}-lens cap")
+        logger.warning(
+            f"lens index truncated by {cause}: {len(lines)} of {len(lenses)} lenses "
+            f"in the prompt ({total} chars), dropped {', '.join(dropped)} — dropped "
+            f"lenses are invisible in chat; shorten the frontmatter descriptions"
+        )
     if not lines:
         return ""
     return (
