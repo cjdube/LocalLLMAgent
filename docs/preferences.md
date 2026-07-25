@@ -35,10 +35,15 @@ import).
 | Field | Required | Purpose |
 |---|---|---|
 | `name` | yes | Category label; becomes the `recolor_event` chat tool's enum and the colorizer's classification table |
-| `color_id` | yes | Google Calendar colorId ("1"–"11") |
+| `color_id` | yes | Google Calendar colorId ("1"–"11"); need not be unique |
 | `color_name` | yes | Google's name for that color (shown to the model in the classification table) |
 | `hint` | no | Extra classification guidance appended in the colorizer prompt (e.g. "with others") |
 | `role` | no | Operational tag — see below |
+
+Several categories may share one `color_id` — Travel, Dining Out, and
+Shows/Events are all Peacock. Distinct names classify better than one
+grab-bag category with a long `hint`: the model matches an event title
+against a label, and each name is separately selectable in `recolor_event`.
 
 **Roles** decouple what the code needs (a "work bucket", a "fitness color")
 from what you call your categories, so renaming "Work/LLC" to "Consulting"
