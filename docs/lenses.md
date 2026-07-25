@@ -49,8 +49,25 @@ the skills index.
 
 The caps exist because the chat prompt already crowds `num_ctx`: at most
 `MAX_INDEX_LENSES` (8) lenses and `MAX_INDEX_CHARS` (600) characters, whichever
-binds first. Past 8 lenses, the rest are invisible to chat — they still work if
-named explicitly via the CLI, but Wren won't know to offer them.
+binds first.
+
+**In practice the character cap binds long before the lens count**, and it's
+worth knowing which one you're actually up against. The two lenses in the vault
+today render at 211 and 146 characters — so roughly **three** descriptions of
+that length exhaust the 600-char budget, not eight. Writing lens descriptions at
+that length silently lowers the real cap to well under `MAX_INDEX_LENSES`.
+
+The truncation is a `break`, not a `continue`: the first line that would overflow
+ends the list, so every lens after it disappears from the prompt with no warning
+and no log line. Those lenses still work when named explicitly (in the CLI, or if
+Craig names the page in chat) — Wren just won't know to offer them. This is a
+silent degrade of exactly the kind `CLAUDE.md` warns about; it's tolerated here
+only because the prompt build must never raise.
+
+The cheap fix is short descriptions. A description only has to answer *when do I
+reach for this lens* — around 80 characters is plenty, and keeps the count cap
+the binding one. Raising `MAX_INDEX_CHARS` is the other lever, but it spends
+context every turn, on every turn that never evaluates anything.
 
 The index names each lens by its **exact page slug**, which is what
 `evaluate_against` takes as `lens_page` — the model picks from a list rather
@@ -116,7 +133,7 @@ chat twice, that's a lens.
   ObsidianWikiAgent's generated pages but has an empty `**Sources**:` line by
   design — it's Craig's assertion, not a summary of anything.
 
-Current lenses: `product-principles`.
+Current lenses: `product-principles`, `engineering-manager-expectations`.
 
 ## Using it
 
