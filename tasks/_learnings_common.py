@@ -164,12 +164,13 @@ def has_substantive_content(text: str) -> bool:
 
 
 def persist_or_email(content: str, prefix: str, day, subject: str,
-                     task_name: str, logger) -> dict:
+                     task_name: str, logger, directory=None) -> dict:
     """Write `content` to the vault as <prefix>-<day>.md; if the write fails
     (e.g. the vault dir is missing), email the draft instead so it's never lost.
     Both paths failing is a hard failure (alert + raise), matching the contract
-    the retired weekly task established."""
-    write_result = write_entry(content, prefix, day)
+    the retired weekly task established. `directory` overrides the default
+    LEARNINGS_DIR target for callers writing outside the vault's ingest queue."""
+    write_result = write_entry(content, prefix, day, directory=directory)
     logger.info(f"write_entry -> {write_result}")
     if "error" in write_result:
         logger.warning("File write failed — emailing the draft so it isn't lost")

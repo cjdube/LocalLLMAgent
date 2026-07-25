@@ -11,7 +11,7 @@ import pytest
 
 from tasks import daily_synthesis as ds
 
-# LEARNINGS_DIR (the vault's raw/) is redirected to tmp_path suite-wide by
+# SYNTHESIS_DIR (the vault's nudges/) is redirected to tmp_path suite-wide by
 # tests/conftest.py::_isolate_learnings_dir, so persist_or_email writes there,
 # never the real vault.
 
@@ -100,9 +100,9 @@ def test_genuine_overlap_pushes_one_nudge(stub_sources, monkeypatch):
 
 
 def test_genuine_overlap_writes_vault_entry(stub_sources, tmp_path, monkeypatch):
-    # The durable archive: a dated Daily-Synthesis file lands in the vault's raw/
-    # (LEARNINGS_DIR, redirected to tmp_path by conftest) so suggestions survive
-    # the transient push.
+    # The durable archive: a dated Daily-Synthesis file lands in SYNTHESIS_DIR
+    # (redirected to tmp_path by conftest) so suggestions survive the transient
+    # push.
     monkeypatch.setattr(ds, "fetch_liked_videos",
                         lambda *a, **k: {"videos": [{"title": "DuckDB deep dive", "channel": "X"}]})
     monkeypatch.setattr(ds, "list_wiki_pages", lambda: {"pages": ["duckdb-analytics.md"]})
@@ -112,6 +112,24 @@ def test_genuine_overlap_writes_vault_entry(stub_sources, tmp_path, monkeypatch)
     assert len(files) == 1
     body = files[0].read_text()
     assert "Synthesis Suggestions" in body and "DuckDB" in body
+
+
+def test_archive_goes_to_synthesis_dir_not_learnings_dir(stub_sources, tmp_path, monkeypatch):
+    # The whole point of #1: the archive must never land in LEARNINGS_DIR (the
+    # vault's raw/), which ObsidianWikiAgent ingests as sources — a nudge ingested
+    # as a source becomes a fabricated wiki claim.
+    raw, nudges = tmp_path / "raw", tmp_path / "nudges"
+    raw.mkdir()
+    nudges.mkdir()
+    monkeypatch.setenv("LEARNINGS_DIR", str(raw))
+    monkeypatch.setenv("SYNTHESIS_DIR", str(nudges))
+    monkeypatch.setattr(ds, "fetch_liked_videos",
+                        lambda *a, **k: {"videos": [{"title": "DuckDB deep dive", "channel": "X"}]})
+    monkeypatch.setattr(ds, "list_wiki_pages", lambda: {"pages": ["duckdb-analytics.md"]})
+
+    assert ds.main() == 0
+    assert len(list(nudges.glob("Daily-Synthesis-*.md"))) == 1
+    assert list(raw.iterdir()) == []
 
 
 def test_no_overlap_pushes_nothing_and_skips_model(stub_sources, tmp_path, monkeypatch):

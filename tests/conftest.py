@@ -166,6 +166,10 @@ def _isolate_task_logs(tmp_path, monkeypatch):
 def _isolate_learnings_dir(tmp_path, monkeypatch):
     # learnings_file._learnings_dir() reads this env at call time.
     monkeypatch.setenv("LEARNINGS_DIR", str(tmp_path))
+    # daily_synthesis archives its nudges outside the ingest queue, in its own
+    # vault dir — a second real path under ~/Documents, so it gets the same
+    # backstop (daily_synthesis._synthesis_dir() also reads it at call time).
+    monkeypatch.setenv("SYNTHESIS_DIR", str(tmp_path))
 
 
 @pytest.fixture(autouse=True)

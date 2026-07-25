@@ -12,13 +12,19 @@ is a bounded pass over a short, pre-matched candidate list: keep the genuine
 connections, drop the coincidental ones, write one line each. No overlap, or no
 genuine connection, means nothing is pushed — silence is the common case.
 
-Nothing is persisted and nothing consequential is done: the only output is an
-optional push, so there is no store to isolate and no confirmation gate.
+The live output is an optional push; a dated copy is archived to SYNTHESIS_DIR so
+suggestions survive it. That directory is deliberately NOT the vault's raw/
+(LEARNINGS_DIR): raw/ is ObsidianWikiAgent's ingest queue, and these files are
+questions addressed to Craig, not sources. Ingesting them produced dated orphan
+wiki pages that restated "is this worth adding?" as "the current focus involves
+…" — a fabrication by restatement. Nothing consequential is done either way, so
+there is no confirmation gate.
 
 Usage:
     python -m tasks.daily_synthesis
 """
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -39,6 +45,11 @@ from tasks._learnings_common import (
     persist_or_email,
     prior_day,
 )
+
+# Where the nudge archive lands: a vault folder ObsidianWikiAgent does not walk
+# (it ingests raw/ only), so Obsidian can still browse the history without the
+# ingest agent treating a question as a source. See the module docstring.
+DEFAULT_SYNTHESIS_DIR = str(Path.home() / "Documents" / "llm-wiki-learnings" / "nudges")
 
 # How many pre-matched pairs the model judges, and how many nudges it may emit.
 # Kept small on purpose: the candidate list is context the small model reasons
@@ -75,6 +86,11 @@ Output rules:
 - At most {MAX_NUDGES} lines. Fewer is better. Quality over quantity.
 - If NONE of the candidates is a genuine, useful connection, output exactly: NONE
 - Output only the lines (or NONE) — no preamble, no headings, no explanation."""
+
+
+def _synthesis_dir() -> Path:
+    """Read at call time, like learnings_file._learnings_dir()."""
+    return Path(os.getenv("SYNTHESIS_DIR", DEFAULT_SYNTHESIS_DIR)).expanduser()
 
 
 def _tokenize(text: str) -> set:
@@ -227,9 +243,8 @@ def main() -> int:
             logger.warning(f"synthesis push did not send: {result['error']}")
         logger.info(f"Pushed {len(nudges)} nudge(s)")
 
-        # Persist a reviewable copy: one file per day in the vault's raw/ (same as
-        # the learnings tasks — flat, ObsidianWikiAgent files/organizes it
-        # downstream; Wren needs no knowledge of that). The push scrolls off the
+        # Persist a reviewable copy: one file per day in SYNTHESIS_DIR, outside the
+        # vault's ingest queue (see the module docstring). The push scrolls off the
         # phone; this is the record Craig scrolls back through later. Each nudge
         # already names both sides, so the bullet list is self-contained.
         body = (f"## Synthesis Suggestions: {day:%B %-d, %Y}\n\n"
@@ -237,7 +252,7 @@ def main() -> int:
         persist_or_email(
             body, "Daily-Synthesis", day,
             subject=f"Synthesis Suggestions (needs manual paste) - {day:%Y-%m-%d}",
-            task_name="daily_synthesis", logger=logger,
+            task_name="daily_synthesis", logger=logger, directory=_synthesis_dir(),
         )
         logger.info("Daily synthesis run complete")
         return 0
