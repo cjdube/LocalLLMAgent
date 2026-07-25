@@ -4,13 +4,20 @@ task. Non-interactive, run by launchd every morning after the daily learnings
 tasks have populated the day's signals.
 
 The design follows the small-local-model constraint (see CLAUDE.md): Python owns
-the structure. It reads yesterday's browsing + YouTube Likes (the "signals") and
-Craig's wiki pages + watched/interesting companies (the "anchors"), and does the
-matching itself via token overlap — the model never rummages through everything
-looking for connections (a small model manufactures those). The model's only job
-is a bounded pass over a short, pre-matched candidate list: keep the genuine
-connections, drop the coincidental ones, write one line each. No overlap, or no
-genuine connection, means nothing is pushed — silence is the common case.
+the structure. It reads yesterday's browsing + YouTube Likes + AI-agent chats (the
+"signals") and Craig's wiki pages + watched/interesting companies (the "anchors"),
+and does the matching itself via token overlap — the model never rummages through
+everything looking for connections (a small model manufactures those). The model's
+only job is a bounded pass over a short, pre-matched candidate list: keep the
+genuine connections, drop the coincidental ones, write one line each. No overlap,
+or no genuine connection, means nothing is pushed — silence is the common case.
+
+Two kinds of candidate go into that list:
+
+- CONNECTION — a signal against an anchor. What the task shipped with.
+- ECHO — a signal against a signal *from a different channel*. The same theme
+  reaching him twice independently in one day is itself a signal about what he's
+  actually chewing on, and no single-source pass can see it.
 
 The live output is an optional push; a dated copy is archived to SYNTHESIS_DIR so
 suggestions survive it. That directory is deliberately NOT the vault's raw/
@@ -27,6 +34,7 @@ Usage:
 import os
 import re
 import sys
+from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -34,6 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from agent.loop import complete_text, resolve_backend, warm_model
 from agent import prefs
 from agent.tools.chrome_history import fetch_chrome_history
+from agent.tools.learnings_file import read_entry
 from agent.tools.notify import notify
 from agent.tools.opportunities import get_watchlist, list_opportunities
 from agent.tools.wiki import list_wiki_pages
@@ -51,15 +60,46 @@ from tasks._learnings_common import (
 # ingest agent treating a question as a source. See the module docstring.
 DEFAULT_SYNTHESIS_DIR = str(Path.home() / "Documents" / "llm-wiki-learnings" / "nudges")
 
-# How many pre-matched pairs the model judges, and how many nudges it may emit.
-# Kept small on purpose: the candidate list is context the small model reasons
-# over, and more than a couple of nudges a day is noise, not signal.
-MAX_CANDIDATES = 8
+# How many pre-matched pairs of each kind the model judges, and how many nudges it
+# may emit. Kept small on purpose: the candidate list is context the small model
+# reasons over, and more than a couple of nudges a day is noise, not signal. The
+# two caps are separate so the echoes (usually few) can't be crowded out by a
+# browsing day that generates dozens of anchor matches, or vice versa.
+MAX_ANCHOR_CANDIDATES = 5
+MAX_CROSS_CANDIDATES = 3
 MAX_NUDGES = 3
+
+# Bullets taken from the AI-chat log. Bounds the prompt on a heavy chat day; the
+# file's bullets are ordered by session, so this keeps the earliest ones.
+MAX_AI_CHAT_BULLETS = 20
 
 # Minimum token length for overlap matching. Short tokens ("api", "the", "app")
 # are too generic to anchor a real connection; the model filters the rest.
 _MIN_TOKEN_LEN = 4
+
+# Above this many tokens, a description is broad enough that sharing exactly one
+# word with another broad description is coincidence rather than signal — so a
+# pair of broad sides needs _MIN_BROAD_OVERLAP shared tokens to qualify. The rule
+# keys off the *smaller* side: a one-token anchor like the page `gemma-4` has only
+# one token to offer, and that single match is the strongest it can be.
+_BROAD_SET_SIZE = 8
+_MIN_BROAD_OVERLAP = 2
+
+# When two signals share nearly all of the smaller one's tokens AND share several of
+# them, they are the same artifact seen twice, not two things about one theme — a
+# liked video whose link also sits in Chrome history, or a newsletter that ships the
+# same post as a video. Both thresholds are needed: the ratio alone would also drop
+# a legitimately thin echo (one page and one video sharing only "duckdb"), which is
+# a real echo, just a small one.
+_DUP_OVERLAP_RATIO = 0.75
+_DUP_MIN_OVERLAP = 4
+
+# An echo claims "the same theme reached him twice", and one shared word is not a
+# theme — on real data a GitHub repo page and the chat bullet "Committed all changes
+# to `main`" became an echo on the token "main". Anchor pairs keep the single-token
+# rule (a wiki page named `gemma-4` has only one token to match), but a two-signal
+# pair always has richer text on both sides, so it can afford to be asked for more.
+_MIN_ECHO_OVERLAP = 2
 
 # Long-but-generic words that would otherwise create spurious matches between
 # any tech page and any tech note. Deliberately short — the model is the real
@@ -71,11 +111,16 @@ _STOPWORDS = {
 }
 
 SYNTHESIS_SYSTEM_PROMPT = f"""You are {prefs.user_name()}'s personal assistant. \
-Below is a shortlist of CANDIDATE connections. Each pairs something {prefs.user_name()} \
-did yesterday (a site he browsed, or a video he Liked) with something already in his \
-world (a page in his notes wiki, or a company he tracks). A dumb keyword match put \
-them together — your job is to decide which are GENUINE, useful connections worth \
-telling him about, and which are coincidental.
+Below is a shortlist of CANDIDATES, put together by a dumb keyword match. Your job \
+is to decide which are GENUINE, useful connections worth telling him about, and \
+which are coincidental. There are two kinds:
+
+- CONNECTION — something {prefs.user_name()} did yesterday (browsed a site, Liked a \
+video, worked through something with an AI agent) lines up with something already in \
+his world (a page in his notes wiki, or a company he tracks).
+- ECHO — the same theme reached him yesterday through two independent channels. The \
+repetition is the point: it says what he is actually chewing on. Say so plainly, e.g. \
+"Stripe's PM archetypes came at you twice yesterday — reading and video; worth a note?".
 
 Keep ONLY the genuine, non-obvious, actionable ones. For each, write ONE short line \
 that names both sides and why they connect — phrased as a nudge he can act on, e.g. \
@@ -93,6 +138,18 @@ def _synthesis_dir() -> Path:
     return Path(os.getenv("SYNTHESIS_DIR", DEFAULT_SYNTHESIS_DIR)).expanduser()
 
 
+# The AI-chat log's section headers ("**Learned**") and the two empty-section
+# markers the learnings templates use.
+_SECTION_RE = re.compile(r"^\*\*(\w+)\*\*$")
+
+
+def _is_none_marker(bullet: str) -> bool:
+    """True for a bullet that is a template placeholder rather than a topic: "- None"
+    (the AI-chat log) or "- **None:** ..." (the daily logs)."""
+    text = bullet[2:].strip()
+    return not text or text.lower() == "none" or "**None:**" in text
+
+
 def _tokenize(text: str) -> set:
     """Lowercase alphanumeric tokens of length >= _MIN_TOKEN_LEN, minus the
     generic stopwords. The unit of overlap between a signal and an anchor."""
@@ -100,10 +157,66 @@ def _tokenize(text: str) -> set:
     return {t for t in tokens if len(t) >= _MIN_TOKEN_LEN and t not in _STOPWORDS}
 
 
-def gather_signals(start, end, logger) -> list:
-    """Yesterday's activity as {text, tokens} rows. Each source is guarded: a
-    dead source contributes nothing rather than killing the run (CLAUDE.md:
-    degrade, don't crash)."""
+def _match(a_tokens: set, b_tokens: set) -> dict | None:
+    """Shared tokens plus a size-normalized score, or None if the pair is too weak
+    to be a candidate.
+
+    The score is the overlap as a fraction of the *smaller* token set, not the raw
+    count: the sets are not the same size (a Chrome signal carries six page paths,
+    a wiki page name carries two words), and ranking by raw count just promotes
+    whichever side is wordiest. `_BROAD_SET_SIZE` handles the other end — see its
+    comment."""
+    overlap = a_tokens & b_tokens
+    if not overlap:
+        return None
+    smaller = min(len(a_tokens), len(b_tokens))
+    if len(overlap) < _MIN_BROAD_OVERLAP and smaller > _BROAD_SET_SIZE:
+        return None
+    return {"score": len(overlap) / smaller, "overlap": sorted(overlap)}
+
+
+def _ai_chat_signals(day, logger) -> list:
+    """Yesterday's AI-agent chats, read from the daily log tasks/ai_chat_learnings.py
+    writes at 4:30 AM (this task runs at 5:45).
+
+    Deliberately the distilled file rather than the raw transcripts: a session's
+    text is capped at 12k chars, and a token set that large overlaps everything, so
+    it would match every anchor and rank above every real pair. The file's bullets
+    are one topic each — title-sized, like the other channels' signals. No file
+    (nothing chatted, or the 4:30 task hasn't run) means no channel, not a failure.
+
+    Only the "Learned" bullets. The file's other section is "Accomplished", which is
+    process ("Committed all changes to `main`") — on real data those matched wiki
+    pages on branch and repo names and nothing else. What he learned is the part that
+    can echo something else in his day."""
+    result = read_entry("AI-Chat-Learnings", day)
+    if "error" in result:
+        logger.info(f"no AI-chat signals: {result['error']}")
+        return []
+
+    signals, in_learned = [], False
+    for line in result["content"].splitlines():
+        stripped = line.strip()
+        section = _SECTION_RE.match(stripped)
+        if section:
+            in_learned = section.group(1) == "Learned"
+            continue
+        # "None" is the learnings template's empty-section marker, not a topic.
+        if not in_learned or not stripped.startswith("- ") or _is_none_marker(stripped):
+            continue
+        text = stripped[2:].strip()
+        signals.append({"channel": "ai-chat", "kind": "discussed with an AI agent",
+                        "text": text, "tokens": _tokenize(text)})
+        if len(signals) >= MAX_AI_CHAT_BULLETS:
+            break
+    return signals
+
+
+def gather_signals(start, end, day, logger) -> list:
+    """Yesterday's activity as {channel, kind, text, tokens} rows. Each source is
+    guarded: a dead source contributes nothing rather than killing the run
+    (CLAUDE.md: degrade, don't crash). `channel` is what makes an echo detectable —
+    see cross_channel_pairs."""
     signals = []
 
     try:
@@ -112,7 +225,7 @@ def gather_signals(start, end, logger) -> list:
         for site in compact_sites(chrome.get("sites", [])):
             paths = " ".join(site.get("pages") or [])
             text = f"{site.get('title') or ''} ({site.get('domain') or ''}) {paths}".strip()
-            signals.append({"kind": "browsed", "text": text,
+            signals.append({"channel": "chrome", "kind": "browsed", "text": text,
                             "tokens": _tokenize(f"{text} {site.get('domain') or ''}")})
     except Exception as e:
         logger.warning(f"chrome signals unavailable: {e}")
@@ -121,10 +234,16 @@ def gather_signals(start, end, logger) -> list:
         yt = fetch_liked_videos(start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
         for video in yt.get("videos", []):
             title = video.get("title") or ""
-            signals.append({"kind": "watched", "text": f"{title} — {video.get('channel') or ''}".strip(" —"),
+            signals.append({"channel": "youtube", "kind": "watched",
+                            "text": f"{title} — {video.get('channel') or ''}".strip(" —"),
                             "tokens": _tokenize(title)})
     except Exception as e:
         logger.warning(f"youtube signals unavailable: {e}")
+
+    try:
+        signals.extend(_ai_chat_signals(day, logger))
+    except Exception as e:
+        logger.warning(f"AI-chat signals unavailable: {e}")
 
     return signals
 
@@ -162,30 +281,87 @@ def gather_anchors(logger) -> list:
     return anchors
 
 
+def _ranked(pairs: list) -> list:
+    """Strongest pairs first. Ties on the normalized score break toward the pair
+    sharing more terms."""
+    pairs.sort(key=lambda p: (p["score"], len(p["overlap"])), reverse=True)
+    return pairs
+
+
+def _one_per_signal(pairs: list) -> list:
+    """Keep each signal's strongest pair only, `pairs` already ranked. One busy
+    browsing row matches several near-identical wiki pages — a Gemini session
+    matched `google-gemini` and `google-gemini-api` and took three of five slots on
+    real data — so without this the shortlist shows the model one activity from three
+    angles instead of the day."""
+    best = {}
+    for p in pairs:
+        best.setdefault(p["signal"]["text"], p)
+    return list(best.values())
+
+
+def _same_artifact(match: dict) -> bool:
+    """True when a pair is one thing seen twice rather than two things about one
+    theme. See _DUP_OVERLAP_RATIO."""
+    return (match["score"] >= _DUP_OVERLAP_RATIO
+            and len(match["overlap"]) >= _DUP_MIN_OVERLAP)
+
+
 def candidate_pairs(signals: list, anchors: list) -> list:
-    """Pair each signal with each anchor that shares a token, scored by overlap
-    size, best first, capped at MAX_CANDIDATES. Pure — the whole matching step."""
+    """CONNECTION candidates: each signal against each anchor sharing a token.
+    Pure — half of the matching step."""
     pairs = []
     for sig in signals:
         for anc in anchors:
-            overlap = sig["tokens"] & anc["tokens"]
-            if overlap:
-                pairs.append({"score": len(overlap), "signal": sig, "anchor": anc,
-                              "overlap": sorted(overlap)})
-    pairs.sort(key=lambda p: p["score"], reverse=True)
-    return pairs[:MAX_CANDIDATES]
+            m = _match(sig["tokens"], anc["tokens"])
+            if m:
+                pairs.append({"kind": "anchor", "signal": sig, "anchor": anc, **m})
+    return _one_per_signal(_ranked(pairs))[:MAX_ANCHOR_CANDIDATES]
+
+
+def cross_channel_pairs(signals: list) -> list:
+    """ECHO candidates: signals from DIFFERENT channels that share tokens — the same
+    theme arriving twice independently in one day.
+
+    Same-channel pairs are excluded: two pages on one site, or two bullets from one
+    chat, sharing a word is one thing seen once, not an echo.
+
+    So are same-artifact pairs (_same_artifact), and that filter is doing most of the
+    work: chrome_history.NOISE_DOMAINS drops youtube.com but not youtu.be or the
+    newsletter redirectors, so a Liked video's own link is usually in the day's
+    browsing too. On real data all three echo slots went to one video and one article
+    matched against themselves before this."""
+    pairs = []
+    for i, a in enumerate(signals):
+        for b in signals[i + 1:]:
+            if a["channel"] == b["channel"]:
+                continue
+            m = _match(a["tokens"], b["tokens"])
+            if m and len(m["overlap"]) >= _MIN_ECHO_OVERLAP and not _same_artifact(m):
+                pairs.append({"kind": "cross", "signal": a, "other": b, **m})
+    return _ranked(pairs)[:MAX_CROSS_CANDIDATES]
 
 
 def render_candidates(pairs: list) -> str:
-    """The candidate shortlist as the model's user prompt."""
+    """The candidate shortlist as the model's user prompt. The CONNECTION/ECHO label
+    matches the two kinds the system prompt describes."""
     lines = []
     for i, p in enumerate(pairs, 1):
-        sig, anc = p["signal"], p["anchor"]
-        lines.append(
-            f"{i}. yesterday he {sig['kind']}: \"{sig['text']}\"\n"
-            f"   existing {anc['kind']}: \"{anc['label']}\"\n"
-            f"   shared terms: {', '.join(p['overlap'])}"
-        )
+        sig = p["signal"]
+        if p["kind"] == "cross":
+            other = p["other"]
+            lines.append(
+                f"{i}. ECHO — yesterday he {sig['kind']}: \"{sig['text']}\"\n"
+                f"   and he {other['kind']}: \"{other['text']}\"\n"
+                f"   shared terms: {', '.join(p['overlap'])}"
+            )
+        else:
+            anc = p["anchor"]
+            lines.append(
+                f"{i}. CONNECTION — yesterday he {sig['kind']}: \"{sig['text']}\"\n"
+                f"   existing {anc['kind']}: \"{anc['label']}\"\n"
+                f"   shared terms: {', '.join(p['overlap'])}"
+            )
     return "\n".join(lines)
 
 
@@ -206,12 +382,14 @@ def main() -> int:
         start, end, day = prior_day()
         logger.info(f"Day: {day}")
 
-        signals = gather_signals(start, end, logger)
+        signals = gather_signals(start, end, day, logger)
         anchors = gather_anchors(logger)
-        logger.info(f"{len(signals)} signal(s), {len(anchors)} anchor(s)")
+        logger.info(f"{len(signals)} signal(s) {dict(Counter(s['channel'] for s in signals))}, "
+                    f"{len(anchors)} anchor(s)")
 
-        candidates = candidate_pairs(signals, anchors)
-        logger.info(f"{len(candidates)} candidate connection(s) after overlap match")
+        candidates = candidate_pairs(signals, anchors) + cross_channel_pairs(signals)
+        logger.info(f"{len(candidates)} candidate(s) after overlap match "
+                    f"({sum(1 for c in candidates if c['kind'] == 'cross')} echo)")
         if not candidates:
             # No token overlap between yesterday and Craig's world — the common
             # case. Log the run-complete boundary (the dashboard reads status
@@ -220,11 +398,15 @@ def main() -> int:
             logger.info("Daily synthesis run complete")
             return 0
 
+        # Log what the model was given, not just what it returned: a thin nudge is
+        # either a bad candidate or bad judgment, and the output alone can't say which.
+        prompt = render_candidates(candidates)
+        logger.info(f"Candidates:\n{prompt}")
+
         backend = resolve_backend("daily_synthesis")
         warm_model(logger=logger, backend=backend)
         raw = complete_text(system_prompt=SYNTHESIS_SYSTEM_PROMPT,
-                            user_prompt=render_candidates(candidates), logger=logger,
-                            backend=backend)
+                            user_prompt=prompt, logger=logger, backend=backend)
         logger.info(f"Model output:\n{raw}")
 
         nudges = parse_nudges(raw)

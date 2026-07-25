@@ -38,3 +38,27 @@ def write_entry(content: str, prefix: str, day, directory: str | Path | None = N
     except Exception as e:
         return {"error": str(e)}
     return {"written": True, "path": str(path)}
+
+
+def read_entry(prefix: str, day, directory: str | Path | None = None) -> dict:
+    """Read back the entry `write_entry` would have written for `day`, as
+    {"content": ...}. A missing file is an error dict, not an exception: a task
+    reading another task's output has to treat "it wrote nothing that day" as an
+    ordinary outcome (tasks/daily_synthesis.py reads the AI-chat log this way).
+
+    The flat path write_entry used is only where the file *starts*. ObsidianWikiAgent
+    files everything it ingests out of raw/ into raw/<type>/ subdirs — in the real
+    vault no .md remains at the root — so fall back to one level down. Without it a
+    reader would look flat, find nothing, and degrade to silence forever."""
+    directory = Path(directory).expanduser() if directory else _learnings_dir()
+    filename = f"{prefix}-{day:%Y-%m-%d}.md"
+    path = directory / filename
+    if not path.is_file():
+        filed = sorted(directory.glob(f"*/{filename}"))
+        if not filed:
+            return {"error": f"no entry for {filename} in {directory} or its subdirs"}
+        path = filed[0]
+    try:
+        return {"content": path.read_text(encoding="utf-8")}
+    except Exception as e:
+        return {"error": str(e)}

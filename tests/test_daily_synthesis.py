@@ -7,9 +7,13 @@ the model/warm/notify calls are stubbed — no Chrome DB, no Google, no model, n
 push. TIMEZONE is pinned so the prior-day window is deterministic, not the
 host's zone (CLAUDE.md: UTC→local day windows)."""
 
+import logging
+
 import pytest
 
 from tasks import daily_synthesis as ds
+
+_LOG = logging.getLogger("test_daily_synthesis")
 
 # SYNTHESIS_DIR (the vault's nudges/) is redirected to tmp_path suite-wide by
 # tests/conftest.py::_isolate_learnings_dir, so persist_or_email writes there,
@@ -63,7 +67,204 @@ def test_candidate_pairs_scores_and_caps():
     pairs = ds.candidate_pairs(signals, anchors)
     assert len(pairs) == 1                       # only the overlapping anchor
     assert pairs[0]["anchor"]["label"] == "duckdb-analytics"
-    assert pairs[0]["score"] == 2
+    assert pairs[0]["score"] == 1.0              # both tokens of a 2-token set
+    assert pairs[0]["kind"] == "anchor"
+
+
+# --------------------------------------------------------------------------- #
+# _match — the size-normalized score, and the broad-vs-broad guard
+# --------------------------------------------------------------------------- #
+
+def _broad(prefix, *shared):
+    """A token set past _BROAD_SET_SIZE whose filler is unique to `prefix`, so two
+    _broad() sets overlap only in the tokens passed as `shared`."""
+    return {f"{prefix}{i}" for i in range(ds._BROAD_SET_SIZE + 1)} | set(shared)
+
+
+def test_match_normalizes_by_the_smaller_set():
+    # A wordy signal sharing both tokens of a 2-token anchor beats one sharing 3 of
+    # a dozen — ranking by raw count would put them the other way round.
+    tight = ds._match({"duckdb", "analytics"} | _broad("a"), {"duckdb", "analytics"})
+    loose = ds._match(_broad("b", "alpha", "beta", "gamma"),
+                      _broad("c", "alpha", "beta", "gamma"))
+    assert len(loose["overlap"]) > len(tight["overlap"])   # raw count says otherwise
+    assert tight["score"] > loose["score"]
+
+
+def test_match_rejects_single_token_between_two_broad_sets():
+    assert ds._match(_broad("a", "kubernetes"), _broad("b", "kubernetes")) is None
+
+
+def test_match_keeps_single_token_when_one_side_is_short():
+    # The page `gemma-4` tokenizes to {"gemma"} — one token is all it has to offer,
+    # so the broad-set rule must not swallow it.
+    m = ds._match(_broad("a", "gemma"), {"gemma"})
+    assert m is not None and m["score"] == 1.0
+
+
+def test_match_without_overlap_is_none():
+    assert ds._match({"terraform"}, {"cooking"}) is None
+
+
+# --------------------------------------------------------------------------- #
+# cross_channel_pairs — the ECHO candidates
+# --------------------------------------------------------------------------- #
+
+def _sig(channel, text, tokens):
+    return {"channel": channel, "kind": "browsed", "text": text, "tokens": set(tokens)}
+
+
+def test_cross_channel_pairs_finds_the_echo():
+    signals = [
+        _sig("chrome", "Inside PM at Stripe", {"stripe", "archetypes"}),
+        _sig("youtube", "Inside PM at Stripe (video)", {"stripe", "archetypes"}),
+    ]
+    pairs = ds.cross_channel_pairs(signals)
+    assert len(pairs) == 1
+    assert pairs[0]["kind"] == "cross"
+    assert pairs[0]["overlap"] == ["archetypes", "stripe"]
+
+
+def test_cross_channel_pairs_ignores_same_channel():
+    # Two pages on one site sharing a word is one thing seen once, not an echo.
+    signals = [
+        _sig("chrome", "Stripe docs", {"stripe", "billing"}),
+        _sig("chrome", "Stripe pricing", {"stripe", "pricing"}),
+    ]
+    assert ds.cross_channel_pairs(signals) == []
+
+
+def test_cross_channel_pairs_caps(monkeypatch):
+    monkeypatch.setattr(ds, "MAX_CROSS_CANDIDATES", 1)
+    signals = [
+        _sig("chrome", "a", {"stripe", "archetypes"}),
+        _sig("youtube", "b", {"stripe", "archetypes"}),
+        _sig("ai-chat", "c", {"stripe", "archetypes"}),
+    ]
+    assert len(ds.cross_channel_pairs(signals)) == 1
+
+
+def test_cross_channel_pairs_rejects_a_single_shared_token():
+    # A GitHub repo page and the chat bullet "Committed all changes to `main`" became
+    # an echo on the token "main" — one word is not a theme.
+    signals = [
+        _sig("chrome", "VoltAgent/awesome-design-md tree/main", {"voltagent", "design", "main"}),
+        _sig("ai-chat", "Committed all changes to main", {"committed", "changes", "main"}),
+    ]
+    assert ds.cross_channel_pairs(signals) == []
+
+
+def test_cross_channel_pairs_drops_the_same_artifact_twice():
+    # A Liked video's own link is usually in the day's browsing too (youtu.be and the
+    # newsletter redirectors are not in NOISE_DOMAINS), which is not an echo.
+    title = {"claude", "design", "insanely", "easy", "even", "beginners"}
+    signals = [
+        _sig("chrome", "Claude Design is Insanely Easy (even for beginners) - YouTube",
+             title | {"youtu"}),
+        _sig("youtube", "Claude Design is Insanely Easy (even for beginners) — Jeff Su", title),
+    ]
+    assert ds.cross_channel_pairs(signals) == []
+
+
+def test_cross_channel_pairs_keeps_two_formats_of_one_theme():
+    # The case worth surfacing: his written tutorial and his video, same day.
+    signals = [
+        _sig("chrome", "Claude Design Tutorial: A Beginner's Guide (jeffsu.org)",
+             {"claude", "design", "tutorial", "beginner", "guide"}),
+        _sig("youtube", "Claude Design is Insanely Easy — Jeff Su",
+             {"claude", "design", "insanely", "easy"}),
+    ]
+    pairs = ds.cross_channel_pairs(signals)
+    assert len(pairs) == 1 and pairs[0]["overlap"] == ["claude", "design"]
+
+
+def test_one_per_signal_keeps_only_each_signal_s_best():
+    # A Gemini browsing row matched google-gemini and google-gemini-api and took
+    # three of five slots on real data.
+    signal = _sig("chrome", "Google Gemini", {"google", "gemini"})
+    pairs = ds.candidate_pairs([signal], [
+        {"kind": "wiki page", "label": "google-gemini", "tokens": {"google", "gemini"}},
+        {"kind": "wiki page", "label": "google-gemini-api", "tokens": {"google", "gemini", "api"}},
+    ])
+    assert len(pairs) == 1
+
+
+def test_render_candidates_labels_both_kinds():
+    anchor_pair = {"kind": "anchor", "score": 1.0, "overlap": ["duckdb"],
+                   "signal": _sig("chrome", "DuckDB docs", {"duckdb"}),
+                   "anchor": {"kind": "wiki page", "label": "duckdb-analytics"}}
+    cross_pair = {"kind": "cross", "score": 1.0, "overlap": ["stripe"],
+                  "signal": _sig("chrome", "Stripe reading", {"stripe"}),
+                  "other": _sig("youtube", "Stripe video", {"stripe"})}
+    out = ds.render_candidates([anchor_pair, cross_pair])
+    assert "1. CONNECTION" in out and "duckdb-analytics" in out
+    assert "2. ECHO" in out and "Stripe video" in out
+
+
+# --------------------------------------------------------------------------- #
+# _ai_chat_signals — the third channel, read from the 4:30 AM learnings log
+# --------------------------------------------------------------------------- #
+
+_AI_CHAT_LOG = """## AI Chat Learnings: July 24, 2026
+
+### Claude · LocalLLMAgent · 5:20 AM
+**Accomplished**
+- Committed all changes to `main`.
+**Learned**
+- DuckDB analytics beats a warehouse for single-node work.
+
+### Gemini · notes · 9:00 AM
+**Accomplished**
+- None
+**Learned**
+- Stripe PM archetypes shift from builder to operator.
+"""
+
+
+def _write_ai_chat_log(tmp_path, day, body=_AI_CHAT_LOG):
+    """LEARNINGS_DIR is redirected to tmp_path by conftest, so this is where
+    read_entry looks."""
+    (tmp_path / f"AI-Chat-Learnings-{day:%Y-%m-%d}.md").write_text(body)
+
+
+def _learned(*bullets):
+    return "**Learned**\n" + "\n".join(f"- {b}" for b in bullets) + "\n"
+
+
+def test_ai_chat_signals_takes_learned_bullets_only(tmp_path):
+    # "Accomplished" is process — on real data those matched wiki pages on branch and
+    # repo names, nothing more.
+    _, _, day = ds.prior_day()
+    _write_ai_chat_log(tmp_path, day)
+
+    signals = ds._ai_chat_signals(day, _LOG)
+    assert [s["text"] for s in signals] == [
+        "DuckDB analytics beats a warehouse for single-node work.",
+        "Stripe PM archetypes shift from builder to operator.",
+    ]
+    assert {s["channel"] for s in signals} == {"ai-chat"}
+    assert "duckdb" in signals[0]["tokens"]
+
+
+def test_ai_chat_signals_skips_none_markers(tmp_path):
+    _, _, day = ds.prior_day()
+    _write_ai_chat_log(tmp_path, day, _learned("None"))
+
+    assert ds._ai_chat_signals(day, _LOG) == []
+
+
+def test_ai_chat_signals_caps_bullets(tmp_path, monkeypatch):
+    monkeypatch.setattr(ds, "MAX_AI_CHAT_BULLETS", 2)
+    _, _, day = ds.prior_day()
+    _write_ai_chat_log(tmp_path, day, _learned(*(f"topic number {i}" for i in range(10))))
+
+    assert len(ds._ai_chat_signals(day, _LOG)) == 2
+
+
+def test_ai_chat_signals_missing_file_yields_nothing(tmp_path):
+    # The 4:30 task writes nothing on a day with no chats. Not a failure.
+    _, _, day = ds.prior_day()
+    assert ds._ai_chat_signals(day, _LOG) == []
 
 
 def test_candidate_pairs_empty_without_overlap():
@@ -142,6 +343,28 @@ def test_no_overlap_pushes_nothing_and_skips_model(stub_sources, tmp_path, monke
     assert stub_sources["model"] == 0        # never warmed/queried the model
     assert stub_sources["pushes"] == []
     assert list(tmp_path.glob("Daily-Synthesis-*.md")) == []  # nothing to archive
+
+
+def test_echo_across_channels_reaches_the_model(stub_sources, tmp_path, monkeypatch):
+    # The case no single-source pass can see: the same theme arrives via a Liked
+    # video and an AI chat on the same day, with no wiki anchor involved at all.
+    _, _, day = ds.prior_day()
+    _write_ai_chat_log(tmp_path, day,
+                       _learned("Stripe PM archetypes shift from builder to operator."))
+    monkeypatch.setattr(ds, "fetch_liked_videos", lambda *a, **k: {"videos": [
+        {"title": "Inside PM at Stripe: archetypes after builder", "channel": "The Skip"}]})
+
+    seen = {}
+
+    def _capture(**kwargs):
+        seen["prompt"] = kwargs["user_prompt"]
+        return "- Stripe archetypes came at you twice yesterday; worth a note?"
+    monkeypatch.setattr(ds, "complete_text", _capture)
+
+    assert ds.main() == 0
+    assert "ECHO" in seen["prompt"]
+    assert "stripe" in seen["prompt"]
+    assert len(stub_sources["pushes"]) == 1
 
 
 def test_model_says_none_pushes_nothing(stub_sources, monkeypatch):
