@@ -90,3 +90,21 @@ def test_model_exception_is_caught_not_raised(stubbed_pipeline, monkeypatch):
     monkeypatch.setattr(eg, "complete_text", boom)
     out = eg.evaluate_against("product-principles", target_text="anything")
     assert "error" in out and "ollama down" in out["error"]
+
+
+def test_empty_model_output_is_an_error_not_a_blank_evaluation(stubbed_pipeline, monkeypatch):
+    # A thinking model that spends its whole num_predict budget reasoning emits
+    # no content (observed: 1 run in 3 before think=False). Returning that as an
+    # evaluation hands the user a blank answer with nothing to act on.
+    monkeypatch.setattr(eg, "complete_text", lambda **k: "  \n ")
+
+    out = eg.evaluate_against("product-principles", target_text="some target")
+
+    assert "error" in out and "empty evaluation" in out["error"]
+    assert "evaluation" not in out
+
+
+def test_judging_does_not_spend_the_budget_on_thinking(stubbed_pipeline):
+    eg.evaluate_against("product-principles", target_text="some target")
+
+    assert stubbed_pipeline["prompts"][0]["think"] is False

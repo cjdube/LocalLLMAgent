@@ -136,8 +136,18 @@ def evaluate_against(lens_page: str = "", target_url: str = "",
             f"---\n\n"
             f"Target to evaluate (source: {source}, title: {title}):\n\n{content}"
         )
+        # think=False: judging a target against standards that are both IN the
+        # prompt is comparison, not chain-of-thought, and the scratchpad competes
+        # for the same num_predict budget as the answer. Measured with thinking on,
+        # 1 run in 3 spent all 3072 tokens reasoning and returned NOTHING; off,
+        # 4 of 4 clean at a tenth of the budget, naming the lens's standards
+        # more specifically. See CLAUDE.md.
         evaluation = complete_text(system_prompt=EVAL_SYSTEM_PROMPT, user_prompt=user_prompt,
-                                   backend=resolve_backend("evaluate_against"))
+                                   backend=resolve_backend("evaluate_against"),
+                                   think=False)
+        if not evaluation.strip():
+            return {"error": "the model returned an empty evaluation — retry; if it "
+                             "persists the prompt is too large for one generation"}
         return {"lens": lens_page, "evaluation": evaluation}
     except Exception as e:
         return {"error": f"evaluate_against failed: {e}"}

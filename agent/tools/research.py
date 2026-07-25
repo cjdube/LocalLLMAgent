@@ -180,8 +180,15 @@ def research(company: str, context: str = None, filing: dict = None) -> dict:
             f"search_people_funding: {compacted['people_funding']}\n"
             f"search_news: {compacted['news']}\n"
         )
+        # think=False: the brief is a fixed seven-label template filled from the
+        # snippets above, with "Unknown" as the miss case — no chain-of-thought
+        # needed, and the scratchpad would compete with it for num_predict.
+        # Measured: 3 of 3 complete briefs at 4% of the budget, ~6x faster, with
+        # the same facts. See CLAUDE.md.
         summary = complete_text(system_prompt=RESEARCH_SYSTEM_PROMPT, user_prompt=user_prompt,
-                                backend=resolve_backend("research"))
+                                backend=resolve_backend("research"), think=False)
+        if not summary.strip():
+            return {"error": f"the model returned an empty brief for {company!r} — retry"}
         return {"company": company, "summary": summary}
     except Exception as e:
         return {"error": f"research failed for {company!r}: {e}"}

@@ -72,3 +72,14 @@ def test_model_exception_is_caught_not_raised(stubbed_pipeline, monkeypatch):
     monkeypatch.setattr(ea, "complete_text", boom)
     out = ea.evaluate_app("https://quorum.example")
     assert "error" in out and "ollama down" in out["error"]
+
+
+def test_empty_model_output_is_an_error_not_a_blank_teardown(stubbed_pipeline, monkeypatch):
+    # Backstop for the truncation that hit evaluate_against: a blank teardown is
+    # indistinguishable from a real one to a caller that only checks for "error".
+    monkeypatch.setattr(ea, "complete_text", lambda **k: "")
+
+    out = ea.evaluate_app("https://quorum.example")
+
+    assert "error" in out and "empty teardown" in out["error"]
+    assert "teardown" not in out

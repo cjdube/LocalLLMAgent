@@ -104,8 +104,14 @@ def evaluate_app(url: str = "", **_) -> dict:
             f"page_title: {page.get('title') or '(none)'}\n\n"
             f"Here is the marketing website content:\n\n{content}"
         )
+        # Thinking stays ON here, unlike its two siblings: skepticism is the
+        # product, and this one was measured healthy — 12 runs across two sites
+        # peaked at 1288 of 3072 tokens, never truncated. The guard below is the
+        # backstop if a longer page ever changes that.
         teardown = complete_text(system_prompt=TEARDOWN_SYSTEM_PROMPT, user_prompt=user_prompt,
                                  backend=resolve_backend("evaluate_app"))
+        if not teardown.strip():
+            return {"error": f"the model returned an empty teardown for {url} — retry"}
         return {"url": url, "teardown": teardown}
     except Exception as e:
         return {"error": f"evaluate_app failed for {url!r}: {e}"}

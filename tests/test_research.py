@@ -177,3 +177,20 @@ def test_research_company_reports_dead_sources(stubbed_pipeline, monkeypatch):
     monkeypatch.setattr(rs, "search_web", lambda *a, **k: {"error": "tavily down"})
     result = rs.research_company("Corvus Robotics")
     assert "error" in result and "tavily down" in result["error"]
+
+
+def test_empty_model_output_is_an_error_not_a_blank_brief(stubbed_pipeline, monkeypatch):
+    # Same guard as the two evaluate_* tools: an empty generation must not reach
+    # the caller as a brief, or the opportunity item gets a blank one persisted.
+    monkeypatch.setattr(rs, "complete_text", lambda **k: "\n\n")
+
+    out = rs.research("Quorum")
+
+    assert "error" in out and "empty brief" in out["error"]
+    assert "summary" not in out
+
+
+def test_brief_does_not_spend_the_budget_on_thinking(stubbed_pipeline):
+    rs.research("Quorum")
+
+    assert stubbed_pipeline["prompts"][0]["think"] is False
