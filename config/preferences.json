@@ -14,7 +14,7 @@
       {"name": "Domestic/Chores", "color_id": "5", "color_name": "Banana"},
       {"name": "Meetings", "color_id": "3", "color_name": "Grape", "hint": "with others", "role": "meetings"},
       {"name": "Travel", "color_id": "7", "color_name": "Peacock", "hint": "/ Vacation"},
-      {"name": "Dining Out", "color_id": "7", "color_name": "Peacock", "hint": "(restaurant reservations)"},
+      {"name": "Dining Out", "color_id": "7", "color_name": "Peacock", "hint": "(dinner reservations, date nights — not a working lunch or coffee, which are Meetings)"},
       {"name": "Shows/Events", "color_id": "7", "color_name": "Peacock", "hint": "(concerts, theater, sporting events)"},
       {"name": "Appointments", "color_id": "6", "color_name": "Tangerine", "hint": "(doctor, dentist, car, etc.)", "role": "appointments"},
       {"name": "Uncategorized", "color_id": "11", "color_name": "Tomato", "hint": "(only if genuinely unable to tell)", "role": "fallback"}
