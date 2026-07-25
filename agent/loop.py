@@ -301,9 +301,11 @@ def _llm_chat(
     """Dispatch a chat completion to the selected backend, returning the same
     canonical `message` dict shape regardless of provider.
 
-    `think` is canonical, not Ollama-specific: every current backend runs a
-    thinking model whose scratchpad competes with the visible answer for the
-    same token budget. None leaves each provider's default alone."""
+    `think` says the caller's answer needs the whole token budget, so the
+    scratchpad shouldn't compete for it. Only the Ollama path acts on it; the
+    Gemini backend already defaults its thinking budget to 0 and exposes
+    WREN_GEMINI_THINKING_BUDGET as the per-model override (some models reject
+    0 outright), so forcing it there would break more than it fixed."""
     b = _resolve_backend(backend)
     if b == "ollama":
         return _ollama_chat(messages, model=model, host=host, tools=tools,

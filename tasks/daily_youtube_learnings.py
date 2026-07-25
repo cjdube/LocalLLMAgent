@@ -80,7 +80,7 @@ def main() -> int:
         user_prompt = f"day: {day:%B %-d, %Y}\nyoutube_videos: {titles}\n"
         synthesis = complete_text(
             system_prompt=DRAFT_SYSTEM_PROMPT, user_prompt=user_prompt, logger=logger,
-            backend=backend,
+            backend=backend, think=False,
         )
         logger.info(f"Drafted synthesis:\n{synthesis}")
 

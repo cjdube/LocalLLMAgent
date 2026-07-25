@@ -161,10 +161,14 @@ def _gemini_chat(
     # gemini-2.5-flash (the default model); gemini-2.5-pro can't disable thinking,
     # so pin a positive WREN_GEMINI_THINKING_BUDGET if you switch to pro.
     thinking_budget = int(os.getenv("WREN_GEMINI_THINKING_BUDGET", "0"))
-    # A caller's explicit think=False wins over the env budget — it's the
-    # canonical seam's way of saying "this call fills in a template".
-    if think is False:
-        thinking_budget = 0
+    # `think` is deliberately NOT honoured here. The seam's think=False means
+    # "don't spend the answer's budget on scratchpad", which on this backend is
+    # already the default above — and forcing 0 would override the per-model
+    # escape hatch the env var exists to provide. Not every model accepts 0:
+    # gemini-2.5-pro rejects it, and so does gemini-3.6-flash (400
+    # INVALID_ARGUMENT; -1 for dynamic, or any positive budget, is accepted).
+    # Tune WREN_GEMINI_THINKING_BUDGET per model instead.
+    _ = think
     system, contents = _gemini_contents(messages)
 
     cfg_kwargs = dict(

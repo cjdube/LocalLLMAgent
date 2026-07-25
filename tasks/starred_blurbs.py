@@ -69,6 +69,7 @@ def _generate_blurb(repo: dict, backend, logger) -> str:
             user_prompt=f"repo: {repo['full_name']}\nREADME:\n{readme}",
             backend=backend,
             logger=logger,
+            think=False,
         )
         logger.info(f"blurb {repo['full_name']} -> {raw!r}")
         blurb = _first_line(raw)

@@ -105,7 +105,7 @@ def main() -> int:
         warm_model(logger=logger, backend=backend)
         entry_text = complete_text(
             system_prompt=DRAFT_SYSTEM_PROMPT, user_prompt=user_prompt, logger=logger,
-            backend=backend,
+            backend=backend, think=False,
         )
         logger.info(f"Drafted entry:\n{entry_text}")
 

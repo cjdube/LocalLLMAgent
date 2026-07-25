@@ -83,7 +83,7 @@ def _summarize(text: str, source: str, logger, backend) -> str:
     user_prompt = f"source: {source}\n\ntranscript:\n{text}\n"
     summary = complete_text(
         system_prompt=SESSION_SYSTEM_PROMPT, user_prompt=user_prompt,
-        logger=logger, backend=backend,
+        logger=logger, backend=backend, think=False,
     )
     logger.info(f"Summarized a {source} chat:\n{summary}")
     return summary

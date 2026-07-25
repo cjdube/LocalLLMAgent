@@ -287,6 +287,8 @@ def build_and_send_brief(logger: Optional[logging.Logger] = None) -> dict:
             system_prompt=GLANCE_SYSTEM_PROMPT,
             user_prompt=f"weather: {weather}\ncalendar_events: {events}",
             backend=brief_backend,
+            think=False,
+            logger=logger,
         )
         if logger:
             logger.info(f"glance summary -> {glance_text}")
@@ -309,6 +311,8 @@ def build_and_send_brief(logger: Optional[logging.Logger] = None) -> dict:
                 system_prompt=STARRED_REPOS_SYSTEM_PROMPT,
                 user_prompt=f"starred_repo_updates: {starred_repos}",
                 backend=brief_backend,
+                think=False,
+                logger=logger,
             )
             if logger:
                 logger.info(f"starred repos intro -> {starred_intro}")
