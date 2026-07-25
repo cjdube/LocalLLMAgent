@@ -22,7 +22,7 @@
     "_comment": "What the daily learnings reviews ignore. Scoped to those tasks only — fetch_chrome_history and the calendar tools still return this data, so chat can answer questions about it.",
     "_comment_keywords": "Case-insensitive substrings. A calendar event whose summary matches is dropped; so is a browsed site whose title matches, and any single page path that matches.",
     "excluded_keywords": ["aarp"],
-    "_comment_domains": "Matched on the domain and its subdomains, so 'sharepoint.com' covers 'aarpsharex.sharepoint.com'.",
+    "_comment_domains": "Matched on the domain and its subdomains, so 'sharepoint.com' covers 'aarpsharex.sharepoint.com'. The second group is click-through redirectors: they contribute a duplicate row for an article already listed under its real domain, and their URL paths carry query-string junk that matches on meaningless tokens (a 'utm_source' parameter matched a wiki summary saying 'open-source'). Subdomain-scoped where the parent domain is real content — 'link.skool.com' is a redirector, 'www.skool.com' is not.",
     "excluded_domains": [
       "aarp.org",
       "aarpvolunteer.my.site.com",
@@ -36,7 +36,12 @@
       "onedrive.live.com",
       "teams.microsoft.com",
       "microsoftonline.com",
-      "cloud.microsoft"
+      "cloud.microsoft",
+      "tldrnewsletter.com",
+      "link.skool.com",
+      "link.mail.beehiiv.com",
+      "taboola.com",
+      "t.co"
     ]
   },
   "job_search": {
