@@ -29,9 +29,17 @@ model told to "find connections across everything" manufactures them):
      *Accomplished* bullets either — those are process ("Committed all changes to
      `main`"), and on real data they matched wiki pages on branch and repo names.
 2. **Gather anchors** — Craig's existing world:
-   - Wiki page names (`list_wiki_pages`).
+   - Wiki pages, each contributing its name **and** its one-line `**Summary**:`
+     (`page_summaries`). The summary is the point: matching on the filename alone can
+     only find lexical identity — "the thing you looked at is spelled like a page you
+     have" — which is why the early nudges only restated the day back at him. Pages
+     whose name ends in a date are skipped: those are ObsidianWikiAgent's write-ups of
+     the daily logs (49 of 203 pages), so matching yesterday's activity against them
+     matches it against the record of itself.
    - Companies he watches or has marked *interested* (`get_watchlist`,
-     `list_opportunities`).
+     `list_opportunities`), matched on their **whole** name — "Planet Fitness" hit the
+     publication "UX Planet" on `planet` and, being a short anchor, outranked the
+     entire vault.
 3. **Match (Python)** — two kinds of candidate, each with its own cap so one can't
    crowd out the other. Tokens are lowercase, length ≥ 4, minus a small stopword
    list — enough to trim obvious noise; the model is the real filter.
@@ -86,9 +94,19 @@ real data did, not in anticipation:
   — one word in common between two long descriptions is coincidence. The rule keys
   off the smaller side, so a one-token anchor like the page `gemma-4` still matches
   on its single token.
-- **One candidate per signal** (`_one_per_signal`) — a Gemini browsing row matched
-  `google-gemini` and `google-gemini-api` and took three of five slots. Without this
-  the shortlist shows the model one activity from three angles instead of the day.
+- **Common tokens don't count** (`generic_tokens`) — a token appearing in ≥5% of the
+  anchor corpus carries no signal. Necessary only because anchors now include summary
+  *prose*: the first run of that matched on `{agent, design}`, `{backend, local}`,
+  `{dashboard, wren}` and `{agent, through}`, four of five candidates being vocabulary
+  coincidence. A fixed stopword list can't reach this — it would have to contain half
+  of Craig's domain — so the set is computed from the corpus each run. Echoes are
+  exempt: there the coincidence is *temporal*, and a common word arriving through two
+  channels in one day still means something. Company anchors are exempt too, since a
+  name has to match whole.
+- **One candidate per side** (`_one_per_side`) — a Gemini browsing row matched
+  `google-gemini` and `google-gemini-api` and took three of five slots; separately, one
+  page matched a tutorial and the video of that same tutorial. Either direction ends up
+  showing the model one story several times instead of showing it the day.
 - **Echoes reject same-artifact pairs and single-token pairs** (`_same_artifact`,
   `_MIN_ECHO_OVERLAP`) — `chrome_history.NOISE_DOMAINS` drops `youtube.com` but not
   `youtu.be` or the newsletter redirectors, so a Liked video's own link is usually in
@@ -99,8 +117,19 @@ real data did, not in anticipation:
 ## Tuning
 
 - `MAX_ANCHOR_CANDIDATES` / `MAX_CROSS_CANDIDATES` / `MAX_NUDGES` /
-  `MAX_AI_CHAT_BULLETS` / `_MIN_TOKEN_LEN` / `_STOPWORDS`, plus the four knobs above,
-  in `tasks/daily_synthesis.py`.
+  `MAX_AI_CHAT_BULLETS` / `MAX_ANCHOR_SUMMARY_CHARS` / `_MIN_TOKEN_LEN` /
+  `_STOPWORDS`, plus the filters above, in `tasks/daily_synthesis.py`.
+
+## Known weakness: Chrome page paths
+
+A Chrome signal's text includes the site's top six page *paths*, and those paths carry
+tokens that mean nothing — branch names, repo names, and URL query vocabulary. On real
+data `utm_source` in a tracking URL matched a page whose summary said "open-source",
+and redirector domains (`link.skool.com`, `tracking.tldrnewsletter.com`) produce a
+second unreadable copy of an article already in the shortlist under its real domain.
+The lever is `learnings.excluded_domains` in [preferences](preferences.md), but it is
+shared with the daily Chrome learnings, so excluding redirectors there changes those
+reviews too — Craig's call, not a silent fix.
 - `SYNTHESIS_DIR` — where the nudge archive is written (see below). Must exist;
   a missing dir emails the nudges instead.
 - `WREN_DAILY_SYNTHESIS_BACKEND` routes just this task to a cloud model

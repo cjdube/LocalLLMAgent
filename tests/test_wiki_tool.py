@@ -33,9 +33,21 @@ def test_missing_vault_errors(tmp_path, monkeypatch):
     monkeypatch.setenv("WIKI_VAULT_PATH", str(missing))
 
     for result in (wiki.read_wiki_index(), wiki.list_wiki_pages(),
-                   wiki.read_wiki_page("x")):
+                   wiki.read_wiki_page("x"), wiki.page_summaries()):
         assert "error" in result and "not found" in result["error"]
     assert not missing.exists()  # errored instead of creating a stray vault
+
+
+def test_page_summaries_extracts_the_summary_line(tmp_path, monkeypatch):
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    (tmp_path / "wiki" / "lm-studio.md").write_text(
+        "# LM Studio\n\n**Summary**: A local LLM execution platform.\n\nBody text.")
+
+    pages = {p["name"]: p["summary"] for p in wiki.page_summaries()["pages"]}
+    assert pages["lm-studio"] == "A local LLM execution platform."
+    # A page without one still appears — daily_synthesis falls back to the name.
+    assert pages["speakers-bureau"] == ""
 
 
 def test_missing_page(tmp_path, monkeypatch):

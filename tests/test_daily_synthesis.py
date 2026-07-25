@@ -33,7 +33,7 @@ def stub_sources(monkeypatch):
 
     monkeypatch.setattr(ds, "fetch_chrome_history", lambda *a, **k: {"sites": []})
     monkeypatch.setattr(ds, "fetch_liked_videos", lambda *a, **k: {"videos": []})
-    monkeypatch.setattr(ds, "list_wiki_pages", lambda: {"pages": []})
+    monkeypatch.setattr(ds, "page_summaries", lambda: {"pages": []})
     monkeypatch.setattr(ds, "get_watchlist", lambda: [])
     monkeypatch.setattr(ds, "list_opportunities", lambda **k: {"opportunities": []})
     monkeypatch.setattr(ds, "warm_model", lambda **k: None)
@@ -104,6 +104,59 @@ def test_match_keeps_single_token_when_one_side_is_short():
 
 def test_match_without_overlap_is_none():
     assert ds._match({"terraform"}, {"cooking"}) is None
+
+
+# --------------------------------------------------------------------------- #
+# generic_tokens — the corpus-frequency filter that makes summary anchors usable
+# --------------------------------------------------------------------------- #
+
+def _anchor(label, *tokens):
+    return {"kind": "wiki page", "label": label, "summary": "", "tokens": set(tokens)}
+
+
+def test_generic_tokens_finds_the_vault_s_filler_words():
+    # "agent" is in every summary here, "duckdb" in one.
+    anchors = [_anchor(f"p{i}", "agent", f"topic{i}") for i in range(40)]
+    anchors.append(_anchor("duckdb-analytics", "duckdb", "columnar"))
+
+    generic = ds.generic_tokens(anchors)
+    assert "agent" in generic
+    assert "duckdb" not in generic and "columnar" not in generic
+
+
+def test_generic_tokens_empty_corpus():
+    assert ds.generic_tokens([]) == set()
+
+
+def test_candidate_pairs_ignores_a_match_on_only_generic_tokens():
+    # Four of five candidates were {agent, design} / {backend, local} coincidences
+    # before this: words that are everywhere in the vault carry no signal.
+    anchors = [_anchor(f"p{i}", "agent", "design", f"topic{i}") for i in range(40)]
+    signal = _sig("chrome", "Some agent design post", {"agent", "design", "unrelated"})
+
+    assert ds.candidate_pairs([signal], anchors) == []
+
+
+def test_candidate_pairs_keeps_a_distinctive_token_match():
+    # The omlx case: "I deleted LM Studio after a week with omlx" against the
+    # lm-studio page. "studio" is rare in the corpus, so it still counts.
+    anchors = [_anchor(f"p{i}", "agent", f"topic{i}") for i in range(40)]
+    anchors.append(_anchor("lm-studio", "studio", "agent"))
+    signal = _sig("chrome", "I deleted LM Studio after a week with omlx",
+                  {"deleted", "studio", "week", "omlx"})
+
+    pairs = ds.candidate_pairs([signal], anchors)
+    assert len(pairs) == 1 and pairs[0]["anchor"]["label"] == "lm-studio"
+
+
+def test_generic_filter_does_not_apply_to_echoes():
+    # An echo's coincidence is temporal: the same word through two channels in one
+    # day means something even when the word is common in the wiki.
+    signals = [
+        _sig("chrome", "Claude Design Tutorial", {"claude", "design", "tutorial"}),
+        _sig("youtube", "Claude Design is Easy", {"claude", "design", "easy"}),
+    ]
+    assert len(ds.cross_channel_pairs(signals)) == 1
 
 
 # --------------------------------------------------------------------------- #
@@ -178,7 +231,7 @@ def test_cross_channel_pairs_keeps_two_formats_of_one_theme():
     assert len(pairs) == 1 and pairs[0]["overlap"] == ["claude", "design"]
 
 
-def test_one_per_signal_keeps_only_each_signal_s_best():
+def test_one_per_side_keeps_only_each_signal_s_best():
     # A Gemini browsing row matched google-gemini and google-gemini-api and took
     # three of five slots on real data.
     signal = _sig("chrome", "Google Gemini", {"google", "gemini"})
@@ -186,6 +239,17 @@ def test_one_per_signal_keeps_only_each_signal_s_best():
         {"kind": "wiki page", "label": "google-gemini", "tokens": {"google", "gemini"}},
         {"kind": "wiki page", "label": "google-gemini-api", "tokens": {"google", "gemini", "api"}},
     ])
+    assert len(pairs) == 1
+
+
+def test_one_per_side_keeps_only_each_anchor_s_best():
+    # One page matched a tutorial and the video of that same tutorial.
+    anchor = {"kind": "wiki page", "label": "claude-knowledge-base-design",
+              "tokens": {"claude", "design", "knowledge"}}
+    pairs = ds.candidate_pairs([
+        _sig("chrome", "Claude Design Tutorial", {"claude", "design", "tutorial"}),
+        _sig("youtube", "Claude Design is Insanely Easy", {"claude", "design", "easy"}),
+    ], [anchor])
     assert len(pairs) == 1
 
 
@@ -199,6 +263,71 @@ def test_render_candidates_labels_both_kinds():
     out = ds.render_candidates([anchor_pair, cross_pair])
     assert "1. CONNECTION" in out and "duckdb-analytics" in out
     assert "2. ECHO" in out and "Stripe video" in out
+
+
+# --------------------------------------------------------------------------- #
+# gather_anchors — pages carry their summary; activity logs and part-name company
+# matches are excluded
+# --------------------------------------------------------------------------- #
+
+@pytest.fixture
+def stub_anchors(monkeypatch):
+    monkeypatch.setattr(ds, "get_watchlist", lambda: [])
+    monkeypatch.setattr(ds, "list_opportunities", lambda **k: {"opportunities": []})
+
+
+def test_gather_anchors_tokenizes_the_page_summary(stub_anchors, monkeypatch):
+    # The point of the whole step: matching on the filename alone can only find
+    # lexical identity, so "columnar" has to be able to reach duckdb-analytics.
+    monkeypatch.setattr(ds, "page_summaries", lambda: {"pages": [
+        {"name": "duckdb-analytics", "summary": "A columnar store for single-node work."}]})
+
+    anchor = ds.gather_anchors(_LOG)[0]
+    assert "columnar" in anchor["tokens"]
+    assert anchor["summary"] == "A columnar store for single-node work."
+
+
+def test_gather_anchors_skips_dated_activity_logs(stub_anchors, monkeypatch):
+    # 49 of the vault's 203 pages are write-ups of the daily logs. Matching
+    # yesterday's activity against the page written from yesterday's activity is
+    # circular — on real data it produced exactly that.
+    monkeypatch.setattr(ds, "page_summaries", lambda: {"pages": [
+        {"name": "daily-chrome-2026-07-24", "summary": "A log of tools encountered."},
+        {"name": "ai-chat-learnings-2026-07-01", "summary": "Chats from July 1."},
+        {"name": "duckdb-analytics", "summary": "A columnar store."},
+    ]})
+
+    assert [a["label"] for a in ds.gather_anchors(_LOG)] == ["duckdb-analytics"]
+
+
+def test_gather_anchors_reports_a_missing_vault(stub_anchors, monkeypatch, caplog):
+    monkeypatch.setattr(ds, "page_summaries", lambda: {"error": "vault not found"})
+
+    with caplog.at_level(logging.WARNING):
+        assert ds.gather_anchors(_LOG) == []
+    assert "vault not found" in caplog.text
+
+
+def test_company_anchor_needs_its_whole_name(monkeypatch):
+    # "Planet Fitness" matched the publication "UX Planet" on `planet` and, being a
+    # two-token anchor, outranked every page in the vault.
+    monkeypatch.setattr(ds, "page_summaries", lambda: {"pages": []})
+    monkeypatch.setattr(ds, "get_watchlist", lambda: [{"company": "Planet Fitness"}])
+    monkeypatch.setattr(ds, "list_opportunities", lambda **k: {"opportunities": []})
+    anchors = ds.gather_anchors(_LOG)
+
+    partial = _sig("chrome", "UX Planet article", {"planet", "article"})
+    whole = _sig("chrome", "Planet Fitness opens a gym", {"planet", "fitness", "opens"})
+    assert ds.candidate_pairs([partial], anchors) == []
+    assert len(ds.candidate_pairs([whole], anchors)) == 1
+
+
+def test_render_candidates_shows_the_anchor_summary():
+    pair = {"kind": "anchor", "score": 1.0, "overlap": ["duckdb"],
+            "signal": _sig("chrome", "DuckDB docs", {"duckdb"}),
+            "anchor": {"kind": "wiki page", "label": "duckdb-analytics",
+                       "summary": "A columnar store for single-node work."}}
+    assert "— A columnar store for single-node work." in ds.render_candidates([pair])
 
 
 # --------------------------------------------------------------------------- #
@@ -291,7 +420,7 @@ def test_parse_nudges_none_yields_nothing():
 def test_genuine_overlap_pushes_one_nudge(stub_sources, monkeypatch):
     monkeypatch.setattr(ds, "fetch_liked_videos",
                         lambda *a, **k: {"videos": [{"title": "DuckDB deep dive", "channel": "X"}]})
-    monkeypatch.setattr(ds, "list_wiki_pages", lambda: {"pages": ["duckdb-analytics.md"]})
+    monkeypatch.setattr(ds, "page_summaries", lambda: {"pages": [{"name": "duckdb-analytics", "summary": ""}]})
 
     assert ds.main() == 0
     assert stub_sources["model"] == 1
@@ -306,7 +435,7 @@ def test_genuine_overlap_writes_vault_entry(stub_sources, tmp_path, monkeypatch)
     # push.
     monkeypatch.setattr(ds, "fetch_liked_videos",
                         lambda *a, **k: {"videos": [{"title": "DuckDB deep dive", "channel": "X"}]})
-    monkeypatch.setattr(ds, "list_wiki_pages", lambda: {"pages": ["duckdb-analytics.md"]})
+    monkeypatch.setattr(ds, "page_summaries", lambda: {"pages": [{"name": "duckdb-analytics", "summary": ""}]})
 
     assert ds.main() == 0
     files = list(tmp_path.glob("Daily-Synthesis-*.md"))
@@ -326,7 +455,7 @@ def test_archive_goes_to_synthesis_dir_not_learnings_dir(stub_sources, tmp_path,
     monkeypatch.setenv("SYNTHESIS_DIR", str(nudges))
     monkeypatch.setattr(ds, "fetch_liked_videos",
                         lambda *a, **k: {"videos": [{"title": "DuckDB deep dive", "channel": "X"}]})
-    monkeypatch.setattr(ds, "list_wiki_pages", lambda: {"pages": ["duckdb-analytics.md"]})
+    monkeypatch.setattr(ds, "page_summaries", lambda: {"pages": [{"name": "duckdb-analytics", "summary": ""}]})
 
     assert ds.main() == 0
     assert len(list(nudges.glob("Daily-Synthesis-*.md"))) == 1
@@ -337,7 +466,7 @@ def test_no_overlap_pushes_nothing_and_skips_model(stub_sources, tmp_path, monke
     # A signal and an anchor that share no tokens.
     monkeypatch.setattr(ds, "fetch_liked_videos",
                         lambda *a, **k: {"videos": [{"title": "Terraform basics", "channel": "X"}]})
-    monkeypatch.setattr(ds, "list_wiki_pages", lambda: {"pages": ["sourdough.md"]})
+    monkeypatch.setattr(ds, "page_summaries", lambda: {"pages": [{"name": "sourdough", "summary": ""}]})
 
     assert ds.main() == 0
     assert stub_sources["model"] == 0        # never warmed/queried the model
@@ -370,7 +499,7 @@ def test_echo_across_channels_reaches_the_model(stub_sources, tmp_path, monkeypa
 def test_model_says_none_pushes_nothing(stub_sources, monkeypatch):
     monkeypatch.setattr(ds, "fetch_liked_videos",
                         lambda *a, **k: {"videos": [{"title": "DuckDB deep dive", "channel": "X"}]})
-    monkeypatch.setattr(ds, "list_wiki_pages", lambda: {"pages": ["duckdb-analytics.md"]})
+    monkeypatch.setattr(ds, "page_summaries", lambda: {"pages": [{"name": "duckdb-analytics", "summary": ""}]})
     monkeypatch.setattr(ds, "complete_text", lambda **k: "NONE")
 
     assert ds.main() == 0
@@ -385,7 +514,7 @@ def test_dead_source_degrades_and_still_runs(stub_sources, monkeypatch):
     monkeypatch.setattr(ds, "fetch_chrome_history", _boom)
     monkeypatch.setattr(ds, "fetch_liked_videos",
                         lambda *a, **k: {"videos": [{"title": "DuckDB deep dive", "channel": "X"}]})
-    monkeypatch.setattr(ds, "list_wiki_pages", lambda: {"pages": ["duckdb-analytics.md"]})
+    monkeypatch.setattr(ds, "page_summaries", lambda: {"pages": [{"name": "duckdb-analytics", "summary": ""}]})
 
     assert ds.main() == 0
     assert len(stub_sources["pushes"]) == 1

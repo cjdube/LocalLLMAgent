@@ -59,6 +59,11 @@ _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
 _LENS_RE = re.compile(r"^\s*lens:\s*true\s*$", re.IGNORECASE | re.MULTILINE)
 _DESC_RE = re.compile(r"^\s*description:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
 
+# ObsidianWikiAgent gives every concept page a one-line `**Summary**:` under its
+# title — all 203 pages had one when this was added. It's the cheapest description
+# of what a page is *about*, as opposed to what it's called.
+_SUMMARY_RE = re.compile(r"^\*\*Summary\*\*:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
+
 
 def _vault() -> Path:
     return Path(os.getenv("WIKI_VAULT_PATH", DEFAULT_WIKI_VAULT)).expanduser()
@@ -143,6 +148,21 @@ def _list_lenses(vault: Path) -> list:
     return lenses
 
 
+def _page_summaries(vault: Path) -> list:
+    """Every wiki page as {name, summary}, the summary being its own `**Summary**:`
+    line ("" if it somehow lacks one). Head-reads each page like _list_lenses, so
+    the whole vault costs one bounded read apiece."""
+    rows = []
+    for name in _list_wiki_pages(vault)["pages"]:
+        try:
+            head = (vault / "wiki" / name).read_text(encoding="utf-8")[:_HEAD_CHARS]
+        except OSError:
+            continue
+        match = _SUMMARY_RE.search(head)
+        rows.append({"name": name[:-3], "summary": match.group(1) if match else ""})
+    return rows
+
+
 # --- model-facing tools (no vault argument; read the configured vault) ---
 
 def read_wiki_index() -> dict:
@@ -160,6 +180,15 @@ def read_wiki_page(name: str) -> dict:
         return {"error": "name must not be empty"}
     vault, err = _require_vault()
     return err or _read_wiki_page(vault, name.strip())
+
+
+def page_summaries() -> dict:
+    """Every wiki page with its one-line summary. Not a registered tool — it exists
+    for tasks/daily_synthesis.py, which matches yesterday's activity against what a
+    page is about rather than what it's named (matching on the filename alone can
+    only ever find lexical identity)."""
+    vault, err = _require_vault()
+    return err or {"pages": _page_summaries(vault)}
 
 
 def list_lenses() -> dict:

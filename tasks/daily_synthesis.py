@@ -45,7 +45,7 @@ from agent.tools.chrome_history import fetch_chrome_history
 from agent.tools.learnings_file import read_entry
 from agent.tools.notify import notify
 from agent.tools.opportunities import get_watchlist, list_opportunities
-from agent.tools.wiki import list_wiki_pages
+from agent.tools.wiki import page_summaries
 from agent.tools.youtube import fetch_liked_videos
 from tasks._common import notify_failure, setup_logger
 from tasks._learnings_common import (
@@ -68,6 +68,10 @@ DEFAULT_SYNTHESIS_DIR = str(Path.home() / "Documents" / "llm-wiki-learnings" / "
 MAX_ANCHOR_CANDIDATES = 5
 MAX_CROSS_CANDIDATES = 3
 MAX_NUDGES = 3
+
+# A wiki page's summary as shown to the model. One line in the vault, so this rarely
+# binds; it's here so one long summary can't dominate the shortlist's size.
+MAX_ANCHOR_SUMMARY_CHARS = 200
 
 # Bullets taken from the AI-chat log. Bounds the prompt on a heavy chat day; the
 # file's bullets are ordered by session, so this keeps the earliest ones.
@@ -100,6 +104,23 @@ _DUP_MIN_OVERLAP = 4
 # rule (a wiki page named `gemma-4` has only one token to match), but a two-signal
 # pair always has richer text on both sides, so it can afford to be asked for more.
 _MIN_ECHO_OVERLAP = 2
+
+# Share of the anchor corpus a token can appear in before it stops discriminating.
+# Anchoring on page *summaries* rather than names is what makes this necessary: prose
+# is full of words that are everywhere in the vault, and the first run of it matched
+# on {agent, design}, {backend, local}, {dashboard, wren} and {agent, through} — four
+# of five candidates were vocabulary coincidences rather than topical connections. A
+# fixed stopword list can't reach this (it would have to contain half of Craig's
+# domain), so the set is computed from the corpus each run and tracks what his wiki is
+# actually about. Echoes are exempt: there the coincidence is *temporal* — the same
+# word arriving through two channels in one day means something even if the word is
+# common — and the anchor corpus isn't involved in the pair at all.
+_GENERIC_TOKEN_SHARE = 0.05
+
+# ...but never call a token filler on the evidence of fewer than this many pages. The
+# share alone would make any token shared by two pages generic in a ten-page vault,
+# which is a statistic about the sample size, not about the token.
+_GENERIC_TOKEN_FLOOR = 5
 
 # Long-but-generic words that would otherwise create spurious matches between
 # any tech page and any tech note. Deliberately short — the model is the real
@@ -141,6 +162,14 @@ def _synthesis_dir() -> Path:
 # The AI-chat log's section headers ("**Learned**") and the two empty-section
 # markers the learnings templates use.
 _SECTION_RE = re.compile(r"^\*\*(\w+)\*\*$")
+
+# Wiki pages whose name ends in a date are ObsidianWikiAgent's write-ups of the
+# daily/weekly logs — `daily-chrome-2026-07-24`, `ai-chat-learnings-2026-07-01`,
+# `strategic-weekly-review-...`. They are records of Craig's activity, not concept
+# knowledge, so matching yesterday's activity against them is circular: on real data
+# yesterday's browsing matched the page written from yesterday's browsing. 49 of the
+# vault's 203 pages, so excluding them also frees up a quarter of the anchor set.
+_DATED_PAGE_RE = re.compile(r"\d{4}-\d{2}-\d{2}$")
 
 
 def _is_none_marker(bullet: str) -> bool:
@@ -249,15 +278,26 @@ def gather_signals(start, end, day, logger) -> list:
 
 
 def gather_anchors(logger) -> list:
-    """Craig's existing world as {label, tokens} rows: wiki page names and the
-    companies he watches or has marked interesting. Same per-source guard."""
+    """Craig's existing world as {label, summary, tokens} rows: wiki pages and the
+    companies he watches or has marked interesting. Same per-source guard.
+
+    A page contributes its `**Summary**:` line as well as its name. Matching on the
+    name alone can only find lexical identity — "the thing you looked at is spelled
+    like a page you have" — which is tautological by construction and exactly the
+    reason the early nudges only ever restated the day back at him. The summary is
+    what lets "columnar store" reach a page called `duckdb-analytics`."""
     anchors = []
 
     try:
-        for page in list_wiki_pages().get("pages", []):
-            name = page[:-3] if page.endswith(".md") else page
-            anchors.append({"kind": "wiki page", "label": name,
-                            "tokens": _tokenize(name.replace("-", " "))})
+        result = page_summaries()
+        if "error" in result:
+            logger.warning(f"wiki anchors unavailable: {result['error']}")
+        for page in result.get("pages", []):
+            name, summary = page["name"], page.get("summary") or ""
+            if _DATED_PAGE_RE.search(name):
+                continue
+            anchors.append({"kind": "wiki page", "label": name, "summary": summary,
+                            "tokens": _tokenize(f"{name.replace('-', ' ')} {summary}")})
     except Exception as e:
         logger.warning(f"wiki anchors unavailable: {e}")
 
@@ -275,7 +315,10 @@ def gather_anchors(logger) -> list:
     except Exception as e:
         logger.warning(f"opportunity anchors unavailable: {e}")
     for company in companies.values():
-        anchors.append({"kind": "company you track", "label": company,
+        # `exact`: half a company name is not the company. "Planet Fitness" matched
+        # the publication "UX Planet" on `planet` and, being a two-token anchor,
+        # outranked every page in the vault — short anchors win the normalized score.
+        anchors.append({"kind": "company you track", "label": company, "exact": True,
                         "tokens": _tokenize(company)})
 
     return anchors
@@ -288,16 +331,24 @@ def _ranked(pairs: list) -> list:
     return pairs
 
 
-def _one_per_signal(pairs: list) -> list:
-    """Keep each signal's strongest pair only, `pairs` already ranked. One busy
-    browsing row matches several near-identical wiki pages — a Gemini session
-    matched `google-gemini` and `google-gemini-api` and took three of five slots on
-    real data — so without this the shortlist shows the model one activity from three
-    angles instead of the day."""
-    best = {}
+def _one_per_side(pairs: list) -> list:
+    """Keep each pair only if neither of its sides has already placed a stronger one,
+    `pairs` already ranked. Both directions bite on real data: a Gemini browsing row
+    matched `google-gemini` and `google-gemini-api` and took three of five slots, and
+    one page (`claude-knowledge-base-design`) matched a tutorial and the video of that
+    same tutorial. Either way the shortlist ends up showing the model one story
+    several times instead of showing it the day."""
+    seen_signals, seen_anchors, kept = set(), set(), []
     for p in pairs:
-        best.setdefault(p["signal"]["text"], p)
-    return list(best.values())
+        signal = p["signal"]["text"]
+        # Echoes have two signals and no anchor; key the second side the same way.
+        anchor = p["anchor"]["label"] if p["kind"] == "anchor" else p["other"]["text"]
+        if signal in seen_signals or anchor in seen_anchors:
+            continue
+        seen_signals.add(signal)
+        seen_anchors.add(anchor)
+        kept.append(p)
+    return kept
 
 
 def _same_artifact(match: dict) -> bool:
@@ -307,16 +358,35 @@ def _same_artifact(match: dict) -> bool:
             and len(match["overlap"]) >= _DUP_MIN_OVERLAP)
 
 
+def generic_tokens(anchors: list) -> set:
+    """Tokens common enough across the anchor corpus to carry no signal. See
+    _GENERIC_TOKEN_SHARE and _GENERIC_TOKEN_FLOOR."""
+    if not anchors:
+        return set()
+    counts = Counter(token for anchor in anchors for token in anchor["tokens"])
+    limit = max(_GENERIC_TOKEN_FLOOR, int(len(anchors) * _GENERIC_TOKEN_SHARE))
+    return {token for token, count in counts.items() if count >= limit}
+
+
 def candidate_pairs(signals: list, anchors: list) -> list:
-    """CONNECTION candidates: each signal against each anchor sharing a token.
-    Pure — half of the matching step."""
+    """CONNECTION candidates: each signal against each anchor sharing a token that
+    still discriminates. Pure — half of the matching step."""
+    generic = generic_tokens(anchors)
     pairs = []
     for sig in signals:
         for anc in anchors:
-            m = _match(sig["tokens"], anc["tokens"])
-            if m:
-                pairs.append({"kind": "anchor", "signal": sig, "anchor": anc, **m})
-    return _one_per_signal(_ranked(pairs))[:MAX_ANCHOR_CANDIDATES]
+            if anc.get("exact"):
+                # A company is matched on its whole name, so no token is generic to
+                # it — dropping one would make the name unmatchable.
+                m = _match(sig["tokens"], anc["tokens"])
+                if not m or set(m["overlap"]) != anc["tokens"]:
+                    continue
+            else:
+                m = _match(sig["tokens"] - generic, anc["tokens"] - generic)
+                if not m:
+                    continue
+            pairs.append({"kind": "anchor", "signal": sig, "anchor": anc, **m})
+    return _one_per_side(_ranked(pairs))[:MAX_ANCHOR_CANDIDATES]
 
 
 def cross_channel_pairs(signals: list) -> list:
@@ -339,7 +409,7 @@ def cross_channel_pairs(signals: list) -> list:
             m = _match(a["tokens"], b["tokens"])
             if m and len(m["overlap"]) >= _MIN_ECHO_OVERLAP and not _same_artifact(m):
                 pairs.append({"kind": "cross", "signal": a, "other": b, **m})
-    return _ranked(pairs)[:MAX_CROSS_CANDIDATES]
+    return _one_per_side(_ranked(pairs))[:MAX_CROSS_CANDIDATES]
 
 
 def render_candidates(pairs: list) -> str:
@@ -357,9 +427,13 @@ def render_candidates(pairs: list) -> str:
             )
         else:
             anc = p["anchor"]
+            # The summary is what makes a match judgeable: "google-stitch" alone tells
+            # the model nothing about whether the connection is real.
+            summary = (anc.get("summary") or "")[:MAX_ANCHOR_SUMMARY_CHARS]
             lines.append(
                 f"{i}. CONNECTION — yesterday he {sig['kind']}: \"{sig['text']}\"\n"
-                f"   existing {anc['kind']}: \"{anc['label']}\"\n"
+                f"   existing {anc['kind']}: \"{anc['label']}\""
+                + (f" — {summary}" if summary else "") + "\n"
                 f"   shared terms: {', '.join(p['overlap'])}"
             )
     return "\n".join(lines)
@@ -385,7 +459,8 @@ def main() -> int:
         signals = gather_signals(start, end, day, logger)
         anchors = gather_anchors(logger)
         logger.info(f"{len(signals)} signal(s) {dict(Counter(s['channel'] for s in signals))}, "
-                    f"{len(anchors)} anchor(s)")
+                    f"{len(anchors)} anchor(s), "
+                    f"{len(generic_tokens(anchors))} token(s) too common to discriminate")
 
         candidates = candidate_pairs(signals, anchors) + cross_channel_pairs(signals)
         logger.info(f"{len(candidates)} candidate(s) after overlap match "
