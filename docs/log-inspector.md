@@ -49,8 +49,25 @@ started. Absence of evidence is the signal. Three outcomes:
 | `missing` | No run at all in the window. launchd never fired it, or it died on import. |
 
 Daemons (chat server, `bg_worker`, `reminder_sweep`) are skipped — they emit no
-run boundaries. Weekly tasks (any plist with a `Weekday` key) are skipped for
-`missing`, since a 24h window can't tell "didn't run" from "isn't due."
+run boundaries.
+
+A task is judged only on the inspection run that *follows* a scheduled start, so
+absence means "was due and didn't run" rather than "isn't due yet". `_last_due()`
+resolves the plist's `StartCalendarInterval` to the most recent wall-clock time
+launchd should have fired it; the task is judged when that time falls inside the
+24h window. For a daily task that's every run — a 24h period always lands in a
+24h window — so the gate is a no-op there. For a weekly task it's the single run
+after its due time: `opportunity_digest` (Sun 21:00) and `starred_blurbs`
+(Sun 20:00) are judged at Monday 08:00 and are quiet the other six days, which
+also means one report per missed occurrence rather than daily nagging until the
+next Sunday.
+
+Weekly tasks were previously skipped for `missing` outright, on the reasoning
+that a 24h window can't tell "didn't run" from "isn't due" — true of a bare
+window, but the due time is derivable from the plist, and the skip left the two
+weekly tasks with no Signal B at all. Schedule shapes `_last_due()` can't place
+in time (a `Day` or `Month` key, or a list of dicts) still fall back to silence
+rather than guessing a due date and crying wolf.
 
 **Signal C — the push channel probe** (`ntfy_health`, in `agent/tools/notify.py`
 — the push channel's own module, since the dashboard's live `push up` pill runs

@@ -44,8 +44,13 @@ WINDOW_HOURS = 24
 
 # A run still marked "running" this long after it started never logged an end —
 # the process died without raising (SIGKILL, OOM), which no error line records.
-# Generous on purpose: the last daily task starts at 7:30 and this runs at 8:00,
-# so a slow-but-healthy run is never mistaken for a dead one.
+#
+# What keeps a slow-but-healthy run from reading as dead is the schedule gap, not
+# this number: every scheduled task starts hours before the 8:00 inspection (the
+# latest, starred_installed, at 20:10), so nothing is legitimately in flight when
+# we look. The margin is thinner than it appears, though — ai_chat_learnings has
+# taken 56 minutes, 93% of an hour. Raise this if a task is ever scheduled within
+# ~2h of 8:00, or trim that task's runtime.
 STALL_HOURS = 1
 
 # Benign lines that would otherwise drown the signal. Everything else at
@@ -147,9 +152,14 @@ def _task_outcomes(now: datetime) -> dict[str, list[str]]:
         # boundaries, so parse_runs has nothing to judge them by.
         if task["is_daemon"]:
             continue
-        # A Weekday key means weekly: a 24h window can't tell "didn't run" from
-        # "isn't due". No task is weekly today; this keeps a future one quiet.
-        if "Weekday" in (task["schedule"] or {}):
+        # Judge a task only on the inspection run that follows a scheduled start,
+        # so absence means "was due and didn't run" rather than "isn't due yet".
+        # For a daily task that's every run (a 24h period always lands in a 24h
+        # window), so this is a no-op there. For a weekly one it's the single run
+        # after its due time — previously those were skipped outright, which left
+        # opportunity_digest and starred_blurbs with no Signal B at all.
+        due = _last_due(task["schedule"], now)
+        if due is None or due < cutoff:
             continue
 
         recent = []
@@ -166,6 +176,25 @@ def _task_outcomes(now: datetime) -> dict[str, list[str]]:
         elif any(r["status"] == "running" and s < stall_cutoff for r, s in recent):
             out["stalled"].append(task["key"])
     return out
+
+
+def _last_due(sci: dict | None, now: datetime) -> datetime | None:
+    """The most recent wall-clock time launchd should have started this task,
+    or None if the schedule isn't one we can reason about.
+
+    Naive local throughout, matching launchd (which schedules on wall clock) and
+    the log timestamps — see the note in main().
+    """
+    if not isinstance(sci, dict) or not set(sci).issubset({"Hour", "Minute", "Weekday"}):
+        return None
+    due = now.replace(hour=sci.get("Hour", 0), minute=sci.get("Minute", 0),
+                      second=0, microsecond=0)
+    if "Weekday" not in sci:
+        return due if due <= now else due - timedelta(days=1)
+    # launchd's Weekday and isoweekday() agree once both are taken mod 7:
+    # Sunday is 0 or 7 in launchd and 7 in isoweekday, Mon-Sat are 1-6 in both.
+    due -= timedelta(days=(due.isoweekday() % 7 - sci["Weekday"] % 7) % 7)
+    return due if due <= now else due - timedelta(days=7)
 
 
 def _by_source(findings: list[dict]) -> str:

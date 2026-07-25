@@ -245,12 +245,101 @@ def test_daemons_are_skipped(monkeypatch, tmp_path):
     assert log_inspector._task_outcomes(NOW)["missing"] == []
 
 
-def test_weekly_task_is_not_reported_missing(monkeypatch, tmp_path):
-    """A 24h window can't tell 'didn't run' from 'isn't due' for a weekly task."""
+def test_weekly_task_not_due_in_the_window_is_not_reported_missing(monkeypatch, tmp_path):
+    """NOW is a Thursday, so a Sunday task's last due time is four days back:
+    'isn't due' must not read as 'didn't run'."""
     monkeypatch.setattr(log_inspector, "discover_tasks", lambda: [
         _task(tmp_path, "weekly_thing", schedule={"Weekday": 0, "Hour": 5, "Minute": 0})])
     (tmp_path / "weekly_thing.log").write_text("")
     assert log_inspector._task_outcomes(NOW)["missing"] == []
+
+
+def test_weekly_task_due_in_the_window_is_reported_missing(monkeypatch, tmp_path):
+    """The gap this closes: a weekly task that was due last night and never ran
+    used to be skipped outright, so nothing reported it."""
+    monkeypatch.setattr(log_inspector, "discover_tasks", lambda: [
+        _task(tmp_path, "weekly_thing", schedule={"Weekday": 3, "Hour": 21, "Minute": 0})])
+    (tmp_path / "weekly_thing.log").write_text("")
+    assert log_inspector._task_outcomes(NOW)["missing"] == ["weekly_thing"]
+
+
+def test_weekly_task_that_ran_when_due_is_silent(monkeypatch, tmp_path):
+    monkeypatch.setattr(log_inspector, "discover_tasks", lambda: [
+        _task(tmp_path, "weekly_thing", schedule={"Weekday": 3, "Hour": 21, "Minute": 0})])
+    at = NOW - timedelta(hours=11)  # Wednesday 21:00, its due time
+    (tmp_path / "weekly_thing.log").write_text("\n".join(_run(
+        at, "weekly thing",
+        _line(at + timedelta(seconds=5), "INFO", "Weekly thing run complete"),
+    )) + "\n")
+    assert log_inspector._task_outcomes(NOW) == {"failed": [], "stalled": [], "missing": []}
+
+
+def test_weekly_task_failure_is_reported(monkeypatch, tmp_path):
+    monkeypatch.setattr(log_inspector, "discover_tasks", lambda: [
+        _task(tmp_path, "weekly_thing", schedule={"Weekday": 3, "Hour": 21, "Minute": 0})])
+    at = NOW - timedelta(hours=11)
+    (tmp_path / "weekly_thing.log").write_text("\n".join(_run(
+        at, "weekly thing",
+        _line(at + timedelta(seconds=5), "ERROR", "Weekly thing run failed: boom"),
+    )) + "\n")
+    assert log_inspector._task_outcomes(NOW)["failed"] == ["weekly_thing"]
+
+
+def test_weekly_task_is_reported_once_not_every_day(monkeypatch, tmp_path):
+    """A weekly miss must not nag daily until the next occurrence. The Thursday
+    08:00 run reports it; Friday and Saturday stay quiet."""
+    monkeypatch.setattr(log_inspector, "discover_tasks", lambda: [
+        _task(tmp_path, "weekly_thing", schedule={"Weekday": 3, "Hour": 21, "Minute": 0})])
+    (tmp_path / "weekly_thing.log").write_text("")
+    reported = [log_inspector._task_outcomes(NOW + timedelta(days=d))["missing"]
+                for d in range(3)]
+    assert reported == [["weekly_thing"], [], []]
+
+
+def test_monthly_schedule_is_skipped(monkeypatch, tmp_path):
+    """A schedule shape we can't place in time keeps the old silence rather than
+    guessing a due date and crying wolf. Day/Month are the shapes we don't read."""
+    monkeypatch.setattr(log_inspector, "discover_tasks", lambda: [
+        _task(tmp_path, "odd_thing", schedule={"Day": 1, "Hour": 5, "Minute": 0})])
+    (tmp_path / "odd_thing.log").write_text("")
+    assert log_inspector._task_outcomes(NOW)["missing"] == []
+
+
+@pytest.mark.parametrize("sci", [None, "", [{"Hour": 5}]])
+def test_unreadable_schedule_has_no_due_time(sci):
+    """launchd also allows a list of dicts; we don't read that shape either."""
+    assert log_inspector._last_due(sci, NOW) is None
+
+
+@pytest.mark.parametrize("launchd_weekday", [0, 7])
+def test_sunday_is_both_zero_and_seven(launchd_weekday):
+    """launchd accepts either for Sunday; both must resolve to the same day."""
+    sunday_9pm = datetime(2026, 7, 19, 21, 0)
+    monday_8am = datetime(2026, 7, 20, 8, 0)
+    sci = {"Weekday": launchd_weekday, "Hour": 21, "Minute": 0}
+    assert log_inspector._last_due(sci, monday_8am) == sunday_9pm
+
+
+def test_due_time_later_today_resolves_to_last_week():
+    """Sunday 08:00, for a task due Sunday 21:00: the due time is tonight, so the
+    last one was a week ago — not today, which would report it missing early."""
+    sci = {"Weekday": 0, "Hour": 21, "Minute": 0}
+    assert log_inspector._last_due(sci, datetime(2026, 7, 19, 8, 0)) == datetime(2026, 7, 12, 21, 0)
+
+
+def test_daily_due_time_later_today_resolves_to_yesterday():
+    sci = {"Hour": 20, "Minute": 10}
+    assert log_inspector._last_due(sci, datetime(2026, 7, 19, 8, 0)) == datetime(2026, 7, 18, 20, 10)
+
+
+def test_every_real_daily_task_is_still_judged_at_the_scheduled_inspection_time():
+    """A daily period always lands inside a 24h window, so the new due-time gate
+    must be a no-op for dailies no matter what hour they run at."""
+    now = datetime(2026, 7, 16, 8, 0)  # when the inspector actually fires
+    cutoff = now - timedelta(hours=log_inspector.WINDOW_HOURS)
+    for hour in range(24):
+        due = log_inspector._last_due({"Hour": hour, "Minute": 0}, now)
+        assert due is not None and due >= cutoff, hour
 
 
 def test_yesterdays_run_does_not_count_as_today(monkeypatch, tmp_path):
