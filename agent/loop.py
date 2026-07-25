@@ -79,6 +79,7 @@ def _ollama_chat(
     timeout: float = None,
     logger: Optional[logging.Logger] = None,
     should_cancel: Optional[Callable[[], bool]] = None,
+    think: Optional[bool] = None,
 ) -> dict:
     """POST a chat completion to Ollama and return the reassembled response
     `message` dict. Centralizes model/host/timeout env defaulting so advance()
@@ -109,6 +110,9 @@ def _ollama_chat(
     # loop and, uncapped, run away for thousands of junk tokens that then live
     # in the session history (observed: a 5,459-token "list memories" reply).
     # 3072 clears the longest legitimate reply seen (a ~2,200-token teardown).
+    # Note this budget covers THINKING TOKENS TOO, and it was sized before the
+    # model had a thinking channel: a reasoning-heavy call can spend all 3072 on
+    # scratchpad and return empty content (see `think` below).
     num_predict = int(os.getenv("OLLAMA_NUM_PREDICT", "3072"))
 
     payload = {
@@ -122,6 +126,10 @@ def _ollama_chat(
     }
     if tools is not None:
         payload["tools"] = tools
+    # Omitted entirely unless a caller opts out, so chat keeps the model's
+    # default behaviour. See complete_text() for why a task turns it off.
+    if think is not None:
+        payload["think"] = think
 
     content_parts: list[str] = []
     tool_calls: list[dict] = []
@@ -165,7 +173,9 @@ def _ollama_chat(
             logger.warning(
                 "ollama generation (%d tokens) reached num_predict=%d and was "
                 "cut off — healthy replies stay well under the cap, so this "
-                "usually means a repetition loop",
+                "means either a repetition loop or a thinking model spending "
+                "the whole budget on scratchpad (which returns EMPTY content; "
+                "pass think=False for template-filling calls)",
                 eval_tokens, num_predict,
             )
     return message
@@ -286,16 +296,22 @@ def _llm_chat(
     timeout: float = None,
     logger: Optional[logging.Logger] = None,
     should_cancel: Optional[Callable[[], bool]] = None,
+    think: Optional[bool] = None,
 ) -> dict:
     """Dispatch a chat completion to the selected backend, returning the same
-    canonical `message` dict shape regardless of provider."""
+    canonical `message` dict shape regardless of provider.
+
+    `think` is canonical, not Ollama-specific: every current backend runs a
+    thinking model whose scratchpad competes with the visible answer for the
+    same token budget. None leaves each provider's default alone."""
     b = _resolve_backend(backend)
     if b == "ollama":
         return _ollama_chat(messages, model=model, host=host, tools=tools,
-                            timeout=timeout, logger=logger, should_cancel=should_cancel)
+                            timeout=timeout, logger=logger, should_cancel=should_cancel,
+                            think=think)
     if b in ("gemini", "google"):
         return _gemini_chat(messages, model=model, tools=tools, timeout=timeout,
-                            logger=logger, should_cancel=should_cancel)
+                            logger=logger, should_cancel=should_cancel, think=think)
     raise ValueError(f"unknown WREN_LLM_BACKEND {b!r} (expected 'ollama' or 'gemini')")
 
 
@@ -442,11 +458,20 @@ def complete_text(
     timeout: float = None,
     logger: Optional[logging.Logger] = None,
     backend: Optional[str] = None,
+    think: Optional[bool] = None,
 ) -> str:
     """Single-turn, tool-free completion — for tasks like writing a short
     summary paragraph where the caller assembles the surrounding structure
     itself rather than trusting the model to produce it. `backend` lets a
-    scheduled task route just itself to a cloud model (see resolve_backend)."""
+    scheduled task route just itself to a cloud model (see resolve_backend).
+
+    Pass `think=False` for a call that fills in a template — a classification,
+    a score, a fixed output format. Thinking tokens are drawn from the same
+    num_predict budget as the answer, so a model that reasons too long returns
+    EMPTY content rather than a truncated answer, which reads downstream as a
+    parse failure. Measured on 40-lead digest scoring: thinking on, 0 of 3 runs
+    produced output (all cut off at the cap); thinking off, 3 of 3, and 5x
+    faster. The chat path leaves this None — there, reasoning is the point."""
     message = _llm_chat(
         [
             {"role": "system", "content": with_identity(system_prompt)},
@@ -457,5 +482,6 @@ def complete_text(
         host=host,
         timeout=timeout,
         logger=logger,
+        think=think,
     )
     return message.get("content", "").strip()

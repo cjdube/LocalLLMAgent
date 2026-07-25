@@ -120,6 +120,40 @@ def test_num_predict_honors_env_override(monkeypatch):
     assert captured["payload"]["options"]["num_predict"] == 1024
 
 
+def test_think_key_omitted_unless_a_caller_opts_out(monkeypatch):
+    # Chat must keep the model's default behaviour: no key in the payload at all.
+    captured = {}
+    _patch_post(monkeypatch, captured, {"message": {"content": "hi"}})
+
+    loop._ollama_chat([{"role": "user", "content": "hey"}])
+
+    assert "think" not in captured["payload"]
+
+
+def test_think_false_reaches_the_payload(monkeypatch):
+    # A template-filling task turns thinking off: the scratchpad competes with
+    # the answer for num_predict, and losing that race returns EMPTY content.
+    captured = {}
+    _patch_post(monkeypatch, captured, {"message": {"content": "hi"}})
+
+    loop._ollama_chat([{"role": "user", "content": "hey"}], think=False)
+
+    assert captured["payload"]["think"] is False
+
+
+def test_complete_text_passes_think_through_the_seam(monkeypatch):
+    seen = {}
+
+    def fake_llm_chat(messages, **kwargs):
+        seen.update(kwargs)
+        return {"content": "ok"}
+
+    monkeypatch.setattr(loop, "_llm_chat", fake_llm_chat)
+
+    assert loop.complete_text("sys", "user", think=False) == "ok"
+    assert seen["think"] is False
+
+
 def test_warns_when_generation_reaches_num_predict(monkeypatch, caplog):
     monkeypatch.setenv("OLLAMA_NUM_PREDICT", "50")
     _patch_post(

@@ -139,6 +139,7 @@ def _gemini_chat(
     timeout: float = None,
     logger: Optional[logging.Logger] = None,
     should_cancel: Optional[Callable[[], bool]] = None,
+    think: Optional[bool] = None,
 ) -> dict:
     """Gemini backend. Streams (consulting should_cancel between chunks so the
     chat cancel button still lands), reassembling the reply into the same
@@ -160,6 +161,10 @@ def _gemini_chat(
     # gemini-2.5-flash (the default model); gemini-2.5-pro can't disable thinking,
     # so pin a positive WREN_GEMINI_THINKING_BUDGET if you switch to pro.
     thinking_budget = int(os.getenv("WREN_GEMINI_THINKING_BUDGET", "0"))
+    # A caller's explicit think=False wins over the env budget — it's the
+    # canonical seam's way of saying "this call fills in a template".
+    if think is False:
+        thinking_budget = 0
     system, contents = _gemini_contents(messages)
 
     cfg_kwargs = dict(

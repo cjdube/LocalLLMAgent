@@ -146,6 +146,8 @@ def main() -> int:
             system_prompt=CLASSIFY_SYSTEM_PROMPT,
             user_prompt=json.dumps(_classify_input(events)),
             backend=resolve_backend("calendar_colorizer"),
+            think=False,   # picking a colorId per title needs no chain-of-thought
+            logger=logger,  # surfaces loop.py's num_predict cut-off warning
         )
         logger.info(f"Raw classification response: {raw_response}")
 

@@ -117,7 +117,9 @@ open a long time (founder is stretched thin), "hiring" = they're seeking product
 leadership.
 
 For EACH lead output exactly one line in this format, nothing else:
-id|score|angle
+n|score|angle
+
+- n: the lead's "n" value, copied exactly.
 
 - score: 1-10, how likely this company has a gap between product strategy and engineering \
 execution that a fractional operator could fill. Investment funds, holding companies, \
@@ -126,7 +128,7 @@ fresh raise or a long-open leadership seat score high.
 - angle: ONE short sentence suggesting {_NAME}'s outreach angle. Plain text, no pipe \
 characters, no markdown.
 
-Output only the id|score|angle lines, one per lead, no preamble."""
+Output only the n|score|angle lines, one per lead, no preamble."""
 
 
 # ---- watermark -------------------------------------------------------------
@@ -465,30 +467,43 @@ def poll_hn() -> dict:
 # ---- scoring ---------------------------------------------------------------
 
 def _compact_for_scoring(items: list) -> list:
-    """The subset of fields the model needs — bounds the prompt."""
+    """The subset of fields the model needs — bounds the prompt. Leads are
+    numbered 1..N for the batch rather than carrying their real id: see
+    _parse_scores."""
     return [
-        {"id": i["id"], "signal": i["signal"], "company": i["company"],
+        {"n": n, "signal": i["signal"], "company": i["company"],
          "title": i.get("title") or "", "location": i.get("location") or "",
          "snippet": (i.get("snippet") or "")[:_SNIPPET_CHARS]}
-        for i in items
+        for n, i in enumerate(items, 1)
     ]
 
 
-def _parse_scores(text: str, valid_ids: set) -> dict:
-    """Parse 'id|score|angle' lines defensively: unknown ids, bad scores, and
-    stray prose are dropped rather than crashing the digest. Items the model
-    skipped simply stay unscored."""
+def _parse_scores(text: str, batch: list) -> dict:
+    """Parse 'n|score|angle' lines into {lead id: (score, angle)} defensively:
+    out-of-range numbers, bad scores, and stray prose are dropped rather than
+    crashing the digest. Leads the model skipped simply stay unscored.
+
+    Keyed by batch position, not by lead id. Ids used to go out in the prompt
+    and come back as the first field, which cost the 2026-07-14 run: a lead id
+    is up to ~50 characters (`lever:<slug>:<uuid>`), and 40 of them per batch is
+    a lot of random string for a small model to transcribe. It burned its whole
+    token budget on that and returned nothing — the same failure that later took
+    down the calendar colorizer, except here _parse_scores degrades to {} and
+    the digest still goes out, so 11 leads were emailed unscored and silently."""
     scores = {}
     for line in (text or "").splitlines():
         parts = line.strip().split("|", 2)
-        if len(parts) < 2 or parts[0].strip() not in valid_ids:
+        if len(parts) < 2:
             continue
         try:
+            n = int(parts[0].strip())
             score = max(1, min(10, int(parts[1].strip())))
         except ValueError:
             continue
+        if not 1 <= n <= len(batch):
+            continue
         angle = parts[2].strip() if len(parts) == 3 else ""
-        scores[parts[0].strip()] = (score, angle)
+        scores[batch[n - 1]["id"]] = (score, angle)
     return scores
 
 
@@ -503,10 +518,23 @@ def score_items(items: list, logger: Optional[logging.Logger] = None) -> dict:
             system_prompt=SCORING_SYSTEM_PROMPT,
             user_prompt=f"leads: {json.dumps(_compact_for_scoring(batch))}",
             backend=resolve_backend("opportunity_digest"),
+            think=False,    # fixed n|score|angle output; see complete_text
+            logger=logger,  # surfaces loop.py's num_predict cut-off warning
         )
         if logger:
             logger.info(f"scoring output ->\n{raw}")
-        scores.update(_parse_scores(raw, {i["id"] for i in batch}))
+        batch_scores = _parse_scores(raw, batch)
+        # Unscored leads still reach the digest (they just score 0), so without
+        # this the failure is invisible: on 2026-07-14 the model returned
+        # nothing and 11 leads were emailed unscored in silence. Partial batches
+        # count too — a run that scores 8 of 10 loses two leads just as quietly.
+        if logger and len(batch_scores) < len(batch):
+            logger.warning(
+                f"scored only {len(batch_scores)} of {len(batch)} leads in this "
+                f"batch — model returned {len(raw or '')} chars; the rest go out "
+                f"unscored"
+            )
+        scores.update(batch_scores)
     return scores
 
 

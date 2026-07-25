@@ -5,6 +5,7 @@ leaves items unreported (and the watermark unadvanced) so the next run
 retries, and a stalled opening is reported exactly once. All collaborators
 are monkeypatched; nothing touches the network, the model, or Gmail."""
 
+import json
 import logging
 from datetime import datetime, timedelta
 
@@ -41,22 +42,43 @@ def test_non_leadership_titles_do_not_match(title):
 # _parse_scores
 # --------------------------------------------------------------------------- #
 
+def _batch():
+    return [{"id": "edgar:1"}, {"id": "hn:2"}]
+
+
 def test_parse_scores_defensively():
-    valid = {"edgar:1", "hn:2"}
     text = (
         "Here are the scores:\n"            # prose: dropped
-        "edgar:1|9|Fresh raise, offer a velocity audit\n"
-        "hn:2|eleven|bad score\n"           # unparseable score: dropped
-        "hn:999|5|unknown id\n"             # not in valid set: dropped
-        "edgar:1|15|clamped\n"              # duplicate: last wins, clamped to 10
+        "1|9|Fresh raise, offer a velocity audit\n"
+        "2|eleven|bad score\n"              # unparseable score: dropped
+        "99|5|out of range\n"               # no such lead in the batch: dropped
+        "1|15|clamped\n"                    # duplicate: last wins, clamped to 10
     )
-    scores = od._parse_scores(text, valid)
+    scores = od._parse_scores(text, _batch())
     assert scores == {"edgar:1": (10, "clamped")}
 
 
+def test_parse_scores_maps_numbers_back_to_lead_ids():
+    # The model never sees a lead id; Python owns the position -> id mapping.
+    assert od._parse_scores("2|8|Angle", _batch()) == {"hn:2": (8, "Angle")}
+
+
+def test_parse_scores_rejects_zero_and_negative_positions():
+    assert od._parse_scores("0|8|x\n-1|8|y", _batch()) == {}
+
+
 def test_parse_scores_empty_and_none():
-    assert od._parse_scores("", {"a"}) == {}
-    assert od._parse_scores(None, {"a"}) == {}
+    assert od._parse_scores("", _batch()) == {}
+    assert od._parse_scores(None, _batch()) == {}
+
+
+def test_compact_for_scoring_numbers_leads_and_hides_ids():
+    compact = od._compact_for_scoring([
+        {"id": "lever:acme:f1e2d3c4-5b6a-7890-abcd-ef1234567890",
+         "signal": "hiring", "company": "Acme", "title": "VP Product"},
+    ])
+    assert compact[0]["n"] == 1
+    assert "id" not in compact[0]
 
 
 # --------------------------------------------------------------------------- #
@@ -74,16 +96,21 @@ def test_score_items_batches_overflow_instead_of_dropping_it(monkeypatch):
     calls = []
 
     def fake_complete(**k):
-        # Answer only the ids in THIS prompt — a real model call is stateless.
-        ids = [i["id"] for i in items if f'"{i["id"]}"' in k["user_prompt"]]
-        calls.append(ids)
-        return "\n".join(f"{i}|7|Angle for {i}" for i in ids)
+        # Answer the leads in THIS prompt by their number — a real model call is
+        # stateless, and numbering restarts at 1 for every batch.
+        leads = json.loads(k["user_prompt"].split("leads: ", 1)[1])
+        calls.append([lead["company"] for lead in leads])
+        return "\n".join(f"{lead['n']}|7|Angle for {lead['company']}" for lead in leads)
 
     monkeypatch.setattr(od, "complete_text", fake_complete)
 
     scores = od.score_items(items)
     assert len(scores) == 5                       # nothing dropped
     assert [len(c) for c in calls] == [2, 2, 1]   # ceil(5/2) bounded prompts
+    # Per-batch numbering must not collide across batches: lead 1 of batch 2 is
+    # a different lead from lead 1 of batch 1.
+    assert {i["id"] for i in items} == set(scores)
+    assert scores["edgar:4"] == (7, "Angle for Co 4")
 
 
 def test_score_items_with_nothing_to_score_makes_no_model_call(monkeypatch):
@@ -116,7 +143,7 @@ def stubbed_run(tmp_path, monkeypatch):
     monkeypatch.setattr(od, "poll_ats", lambda watchlist: {"items": [], "errors": []})
     monkeypatch.setattr(od, "poll_hn", lambda: {"items": []})
     monkeypatch.setattr(od, "complete_text",
-                        lambda **k: seen["prompts"].append(k) or "edgar:1|9|Offer a velocity audit.")
+                        lambda **k: seen["prompts"].append(k) or "1|9|Offer a velocity audit.")
     monkeypatch.setattr(od, "send_email",
                         lambda subject, body, html=False:
                         seen["emails"].append((subject, body)) or {"message_id": "m1"})
@@ -294,7 +321,7 @@ def test_stalled_opening_reported_exactly_once(stubbed_run, monkeypatch):
                "url": "https://boards.greenhouse.io/acme/1", "posted_at": posted}
     monkeypatch.setattr(od, "poll_edgar", lambda *a: {"items": []})
     monkeypatch.setattr(od, "poll_ats", lambda wl: {"items": [posting], "errors": []})
-    monkeypatch.setattr(od, "complete_text", lambda **k: "greenhouse:acme:1|7|Offer to bridge.")
+    monkeypatch.setattr(od, "complete_text", lambda **k: "1|7|Offer to bridge.")
 
     assert od.main() == 0
     body = stubbed_run["emails"][0][1]
@@ -322,7 +349,7 @@ def test_stalled_flip_rescores_under_the_new_signal(stubbed_run, monkeypatch):
     monkeypatch.setattr(od, "poll_ats",
                         lambda wl: {"items": [posting(10)], "errors": []})
     monkeypatch.setattr(od, "complete_text",
-                        lambda **k: "greenhouse:acme:1|4|Just posted, wait.")
+                        lambda **k: "1|4|Just posted, wait.")
     assert od.main() == 0
     assert "4/10" in stubbed_run["emails"][0][1]
 
@@ -330,7 +357,7 @@ def test_stalled_flip_rescores_under_the_new_signal(stubbed_run, monkeypatch):
     monkeypatch.setattr(od, "poll_ats",
                         lambda wl: {"items": [posting(60)], "errors": []})
     monkeypatch.setattr(od, "complete_text",
-                        lambda **k: "greenhouse:acme:1|9|Seat's been open 60 days — offer to bridge.")
+                        lambda **k: "1|9|Seat's been open 60 days — offer to bridge.")
     assert od.main() == 0
     body = stubbed_run["emails"][1][1]
     assert "Stalled Searches" in body and "9/10" in body and "bridge" in body
