@@ -25,7 +25,15 @@ FITNESS = CATEGORY_COLORS["Fitness"][0]
 # --------------------------------------------------------------------------- #
 
 def test_parse_valid_object():
-    assert cc._parse_classification('{"abc": "1", "def": "6"}') == {"abc": "1", "def": "6"}
+    assert cc._parse_classification('{"1": "1", "2": "6"}') == {"1": "1", "2": "6"}
+
+
+@pytest.mark.parametrize("raw", ["", "   \n"])
+def test_parse_reports_empty_response_distinctly(raw):
+    # A thinking model that burns its whole num_predict budget reasoning returns
+    # no content; "bad JSON" is a misleading diagnosis for that.
+    with pytest.raises(RuntimeError, match="empty response"):
+        cc._parse_classification(raw)
 
 
 @pytest.mark.parametrize("raw", [
@@ -60,7 +68,7 @@ def test_apply_updates_valid_and_skips_missing_or_invalid(monkeypatch):
     monkeypatch.setattr(cc, "set_event_color",
                         lambda eid, cid: (patched.append((eid, cid)) or {"updated": True}))
 
-    classification = {"e1": WORK, "e2": "99"}  # e2 invalid colorId, e3 unclassified
+    classification = {"1": WORK, "2": "99"}  # 2 invalid colorId, 3 unclassified
     updated, skipped = cc._apply_classification(_events(), classification, _LOGGER)
 
     assert updated == [("Sprint planning", WORK)]
@@ -73,7 +81,7 @@ def test_apply_counts_patch_failure_as_skipped(monkeypatch):
                         lambda eid, cid: {"error": "API exploded"} if eid == "e1"
                         else {"updated": True})
 
-    classification = {"e1": WORK, "e2": FITNESS, "e3": FITNESS}
+    classification = {"1": WORK, "2": FITNESS, "3": FITNESS}
     updated, skipped = cc._apply_classification(_events(), classification, _LOGGER)
 
     assert skipped == ["Sprint planning"]
@@ -91,6 +99,27 @@ def test_quiet_day_still_logs_a_run_complete_boundary(monkeypatch, capsys):
 
     assert cc.main() == 0
     assert any(_is_run_success(line) for line in capsys.readouterr().out.splitlines())
+
+
+def test_classify_input_hides_event_ids_behind_numbers():
+    # Google's 26-char ids sent to the model cost a run: it burned its whole
+    # token budget transcribing one, and mis-copied it even when it succeeded.
+    # Python owns the number -> id mapping now.
+    assert cc._classify_input(_events()) == [
+        {"n": 1, "summary": "Sprint planning"},
+        {"n": 2, "summary": "Morning run"},
+        {"n": 3, "summary": "Mystery block"},
+    ]
+
+
+def test_apply_maps_numbers_back_to_the_right_event_ids(monkeypatch):
+    patched = []
+    monkeypatch.setattr(cc, "set_event_color",
+                        lambda eid, cid: (patched.append((eid, cid)) or {"updated": True}))
+
+    cc._apply_classification(_events(), {"1": WORK, "3": FITNESS}, _LOGGER)
+
+    assert patched == [("e1", WORK), ("e3", FITNESS)]
 
 
 def test_valid_color_ids_derive_from_category_colors():

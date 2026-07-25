@@ -36,7 +36,7 @@ def _classification_table() -> str:
 
 
 CLASSIFY_SYSTEM_PROMPT = f"""You are {prefs.user_name()}'s calendar color-coding assistant. You are given a \
-JSON list of yesterday's calendar events, each with an "id" and a "summary" (title). For \
+JSON list of yesterday's calendar events, each with an "n" (its number) and a "summary" (title). For \
 each event, decide which category it belongs to and return the matching Google Calendar \
 colorId, using EXACTLY this mapping:
 
@@ -45,10 +45,25 @@ colorId, using EXACTLY this mapping:
 Best-guess every event from its title. Only use colorId "{_FALLBACK_COLOR}" when you genuinely cannot tell \
 what category an event belongs to — do not use it as a default.
 
-Output ONLY a single JSON object mapping each event's "id" to its chosen colorId string, \
+Output ONLY a single JSON object mapping each event's "n" to its chosen colorId string, \
 nothing else — no preamble, no explanation, no markdown code fences. Example:
-{{"abc123": "1", "def456": "6"}}
+{{"1": "1", "2": "6"}}
 """
+
+
+def _classify_input(events: list) -> list:
+    """Number the events 1..N for the model instead of showing it Google's
+    26-character event ids.
+
+    The ids used to go out and come back as the response's keys, which cost a
+    run: on 2026-07-25 the model spent all 3072 num_predict tokens in its
+    thinking block transcribing an id character by character and second-guessing
+    itself, finished with done_reason 'length', and emitted no content at all —
+    an empty response the parser could only report as bad JSON. Even successful
+    runs mis-copied that id (dropping two characters), so the event silently
+    matched nothing and never got colored. Small integers are cheap to copy and
+    trivial to verify, and Python owns the number -> id mapping."""
+    return [{"n": n, "summary": e["summary"]} for n, e in enumerate(events, 1)]
 
 
 def _yesterday_range() -> tuple[datetime, datetime]:
@@ -59,9 +74,15 @@ def _yesterday_range() -> tuple[datetime, datetime]:
 
 
 def _parse_classification(raw_response: str) -> dict:
-    """Parse the model's {event_id: colorId} response, rejecting anything that
-    isn't a JSON object — the model is told to emit exactly that shape, but a
-    small local model can drift (prose preamble, a list, code fences)."""
+    """Parse the model's {event_number: colorId} response, rejecting anything
+    that isn't a JSON object — the model is told to emit exactly that shape, but
+    a small local model can drift (prose preamble, a list, code fences)."""
+    if not raw_response.strip():
+        raise RuntimeError(
+            "Model returned an empty response — a thinking model that spends its "
+            "whole num_predict budget reasoning emits no content at all "
+            "(done_reason 'length'). Check OLLAMA_NUM_PREDICT and the prompt size."
+        )
     try:
         classification = json.loads(raw_response)
     except json.JSONDecodeError as e:
@@ -74,17 +95,18 @@ def _parse_classification(raw_response: str) -> dict:
 
 
 def _apply_classification(events: list, classification: dict, logger) -> tuple[list, list]:
-    """Recolor each event per the classification. An event whose classified
-    color is missing/invalid, or whose patch fails, is skipped (logged) rather
-    than failing the run — one bad classification shouldn't lose the rest.
-    Returns (updated, skipped): updated as (summary, color_id), skipped as
-    summaries."""
+    """Recolor each event per the classification, which is keyed by the event's
+    1-based position in `events` (see _classify_input). An event whose
+    classified color is missing/invalid, or whose patch fails, is skipped
+    (logged) rather than failing the run — one bad classification shouldn't lose
+    the rest. Returns (updated, skipped): updated as (summary, color_id),
+    skipped as summaries."""
     updated, skipped = [], []
-    for event in events:
+    for n, event in enumerate(events, 1):
         event_id = event["id"]
-        color_id = classification.get(event_id)
+        color_id = classification.get(str(n))
         if color_id not in VALID_COLOR_IDS:
-            logger.warning(f"No valid color for event {event_id} ({event['summary']!r}), skipping")
+            logger.warning(f"No valid color for event {n} ({event['summary']!r}), skipping")
             skipped.append(event["summary"])
             continue
 
@@ -120,10 +142,9 @@ def main() -> int:
             logger.info("Colorizer run complete: 0 updated, 0 skipped")
             return 0
 
-        classify_input = [{"id": e["id"], "summary": e["summary"]} for e in events]
         raw_response = complete_text(
             system_prompt=CLASSIFY_SYSTEM_PROMPT,
-            user_prompt=json.dumps(classify_input),
+            user_prompt=json.dumps(_classify_input(events)),
             backend=resolve_backend("calendar_colorizer"),
         )
         logger.info(f"Raw classification response: {raw_response}")
