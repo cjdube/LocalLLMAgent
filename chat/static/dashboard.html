@@ -92,8 +92,17 @@
   button.btn:disabled { opacity: 0.5; cursor: default; }
 
   /* Run-duration charts (rendered by run-chart.js) */
-  .chart-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px 22px; }
-  .chart-cell { min-width: 0; }
+  /* Below desktop, as many 250px columns as fit — two on a tablet, one on a
+     phone. At desktop width it's pinned to four, which with today's 12 tasks
+     reads as three rows. The row count is left to fall out of the task count
+     rather than being pinned too, so a 13th task wraps instead of squashing. */
+  .chart-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; }
+  @media (min-width: 1100px) { .chart-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+  /* Each chart is its own card. Sharing one panel, twelve sparklines ran
+     together — a neighbour's line reads as a continuation of your own. The
+     section itself is therefore NOT a .panel: cards inside a card double every
+     border. */
+  .chart-cell { min-width: 0; background: #fffbeb; border: 1px solid #f2e7c3; border-radius: 12px; padding: 12px 14px; }
   .chart-head { display: flex; align-items: baseline; gap: 8px; }
   /* One line, always: a name that wraps pushes its chart out of alignment with
      the rest of its row. Truncated names keep their full text in a tooltip. */
@@ -142,7 +151,7 @@
     <div class="content">
       <section>
         <div class="section-label">Run duration <span id="runChartHint" class="hint"></span></div>
-        <div id="runChart" class="panel">Loading…</div>
+        <div id="runChart" class="muted">Loading…</div>
       </section>
       <section>
         <div class="section-label">Scheduled tasks <span id="taskHint" class="hint"></span></div>
