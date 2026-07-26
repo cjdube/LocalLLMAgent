@@ -174,7 +174,7 @@ def _system_message_content() -> str:
     # Skills are chat-only (like the wiki tools), so the index lives here rather
     # than in with_identity() where the scheduled tasks would also carry it.
     # Rendered per turn so a skill saved mid-session shows up on the next turn.
-    skills_index = render_skills_index()
+    skills_index = render_skills_index(logger)
     if skills_index:
         dated += "\n\n" + skills_index
     # The evaluation-lenses index: which wiki pages are Craig's standards rubrics,

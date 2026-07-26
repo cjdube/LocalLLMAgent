@@ -138,3 +138,74 @@ def test_render_index_respects_char_cap(monkeypatch):
     block = skills.render_skills_index()
     # The first entry alone exceeds the cap, so no entries fit -> "".
     assert block == ""
+
+
+# --------------------------------------------------------------------------- #
+# truncation is logged, not silent
+# --------------------------------------------------------------------------- #
+
+class _FakeLogger:
+    def __init__(self):
+        self.warnings = []
+
+    def warning(self, msg):
+        self.warnings.append(msg)
+
+
+def test_render_index_warns_when_char_cap_drops_skills(monkeypatch):
+    monkeypatch.setattr(skills, "MAX_INDEX_CHARS", 60)
+    skills.write_skill("aaaa", description="x" * 40, body="b")
+    skills.write_skill("bbbb", description="y" * 40, body="b")
+    skills.write_skill("cccc", description="z" * 40, body="b")
+
+    log = _FakeLogger()
+    block = skills.render_skills_index(log)
+
+    assert "aaaa" in block and "bbbb" not in block and "cccc" not in block
+    assert len(log.warnings) == 1
+    warning = log.warnings[0]
+    assert "1 of 3 skills" in warning
+    assert "bbbb" in warning and "cccc" in warning
+    assert "60-char budget" in warning
+
+
+def test_render_index_warns_when_skill_cap_drops_skills(monkeypatch):
+    monkeypatch.setattr(skills, "MAX_INDEX_SKILLS", 2)
+    for i in range(4):
+        skills.write_skill(f"skill-{i}", description="short", body="b")
+
+    log = _FakeLogger()
+    skills.render_skills_index(log)
+
+    assert len(log.warnings) == 1
+    warning = log.warnings[0]
+    assert "2-skill cap" in warning
+    assert "2 of 4 skills" in warning
+
+
+def test_render_index_warns_even_when_nothing_fits(monkeypatch):
+    monkeypatch.setattr(skills, "MAX_INDEX_CHARS", 20)
+    skills.write_skill("aaaa", description="x" * 50, body="b")
+
+    log = _FakeLogger()
+    # Worst case: the index comes back empty, so every skill is invisible.
+    assert skills.render_skills_index(log) == ""
+    assert len(log.warnings) == 1
+    assert "0 of 1 skills" in log.warnings[0]
+
+
+def test_render_index_no_warning_when_every_skill_fits():
+    skills.write_skill("trip-prep", description="Prep for a trip", body="b")
+
+    log = _FakeLogger()
+    assert "trip-prep" in skills.render_skills_index(log)
+    assert log.warnings == []
+
+
+def test_render_index_truncation_without_a_logger_does_not_raise(monkeypatch):
+    monkeypatch.setattr(skills, "MAX_INDEX_CHARS", 60)
+    skills.write_skill("aaaa", description="x" * 40, body="b")
+    skills.write_skill("bbbb", description="y" * 40, body="b")
+
+    # The prompt build must never break on a logger-less call.
+    assert "aaaa" in skills.render_skills_index()

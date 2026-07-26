@@ -157,10 +157,18 @@ def delete_skill(name: str) -> dict:
     return {"name": slug, "removed": True}
 
 
-def render_skills_index() -> str:
+def render_skills_index(logger=None) -> str:
     """The capped 'slug: description' block injected into the chat system prompt,
     or "" when there are no skills. Bodies are never included — Wren reads a
-    skill's body on demand with read_skill."""
+    skill's body on demand with read_skill.
+
+    A skill dropped by either cap is invisible to Wren, who then never follows
+    it — a silent degrade, so it's logged at WARNING with the counts and the
+    names (CLAUDE.md). Mirrors wiki.render_lenses_index; unlike the lens index,
+    skills are written by Wren rather than hand-authored, so the count cap is as
+    likely to bite as the character budget. Rendered per turn, so a standing drop
+    repeats every turn; log_inspector collapses identical warnings into a count
+    rather than pushing each one."""
     skills = list_skills()["skills"]
     if not skills:
         return ""
@@ -171,6 +179,17 @@ def render_skills_index() -> str:
             break
         lines.append(line)
         total += len(line)
+    if len(lines) < len(skills) and logger:
+        # Only ever a truncated prefix, so the dropped ones are the tail.
+        dropped = [s["name"] for s in skills[len(lines):]]
+        cause = (f"the {MAX_INDEX_CHARS}-char budget"
+                 if len(lines) < min(len(skills), MAX_INDEX_SKILLS)
+                 else f"the {MAX_INDEX_SKILLS}-skill cap")
+        logger.warning(
+            f"skills index truncated by {cause}: {len(lines)} of {len(skills)} skills "
+            f"in the prompt ({total} chars), dropped {', '.join(dropped)} — dropped "
+            f"skills are invisible in chat; shorten the frontmatter descriptions"
+        )
     if not lines:
         return ""
     return (
