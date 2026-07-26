@@ -1,6 +1,6 @@
 # Run-duration charts
 
-The **Run duration** section at the bottom of `/dashboard`: one small chart per
+The **Run duration** section at the top of `/dashboard`: one small chart per
 scheduled task, plotting how long each of its runs took.
 
 ## Why duration, and not reliability

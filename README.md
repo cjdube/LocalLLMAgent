@@ -367,10 +367,15 @@ chat/
 
 It's a single scrollable page (no tabs). Chat lives at `/`, not here:
 
-- **Capabilities** (top of the page) — auto-generated from the chat
-  tools' `TOOL_SCHEMA`s as chips, grouped read-only (Wren runs them itself) vs.
-  the confirmation-gated write tools. Click a chip to see its parameters. Always
-  in sync with what's actually registered — no separate docs to maintain.
+- **Run duration** (top of the page) — one small chart per task, plotting how
+  long each of its runs took over the last 30 days, with the median as a dashed
+  reference line and failures in red. This is the question the dot-strip below
+  can't answer: a task's runs are near-uniformly green, but `morning_brief` has
+  taken 8 seconds and it has taken 25 minutes, and `ai_chat_learnings` once ran
+  for 56 — all of them "success". Hand-rolled SVG in
+  `chat/static/run-chart.js` (no charting library, so the page still draws
+  itself offline), on a log scale because durations span three orders of
+  magnitude within a single task. See [docs/run-charts.md](docs/run-charts.md).
 - **Scheduled tasks** (below it) — a table, one row per task: name, schedule,
   next run, last-run status (✓/✗/running) with a dot-strip of recent runs, and
   **Run now** / **See runs**. Nothing new is persisted: schedules are read live
@@ -381,15 +386,10 @@ It's a single scrollable page (no tabs). Chat lives at `/`, not here:
 - **Run detail** — clicking a row (or **See runs**) opens a right-side
   slide-over with the task's run history; click a run for its tool-call timeline
   (`name → args → result`) and the final response or the error/traceback.
-- **Run duration** (bottom) — one small chart per task, plotting how long each
-  of its runs took over the last 30 days, with the median as a dashed reference
-  line and failures in red. This is the question the dot-strip can't answer:
-  a task's runs are near-uniformly green, but `morning_brief` has taken 8
-  seconds and it has taken 25 minutes, and `ai_chat_learnings` once ran for 56
-  — all of them "success". Hand-rolled SVG in
-  `chat/static/run-chart.js` (no charting library, so the page still draws
-  itself offline), on a log scale because durations span three orders of
-  magnitude within a single task. See [docs/run-charts.md](docs/run-charts.md).
+- **Capabilities** (bottom) — auto-generated from the chat
+  tools' `TOOL_SCHEMA`s as chips, grouped read-only (Wren runs them itself) vs.
+  the confirmation-gated write tools. Click a chip to see its parameters. Always
+  in sync with what's actually registered — no separate docs to maintain.
 **Run now runs the real task, side effects and all** — `morning_brief` sends the
 actual email, `strava_download`/`calendar_colorizer` write real calendar events —
 exactly what the schedule does, just now. The button asks for a click-through
