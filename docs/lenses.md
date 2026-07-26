@@ -52,10 +52,11 @@ The caps exist because the chat prompt already crowds `num_ctx`: at most
 binds first.
 
 **In practice the character cap binds long before the lens count**, and it's
-worth knowing which one you're actually up against. The two lenses in the vault
-today render at 211 and 146 characters — so roughly **three** descriptions of
-that length exhaust the 600-char budget, not eight. Writing lens descriptions at
-that length silently lowers the real cap to well under `MAX_INDEX_LENSES`.
+worth knowing which one you're actually up against. The three lenses in the vault
+today render at 211, 146, and 119 characters — 476 of the 600-char budget, with
+room for roughly one more short description. So four or five descriptions of that
+length exhaust the budget, not eight. Writing lens descriptions at that length
+silently lowers the real cap to well under `MAX_INDEX_LENSES`.
 
 The truncation is a `break`, not a `continue`: the first line that would overflow
 ends the list, so every lens after it disappears from the prompt. Those lenses
@@ -102,6 +103,55 @@ pipeline, not a freeform agent task (small-local-model constraint, see
    Where It Falls Short / What I'd Change**, 2–4 bullets each, each point
    naming the standard it turns on. No JSON to parse, nothing to break.
 
+### The deterministic pre-pass
+
+Some of what a lens wants is counting and exact matching, not judgement. A lens can opt
+into having those computed in Python via two optional frontmatter keys, handled by
+[agent/tools/prose_checks.py](../agent/tools/prose_checks.py):
+
+```yaml
+---
+lens: true
+description: ...
+max_em_dashes_per_sentence: 1
+banned_phrases: paradigm shift, cutting-edge, game changer
+---
+```
+
+Either key alone is enough. A lens with neither (`product-principles`,
+`engineering-manager-expectations`) gets no block and behaves exactly as before. No lens is
+named in the code — the opt-in lives in the vault, same as the `lens: true` marker.
+
+When enabled, the results are injected ahead of the target as an authoritative block, and
+the system prompt tells the model to report them without re-deriving or contradicting them.
+The checks run on the **compacted, truncated** target, so a reported finding can never quote
+text the model can't see.
+
+Two details are load-bearing, both measured:
+
+- **A passing check says "none" out loud** rather than staying silent. Silence is what let
+  the model invent an em-dash finding — it quoted a comma-heavy sentence containing no em
+  dashes and called it a cluster. It cannot contradict an explicit "none".
+- **One line per finding, never a grouped list.** With `- Banned phrases present: "paradigm
+  shift", "cutting-edge".` on one line, the model forwarded only *one* of the two, in 3 of 3
+  runs. Split onto its own indented line each, both came through 3 of 3.
+
+Measured on `ai-slop` before and after, at n=3 per case: em-dash detection went from 3 of 3
+with an intermittent false positive on clean prose, to 3 of 3 with **zero** false positives
+and both offending sentences caught rather than one; exact-phrase detection went from 1–2 of
+3 to **3 of 3**. The model no longer does either check, so there is nothing left to fabricate
+or crowd out.
+
+A section with nothing to report gets **"Nothing significant"** rather than
+bullets. That escape hatch is load-bearing: a fixed template with a bullet quota
+compels the model to fill every heading, so a target that genuinely *meets* the
+lens gets invented faults. Measured on the `ai-slop` lens against a clean draft —
+3 of 3 runs manufactured findings, one of them recommending a change that would
+have made the draft worse. A lens page can't fix this from its own text (the
+output contract outranks anything the lens says about not over-correcting), so
+the permission has to live in the system prompt. It cuts both ways, which is the
+point: on a draft that is all slop, **Where It Aligns** comes back empty too.
+
 The call passes `think=False`. Judging a target against standards that are
 *both already in the prompt* is comparison, not chain-of-thought; with thinking
 on, 1 run in 3 spent the whole budget on scratchpad and returned a blank
@@ -136,11 +186,46 @@ chat twice, that's a lens.
   the last is worth copying, since naming failure modes gives the model
   something concrete to match against.
 - **Keep it under ~8000 characters** of compacted text, or the tail is cut.
+- **If a check is a count or an exact match, put it in the pre-pass, not in the prose.**
+  This is the lesson the two frontmatter keys came out of, and it's worth reaching for
+  before tuning wording. The model saturates at roughly a dozen findings and then
+  *substitutes* rather than adds, so low-salience mechanical checks lose to the obvious prose
+  problems: an em-dash rule and an exact-phrase list buried in the pattern list fired in 1 of
+  3 runs each. Moving them to the top of the page got them to 3 of 3 and 2–3 of 3, but at the
+  cost of a fabricated finding. Computing them in Python got both to 3 of 3 with no
+  fabrication, and shortened the lens.
+- **Every rule you add destabilises the ones already there.** This is the counterweight to
+  the point above, and it bit repeatedly while authoring `ai-slop`. Adding a doc-type
+  exemption to the over-correct section knocked the exact-phrase check from 3 of 3 down to 1
+  of 3 and introduced a *fabricated* em-dash finding — the model quoted a comma-heavy
+  sentence containing no em dashes at all and called it a cluster. Tightening "stay silent if
+  the check passes" made that worse, not better: it removed the model's habit of
+  self-correcting mid-bullet and left it committing to the false claim instead. Budget rules
+  like a scarce resource, change one thing at a time, and re-measure the *old* wins too.
+- **Three runs cannot tell 2 of 3 from 3 of 3.** Read a single run's difference as noise
+  until a config repeats. Most of the tuning above was measured at n=3, which is enough to
+  catch 0 of 3 versus 3 of 3 and not much finer.
+- **A rule the model can't apply reliably is worth deleting, not tuning.** `ai-slop`
+  originally flagged "bullets where two sentences of prose would read better". That produced
+  false positives on Craig's own reference docs (whose bold-lead-in bullet lists are the
+  intended format) and never once caught the case it was for — a bullet-crutch list in a
+  narrative draft went unflagged in 0 of 6 runs across two different formulations. Deleting
+  the clause cost nothing real and removed the false positives outright. Prefer that to a
+  third attempt at wording.
 - **It's hand-authored, not ingested.** A lens lives in `wiki/` alongside
   ObsidianWikiAgent's generated pages but has an empty `**Sources**:` line by
   design — it's Craig's assertion, not a summary of anything.
 
-Current lenses: `product-principles`, `engineering-manager-expectations`.
+Current lenses: `product-principles`, `engineering-manager-expectations`,
+`ai-slop`.
+
+`ai-slop` is the odd one out and worth reading as a second pattern: it judges
+*writing* rather than a product or a role, and it's detection-only — it names the
+pattern, quotes the offending line, and stops. It carries an explicit "Don't
+over-correct" section, because the failure mode for a prose lens is flagging a
+writer's real voice as a defect. Adapted from the `no-ai-slop` Claude Code skill,
+condensed to the patterns a small local model applies reliably; the skill's
+*rewrite* half was deliberately left out (see non-goals).
 
 ## Using it
 
@@ -160,10 +245,17 @@ Standalone:
 - **No lens registry, no code per lens.** Adding one is writing a Markdown file
   with the marker. This is why the marker is frontmatter rather than a
   hardcoded page name — the design assumed several lenses from the start
-  (`engineering-standards`, `hiring-bar` were the motivating examples), even
-  though only one exists today.
+  (`engineering-standards`, `hiring-bar` were the motivating examples), and
+  three exist today.
 - **Not wired into any scheduled task.** Like `evaluate_app`, this is
   user-initiated: it fetches only URLs Craig names, and doesn't become a
   background pipeline.
 - **No structured (JSON) model output.** Fixed markdown headings the chat
   renders directly, with no parser to fail.
+- **A lens critiques; it never rewrites.** The `no-ai-slop` skill this borrows
+  from has an edit mode that returns a revised draft. That half stayed out on
+  purpose: "return the full edited draft" is a *document*, and the local model
+  writes blurbs and scores, not documents (`CLAUDE.md`). A small model asked to
+  rewrite prose while preserving voice will flatten the voice — the exact failure
+  the lens exists to catch, and it would degrade silently. Rewriting is what the
+  frontier-escalation button is for.

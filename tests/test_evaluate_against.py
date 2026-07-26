@@ -108,3 +108,44 @@ def test_judging_does_not_spend_the_budget_on_thinking(stubbed_pipeline):
     eg.evaluate_against("product-principles", target_text="some target")
 
     assert stubbed_pipeline["prompts"][0]["think"] is False
+
+
+# --------------------------------------------------------------------------- #
+# deterministic pre-pass — see agent/tools/prose_checks.py
+# --------------------------------------------------------------------------- #
+
+def test_a_lens_without_check_keys_gets_no_checks_block(stubbed_pipeline):
+    # The default stub lens declares no checks, so nothing is injected and the
+    # prompt keeps the shape the other lenses rely on.
+    eg.evaluate_against("product-principles", target_text="a — b — c")
+
+    assert "Mechanical checks" not in stubbed_pipeline["prompts"][0]["user_prompt"]
+
+
+def test_a_lens_declaring_checks_gets_the_results_injected(stubbed_pipeline, monkeypatch):
+    monkeypatch.setattr(eg, "read_wiki_page", lambda name: {"content": (
+        "---\nlens: true\nmax_em_dashes_per_sentence: 1\n"
+        "banned_phrases: paradigm shift\n---\n\nMy standards.")})
+
+    eg.evaluate_against("ai-slop", target_text="It is a paradigm shift — truly — yes.")
+
+    prompt = stubbed_pipeline["prompts"][0]["user_prompt"]
+    assert "Mechanical checks" in prompt
+    assert '"paradigm shift"' in prompt
+    assert "It is a paradigm shift — truly — yes." in prompt
+    # The lens body still reaches the model alongside the computed findings.
+    assert "My standards." in prompt
+
+
+def test_checks_run_on_the_truncated_target_not_the_original(stubbed_pipeline, monkeypatch):
+    # A finding the model cannot see in its copy of the target would be
+    # unquotable and read as a hallucination, so the check must see the same text.
+    monkeypatch.setattr(eg, "read_wiki_page", lambda name: {"content":
+        "---\nmax_em_dashes_per_sentence: 1\n---\n\nStandards."})
+    monkeypatch.setattr(eg, "_TARGET_CHARS", 20)
+
+    eg.evaluate_against("ai-slop", target_text="a" * 40 + " tail — x — y.")
+
+    prompt = stubbed_pipeline["prompts"][0]["user_prompt"]
+    assert "none" in prompt          # the dashes were truncated away
+    assert "— x — y" not in prompt
