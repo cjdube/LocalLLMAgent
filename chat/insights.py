@@ -25,6 +25,7 @@ import subprocess
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
+from statistics import median
 
 from agent.loop import active_model_label
 from agent.tools.memory import recall
@@ -393,6 +394,57 @@ def parse_run_detail(log_path, run_id: str) -> dict | None:
         if run["id"] == run_id:
             return run
     return None
+
+
+# --------------------------------------------------------------------------- #
+# Run statistics (the dashboard's duration charts)
+# --------------------------------------------------------------------------- #
+
+def run_stats(days: int = 30, now: datetime | None = None) -> dict:
+    """Per-task run-duration series, for charting how long each task takes.
+
+    One entry per scheduled task — daemons are skipped, having no discrete runs
+    — with its runs ordered OLDEST FIRST, which is how a chart plots them left
+    to right and the reverse of what parse_runs returns.
+
+    The point of the series is the spread, not the average. A task's dot strip
+    on the dashboard shows ten identical green dots whether a run took 8 seconds
+    or 25 minutes; morning_brief has done both. So median_s and max_s are
+    reported together, and a run that never finished stays in the series with
+    duration_s=None rather than being dropped: "started and never closed" is
+    exactly the state worth seeing. Those runs are excluded from median_s/max_s
+    and counted in `unfinished` instead.
+
+    No timezone conversion happens here, and none belongs here: `logging` writes
+    the log timestamps in local time and `now` is local, so both sides of the
+    window comparison are already naive-local. (The UTC-vs-local rule in
+    CLAUDE.md is about feeds that hand us UTC — a log we wrote ourselves isn't
+    one, and converting it would introduce the very skew that rule prevents.)
+    """
+    cutoff = (now or datetime.now()) - timedelta(days=days)
+    tasks = []
+    for task in discover_tasks():
+        if task["is_daemon"]:
+            continue
+        runs = []
+        for run in reversed(parse_runs(task["log_path"])):
+            started = _parse_ts(run["start"])
+            if started is None or started < cutoff:
+                continue
+            runs.append({k: run[k] for k in ("id", "start", "status", "duration_s")})
+
+        durations = [r["duration_s"] for r in runs if r["duration_s"] is not None]
+        tasks.append({
+            "key": task["key"],
+            "display_name": task["display_name"],
+            "runs": runs,
+            "count": len(runs),
+            "unfinished": len(runs) - len(durations),
+            "failures": sum(1 for r in runs if r["status"] == "failure"),
+            "median_s": round(median(durations), 1) if durations else None,
+            "max_s": max(durations) if durations else None,
+        })
+    return {"days": days, "tasks": tasks}
 
 
 # --------------------------------------------------------------------------- #

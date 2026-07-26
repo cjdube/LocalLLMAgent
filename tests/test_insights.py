@@ -497,3 +497,130 @@ def test_discover_tasks_returns_fresh_list(tmp_path, monkeypatch):
     assert a is not b  # mutating one caller's result can't corrupt the cache
     a.clear()
     assert len(insights.discover_tasks()) == 1
+
+
+# --------------------------------------------------------------------------- #
+# run_stats (the dashboard's duration charts)
+# --------------------------------------------------------------------------- #
+
+def _stub_tasks(monkeypatch, *tasks):
+    """Pin discover_tasks so run_stats reads only the fixture logs."""
+    monkeypatch.setattr(insights, "discover_tasks", lambda: list(tasks))
+
+
+def _task(key, log_path, is_daemon=False):
+    return {"key": key, "display_name": insights._prettify(key),
+            "log_path": log_path, "is_daemon": is_daemon,
+            "schedule": {"Hour": 6, "Minute": 0}, "human_schedule": "Daily 6:00 AM"}
+
+
+# run_stats windows on `now`, so every fixture below is dated relative to this.
+STATS_NOW = datetime(2026, 7, 30, 12, 0)
+
+
+def test_run_stats_series_is_oldest_first(tmp_path, monkeypatch):
+    # parse_runs returns most-recent-first; a chart plots left to right, so
+    # run_stats has to hand back the reverse.
+    log = tmp_path / "brief.log"
+    _write_log(log, [
+        "2026-07-28 06:00:00,000 [INFO] Starting brief run",
+        "2026-07-28 06:00:05,000 [INFO] Brief run complete",
+        "2026-07-29 06:00:00,000 [INFO] Starting brief run",
+        "2026-07-29 06:00:09,000 [INFO] Brief run complete",
+    ])
+    _stub_tasks(monkeypatch, _task("brief", log))
+    task = insights.run_stats(days=30, now=STATS_NOW)["tasks"][0]
+    assert [r["start"][:10] for r in task["runs"]] == ["2026-07-28", "2026-07-29"]
+    assert [r["duration_s"] for r in task["runs"]] == [5.0, 9.0]
+
+
+def test_run_stats_excludes_runs_outside_the_window(tmp_path, monkeypatch):
+    log = tmp_path / "brief.log"
+    _write_log(log, [
+        "2026-06-01 06:00:00,000 [INFO] Starting brief run",   # 59 days back
+        "2026-06-01 06:00:05,000 [INFO] Brief run complete",
+        "2026-07-29 06:00:00,000 [INFO] Starting brief run",
+        "2026-07-29 06:00:09,000 [INFO] Brief run complete",
+    ])
+    _stub_tasks(monkeypatch, _task("brief", log))
+    out = insights.run_stats(days=7, now=STATS_NOW)
+    assert out["days"] == 7
+    task = out["tasks"][0]
+    assert task["count"] == 1
+    assert task["runs"][0]["duration_s"] == 9.0
+
+
+def test_run_stats_reports_median_and_max(tmp_path, monkeypatch):
+    # The whole point of the chart: a task whose runs all "succeed" can still
+    # range from seconds to minutes, and only max makes that visible.
+    log = tmp_path / "brief.log"
+    lines = []
+    for day, secs in ((26, 8), (27, 10), (28, 12), (29, 600)):
+        lines += [
+            f"2026-07-{day} 06:00:00,000 [INFO] Starting brief run",
+            f"2026-07-{day} 06:{secs // 60:02d}:{secs % 60:02d},000 [INFO] Brief run complete",
+        ]
+    _write_log(log, lines)
+    _stub_tasks(monkeypatch, _task("brief", log))
+    task = insights.run_stats(days=30, now=STATS_NOW)["tasks"][0]
+    assert task["count"] == 4
+    assert task["median_s"] == 11.0
+    assert task["max_s"] == 600.0
+
+
+def test_run_stats_keeps_unfinished_runs_but_excludes_them_from_stats(tmp_path, monkeypatch):
+    # A run that started and never closed has no duration. Dropping it would
+    # hide the one state worth noticing, so it stays in the series with
+    # duration_s=None and is counted separately.
+    log = tmp_path / "brief.log"
+    _write_log(log, [
+        "2026-07-28 06:00:00,000 [INFO] Starting brief run",
+        "2026-07-28 06:00:20,000 [INFO] Brief run complete",
+        "2026-07-29 06:00:00,000 [INFO] Starting brief run",
+    ])
+    _stub_tasks(monkeypatch, _task("brief", log))
+    task = insights.run_stats(days=30, now=STATS_NOW)["tasks"][0]
+    assert task["count"] == 2
+    assert task["unfinished"] == 1
+    assert task["runs"][-1]["status"] == "running"
+    assert task["runs"][-1]["duration_s"] is None
+    assert task["median_s"] == 20.0
+    assert task["max_s"] == 20.0
+
+
+def test_run_stats_counts_failures(tmp_path, monkeypatch):
+    log = tmp_path / "brief.log"
+    _write_log(log, [
+        "2026-07-28 06:00:00,000 [INFO] Starting brief run",
+        "2026-07-28 06:00:05,000 [INFO] Brief run complete",
+        "2026-07-29 06:00:00,000 [INFO] Starting brief run",
+        "2026-07-29 06:00:03,000 [ERROR] Boom exploded",
+    ])
+    _stub_tasks(monkeypatch, _task("brief", log))
+    task = insights.run_stats(days=30, now=STATS_NOW)["tasks"][0]
+    assert task["failures"] == 1
+    assert task["runs"][-1]["status"] == "failure"
+    assert task["runs"][-1]["duration_s"] == 3.0
+
+
+def test_run_stats_skips_daemons(tmp_path, monkeypatch):
+    log = tmp_path / "wren.log"
+    _write_log(log, ["2026-07-29 06:00:00,000 [INFO] Starting Wren chat server on port 8420"])
+    _stub_tasks(monkeypatch, _task("wren", log, is_daemon=True))
+    assert insights.run_stats(days=30, now=STATS_NOW)["tasks"] == []
+
+
+def test_run_stats_lists_a_task_with_no_runs_in_the_window(tmp_path, monkeypatch):
+    # Present but empty, so the chart can say "no runs in the last N days"
+    # rather than silently omitting a task the table above still lists.
+    log = tmp_path / "quiet.log"
+    _write_log(log, [
+        "2026-06-01 06:00:00,000 [INFO] Starting quiet run",
+        "2026-06-01 06:00:05,000 [INFO] Quiet run complete",
+    ])
+    _stub_tasks(monkeypatch, _task("quiet", log))
+    task = insights.run_stats(days=7, now=STATS_NOW)["tasks"][0]
+    assert task["runs"] == []
+    assert task["count"] == 0
+    assert task["median_s"] is None
+    assert task["max_s"] is None

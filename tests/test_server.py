@@ -65,6 +65,7 @@ EMAIL_CALL = {"function": {"name": "send_email", "arguments": {"subject": "Hi", 
     ("get", "/api/runs/morning_brief", {}),
     ("get", "/api/runs/morning_brief/someid", {}),
     ("get", "/api/capabilities", {}),
+    ("get", "/api/run_stats", {}),
     ("get", "/api/health/ntfy", {}),
     ("post", "/api/run/morning_brief", {}),
     ("get", "/api/run/morning_brief/status", {}),
@@ -905,6 +906,35 @@ def test_health_ntfy_passes_probe_result_through(auth_client, monkeypatch, healt
     resp = auth_client.get("/api/health/ntfy")
     assert resp.status_code == 200
     assert resp.get_json() == health
+
+
+# --------------------------------------------------------------------------- #
+# /api/run_stats (the dashboard's duration charts)
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("query,expected", [
+    ("", 30),               # default window
+    ("?days=7", 7),
+    ("?days=0", 30),        # falsy -> default, not a zero-day window
+    ("?days=-5", 1),        # clamped up
+    ("?days=9999", 365),    # clamped down
+    ("?days=soon", 30),     # unparseable -> default
+])
+def test_run_stats_clamps_the_window_instead_of_rejecting_it(
+        auth_client, monkeypatch, query, expected):
+    # ?days= is a chart window: a nonsense value should narrow the chart, not
+    # 400 the page that asked for it.
+    seen = {}
+    from chat import routes_dashboard
+
+    def fake_run_stats(days):
+        seen["days"] = days
+        return {"days": days, "tasks": []}
+
+    monkeypatch.setattr(routes_dashboard, "run_stats", fake_run_stats)
+    resp = auth_client.get("/api/run_stats" + query)
+    assert resp.status_code == 200
+    assert seen["days"] == expected
 
 
 # --------------------------------------------------------------------------- #

@@ -360,6 +360,7 @@ chat/
   insights.py         # read/parse layer: plists -> schedules, logs -> runs,
                       # tool schemas -> capabilities, plus the run-now manager
   static/dashboard.html  # single-page dashboard UI (vanilla JS, no build step)
+  static/run-chart.js # the run-duration charts (hand-rolled SVG, no library)
   static/favicon.svg  # Wren mark (cream wren on terracotta) — header logo + favicon
   static/{favicon-32,apple-touch-icon,icon-512}.png  # raster fallbacks
 ```
@@ -380,6 +381,15 @@ It's a single scrollable page (no tabs). Chat lives at `/`, not here:
 - **Run detail** — clicking a row (or **See runs**) opens a right-side
   slide-over with the task's run history; click a run for its tool-call timeline
   (`name → args → result`) and the final response or the error/traceback.
+- **Run duration** (bottom) — one small chart per task, plotting how long each
+  of its runs took over the last 30 days, with the median as a dashed reference
+  line and failures in red. This is the question the dot-strip can't answer:
+  a task's runs are near-uniformly green, but `morning_brief` has taken 8
+  seconds and it has taken 25 minutes, and `ai_chat_learnings` once ran for 56
+  — all of them "success". Hand-rolled SVG in
+  `chat/static/run-chart.js` (no charting library, so the page still draws
+  itself offline), on a log scale because durations span three orders of
+  magnitude within a single task. See [docs/run-charts.md](docs/run-charts.md).
 **Run now runs the real task, side effects and all** — `morning_brief` sends the
 actual email, `strava_download`/`calendar_colorizer` write real calendar events —
 exactly what the schedule does, just now. The button asks for a click-through
@@ -390,7 +400,7 @@ window otherwise: schedules are still edited by hand in the `.plist` files
 New dashboard routes on the chat server, all behind the same auth:
 `GET /dashboard`, `GET /api/schedules`, `GET /api/runs/<task>`,
 `GET /api/runs/<task>/<run_id>`, `GET /api/capabilities`,
-`POST /api/run/<task>`, `GET /api/run/<task>/status`.
+`GET /api/run_stats`, `POST /api/run/<task>`, `GET /api/run/<task>/status`.
 
 ### Memories
 
@@ -688,7 +698,8 @@ Run the suite from the repo root:
 ```
 
 The one exception to "this project is Python" is a pair of shared browser
-scripts. `chat/static/chat-dock.js` is the chat page's dock.
+scripts. `chat/static/chat-dock.js` is the chat page's dock and
+`chat/static/run-chart.js` the dashboard's duration charts.
 `chat/static/nav.js` renders the top-nav menu on
 every view from one canonical list, with `chat/static/nav.css` owning its look
 and mobile-wrap behavior — so the menu stays consistent instead of drifting per

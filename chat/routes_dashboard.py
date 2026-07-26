@@ -8,7 +8,7 @@ Registered as a Flask blueprint by chat/server.py. `run_manager` (the on-demand
 
 import logging
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 
 from agent.toolset import TOOLS, WRITE_TOOLS
 from agent.tools.memory import recall
@@ -21,6 +21,7 @@ from chat.insights import (
     next_run,
     parse_run_detail,
     parse_runs,
+    run_stats,
     system_map,
     task_by_key,
 )
@@ -85,6 +86,19 @@ def api_run_detail(task_key: str, run_id: str):
     if run is None:
         return jsonify({"error": "unknown run"}), 404
     return jsonify(run)
+
+
+@dashboard_bp.route("/api/run_stats", methods=["GET"])
+def api_run_stats():
+    """Duration series per task for the dashboard's charts. /api/schedules
+    carries only the last run and a bare status list, which is the "did it
+    work" question; this is the "how long does it take" one."""
+    if not _authenticated():
+        return jsonify({"error": "not authenticated"}), 401
+    # Clamped rather than validated: ?days= is a chart window, and a nonsense
+    # value should narrow the chart, not 400 the page that requested it.
+    days = request.args.get("days", type=int) or 30
+    return jsonify(run_stats(days=max(1, min(days, 365))))
 
 
 @dashboard_bp.route("/api/health/ntfy", methods=["GET"])
