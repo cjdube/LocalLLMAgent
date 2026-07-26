@@ -154,8 +154,7 @@ real usage ever surprises you.
 - `chat/server.py` — the `/chat/escalate` route; the confirm continuation threads
   the escalated turn's backend through `_run_turn` via `pending_backends` so a
   paused write resumes on the frontier model.
-- `chat/static/chat-dock.js` — the redo button and ⚡ badge (shared by `/chat` and
-  the dashboard side panel).
+- `chat/static/chat-dock.js` — the redo button and ⚡ badge on `/chat`.
 
 ## Adding another frontier provider (e.g. Claude)
 

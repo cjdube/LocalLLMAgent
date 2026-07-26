@@ -352,8 +352,8 @@ phone has a connection.
 
 The same always-on chat server also serves a dashboard at
 `http://127.0.0.1:8420/dashboard` (or the Tailscale HTTPS URL) — one place to
-see what's scheduled, whether it's working, what Wren can do, and to talk to
-her. It reuses the chat server's token auth, so no separate login.
+see what's scheduled, whether it's working, and what Wren can do. It reuses the
+chat server's token auth, so no separate login.
 
 ```
 chat/
@@ -364,10 +364,9 @@ chat/
   static/{favicon-32,apple-touch-icon,icon-512}.png  # raster fallbacks
 ```
 
-It's a single page (no tabs) — a scrollable left column with the chat docked
-on the right so you can talk to Wren while watching a run:
+It's a single scrollable page (no tabs). Chat lives at `/`, not here:
 
-- **Capabilities** (top of the left column) — auto-generated from the chat
+- **Capabilities** (top of the page) — auto-generated from the chat
   tools' `TOOL_SCHEMA`s as chips, grouped read-only (Wren runs them itself) vs.
   the confirmation-gated write tools. Click a chip to see its parameters. Always
   in sync with what's actually registered — no separate docs to maintain.
@@ -381,9 +380,6 @@ on the right so you can talk to Wren while watching a run:
 - **Run detail** — clicking a row (or **See runs**) opens a right-side
   slide-over with the task's run history; click a run for its tool-call timeline
   (`name → args → result`) and the final response or the error/traceback.
-- **Chat dock** — the same chat UI as `/`, always visible on the right, using
-  the existing `/chat` endpoints (confirmation prompts appear inline in the dock).
-
 **Run now runs the real task, side effects and all** — `morning_brief` sends the
 actual email, `strava_download`/`calendar_colorizer` write real calendar events —
 exactly what the schedule does, just now. The button asks for a click-through
@@ -692,8 +688,8 @@ Run the suite from the repo root:
 ```
 
 The one exception to "this project is Python" is a pair of shared browser
-scripts. `chat/static/chat-dock.js` is the chat dock shared by the chat page and
-the dashboard's side panel. `chat/static/nav.js` renders the top-nav menu on
+scripts. `chat/static/chat-dock.js` is the chat page's dock.
+`chat/static/nav.js` renders the top-nav menu on
 every view from one canonical list, with `chat/static/nav.css` owning its look
 and mobile-wrap behavior — so the menu stays consistent instead of drifting per
 page. **Adding a new view?** Give its page three things and it inherits the menu

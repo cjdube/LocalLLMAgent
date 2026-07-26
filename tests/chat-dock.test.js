@@ -1,6 +1,5 @@
 /**
- * Tests for chat/static/chat-dock.js — the chat dock shared by /chat and the
- * dashboard's side panel.
+ * Tests for chat/static/chat-dock.js — the chat dock used by /chat.
  *
  * The dock is a plain <script>, not a module: it wraps itself in an IIFE that
  * runs on load and binds to elements the page supplies. So rather than adding
@@ -20,8 +19,8 @@ const path = require("path");
 const DOCK_SRC = fs.readFileSync(
   path.join(__dirname, "..", "chat", "static", "chat-dock.js"), "utf8");
 
-// The dock's contract with a page is this markup: the ids it binds to. Both
-// index.html and dashboard.html supply exactly these.
+// The dock's contract with a page is this markup: the ids it binds to.
+// index.html supplies exactly these.
 const MARKUP = `
   <div id="messages"></div>
   <form id="composer">

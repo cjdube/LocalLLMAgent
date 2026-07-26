@@ -1,24 +1,24 @@
-// The chat dock, shared by /chat (full page) and /dashboard (side panel).
+// The chat dock, used by /chat (full page). It was also the dashboard's side
+// panel until that panel was removed — the dashboard is a read-only view now.
 //
-// This lived twice — once inline in each page — and the copies drifted: the
+// It once lived twice — inline in each page — and the copies drifted: the
 // dashboard's never grew the Stop button, and a missing try/catch around the
 // turn fetch had to be fixed in both. One copy now, included as:
 //
 //   <script src="/static/chat-dock.js"></script>
 //
 // The contract is the markup, not a config object: a page supplies #messages,
-// #composer, #input, #send, and #newChat, and owns all the CSS. Styling is the
-// only thing the two pages legitimately disagree about (the panel runs a size
-// smaller than the full page), so it stays in their stylesheets — this file
+// #composer, #input, #send, and #newChat, and owns all the CSS — this file
 // emits structure and class names and never touches presentation.
 //
 // Class names to style: .msg.user / .msg.wren / .msg.system, .msg.typing with
 // .typing-dot children, and .confirm with .detail / .actions / .yes / .no.
-// Note .typing-dot, not .dot — the dashboard already uses .dot for run-history
-// status dots, and a collision there is what forced the copies apart before.
+// Note .typing-dot, not .dot — a host page may already use .dot for something
+// else (the dashboard's run-history status dots), and that collision is what
+// forced the copies apart before.
 //
-// Wrapped in an IIFE: the dashboard's inline script shares this global scope
-// and has its own el()/api() helpers to not clobber.
+// Wrapped in an IIFE: a host page's inline script shares this global scope, so
+// this file declares nothing on it.
 (() => {
   const messagesEl = document.getElementById("messages");
   const form = document.getElementById("composer");

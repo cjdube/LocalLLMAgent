@@ -13,7 +13,7 @@ Wren is a local-first personal AI agent: a Gemma model served by Ollama on a Mac
 - `agent/store.py` — locked/atomic JSON store primitives used by every store under `config/`.
 - `tasks/*.py` — unattended entrypoints run by launchd; `tasks/_common.py` has `setup_logger`/`notify_failure`, and `tasks/_learnings_common.py` the shared gather→persist→email helpers for the two daily-learnings tasks. `tasks/bg_worker.py` is the generic runner that polls `config/bg_jobs.json` for user-initiated background jobs with push-to-approve.
 - `launchd/` — the scheduler: one plist per task (`StartInterval` for pollers, `StartCalendarInterval` for daily/weekly jobs), logging to `logs/`.
-- `tests/` — flat pytest suite, one `test_<module>.py` per source module; plus `chat-dock.test.js`, the lone JS suite (jest/jsdom, `npm test`), covering the shared browser dock.
+- `tests/` — flat pytest suite, one `test_<module>.py` per source module; plus `chat-dock.test.js`, the lone JS suite (jest/jsdom, `npm test`), covering the chat page's browser dock.
 - `config/` — `.env` (documented in `.env.example`) plus gitignored JSON stores.
 
 ## Data sourcing policy

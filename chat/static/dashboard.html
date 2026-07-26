@@ -43,7 +43,7 @@
   .pill.off .glow { background: #98a2b3; }
 
   main { flex: 1; display: flex; min-height: 0; }
-  .left { flex: 1; min-width: 0; overflow-y: auto; padding: 20px 18px; display: flex; flex-direction: column; gap: 22px; }
+  .content { flex: 1; min-width: 0; overflow-y: auto; padding: 20px 18px; display: flex; flex-direction: column; gap: 22px; }
   .section-label { font-size: 13px; font-weight: 600; color: #6b7280; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: baseline; }
   .section-label .hint { font-weight: 400; font-size: 12px; color: #9ca3af; }
 
@@ -91,37 +91,6 @@
   button.btn.primary { background: #1f2328; color: #fff; border-color: #1f2328; }
   button.btn:disabled { opacity: 0.5; cursor: default; }
 
-  /* Chat dock */
-  .dock { flex: 0 0 33%; min-width: 320px; background: #ffffff; border-left: 1px solid #e5e7eb; display: flex; flex-direction: column; min-height: 0; }
-  .dock-head { padding: 13px 16px; border-bottom: 1px solid #e5e7eb; display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; }
-  .dock-head .newchat { margin-left: auto; font-size: 12px; font-weight: 400; color: #6b7280; background: none; border: 1px solid #d0d5dd; border-radius: 6px; padding: 4px 8px; cursor: pointer; }
-  #messages { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 9px; }
-  .msg { max-width: 88%; padding: 9px 12px; border-radius: 14px; font-size: 14px; line-height: 1.45; white-space: pre-wrap; }
-  .msg.user { align-self: flex-end; background: #1f2328; color: white; }
-  .msg.wren { align-self: flex-start; background: #f4f4f5; }
-  .msg.system { align-self: center; background: transparent; color: #9ca3af; font-size: 12px; }
-  .msg.wren.escalated .badge { display: block; font-size: 10px; font-weight: 600; color: #7c3aed; margin-bottom: 3px; }
-  .escalate { align-self: flex-start; margin: -4px 0 2px; padding: 4px 9px; font-size: 12px; background: #fff; color: #4b5563; border: 1px solid #d0d5dd; border-radius: 8px; cursor: pointer; }
-  .escalate:hover { background: #f3f0fb; color: #7c3aed; border-color: #ddd0f5; }
-  .escalate:disabled { opacity: 0.5; cursor: default; }
-  /* .typing-dot, not .dot — .dot above is the run-history status dot. */
-  .msg.typing { display: flex; align-items: center; gap: 4px; padding: 12px; }
-  .msg.typing .typing-dot { width: 6px; height: 6px; border-radius: 50%; background: #9ca3af; animation: bounce 1.2s infinite ease-in-out; }
-  .msg.typing .typing-dot:nth-child(2) { animation-delay: 0.15s; }
-  .msg.typing .typing-dot:nth-child(3) { animation-delay: 0.3s; }
-  @keyframes bounce { 0%,60%,100% { opacity: 0.3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
-  .confirm { align-self: flex-start; max-width: 92%; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 14px; padding: 11px 13px; font-size: 14px; }
-  .confirm .detail { margin-top: 8px; padding: 8px 10px; background: #fff; border: 1px solid #fed7aa; border-radius: 8px; font-size: 13px; color: #6b7280; white-space: pre-wrap; max-height: 160px; overflow-y: auto; }
-  .confirm .actions { margin-top: 9px; display: flex; gap: 8px; }
-  .confirm button { flex: 1; padding: 7px; border-radius: 8px; border: none; font-size: 13px; cursor: pointer; }
-  .confirm .yes { background: #16a34a; color: white; }
-  .confirm .no { background: #e5e7eb; color: #1f2328; }
-  #composer { display: flex; gap: 8px; padding: 12px; border-top: 1px solid #e5e7eb; }
-  #input { flex: 1; padding: 10px 14px; border-radius: 20px; border: 1px solid #d0d5dd; font-size: 15px; }
-  #send { padding: 0 16px; border-radius: 20px; border: none; background: #1f2328; color: white; font-size: 14px; cursor: pointer; }
-  #send:disabled { opacity: 0.5; }
-  #send.stop { background: #b42318; }
-
   /* Run-detail slide-over */
   .backdrop { position: fixed; inset: 0; background: rgba(16,24,40,0.4); opacity: 0; pointer-events: none; transition: opacity 0.18s ease; z-index: 40; }
   .backdrop.show { opacity: 1; pointer-events: auto; }
@@ -141,11 +110,6 @@
   .final { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 10px; padding: 12px; font-size: 14px; white-space: pre-wrap; }
   .error-box { background: #fef3f2; border: 1px solid #fecdca; border-radius: 10px; padding: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: #b42318; white-space: pre-wrap; word-break: break-word; margin-top: 10px; }
   .drawer-body table th, .drawer-body table td { font-size: 13px; }
-
-  @media (max-width: 860px) {
-    main { flex-direction: column; }
-    .dock { flex: none; width: auto; min-width: 0; border-left: none; border-top: 1px solid #e5e7eb; height: 50vh; }
-  }
 </style>
 </head>
 <body>
@@ -160,7 +124,7 @@
   </header>
 
   <main>
-    <div class="left">
+    <div class="content">
       <section>
         <div class="section-label">Capabilities</div>
         <div id="capPanel" class="panel">Loading…</div>
@@ -170,18 +134,6 @@
         <div id="tasksWrap"></div>
       </section>
     </div>
-
-    <aside class="dock">
-      <div class="dock-head">
-        <span>Chat with Wren</span>
-        <button id="newChat" class="newchat">New chat</button>
-      </div>
-      <div id="messages"></div>
-      <form id="composer">
-        <input id="input" autocomplete="off" placeholder="Ask Wren anything...">
-        <button id="send" type="submit">Send</button>
-      </form>
-    </aside>
   </main>
 
   <div id="backdrop" class="backdrop"></div>
@@ -486,7 +438,6 @@ loadCapabilities();
 loadTasks();
 loadPushHealth();
 </script>
-<script src="/static/chat-dock.js"></script>
 <script src="/static/nav.js"></script>
 </body>
 </html>
