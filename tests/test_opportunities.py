@@ -128,6 +128,62 @@ def test_flip_stalled_respects_dismissed_and_missing_dates():
 
 
 # --------------------------------------------------------------------------- #
+# closure detection
+# --------------------------------------------------------------------------- #
+
+def _ats(item_id, **extra):
+    return _candidate(item_id, "hiring", source="ats", **extra)
+
+
+def test_close_missing_retires_openings_gone_from_a_polled_board():
+    opp.insert_new_items([_ats("greenhouse:acme:1"), _ats("greenhouse:acme:2")])
+    # Board answered; only job 2 is still listed.
+    closed = opp.close_missing({"greenhouse:acme:2"}, ["greenhouse:acme"])
+    assert [i["id"] for i in closed] == ["greenhouse:acme:1"]
+    assert closed[0]["status"] == "closed" and closed[0]["closed_at"]
+    assert [i["id"] for i in opp.pending_new_items()] == ["greenhouse:acme:2"]
+
+    # Marked once: a second run doesn't re-close or re-stamp it.
+    stamp = closed[0]["closed_at"]
+    assert opp.close_missing({"greenhouse:acme:2"}, ["greenhouse:acme"]) == []
+    assert opp.get_item("greenhouse:acme:1")["closed_at"] == stamp
+
+
+def test_close_missing_ignores_boards_that_did_not_poll_cleanly():
+    """The failure mode worth pinning: a timed-out board returns no openings,
+    which must never read as 'every role there was filled'. Same for a company
+    Craig just unwatched — its board isn't polled at all any more."""
+    opp.insert_new_items([_ats("lever:acme:1"), _ats("ashby:beta:1")])
+    # Only beta's board answered; acme errored, so it isn't in boards_polled.
+    closed = opp.close_missing(set(), ["ashby:beta"])
+    assert [i["id"] for i in closed] == ["ashby:beta:1"]
+    assert opp.list_opportunities(status="closed")["count"] == 1
+
+
+def test_close_missing_leaves_non_ats_items_alone():
+    """EDGAR filings and HN posts don't 'close' — a filing is a historical
+    event and HN comments never come down. Only board postings are checked."""
+    opp.insert_new_items([_candidate(), _candidate("hn:1", "hiring", source="hn")])
+    assert opp.close_missing(set(), ["greenhouse:acme", "hn"]) == []
+
+
+def test_close_missing_badges_interested_instead_of_retiring_it():
+    item_id = opp.insert_new_items([_ats("greenhouse:acme:1")])[0]["id"]
+    opp.update_opportunity(item_id, "interested")
+    closed = opp.close_missing(set(), ["greenhouse:acme"])
+    # Craig may already have reached out: it stays in his pipeline, flagged.
+    assert closed[0]["status"] == "interested" and closed[0]["closed_at"]
+    assert opp.list_opportunities(status="interested")["count"] == 1
+
+
+def test_close_missing_leaves_dismissed_alone():
+    item_id = opp.insert_new_items([_ats("greenhouse:acme:1")])[0]["id"]
+    opp.update_opportunity(item_id, "dismissed")
+    assert opp.close_missing(set(), ["greenhouse:acme"]) == []
+    assert opp.list_opportunities(status="dismissed")["count"] == 1
+
+
+# --------------------------------------------------------------------------- #
 # scores / digest lifecycle / prune
 # --------------------------------------------------------------------------- #
 
@@ -160,6 +216,7 @@ def test_prune_drops_old_digested_keeps_interested():
             {"id": "c", "status": "interested", "updated": old.isoformat()},
             {"id": "d", "status": "digested", "updated": datetime.now().isoformat()},
             {"id": "e", "status": "digested", "updated": "not-a-date"},  # kept, not guessed
+            {"id": "f", "status": "closed", "updated": old.isoformat()},
         ],
     }
     opp._prune(data)

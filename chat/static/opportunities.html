@@ -51,6 +51,7 @@
   .badge.hiring { background: #eff8ff; color: #175cd3; }
   .badge.score { background: #eef2ff; color: #3730a3; }
   .badge.pending { background: #fffaeb; color: #b54708; }
+  .badge.gone { background: #f2f4f7; color: #667085; }
   .badge.failed { background: #fef3f2; color: #b42318; }
 
   details.research { flex-basis: 100%; margin-top: 2px; }
@@ -151,6 +152,10 @@ function itemRow(item, buttons) {
   row.appendChild(body);
 
   if (item.score) row.appendChild(el("span", "badge score", item.score + "/10"));
+  // Only interested items reach here closed — the scout retires the rest out of
+  // the triage view. Craig may already have reached out, so say so rather than
+  // dropping it.
+  if (item.closed_at) row.appendChild(el("span", "badge gone", "no longer listed"));
 
   const research = item.research || null;
   if (research && research.status === "pending") {

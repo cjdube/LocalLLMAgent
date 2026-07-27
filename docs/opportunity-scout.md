@@ -69,6 +69,14 @@ Then the stall check runs: any watched leadership opening still open past
 `stalled_search` and put back into `new`. This happens exactly once per
 opening — that's the "stalled exec search" signal the scout was built for.
 
+Then the closure check runs: for every watched board that answered **without
+an error this run**, any stored opening whose id isn't in that board's current
+openings has come down — filled, pulled, or retitled past the leadership
+filter. The board-by-board scoping is the whole safety of it: a timed-out
+board returns zero openings, and without it that would retire a company's
+entire pipeline in one go. A company Craig just unwatched is likewise never
+polled, so its items are left alone.
+
 Everything in `new` becomes the digest:
 
 1. The model scores the *unscored* ones — a 1–10 fit rating plus a one-line
@@ -99,6 +107,30 @@ gets polled.
 - **Dismissed** — the item leaves the triage view, will never be re-flagged
   as stalled, and is pruned from the store 30 days later. (`digested` items
   never touched also age out after 30 days.)
+
+## What happens when a posting is filled?
+
+The closure check above retires it, and the status it lands in depends on where
+it was:
+
+- Not yet triaged (`new` or `digested`) → status `closed`. It leaves the triage
+  view immediately and ages out on the same 30-day clock as `dismissed`. A
+  posting that closes before its first digest is dropped from that digest
+  rather than emailed as a live lead — the check runs before the digest is
+  built.
+- `interested` → **kept, with a "no longer listed" badge** on `/opportunities`.
+  Craig may already have emailed them, so the closure is information, not a
+  reason to hide the item. It keeps its research brief and never ages out.
+- `dismissed` → untouched.
+
+`closed` is deliberately separate from `dismissed`: dismissed means Craig
+judged it, closed means the market did. Conflating them would lose the record
+of which watched searches actually resolved. Nothing pushes a notification for
+a closure; the badge and the log line are the whole surface.
+
+This is ATS-only. An EDGAR Form D filing is a historical event that never
+closes (a stale raise decays in relevance rather than disappearing), and HN
+comments are never removed — only board postings have a knowable end.
 
 The store is the memory: a dismissed item that ages out could in principle
 reappear if the source served it again, but in practice the EDGAR watermark

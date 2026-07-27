@@ -90,6 +90,43 @@ def flip_stalled(open_postings: dict, stalled_days: int, now: datetime | None = 
     return flipped
 
 
+def close_missing(open_ids: set, polled_boards: list, now: str | None = None) -> list:
+    """Retire watched openings that have vanished from their board.
+
+    open_ids is every ATS item id seen in this run's poll; polled_boards is the
+    "<ats>:<slug>" of every board that answered *without error*. An item is only
+    considered when its own board is in that list, so a timed-out board — or one
+    Craig just unwatched — can't be read as "every role there was filled".
+
+    A closure isn't a judgement, so it never becomes 'dismissed': items get
+    their own terminal 'closed' status (and age out on the same 30-day clock).
+    'interested' is the exception — Craig may already have reached out, so the
+    item keeps its status and just carries closed_at, which the page badges as
+    "no longer listed". Marked once: an item that already has closed_at is left
+    alone rather than having its timestamps bumped every week. Returns the
+    items that changed."""
+    boards = set(polled_boards)
+    stamp = now or _now()
+    changed = []
+    with _locked():
+        data = _load()
+        for item in data["items"]:
+            if item.get("source") != "ats" or item.get("closed_at"):
+                continue
+            if item["id"].rsplit(":", 1)[0] not in boards or item["id"] in open_ids:
+                continue
+            if item["status"] in ("dismissed", "closed"):
+                continue
+            if item["status"] != "interested":
+                item["status"] = "closed"
+            item["closed_at"] = stamp
+            item["updated"] = stamp
+            changed.append(item)
+        if changed:
+            _save(data)
+    return changed
+
+
 def get_item(item_id: str) -> dict | None:
     with _locked():
         return next((i for i in _load()["items"] if i["id"] == item_id), None)

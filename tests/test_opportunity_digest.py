@@ -229,6 +229,60 @@ def test_truncated_edgar_with_no_older_hits_holds_without_regressing(stubbed_run
     assert load_json(od.STATE_PATH, {})["edgar_window_start"] == "2026-07-09"
 
 
+def _ats_job(job_id=1, title="VP of Product"):
+    return {"id": f"greenhouse:acme:{job_id}", "source": "ats", "signal": "hiring",
+            "company": "Acme", "title": title,
+            "url": f"https://boards.greenhouse.io/acme/jobs/{job_id}",
+            "location": "Boston, MA", "posted_at": "2026-07-10"}
+
+
+def test_closed_postings_are_retired_on_the_next_run(stubbed_run, monkeypatch):
+    board = {"items": [_ats_job()], "errors": [], "boards_polled": ["greenhouse:acme"]}
+    monkeypatch.setattr(od, "poll_ats", lambda watchlist: board)
+    monkeypatch.setattr(od, "poll_edgar", lambda *a: {"items": []})
+    assert od.main() == 0
+    assert "VP of Product" in stubbed_run["emails"][0][1]
+
+    # Next run: the board answers, the job is gone — it was filled or pulled.
+    board["items"] = []
+    assert od.main() == 0
+    assert opp.list_opportunities(status="closed")["count"] == 1
+
+
+def test_a_failed_board_closes_nothing(stubbed_run, monkeypatch):
+    """The dangerous failure: an ATS timeout returns zero openings. Without the
+    boards_polled guard that would retire a company's entire pipeline."""
+    board = {"items": [_ats_job()], "errors": [], "boards_polled": ["greenhouse:acme"]}
+    monkeypatch.setattr(od, "poll_ats", lambda watchlist: board)
+    monkeypatch.setattr(od, "poll_edgar", lambda *a: {"items": []})
+    assert od.main() == 0
+
+    board.update({"items": [], "errors": ["Acme (greenhouse/acme): timeout"],
+                  "boards_polled": []})
+    assert od.main() == 0
+    assert opp.list_opportunities(status="closed")["count"] == 0
+    assert opp.list_opportunities(status="digested")["count"] == 1
+
+
+def test_posting_closing_before_its_first_digest_is_never_reported(stubbed_run, monkeypatch):
+    """close_missing runs before the digest is built, so a job seen by one run
+    (send failed, say) that comes down before the next one never goes out as a
+    live lead."""
+    monkeypatch.setattr(od, "poll_edgar", lambda *a: {"items": []})
+    opp.insert_new_items([_ats_job(1, "VP of Engineering")])
+    assert opp.pending_new_items()[0]["status"] == "new"
+
+    # This run: job 1 is gone from the board, job 2 is newly listed.
+    monkeypatch.setattr(od, "poll_ats",
+                        lambda watchlist: {"items": [_ats_job(2, "Head of Product")],
+                                           "errors": [], "boards_polled": ["greenhouse:acme"]})
+    monkeypatch.setattr(od, "complete_text", lambda **k: "1|5|Say hi.")
+    assert od.build_and_send_digest()["new_items"] == 1
+    body = stubbed_run["emails"][-1][1]
+    assert "Head of Product" in body and "VP of Engineering" not in body
+    assert opp.list_opportunities(status="closed")["count"] == 1
+
+
 def test_send_failure_exits_nonzero_and_leaves_items_new(stubbed_run, monkeypatch):
     monkeypatch.setattr(od, "send_email",
                         lambda subject, body, html=False: {"error": "gmail 503"})

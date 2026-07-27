@@ -14,7 +14,8 @@ The pollers and the dedupe store do everything deterministic; the local LLM
 only scores each NEW item 1-10 for fractional-operator fit and drafts a
 one-line outreach angle. HTML is assembled in Python (morning-brief pattern).
 Only items not seen before (or newly stalled) are reported, so an empty day
-sends no email.
+sends no email. Each run also retires watched openings that have dropped off
+their board (close_missing), so a filled role stops sitting in the pipeline.
 
 The whole pipeline lives in build_and_send_digest(), shared by this scheduled
 task (main, below) and the chat server's send_opportunity_digest tool.
@@ -373,15 +374,22 @@ def _ats_board_jobs(entry: dict) -> list:
 
 def poll_ats(watchlist: list) -> dict:
     """Leadership openings across every watched board. One board failing is
-    reported in `errors` but never blocks the others."""
-    items, errors = [], []
+    reported in `errors` but never blocks the others.
+
+    `boards_polled` lists the "<ats>:<slug>" of the boards that answered
+    cleanly — the ones whose returned openings are a complete picture. Closure
+    detection needs that distinction: absence from a board that errored means
+    nothing, absence from one that answered means the posting came down."""
+    items, errors, polled = [], [], []
     for entry in watchlist:
         try:
             items.extend(_ats_board_jobs(entry))
         except (requests.exceptions.RequestException, ValueError,
                 ElementTree.ParseError) as e:
             errors.append(f"{entry['company']} ({entry['ats']}/{entry['slug']}): {e}")
-    return {"items": items, "errors": errors}
+        else:
+            polled.append(f"{entry['ats']}:{entry['slug']}")
+    return {"items": items, "errors": errors, "boards_polled": polled}
 
 
 # Phrases that make an HN "Who is hiring" post worth scoring, from
@@ -720,6 +728,17 @@ def build_and_send_digest(logger: Optional[logging.Logger] = None) -> dict:
         if flipped:
             log.info(f"{len(flipped)} openings crossed the "
                      f"{_stalled_days()}-day stalled threshold")
+
+        # Anything the store still holds for a cleanly-polled board that isn't
+        # in that board's current openings has come down — filled, pulled, or
+        # retitled. Runs before pending_new_items so a posting that closes
+        # before its first digest is never reported as a live lead.
+        closed = opportunities.close_missing(
+            set(open_postings), ats_result.get("boards_polled", []))
+        if closed:
+            in_pipeline = [i for i in closed if i["status"] == "interested"]
+            log.info(f"{len(closed)} watched openings no longer listed — closed "
+                     f"({len(in_pipeline)} of them marked interested)")
 
         to_report = opportunities.pending_new_items()
         if not to_report:

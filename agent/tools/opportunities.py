@@ -5,7 +5,9 @@ Three signals, all from free ToS-clean sources (see CLAUDE.md's data sourcing
 policy): "funded" (new SEC Form D filings), "hiring" (product/eng leadership
 openings at watched companies, plus HN Who-is-hiring posts), and
 "stalled_search" (a watched leadership opening still unfilled after
-OPP_STALLED_DAYS — flipped once, when it crosses the threshold).
+OPP_STALLED_DAYS — flipped once, when it crosses the threshold). A watched
+opening that disappears from its board is retired to status "closed" (see
+close_missing) so a filled role stops looking like a live lead.
 
 The chat model manages the watchlist and item statuses through the tools
 below; the digest task inserts/scores items. State lives in
@@ -39,9 +41,11 @@ _ATS_KINDS = ("greenhouse", "lever", "ashby", "icims")
 _SETTABLE_STATUSES = ("interested", "dismissed")
 
 # Keep the store bounded: it grows from daily polling, and list_opportunities
-# feeds the model's context. Items Craig has dealt with (dismissed) or that
-# were reported and never acted on (digested) fall off after the window;
-# "interested" is his live pipeline and "new" is pre-digest, so both are kept.
+# feeds the model's context. Items Craig has dealt with (dismissed), that were
+# reported and never acted on (digested), or whose posting came down (closed)
+# fall off after the window; "interested" is his live pipeline and "new" is
+# pre-digest, so both are kept — including an interested item whose posting
+# closed, which stays as a badged reminder of an outreach already in flight.
 _PRUNE_AFTER_S = 30 * 24 * 3600
 _LIST_LIMIT = 20
 
@@ -53,7 +57,8 @@ LIST_OPPORTUNITIES_TOOL_SCHEMA = {
         "description": "List fractional-work opportunity signals Wren's daily scout has gathered "
         "(funded companies, leadership openings, stalled exec searches), newest first. Use when "
         "Craig asks about opportunities, leads, or the pipeline. Optionally filter by status "
-        "(new, digested, interested, dismissed) or signal (funded, hiring, stalled_search).",
+        "(new, digested, interested, dismissed, or closed — the posting came down) or signal "
+        "(funded, hiring, stalled_search).",
         "parameters": {
             "type": "object",
             "properties": {
@@ -147,7 +152,7 @@ def _prune(data: dict, now: datetime | None = None) -> None:
     now = now or datetime.now()
 
     def keep(item: dict) -> bool:
-        if item["status"] not in ("digested", "dismissed"):
+        if item["status"] not in ("digested", "dismissed", "closed"):
             return True
         try:
             age = (now - datetime.fromisoformat(item["updated"])).total_seconds()
@@ -261,6 +266,7 @@ def get_watchlist() -> list:
 # the feed module imports back, so the two modules load without a cycle.
 from agent.tools._opportunities_feed import (  # noqa: E402
     all_items,
+    close_missing,
     flip_stalled,
     get_item,
     insert_new_items,
