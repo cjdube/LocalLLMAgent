@@ -9,7 +9,7 @@ either consumer product, so we use what lands on disk):
   system-reminders — so a session spanning several days is summarized once per
   day it was active ("new or revisited that day").
 - A Gemini "drop folder" (WREN_GEMINI_CHATS_DIR): Gemini has no local footprint,
-  so Craig drops an exported .md/.txt/.json file per conversation and we pick up
+  so the user drops an exported .md/.txt/.json file per conversation and we pick up
   anything not yet processed. Files are never modified or deleted.
 
 Everything here is deterministic Python — the model only turns the compacted text

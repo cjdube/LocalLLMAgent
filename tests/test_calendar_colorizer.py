@@ -6,6 +6,7 @@ import logging
 
 import pytest
 
+from agent import prefs
 from agent.tools.calendar import CATEGORY_COLORS
 from chat.insights import _is_run_success
 from tasks import calendar_colorizer as cc
@@ -16,8 +17,11 @@ _LOGGER = logging.getLogger("test_calendar_colorizer")
 def _never_called(*a, **k):
     raise AssertionError("the model must not be warmed on a day with no events")
 
-WORK = CATEGORY_COLORS["Work/LLC"][0]
-FITNESS = CATEGORY_COLORS["Fitness"][0]
+# By role, not by category name: docs/preferences.md promises a cloner can
+# rename "Work/LLC" to anything without breaking code, so a test that hardcodes
+# the name breaks on any preferences.json but the one it was written against.
+WORK = prefs.category_color_by_role("work", "1")
+FITNESS = prefs.category_color_by_role("fitness", "4")
 
 
 # --------------------------------------------------------------------------- #

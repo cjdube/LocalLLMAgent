@@ -8,15 +8,18 @@ ways:
 - **Scheduled tasks** (Strava-to-calendar logging, a morning brief email, daily
   activity + YouTube + AI-chat learnings entries) — unattended, triggered entirely
   by macOS `launchd`, no human in the loop.
-- **Ad hoc chat** — a small always-on web app (`chat/server.py`) so Craig can
+- **Ad hoc chat** — a small always-on web app (`chat/server.py`) so the user can
   talk to Wren directly and have her take action on request, from anywhere,
   over Tailscale. See "Wren — ad hoc chat" below.
 
 **Make it yours.** Personal preferences — whose agent this is, calendar
 categories and colors, which job titles the opportunity scout flags, default
-location — live in the committed `config/preferences.json`, not in Python.
-Clone the repo, edit that one file (and the persona Markdown in
-`agent/identity.md` / `agent/wren.md`), and Wren serves you instead. Every
+location — live in `config/preferences.json`, not in Python. Copy
+`config/preferences.example.json` to `config/preferences.json`, edit it, do the
+same for `agent/identity.example.md` → `agent/identity.md`, and Wren serves you
+instead. Both real files are **gitignored** — they hold your name and where you
+live, so they stay out of the repo; the `.example` versions are the committed
+templates, and the code falls back to them so a fresh clone still runs. Every
 key is documented in [docs/preferences.md](docs/preferences.md). Secrets stay
 in the gitignored `config/.env`.
 
@@ -47,10 +50,10 @@ a cloud model (Gemini) via `WREN_LLM_BACKEND` — globally, or per-task with
 cloud. This sends that task's data off-device, the opposite of the local-first
 default, so it's opt-in. See [docs/llm-backend.md](docs/llm-backend.md).
 
-**Chat can escalate a weak answer to a frontier model, by hand.** When Craig
+**Chat can escalate a weak answer to a frontier model, by hand.** When the user
 judges a local reply too weak, a "Redo with the frontier model" button re-runs
 that turn on a configured cloud backend (`WREN_ESCALATION_BACKEND`, provider-
-neutral) — one deliberate, badged, logged tap. There's no automatic router: Craig
+neutral) — one deliberate, badged, logged tap. There's no automatic router: the user
 is the router, and every escalation is recorded to `config/escalations.json` as
 the paired dataset that would justify one later. See
 [docs/frontier-escalation.md](docs/frontier-escalation.md).
@@ -117,13 +120,13 @@ Every system prompt gets two persona layers prepended automatically (via
 1. **`agent/wren.md`** — Wren's own identity: name, voice, personality traits.
    Present in *every* call, scheduled or chat, so she's a consistent agent
    either way.
-2. **`agent/identity.md`** — who Craig is and how he wants things written
-   (direct, concise, no flattery).
+2. **`agent/identity.md`** — who the user is and how they want things written
+   (direct, concise, no flattery). This one is personal data, so it's
+   **gitignored**; copy `agent/identity.example.md` and rewrite it as yourself.
+   A checkout without it just runs on `wren.md` alone.
 
-Both are hand-maintained, condensed excerpts of `AgentOS/IDENTITY.md` (Part 2
-and Part 1 respectively) — trimmed because the full file includes Claude-Code/
-AgentOS-specific content (diagrams, "System 2 Founder") that doesn't apply to
-a small local model. A third file, **`agent/wren_chat.md`**, holds
+Both are hand-maintained and deliberately short — every token is paid for on
+every call, scheduled or chat. A third file, **`agent/wren_chat.md`**, holds
 *behavioral* instructions (ask questions when useful, narrate intent before an
 action) that only make sense in an interactive session — it's loaded only by
 `chat/server.py`, not injected into scheduled tasks, since those are
@@ -140,7 +143,7 @@ in — nothing new inherits it automatically.
 | `web_search.py` | Web search via Tavily API |
 | `web_fetch.py` | Fetch one web page as clean markdown via the Firecrawl API (`fetch_webpage`) — search finds pages, this reads one. Content is untrusted, scheme-validated, and capped (`WEB_FETCH_MAX_CHARS`) |
 | `evaluate_app.py` | Strategic teardown of a product from its website URL (`evaluate_app`) — a fixed pipeline (Firecrawl fetch → deterministic compaction → one model call) producing a skeptical VC-style analysis: hidden risks, adoption friction, missing technical constraints. See [docs/app-evaluator.md](docs/app-evaluator.md) |
-| `evaluate_against.py` | Evaluate a target (a URL or inline text) against Craig's **own** standards (`evaluate_against`) — the same fixed pipeline as `evaluate_app`, but the rubric is a wiki "lens" page Craig curates (e.g. his product principles), loaded at call time. Returns where the target aligns, where it falls short, and what to change. A lens is any wiki page with `lens: true` in its frontmatter, so adding one is writing a page — no code change. A lens can also opt into deterministic pre-pass checks (em dashes per sentence, exact banned phrases) computed in Python and handed to the model as fact, rather than asked of it. Marker contract, the injected index, the pre-pass, and how to author a lens in [docs/lenses.md](docs/lenses.md) |
+| `evaluate_against.py` | Evaluate a target (a URL or inline text) against the user's **own** standards (`evaluate_against`) — the same fixed pipeline as `evaluate_app`, but the rubric is a wiki "lens" page the user curates (e.g. his product principles), loaded at call time. Returns where the target aligns, where it falls short, and what to change. A lens is any wiki page with `lens: true` in its frontmatter, so adding one is writing a page — no code change. A lens can also opt into deterministic pre-pass checks (em dashes per sentence, exact banned phrases) computed in Python and handed to the model as fact, rather than asked of it. Marker contract, the injected index, the pre-pass, and how to author a lens in [docs/lenses.md](docs/lenses.md) |
 | `github_starred.py` | List starred GitHub repos, optionally filtered to those pushed to since a given timestamp, with a `recent_changes` summary (release notes or recent commit subjects) per matched repo; `fetch_readme` returns a repo's raw README (best-effort, feeds the `/starred` blurbs); `fetch_latest_release` returns a repo's latest published release (best-effort, feeds the `/starred` release-awareness column); `compare_versions` normalizes two tag strings to a numeric core and reports whether an installed version is behind a release (feeds the `/starred` "Installed" column) |
 | `strava.py` | Strava activities via the Strava API (own OAuth app), for a given date. Run `--authorize` once to mint a refresh token |
 | `calendar.py` | Google Calendar read/write (`get_upcoming_events`, `get_events_in_range`, `log_calendar_event` — idempotent via `source_id`) |
@@ -153,7 +156,7 @@ in — nothing new inherits it automatically.
 | `memory.py` | Persistent long-term memory in two tiers — `remember` (archival, search-only), `pin` (active, injected into every system prompt), `recall` (search either tier, optionally by category), `recategorize` (relabel a fact's category in place, keeping its id/history), `archive` (demote active→archival), `forget` (delete). Stored in `config/wren_memory.json`; archival facts track an `access_count`. The writes (`remember`/`pin`/`recategorize`/`forget`) are confirmation-gated. See [docs/memory.md](docs/memory.md) |
 | `skills.py` | Procedural memory (chat-only) — reusable how-to procedures composing the other tools: `list_skills`, `read_skill`, `write_skill` (create/overwrite), `delete_skill`. One Markdown file per skill under `skills/` (override with `WREN_SKILLS_DIR`); a capped title+one-line index is injected into the chat prompt so Wren knows what procedures exist, reading a body on demand. Writes are confirmation-gated |
 | `reminders.py` | Scheduled reminders — `set_reminder` (parses the time in Python via `dates.resolve_reminder_time`, not the model), `list_reminders`, `cancel_reminder`. Stored in `config/reminders.json`; the `reminder_sweep` task fires each due one as an `ntfy` phone push, then clears it. Set/cancel are confirmation-gated |
-| `schedule.py` | Read-only view of Wren's *own* launchd-scheduled tasks (`list_scheduled_tasks`) — the same schedule/next-run/last-status data the dashboard shows, so chat can answer "what do you run?" / "what's next?". Reuses the `chat.insights` dashboard data layer; distinct from Craig's Google Tasks and reminders |
+| `schedule.py` | Read-only view of Wren's *own* launchd-scheduled tasks (`list_scheduled_tasks`) — the same schedule/next-run/last-status data the dashboard shows, so chat can answer "what do you run?" / "what's next?". Reuses the `chat.insights` dashboard data layer; distinct from the user's Google Tasks and reminders |
 | `background.py` | Background tasks — `run_in_background` (hand off a multi-step task that runs detached and pushes a summary when done), `list_background_jobs`, `get_job_result`. Jobs live in `config/bg_jobs.json`; the `bg_worker` task runs them. Posture is "read/draft freely, tap-to-approve consequential actions". Also owns the HMAC-signed approval tokens. Full lifecycle, approval flow, and exclusions in [docs/background.md](docs/background.md) |
 | `opportunities.py` | Opportunity signal store for the fractional-work scout — `list_opportunities`, `update_opportunity` (mark interested/dismissed), `watch_company`/`unwatch_company`. The `opportunity_digest` task fills it; full lifecycle in [docs/opportunity-scout.md](docs/opportunity-scout.md) |
 | `research.py` | Company research — a fixed pipeline (not a freeform agent task): bounded Tavily searches summarized by the model into a fixed-template brief. `research_opportunity` enriches and persists onto a scout item (see [docs/opportunity-scout.md](docs/opportunity-scout.md)); `research_company` researches ANY company by name and returns the brief directly — the general-purpose verb chat and skills compose. Read-only against the outside world; web snippets are treated as untrusted display text |
@@ -172,15 +175,15 @@ Every tool module is runnable standalone for testing, e.g.:
 | `tasks/ai_chat_learnings.py` | Daily 4:30 AM | Covers the prior day's chats with AI agents: reads every Claude Code session active that day from `~/.claude/projects` (plus any new Gemini export dropped in `WREN_GEMINI_CHATS_DIR`), and has the local model write a brief **Accomplished / Learned** summary per session — outcomes, not the back-and-forth. Writes one `AI-Chat-Learnings-<date>.md` per day in `LEARNINGS_DIR`, one section per session. A day with no chats (or only empty summaries) writes nothing; same vault-write-fails → email fallback. Neither product has an API for past chats, so the sources are local session logs + a drop folder. `--backfill N` summarizes each of the last N days as a separate file. See [docs/ai-chat-learnings.md](docs/ai-chat-learnings.md). |
 | `tasks/daily_youtube_learnings.py` | Daily 5:05 AM | Covers the prior day's YouTube Liked videos: the local model writes a short synthesis of what they teach, and a deterministic, scheme-validated linked list of the exact videos (verbatim titles + URLs) is appended in Python; writes it as `Daily-YouTube-<date>.md` in `LEARNINGS_DIR`. A day with no Likes writes nothing. Same vault-write-fails → email fallback. |
 | `tasks/daily_chrome_learnings.py` | Daily 5:15 AM | Covers the prior day's Chrome browsing history, has the local model draft a compact daily log — a **Tools & Tech Encountered** section plus a **Product & Strategy** section for product-management reading — writes it as `Daily-Chrome-<date>.md` in `LEARNINGS_DIR` (Obsidian vault, one file per day). Each site carries its top page *paths*, so the review can say what was being looked into rather than restate the tab title. Sites and pages matching `learnings.excluded_domains` / `learnings.excluded_keywords` ([preferences](docs/preferences.md)) are skipped. Small, focused prompt so the on-device model produces a full draft. A day with no meaningful browsing (or a draft that's just "None") writes nothing. If the write fails — e.g. `LEARNINGS_DIR` points somewhere that doesn't exist — it emails the draft instead so it's never silently lost (and pushes a phone alert). |
-| `tasks/daily_synthesis.py` | Daily 5:45 AM | Proactive synthesis: connects the prior day's activity to Craig's own accumulated knowledge. Python matches yesterday's browsing + YouTube Likes + the *Learned* bullets of that day's AI-chat log against his wiki pages (name **and** one-line summary, skipping the dated activity logs) and watched/interesting companies by token overlap, discounting tokens too common across the vault to discriminate (**CONNECTION** candidates), and also matches those signals against *each other across channels* (**ECHO** candidates — the same theme reaching him twice independently in one day). The local model does one bounded pass over the shortlist to keep only genuine, non-obvious connections (dropping coincidental keyword hits), and it pushes at most 3 "these line up — want a summary?" nudges via ntfy (email fallback if the push fails) **and** writes a durable `Daily-Synthesis-<date>.md` to `SYNTHESIS_DIR` (default `<vault>/nudges`) so past suggestions are reviewable in Obsidian — deliberately *not* the vault's `raw/`, which ObsidianWikiAgent ingests as sources. No overlap, or nothing genuine, means no push and no file — silence is the common case. See [docs/daily-synthesis.md](docs/daily-synthesis.md). |
+| `tasks/daily_synthesis.py` | Daily 5:45 AM | Proactive synthesis: connects the prior day's activity to the user's own accumulated knowledge. Python matches yesterday's browsing + YouTube Likes + the *Learned* bullets of that day's AI-chat log against his wiki pages (name **and** one-line summary, skipping the dated activity logs) and watched/interesting companies by token overlap, discounting tokens too common across the vault to discriminate (**CONNECTION** candidates), and also matches those signals against *each other across channels* (**ECHO** candidates — the same theme reaching him twice independently in one day). The local model does one bounded pass over the shortlist to keep only genuine, non-obvious connections (dropping coincidental keyword hits), and it pushes at most 3 "these line up — want a summary?" nudges via ntfy (email fallback if the push fails) **and** writes a durable `Daily-Synthesis-<date>.md` to `SYNTHESIS_DIR` (default `<vault>/nudges`) so past suggestions are reviewable in Obsidian — deliberately *not* the vault's `raw/`, which ObsidianWikiAgent ingests as sources. No overlap, or nothing genuine, means no push and no file — silence is the common case. See [docs/daily-synthesis.md](docs/daily-synthesis.md). |
 | `tasks/strava_download.py` | Daily 5:50 AM | Fetches yesterday's Strava activities and maps each one onto a Google Calendar event in plain Python — no model, since it's a pure field mapping with no natural-language step. Deduped by `source_id` (Strava activity id) so re-runs never create duplicates. |
 | `tasks/morning_brief.py` | Daily 6:00 AM | Fetches weather + next-24h calendar events + Google Tasks past due or due within 48h (via `google_tasks.get_tasks_due_soon`) + starred GitHub repos pushed to since the last brief (via `github_starred.fetch_starred_repos`, cursor persisted in `config/github_starred_state.json`), has the model write a short "at a glance" summary and a one-sentence intro for the starred-repos section, assembles a styled HTML email (weather / calendar / tasks due soon / Starred Repos sections), sends it via Gmail. The pipeline lives in `build_and_send_brief()`, shared with the chat `send_morning_brief` tool. |
 | `tasks/opportunity_digest.py` | Weekly Sundays at 9:00 PM | The fractional-work opportunity scout. Polls three free, ToS-clean sources — new SEC Form D filings in the watched states (MA/NH/ME), leadership openings on watched ATS boards (Greenhouse/Lever/Ashby/iCIMS, flagging stalled searches), and the current HN "Who is hiring" thread — dedupes them into `config/opportunities.json`, has the model score fractional-operator fit, and emails a three-section Opportunity Digest (ntfy push for high scores; nothing new → no email). Each run also retires openings that have dropped off a cleanly-polled board, so filled roles stop looking like live leads. Full lifecycle — sources, dedupe/watermark behavior, triage semantics, scoring — in [docs/opportunity-scout.md](docs/opportunity-scout.md). |
 | `tasks/starred_blurbs.py` | Weekly Sundays at 8:00 PM | Caches a one-line "what it does" blurb for each starred GitHub repo, for the `/starred` view. One isolated model call per repo summarizes its README (`github_starred.fetch_readme`, truncated) into a plain sentence, cached in `config/starred_blurbs.json` keyed by `full_name`; a missing README or unusable output falls back to the repo's GitHub description. Blurbs are generated once per repo (only newly-starred repos each run) and de-starred repos are pruned; `--refresh` regenerates all. See [docs/starred.md](docs/starred.md). |
 | `tasks/starred_releases.py` | Daily 8:00 PM | Caches each starred GitHub repo's latest published release (`github_starred.fetch_latest_release`) in `config/starred_releases.json` keyed by `full_name`, for the `/starred` view's release-awareness column. No model — pure GitHub reads, fanned over a small pool. Repos with no releases get no entry; the whole cache is rewritten from the live star list each run, so de-starred repos are pruned. Daily (not weekly) so a new version shows up promptly. See [docs/starred.md](docs/starred.md). |
-| `tasks/starred_installed.py` | Daily 8:10 PM | Resolves the installed version of each repo Craig tracks in `config/starred_installed.json` (a hand-edited map of `full_name` → `version_cmd` to run or a static `version`), caching `{version, source, error}` in `config/starred_installed_versions.json` for the `/starred` view's "Installed" column. Runs `version_cmd`s locally with no shell and a timeout; no model. The cache is rewritten from the config each run, so removing a repo prunes it. See [docs/starred.md](docs/starred.md). |
+| `tasks/starred_installed.py` | Daily 8:10 PM | Resolves the installed version of each repo the user tracks in `config/starred_installed.json` (a hand-edited map of `full_name` → `version_cmd` to run or a static `version`), caching `{version, source, error}` in `config/starred_installed_versions.json` for the `/starred` view's "Installed" column. Runs `version_cmd`s locally with no shell and a timeout; no model. The cache is rewritten from the config each run, so removing a repo prunes it. See [docs/starred.md](docs/starred.md). |
 | `tasks/log_inspector.py` | Daily 8:00 AM | Watches Wren's own logs — the only task that does. Scans the last 24h of `logs/*.log` for errors and for the small model's strain signals (a prompt that overflowed `num_ctx` and lost the system prompt off the front, a generation that hit `num_predict` mid-repetition-loop), and separately checks via `parse_runs()` that every scheduled task actually ran and finished — catching the ones a line scan can't see, like a task that crashed before logging or that launchd never fired. Pure Python, no model: a health check that called the model couldn't report that the model is down. Quiet by default — a push (a counts rollup, since ntfy truncates at 500 chars) always means something needs attention. See [docs/log-inspector.md](docs/log-inspector.md). |
-| `tasks/calendar_colorizer.py` | Daily 5:00 PM | Fetches yesterday's calendar events, has the model guess a category per event title (Work/LLC, AARP, Fitness, Meal Prep, Domestic/Chores, Meetings, Travel, Dining Out, Shows/Events, Appointments, or Uncategorized) and returns a colorId per event, then patches each event's color. Always re-classifies, even events colored by a previous run or by hand. On failure, pushes a phone alert and emails a notice. |
+| `tasks/calendar_colorizer.py` | Daily 5:00 PM | Fetches yesterday's calendar events, has the model guess a category per event title (the categories from `config/preferences.json` — Work, Fitness, Meal Prep, Domestic/Chores, Meetings, Travel, and so on) and returns a colorId per event, then patches each event's color. Always re-classifies, even events colored by a previous run or by hand. On failure, pushes a phone alert and emails a notice. |
 
 All of these are **fully unattended** — no prompts, no approval steps. This is a
 deliberate difference from the original interactive Claude Code skills these
@@ -190,7 +193,7 @@ and waited for approval before writing anywhere. There's nobody to ask at
 
 **Failure alerts (push).** Since these run with nobody watching — and a
 browser tab can't reach out while an emailed failure notice gets buried — each
-task pushes a one-line alert to Craig's phone if its run fails, via a
+task pushes a one-line alert to the user's phone if its run fails, via a
 self-hosted [ntfy](https://ntfy.sh) server (`agent/tools/notify.py`). The push
 is best-effort: a notify outage is logged and swallowed so it can never mask
 the underlying task failure. Alerts that fire once and are gone if they don't
@@ -213,7 +216,7 @@ up` and still fails every publish; testing that would mean sending a real push.
 
 ## Wren — ad hoc chat
 
-`chat/server.py` is a small always-on Flask app so Craig can talk to Wren
+`chat/server.py` is a small always-on Flask app so the user can talk to Wren
 directly instead of waiting for a scheduled run — check something, ask a
 question, or have her take an action right now.
 
@@ -259,7 +262,7 @@ chat/
   tools that create, alter, or delete a fact — `remember`, `pin`, `recategorize`,
   `forget` — are confirmation-gated so a prompt injection in fetched web content
   can't silently write (or, worse, `pin`) a fact. The two tiers, the gating
-  rationale, and the friction tradeoff are in [docs/memory.md](docs/memory.md). Wren can also search Craig's **learnings wiki** (`WIKI_VAULT_PATH`, the
+  rationale, and the friction tradeoff are in [docs/memory.md](docs/memory.md). Wren can also search the user's **learnings wiki** (`WIKI_VAULT_PATH`, the
   Obsidian vault ObsidianWikiAgent maintains): `read_wiki_index`,
   `list_wiki_pages`, `read_wiki_page` navigate the concept pages the way that
   project's own query CLI does — read the index, open the relevant page(s),
@@ -273,15 +276,15 @@ chat/
   injected into the chat prompt (chat-only, like the wiki tools, to protect the
   small `num_ctx`), and Wren opens a body on demand with `read_skill` before
   following it. `write_skill` (create or overwrite) and `delete_skill` are
-  confirmation-gated; capture is Craig-initiated, mirroring memory. Wren can also
-  set **reminders**: `set_reminder` takes Craig's time phrase verbatim (e.g. "in
+  confirmation-gated; capture is the user-initiated, mirroring memory. Wren can also
+  set **reminders**: `set_reminder` takes the user's time phrase verbatim (e.g. "in
   2 hours", "3pm", "tomorrow 9am" — resolved in Python by
   `dates.resolve_reminder_time`, never by the model) plus a message, and the
   `reminder_sweep` task pushes it to his phone via `ntfy` when it comes due, then
   clears it. `list_reminders`/`cancel_reminder` manage pending ones; set and
   cancel are confirmation-gated. Wren can also **hand a task off to run in the
   background** with `run_in_background` — a multi-step job that outlives the chat
-  turn and pushes Craig a summary when done (see **Background tasks** below).
+  turn and pushes the user a summary when done (see **Background tasks** below).
   `list_background_jobs`/`get_job_result` report on them. Not yet wired up for chat:
   writing a learnings review file — `learnings_file.write_entry` doesn't have a
   `TOOL_SCHEMA` yet (only ever called directly from Python by the daily learnings
@@ -319,7 +322,7 @@ chat/
 ### Running it
 
 Unlike the scheduled tasks (`StartCalendarInterval`), this needs to just stay
-running — `launchd/com.craigdube.localllmagent.wren.plist` uses `RunAtLoad` +
+running — `launchd/local.wren.wren.plist` uses `RunAtLoad` +
 `KeepAlive` instead, so it starts on login and restarts if it crashes. Same
 log convention as the other tasks: `logs/wren.log` (structured) +
 `logs/wren.launchd.log` (raw stdout/stderr).
@@ -422,7 +425,7 @@ read-only, so this page is where leads actually get worked: **To triage**
 where research briefs land), and **Watchlist** (the boards the scout polls).
 Openings that come down from a watched board are retired automatically each
 run: untriaged ones drop out of the view, while interested ones stay put with
-a "no longer listed" badge, since Craig may already have reached out.
+a "no longer listed" badge, since the user may already have reached out.
 Backed by `GET /api/opportunities` plus small POST/DELETE triage endpoints
 that call the same `agent/tools/opportunities.py` store functions the chat
 tools use, so the page and chat can't drift apart. Each digest email footer
@@ -433,16 +436,16 @@ and everything else about the scout's lifecycle — is documented in
 ### Starred
 
 `http://127.0.0.1:8420/starred` (same auth as the dashboard) is a table of
-Craig's starred GitHub repos — **Repo · Language · What it does · Latest release
+the user's starred GitHub repos — **Repo · Language · What it does · Latest release
 · Installed** — sorted by most-recently-pushed. Backed by
 `GET /api/starred`, which fetches the repo list live and merges in each repo's
 cached "what it does" blurb (falling back to its GitHub description for any repo
 not yet cached), its cached latest release (badged **🆕 new** when cut within the
-last 30 days), and Craig's cached installed version (badged **update available**
+last 30 days), and the user's cached installed version (badged **update available**
 when it's behind the latest release). The three caches are written by scheduled
 tasks (`tasks/starred_blurbs.py`, `tasks/starred_releases.py`,
 `tasks/starred_installed.py`), so the model never runs on the page's request path.
-Installed-version tracking is opt-in per repo — Craig lists the repos he has (and
+Installed-version tracking is opt-in per repo — the user lists the repos they have (and
 how to read each one's version) in `config/starred_installed.json`; Wren never
 runs an upgrade. See [docs/starred.md](docs/starred.md).
 
@@ -478,12 +481,12 @@ copied to `~/Library/LaunchAgents/` and loaded with `launchctl load`.
 `launchd` was chosen over `cron` because it survives sleep/wake and is the
 native macOS mechanism — no Claude Code/Cowork involvement in scheduling at
 all. The calendar-driven tasks use `StartCalendarInterval`; Wren's chat server
-(`com.craigdube.localllmagent.wren.plist`) uses `RunAtLoad` + `KeepAlive`
+(`local.wren.wren.plist`) uses `RunAtLoad` + `KeepAlive`
 instead, since it needs to just stay running rather than fire on a timer. The
-reminder sweep (`com.craigdube.localllmagent.remindersweep.plist`) uses a
+reminder sweep (`local.wren.remindersweep.plist`) uses a
 60-second `StartInterval` — a short-lived poll that fires any due reminders and
 exits, so a reminder lands within about a minute of its time. The background
-worker (`com.craigdube.localllmagent.bgworker.plist`) likewise uses a 30-second
+worker (`local.wren.bgworker.plist`) likewise uses a 30-second
 `StartInterval`, running at most one queued background job per poll; launchd
 never runs two copies of the same job at once, so a long job just delays the
 next poll rather than overlapping. The worker's idle poll is deliberately
@@ -503,16 +506,20 @@ as a last resort `python -m agent.tools.background --approve <job_id>` /
 Useful commands:
 ```bash
 # check status
-launchctl print gui/$(id -u)/com.craigdube.localllmagent.<name>
+launchctl print gui/$(id -u)/local.wren.<name>
 
 # trigger a task on demand (bypasses the schedule, useful for testing)
-launchctl start com.craigdube.localllmagent.<name>
+launchctl start local.wren.<name>
 
-# reload after editing a .plist
-launchctl unload ~/Library/LaunchAgents/com.craigdube.localllmagent.<name>.plist
-cp launchd/com.craigdube.localllmagent.<name>.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.craigdube.localllmagent.<name>.plist
+# reload after editing a .plist (boots out the old one, then bootstraps)
+./launchd/install.sh launchd/local.wren.<name>.plist
 ```
+
+The plists in `launchd/` carry `__WREN_ROOT__` and `__HOME__` placeholders
+rather than absolute paths, so they're checkout-independent — `install.sh`
+substitutes both and copies the result into `~/Library/LaunchAgents/`. Don't
+`cp` a plist into place by hand; launchd expands neither `~` nor `$HOME` in
+`ProgramArguments`, so an unsubstituted plist fails to start.
 
 Logs land in two places per task: `logs/<name>.log` (structured, written by
 the Python task itself) and `logs/<name>.launchd.log` (raw stdout/stderr,
@@ -592,12 +599,12 @@ mostly useful if the Python process fails to start at all).
    a quick smoke test since the session cookie is `Secure` — a real browser
    may not persist login over plain `http://`; use the HTTPS tailnet URL from
    step 8 for anything beyond a one-off check.)
-7. Load the launchd plists (see Scheduling section above) — this now
-   includes `com.craigdube.localllmagent.wren.plist`, the always-on chat
-   server. On a different machine or checkout path, first edit the absolute
-   paths in each plist (`ProgramArguments`, `WorkingDirectory`, the two log
-   paths — they hardcode `/Users/craigdube/Projects/LocalLLMAgent`) and
-   rename the `com.craigdube.*` labels to taste.
+7. Load the launchd plists with `./launchd/install.sh` (see Scheduling section
+   above) — this installs every agent in `launchd/`, including
+   `local.wren.wren.plist`, the always-on chat server. The script fills in the
+   `__WREN_ROOT__` / `__HOME__` placeholders from wherever you checked the repo
+   out, so nothing needs hand-editing; rename the `local.wren.*` labels to taste
+   if you'd rather they were namespaced to you.
 8. Install [Tailscale](https://tailscale.com) on the Mac Mini and your phone
    if you want to reach Wren's chat from outside your home WiFi, then run
    `tailscale serve --bg 8420` (see "Wren — ad hoc chat" above for the
@@ -623,13 +630,16 @@ mostly useful if the Python process fails to start at all).
    behind, which a bare retry cannot do:
    ```bash
    brew services stop colima           # hand off from Homebrew, if it's running
-   cp launchd/infra/com.craigdube.colima.plist ~/Library/LaunchAgents/
-   launchctl load ~/Library/LaunchAgents/com.craigdube.colima.plist
+   ./launchd/install.sh launchd/infra/local.wren.colima.plist
    ```
-   To stop colima deliberately, unload it — `colima stop` alone won't stick,
+   (colima lives in `launchd/infra/`, so a bare `./launchd/install.sh` skips it
+   — it's optional infrastructure, and keeping it out of `launchd/` also keeps
+   it off the dashboard's task list.)
+
+   To stop colima deliberately, boot it out — `colima stop` alone won't stick,
    since launchd immediately brings it back:
    ```bash
-   launchctl unload ~/Library/LaunchAgents/com.craigdube.colima.plist
+   launchctl bootout gui/$(id -u)/local.wren.colima
    ```
    The `log_inspector` task actively probes this channel every morning, because
    a dead one is invisible to any log scan until something tries to use it.
@@ -664,13 +674,13 @@ mostly useful if the Python process fails to start at all).
    ```bash
    docker exec -e NTFY_PASSWORD='<wren-pw>'  ntfy ntfy user add wren
    docker exec ntfy ntfy access wren wren-alerts write
-   docker exec -e NTFY_PASSWORD='<craig-pw>' ntfy ntfy user add craig
-   docker exec ntfy ntfy access craig wren-alerts read
+   docker exec -e NTFY_PASSWORD='<owner-pw>' ntfy ntfy user add owner
+   docker exec ntfy ntfy access owner wren-alerts read
    docker exec ntfy ntfy token add wren    # -> tk_...  set as NTFY_TOKEN
    ```
    Set `NTFY_URL=http://<mac-mini-tailscale-name>:2586/wren-alerts` and
    `NTFY_TOKEN=tk_...` in `config/.env`. On your iPhone, install the ntfy app →
-   add a custom server pointing at the same Tailscale URL, log in as `craig`
+   add a custom server pointing at the same Tailscale URL, log in as `owner`
    (its password), subscribe to `wren-alerts`. Smoke-test end to end:
    ```bash
    .venv/bin/python -m agent.tools.notify --message "hello from Wren" --title "Wren"
@@ -790,14 +800,14 @@ steer the model. The blast radius is contained by design:
   text (e.g. "remember what that page said") is injected into every future
   system prompt. It's rendered under a heading that frames saved items as
   reference facts to recall, *not* instructions to act on
-  (`memory.render_memory_block()`), and capture is explicit (Craig-initiated,
+  (`memory.render_memory_block()`), and capture is explicit (the user-initiated,
   never a background scrape). `forget` is confirmation-gated so a poisoned
   memory can't be silently pruned to cover tracks.
 - **Background tasks** (`run_in_background` → `bg_worker`) run detached, with no
   one present to confirm — so they follow an **"A + push-to-approve"** posture
   (`toolset.CONSEQUENTIAL_TOOLS`). The worker reads/researches/drafts freely, but
   any external/irreversible action (`send_email`, `send_morning_brief`) *pauses*
-  the job and is pushed to Craig's phone for a
+  the job and is pushed to the user's phone for a
   tap-to-approve decision before it runs (the tap gets an immediate confirming
   push — "Approved" / "Denied" — since the ntfy buttons have no selected state
   of their own). So untrusted content pulled mid-task
@@ -810,7 +820,7 @@ steer the model. The blast radius is contained by design:
   system prompts, so a poisoned page read mid-job must not be able to plant a
   durable instruction that outlives the job, even behind an approval tap. The
   read side (`recall`, `read_skill`) stays available. Starting a background
-  task is itself confirmation-gated in chat, so a job only runs because Craig
+  task is itself confirmation-gated in chat, so a job only runs because the user
   said to.
 
 The model can actuate a **consequential** write only with an explicit human
@@ -820,7 +830,7 @@ the model out of the write path entirely (`complete_text`; `strava_download`'s
 deterministic Python field-map, which replaced an earlier `run_agent` path fed
 by Strava activity *names*). The one place the model actuates a write
 *unattended* is a background task performing a **reversible, internal** write to
-Craig's own account (e.g. creating a task or recoloring an event) — a
+the user's own account (e.g. creating a task or recoloring an event) — a
 deliberate, bounded exception, not a general autonomy grant. That line is two
 editable sets in `toolset.py`: `CONSEQUENTIAL_TOOLS` (move a tool into it to
 require approval, out of it to allow unattended) and `UNATTENDED_EXCLUDED_TOOLS`

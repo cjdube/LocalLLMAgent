@@ -55,7 +55,7 @@ def test_compact_sites_drops_excluded_domain(excluded):
 
 def test_compact_sites_drops_subdomains_of_excluded(excluded):
     # The whole point of suffix matching: one entry covers every M365 tenant.
-    out = lc.compact_sites([_site("aarpsharex.sharepoint.com"), _site("ai.google.dev")])
+    out = lc.compact_sites([_site("acme.sharepoint.com"), _site("ai.google.dev")])
     assert [s["domain"] for s in out] == ["ai.google.dev"]
 
 
@@ -69,7 +69,7 @@ def test_compact_sites_excludes_before_the_cap(excluded, monkeypatch):
     # An excluded site must not consume one of the MAX_CHROME_SITES slots.
     monkeypatch.setattr(lc, "MAX_CHROME_SITES", 2)
     out = lc.compact_sites([
-        _site("aarpsharex.sharepoint.com", visits=99),
+        _site("acme.sharepoint.com", visits=99),
         _site("ai.google.dev", visits=5),
         _site("tailscale.com", visits=3),
     ])
@@ -113,12 +113,12 @@ def test_compact_sites_omits_pages_when_absent(excluded):
 
 @pytest.fixture
 def excluded_kw(monkeypatch):
-    monkeypatch.setattr(lc, "_EXCLUDED_KEYWORDS", ["aarp"])
+    monkeypatch.setattr(lc, "_EXCLUDED_KEYWORDS", ["acme"])
 
 
 def test_is_excluded_text_is_case_insensitive(excluded_kw):
-    assert lc.is_excluded_text("AARP Speakers Bureau")
-    assert lc.is_excluded_text("volunteering for aarp")
+    assert lc.is_excluded_text("Acme Speakers Bureau")
+    assert lc.is_excluded_text("volunteering for acme")
     assert not lc.is_excluded_text("Gemini API pricing")
     assert not lc.is_excluded_text("")
 
@@ -126,7 +126,7 @@ def test_is_excluded_text_is_case_insensitive(excluded_kw):
 def test_compact_sites_drops_site_whose_title_matches(excluded_kw):
     # The domain is fine; the subject isn't.
     site = _site("www.eventbrite.com")
-    site["title"] = "AARP NH Speakers Bureau — Register"
+    site["title"] = "Acme Speakers Bureau — Register"
     out = lc.compact_sites([site, _site("ai.google.dev")])
     assert [s["domain"] for s in out] == ["ai.google.dev"]
 
@@ -135,7 +135,7 @@ def test_compact_sites_drops_only_the_matching_path_not_the_site(excluded_kw):
     # One excluded page on an otherwise reviewable site must not drop the site.
     site = _site("www.linkedin.com")
     site["pages"] = [{"path": "/feed/", "visits": 5},
-                     {"path": "/company/aarp/", "visits": 2}]
+                     {"path": "/company/acme/", "visits": 2}]
     out = lc.compact_sites([site])
     assert out[0]["pages"] == ["/feed/"]
 
@@ -143,7 +143,7 @@ def test_compact_sites_drops_only_the_matching_path_not_the_site(excluded_kw):
 def test_compact_sites_no_keywords_keeps_everything(monkeypatch):
     monkeypatch.setattr(lc, "_EXCLUDED_KEYWORDS", [])
     site = _site("www.eventbrite.com")
-    site["title"] = "AARP NH Speakers Bureau"
+    site["title"] = "Acme Speakers Bureau"
     assert len(lc.compact_sites([site])) == 1
 
 

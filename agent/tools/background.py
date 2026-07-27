@@ -1,10 +1,10 @@
 """Background tasks — Wren runs a multi-step job detached from the chat turn and
-pushes Craig a summary when it's done.
+pushes the user a summary when it's done.
 
 Execution posture is "A + push-to-approve" (see the Phase 2 plan): the worker
 (tasks/bg_worker.py) reads/researches/drafts freely, but any consequential,
 irreversible action (send_email, etc. — see toolset.CONSEQUENTIAL_TOOLS) pauses
-and is pushed to Craig's phone to approve. Untrusted content pulled mid-task
+and is pushed to the user's phone to approve. Untrusted content pulled mid-task
 therefore can never trigger an unattended irreversible action.
 
 This module owns the job store and the approval-token logic; the worker owns
@@ -34,12 +34,17 @@ from uuid import uuid4
 from dotenv import load_dotenv
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
+from agent import prefs
 from agent.store import atomic_write_json, load_json, locked
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(_ROOT / "config" / ".env")
 
 _STORE_PATH = _ROOT / "config" / "bg_jobs.json"
+
+# The user's name, for the model-facing tool descriptions below. From
+# config/preferences.json; falls back to "the user".
+_NAME = prefs.user_name()
 
 # Approval tokens are short-lived and single-purpose; reuse the Flask secret so
 # there's no extra key to manage. Single-use is enforced by the job state
@@ -55,10 +60,10 @@ RUN_IN_BACKGROUND_TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "run_in_background",
-        "description": "Kick off a multi-step task to run in the background and notify Craig with "
-        "a summary when it's done — for things that take a while or that he wants to walk away "
+        "description": f"Kick off a multi-step task to run in the background and notify {_NAME} with "
+        "a summary when it's done — for things that take a while or that they want to walk away "
         "from. You do NOT do the task now; you hand it off. Any consequential action it needs "
-        "(like sending an email) is routed to Craig's phone for approval automatically.",
+        f"(like sending an email) is routed to {_NAME}'s phone for approval automatically.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -77,8 +82,8 @@ LIST_BG_JOBS_TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "list_background_jobs",
-        "description": "List Craig's recent background jobs and their status (pending, "
-        "awaiting_approval, done, failed). Use when he asks what's running or what happened to a task.",
+        "description": f"List {_NAME}'s recent background jobs and their status (pending, "
+        "awaiting_approval, done, failed). Use when they ask what's running or what happened to a task.",
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
 }

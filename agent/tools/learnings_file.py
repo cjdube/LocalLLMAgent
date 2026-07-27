@@ -1,8 +1,8 @@
-"""Write a learnings review to a Markdown file in Craig's Obsidian vault.
+"""Write a learnings review to a Markdown file in the user's Obsidian vault.
 
 The daily learnings tasks each drop a standalone .md file (one per day) into the
 vault's raw/ dir. Callers whose output isn't a *source* for the vault (e.g.
-daily_synthesis, which archives nudges addressed to Craig) pass an explicit
+daily_synthesis, which archives nudges addressed to the user) pass an explicit
 `directory` instead, to stay out of the ingest queue. Returns dicts (not
 print/exit); a missing target dir is surfaced as an error rather than created, so
 the caller's email fallback fires.

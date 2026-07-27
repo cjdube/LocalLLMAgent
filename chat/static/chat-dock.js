@@ -25,7 +25,7 @@
   const input = document.getElementById("input");
   const sendBtn = document.getElementById("send");
   const newChatBtn = document.getElementById("newChat");
-  const GREETING = "Hi Craig, what can I do for you today?";
+  const GREETING = "Hi — what can I do for you today?";
 
   function scrollToEnd() {
     messagesEl.scrollTop = messagesEl.scrollHeight;

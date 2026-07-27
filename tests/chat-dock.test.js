@@ -69,7 +69,7 @@ describe("boot", () => {
   test("greets once on load", () => {
     const wren = messages().querySelectorAll(".msg.wren");
     expect(wren).toHaveLength(1);
-    expect(wren[0].textContent).toContain("Hi Craig");
+    expect(wren[0].textContent).toContain("Hi —");
   });
 });
 
@@ -103,11 +103,11 @@ describe("sending a turn", () => {
   });
 
   test("renders the reply and unlocks the composer when the turn ends", async () => {
-    resolvesWith({ type: "final", text: "VibeFoundry is your brand." });
+    resolvesWith({ type: "final", text: "Wren is your agent." });
     submit("hello");
     await settle();
     expect(dots()).toHaveLength(0);
-    expect(lastMessage()).toBe("VibeFoundry is your brand.");
+    expect(lastMessage()).toBe("Wren is your agent.");
     expect(input().disabled).toBe(false);
     expect(sendBtn().textContent).toBe("Send");
     expect(sendBtn().classList.contains("stop")).toBe(false);
@@ -202,7 +202,7 @@ describe("stopping a turn", () => {
 describe("confirming a write", () => {
   const CONFIRM = {
     type: "confirm",
-    summary: "Send email to craig@example.com",
+    summary: "Send email to owner@example.com",
     detail: "Hi, following up on claim #4471",
   };
 
@@ -210,7 +210,7 @@ describe("confirming a write", () => {
     resolvesWith(CONFIRM);
     submit("email the adjuster");
     await settle();
-    expect($(".confirm").textContent).toContain("Send email to craig@example.com");
+    expect($(".confirm").textContent).toContain("Send email to owner@example.com");
     expect($(".confirm .detail").textContent).toBe("Hi, following up on claim #4471");
     expect($(".confirm .actions").querySelectorAll("button")).toHaveLength(2);
     expect(dots()).toHaveLength(0);
@@ -289,7 +289,7 @@ describe("new chat", () => {
     expect(global.fetch).toHaveBeenLastCalledWith("/chat/new", { method: "POST" });
     const remaining = messages().children;
     expect(remaining).toHaveLength(1);
-    expect(remaining[0].textContent).toContain("Hi Craig");
+    expect(remaining[0].textContent).toContain("Hi —");
   });
 
   test("unlocks the composer when started mid-turn", async () => {
@@ -313,7 +313,7 @@ describe("new chat", () => {
     // The rejected fetch must not skip the reset — the thread still clears and
     // re-greets rather than leaving a half-reset dock.
     expect(messages().children).toHaveLength(1);
-    expect(lastMessage()).toContain("Hi Craig");
+    expect(lastMessage()).toContain("Hi —");
     expect(sendBtn().textContent).not.toBe("Stop");
   });
 });

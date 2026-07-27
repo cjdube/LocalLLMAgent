@@ -13,9 +13,14 @@ import sys
 
 import requests
 
+from agent import prefs
 from agent.tools._http import http_error, load_env, missing_key_error, print_result, resolve_key
 
 load_env()
+
+# The user's name, for the model-facing tool descriptions below. From
+# config/preferences.json; falls back to "the user".
+_NAME = prefs.user_name()
 
 SEARCH_URL = "https://api.tavily.com/search"
 
@@ -25,7 +30,7 @@ TOOL_SCHEMA = {
         "name": "search_web",
         "description": (
             "Search the web for current information — anything not in your "
-            "training data or Craig's local tools. Returns results with "
+            f"training data or {_NAME}'s local tools. Returns results with "
             "titles, URLs, and content snippets."
         ),
         "parameters": {

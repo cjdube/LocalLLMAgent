@@ -517,7 +517,7 @@ def test_idle_sessions_evicted_on_next_chat(auth_client, monkeypatch):
 
 def test_api_memories_splits_scope_and_sorts_archival_by_access_count(auth_client, tmp_path, monkeypatch):
     monkeypatch.setattr(memory, "_STORE_PATH", tmp_path / "wren_memory.json")
-    memory.pin("Craig prefers metric units", category="preference")
+    memory.pin("I prefer metric units", category="preference")
     memory.remember("Crows can recognize human faces", category="trivia")
     memory.remember("Owls can rotate their heads 270 degrees", category="trivia")
     memory.recall(query="owls")  # bumps owls' access_count to 1; crows stays at 0
@@ -525,7 +525,7 @@ def test_api_memories_splits_scope_and_sorts_archival_by_access_count(auth_clien
     resp = auth_client.get("/api/memories")
     assert resp.status_code == 200
     data = resp.get_json()
-    assert [m["text"] for m in data["active"]] == ["Craig prefers metric units"]
+    assert [m["text"] for m in data["active"]] == ["I prefer metric units"]
     assert [m["text"] for m in data["archival"]] == [
         "Owls can rotate their heads 270 degrees",
         "Crows can recognize human faces",
@@ -867,7 +867,7 @@ def test_budget_counts_tool_results_not_just_history(monkeypatch):
 def test_main_logs_and_pushes_when_over_budget(monkeypatch, caplog):
     # The wiring, not the arithmetic: an over-budget config must reach both
     # surfaces. The log alone is invisible (the dashboard skips daemon logs),
-    # so the push is the part Craig actually sees.
+    # so the push is the part the user actually sees.
     pushes = []
     monkeypatch.setattr(srv, "notify", lambda **kw: pushes.append(kw))
     monkeypatch.setattr(srv.app, "run", lambda **kw: None)

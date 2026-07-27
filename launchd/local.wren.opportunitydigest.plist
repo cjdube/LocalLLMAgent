@@ -3,17 +3,17 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.craigdube.localllmagent.opportunitydigest</string>
+    <string>local.wren.opportunitydigest</string>
 
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/craigdube/Projects/LocalLLMAgent/.venv/bin/python</string>
+        <string>__WREN_ROOT__/.venv/bin/python</string>
         <string>-m</string>
         <string>tasks.opportunity_digest</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/craigdube/Projects/LocalLLMAgent</string>
+    <string>__WREN_ROOT__</string>
 
     <key>StartCalendarInterval</key>
     <dict>
@@ -26,9 +26,9 @@
     </dict>
 
     <key>StandardOutPath</key>
-    <string>/Users/craigdube/Projects/LocalLLMAgent/logs/opportunity_digest.launchd.log</string>
+    <string>__WREN_ROOT__/logs/opportunity_digest.launchd.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/craigdube/Projects/LocalLLMAgent/logs/opportunity_digest.launchd.log</string>
+    <string>__WREN_ROOT__/logs/opportunity_digest.launchd.log</string>
 
     <key>RunAtLoad</key>
     <false/>

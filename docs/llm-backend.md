@@ -57,7 +57,7 @@ pointing it at a cloud backend (by setting the global) is the riskiest switch.
 consumer next starts — there's nothing to reload live:
 
 - **Chat server** — restart it so it re-reads `.env`. It runs under launchd, so:
-  `launchctl kickstart -k gui/$(id -u)/com.craigdube.localllmagent.wren`
+  `launchctl kickstart -k gui/$(id -u)/local.wren.wren`
   (each scheduled task is a separate launchd job that loads `.env` fresh on every
   run, so tasks need no restart — the next run picks up the change.)
 - **Scheduled tasks** — nothing to do; the change applies on the task's next run.

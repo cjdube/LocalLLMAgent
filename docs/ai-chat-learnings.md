@@ -1,7 +1,7 @@
 # AI chat learnings — how it works
 
 A daily unattended task that reviews the prior day's chats with AI agents and
-writes a brief **Accomplished / Learned** summary of each into Craig's Obsidian
+writes a brief **Accomplished / Learned** summary of each into the user's Obsidian
 vault — outcomes and takeaways, not the back-and-forth. It follows the same
 gather → compact → local model → persist shape as the other daily learnings
 tasks (`daily_chrome_learnings`, `daily_youtube_learnings`).

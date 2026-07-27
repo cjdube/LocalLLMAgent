@@ -7,16 +7,18 @@ Wren separates three kinds of configuration:
 - **Runtime state** (memories, reminders, opportunity items) — gitignored JSON
   stores under `config/`, managed by the code.
 - **Personal preferences** (who Wren serves and what they care about) —
-  `config/preferences.json`, **committed to the repo**. Not secret, just
-  personal. If you clone this repo, edit this one file to make Wren yours
-  instead of editing Python.
+  `config/preferences.json`, **gitignored**. Not secret, just personal — it
+  holds your name, where you live, and what you do, none of which belongs in a
+  shared repo. `config/preferences.example.json` is the committed template:
+  copy it, edit your copy, and never edit Python.
 
-The file is loaded once at import by `agent/prefs.py`. A missing or
-unparseable file degrades to coded defaults (nothing crashes), but the
-consumers below then run with generic/empty values, so keep it valid —
-`tests/test_prefs.py` guards the schema. **Restart the chat server after
-editing** (module-level values, including tool-schema enums, are built at
-import).
+The file is loaded once at import by `agent/prefs.py`, which falls back to
+`preferences.example.json` when you haven't made your own copy yet — so a fresh
+clone boots with a valid schema. A file that exists but is unparseable degrades
+to coded defaults (nothing crashes), but the consumers below then run with
+generic/empty values, so keep it valid — `tests/test_prefs.py` guards the
+schema of whichever file is live. **Restart the chat server after editing**
+(module-level values, including tool-schema enums, are built at import).
 
 ## Keys
 
@@ -25,7 +27,7 @@ import).
 | Key | Used by | Purpose |
 |---|---|---|
 | `user_name` | scoring/research/colorizer/daily-learnings prompts | The name the LLM prompts refer to |
-| `positioning` | `tasks/opportunity_digest.py` scoring prompt, `agent/tools/research.py` brief prompt | One noun phrase: who you are professionally ("a fractional product/engineering leader (Vibe Foundry)") |
+| `positioning` | `tasks/opportunity_digest.py` scoring prompt, `agent/tools/research.py` brief prompt | One noun phrase: who you are professionally ("a fractional product/engineering leader") |
 | `engagement_model` | `tasks/opportunity_digest.py` scoring prompt | One verb phrase completing "…who <engagement_model>." — how you engage with companies |
 
 ### `calendar`
@@ -80,20 +82,21 @@ will over-match.
 Microsoft 365 live here: real activity, but not something to review.
 
 Scoped to the learnings tasks only. `fetch_chrome_history` still returns these
-sites, so chat can answer "what was I doing on the AARP portal last week?" —
-that's the difference between this list and `chrome_history.NOISE_DOMAINS`,
+sites, so chat can answer "what was I doing on the volunteer portal last week?"
+— that's the difference between this list and `chrome_history.NOISE_DOMAINS`,
 which blinds the tool everywhere.
 
 An entry matches the domain **and its subdomains**, so `sharepoint.com` covers
-every tenant (`aarpsharex.sharepoint.com`) and `aarp.org` covers
-`secure.aarp.org`. It is not a substring match — `notsharepoint.com` is kept.
+every tenant (`acme.sharepoint.com`) and `example.org` covers
+`secure.example.org`. It is not a substring match — `notsharepoint.com` is kept.
 Ports are stripped before matching, so `127.0.0.1` would cover
 `127.0.0.1:8420`. Empty list = nothing excluded.
 
-Note that a service's own domain isn't always enough: the AARP volunteer portal
-serves from both `aarpvolunteer.my.site.com` and `aarpvolunteer.my.salesforce.com`,
-and both are listed. After adding an entry, check a real day against it (see
-the exclusion tests in `tests/test_learnings_common.py`).
+Note that a service's own domain isn't always enough: a Salesforce-backed
+volunteer portal can serve from both `<org>.my.site.com` and
+`<org>.my.salesforce.com`, and both need listing. After adding an entry, check a
+real day against it (see the exclusion tests in
+`tests/test_learnings_common.py`).
 
 ### `job_search`
 
@@ -125,9 +128,10 @@ overrides.
 - **The EDGAR fund-name noise filter** (`_FUND_NAME_RE` in
   `tasks/opportunity_digest.py`) — SEC Form D mechanics, not a preference;
   anyone scouting the same source wants the same filter.
-- **"Craig" in tool-schema description strings and module docstrings**
-  (~40 mentions across `agent/tools/*.py`) and the daily reviews' Obsidian
-  template/section rules in `tasks/daily_*_learnings.py` — a mechanical later
-  sweep; the persona-bearing prompt openings already use `user_name`.
-- **`agent/identity.md` / `agent/wren.md` / `agent/wren_chat.md`** — already
-  data (committed Markdown loaded into system prompts); edit them directly.
+- **The daily reviews' Obsidian template/section rules** in
+  `tasks/daily_*_learnings.py` — structural output contract, not a preference.
+- **`agent/wren.md` / `agent/wren_chat.md`** — Wren's own voice and her
+  interactive behavior, deliberately impersonal; edit them directly if you want
+  a different agent. `agent/identity.md` (who she serves) is the personal one:
+  gitignored like `preferences.json`, templated by
+  `agent/identity.example.md`.

@@ -1,7 +1,7 @@
 # Daily synthesis — how it works
 
 Wren's first *proactive* routine. Every other scheduled task reads one source
-and produces one artifact; this one connects yesterday's activity to what Craig
+and produces one artifact; this one connects yesterday's activity to what the user
 already knows and nudges him when they line up — e.g. *"You dug into DuckDB
 yesterday — it fits your 'local-analytics' note; want a summary?"*
 
@@ -9,7 +9,7 @@ Runs daily at 5:45 AM, after the learnings tasks (5:05 / 5:15) have populated th
 day's signals. The live output is an optional ntfy push, archived to
 `SYNTHESIS_DIR`; nothing consequential is done, so there is no confirmation gate.
 
-Code: `tasks/daily_synthesis.py`. Launchd: `launchd/com.craigdube.localllmagent.dailysynthesis.plist`.
+Code: `tasks/daily_synthesis.py`. Launchd: `launchd/local.wren.dailysynthesis.plist`.
 
 ## The pipeline
 
@@ -28,7 +28,7 @@ model told to "find connections across everything" manufactures them):
      capped at 12k chars and a token set that large overlaps everything. Not the
      *Accomplished* bullets either — those are process ("Committed all changes to
      `main`"), and on real data they matched wiki pages on branch and repo names.
-2. **Gather anchors** — Craig's existing world:
+2. **Gather anchors** — the user's existing world:
    - Wiki pages, each contributing its name **and** its one-line `**Summary**:`
      (`page_summaries`). The summary is the point: matching on the filename alone can
      only find lexical identity — "the thing you looked at is spelled like a page you
@@ -58,7 +58,7 @@ model told to "find connections across everything" manufactures them):
    `email_fallback=True` (a one-shot alert nothing retries), **and** a durable
    copy written as `Daily-Synthesis-<date>.md` to `SYNTHESIS_DIR` (default
    `<vault>/nudges`) via `persist_or_email`. The push is the live channel; the
-   file is the record Craig scrolls back through later. No overlap, or nothing
+   file is the record the user scrolls back through later. No overlap, or nothing
    genuine, means **no push and no file** — silence is the common case.
 
 ## Why the archive is not in `raw/`
@@ -66,7 +66,7 @@ model told to "find connections across everything" manufactures them):
 It was, for two days (2026-07-23 and 07-24), and that was a category error worth
 recording. `raw/` is ObsidianWikiAgent's ingest queue: every file it finds there
 is treated as a *source* and written up as a wiki page. But a nudge is a question
-addressed to Craig, not a source. The ingest agent dutifully converted
+addressed to the user, not a source. The ingest agent dutifully converted
 
 > "You were exploring LM Studio for local agents—is this worth adding to your
 > 'claude-code-agent-architecture' research?"
@@ -99,7 +99,7 @@ real data did, not in anticipation:
   *prose*: the first run of that matched on `{agent, design}`, `{backend, local}`,
   `{dashboard, wren}` and `{agent, through}`, four of five candidates being vocabulary
   coincidence. A fixed stopword list can't reach this — it would have to contain half
-  of Craig's domain — so the set is computed from the corpus each run. Echoes are
+  of the user's domain — so the set is computed from the corpus each run. Echoes are
   exempt: there the coincidence is *temporal*, and a common word arriving through two
   channels in one day still means something. Company anchors are exempt too, since a
   name has to match whole.
@@ -129,7 +129,7 @@ and redirector domains (`link.skool.com`, `tracking.tldrnewsletter.com`) produce
 second unreadable copy of an article already in the shortlist under its real domain.
 The lever is `learnings.excluded_domains` in [preferences](preferences.md), but it is
 shared with the daily Chrome learnings, so excluding redirectors there changes those
-reviews too — Craig's call, not a silent fix.
+reviews too — the user's call, not a silent fix.
 - `SYNTHESIS_DIR` — where the nudge archive is written (see below). Must exist;
   a missing dir emails the nudges instead.
 - `WREN_DAILY_SYNTHESIS_BACKEND` routes just this task to a cloud model

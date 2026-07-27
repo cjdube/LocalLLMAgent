@@ -1,5 +1,5 @@
 """Company research for the opportunity scout — a short web-sourced brief on
-the business behind an opportunity, so Craig can judge fit before spending
+the business behind an opportunity, so the user can judge fit before spending
 outreach effort.
 
 Deliberately a fixed pipeline, not a freeform agent task (small-local-model
@@ -234,7 +234,7 @@ RESEARCH_OPPORTUNITY_TOOL_SCHEMA = {
         "description": "Research the company behind a scout opportunity into a short "
         "brief — what they do, value proposition, who to contact, size/stage, why now, "
         "red flags — saved on the opportunity and shown on the /opportunities page. Use "
-        "when Craig marks one interested or asks to look into it. Takes a minute or "
+        f"when {_NAME} marks one interested or asks to look into it. Takes a minute or "
         "two; get the id from list_opportunities.",
         "parameters": {
             "type": "object",
@@ -253,7 +253,7 @@ RESEARCH_COMPANY_TOOL_SCHEMA = {
         "name": "research_company",
         "description": "Research ANY company by name — same brief as "
         "research_opportunity, but not tied to the scout: nothing is saved, the brief "
-        "is returned directly. Use when Craig names a company to look into that isn't "
+        f"is returned directly. Use when {_NAME} names a company to look into that isn't "
         "in the opportunities list. Takes a minute or two.",
         "parameters": {
             "type": "object",

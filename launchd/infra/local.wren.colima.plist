@@ -21,27 +21,27 @@
   keeping it a directory down means colima doesn't show up as a Wren task in
   the dashboard.
 
-  Install:
+  Install (the paths below are __WREN_ROOT__/__HOME__ placeholders — install.sh
+  fills them in, so don't cp this file into place by hand):
       brew services stop colima     # hand off from Homebrew first
-      cp launchd/infra/com.craigdube.colima.plist ~/Library/LaunchAgents/
-      launchctl load ~/Library/LaunchAgents/com.craigdube.colima.plist
+      ./launchd/install.sh launchd/infra/local.wren.colima.plist
 
-  To stop colima deliberately, unload it — `colima stop` alone won't stick,
+  To stop colima deliberately, boot it out — `colima stop` alone won't stick,
   because launchd will bring it straight back:
-      launchctl unload ~/Library/LaunchAgents/com.craigdube.colima.plist
+      launchctl bootout gui/$(id -u)/local.wren.colima
 -->
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.craigdube.colima</string>
+    <string>local.wren.colima</string>
 
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/craigdube/Projects/LocalLLMAgent/launchd/infra/colima-start.sh</string>
+        <string>__WREN_ROOT__/launchd/infra/colima-start.sh</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/craigdube</string>
+    <string>__HOME__</string>
 
     <key>RunAtLoad</key>
     <true/>

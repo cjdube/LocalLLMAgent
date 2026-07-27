@@ -3,25 +3,25 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.craigdube.localllmagent.bgworker</string>
+    <string>local.wren.bgworker</string>
 
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/craigdube/Projects/LocalLLMAgent/.venv/bin/python</string>
+        <string>__WREN_ROOT__/.venv/bin/python</string>
         <string>-m</string>
         <string>tasks.bg_worker</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/craigdube/Projects/LocalLLMAgent</string>
+    <string>__WREN_ROOT__</string>
 
     <key>StartInterval</key>
     <integer>30</integer>
 
     <key>StandardOutPath</key>
-    <string>/Users/craigdube/Projects/LocalLLMAgent/logs/bg_worker.launchd.log</string>
+    <string>__WREN_ROOT__/logs/bg_worker.launchd.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/craigdube/Projects/LocalLLMAgent/logs/bg_worker.launchd.log</string>
+    <string>__WREN_ROOT__/logs/bg_worker.launchd.log</string>
 
     <key>RunAtLoad</key>
     <true/>

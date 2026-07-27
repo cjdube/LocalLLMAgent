@@ -38,7 +38,7 @@ TOOL_SCHEMA = {
             "properties": {
                 "location": {
                     "type": "string",
-                    "description": "City,State,Country e.g. 'Newfields,NH,US'. Omit to use the default location.",
+                    "description": "City,State,Country e.g. 'Portland,OR,US'. Omit to use the default location.",
                 },
                 "units": {
                     "type": "string",
@@ -131,7 +131,7 @@ def parse(raw: dict, days: int = 1) -> dict:
 
 def _normalize_location(location: str) -> str:
     """OpenWeatherMap's city lookup wants 'City,ST,US' with no spaces. Models
-    tend to pass loosely formatted strings like 'Newfields, NH' — coerce those
+    tend to pass loosely formatted strings like 'Portland, OR' — coerce those
     into the strict format rather than relying on the model to get it right."""
     parts = [p.strip() for p in location.split(",") if p.strip()]
     if len(parts) == 2 and len(parts[1]) == 2 and parts[1].isalpha():

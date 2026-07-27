@@ -4,7 +4,7 @@ at once, so a long job just delays the next poll rather than overlapping).
 
 Execution posture "A + push-to-approve": the job runs the agent tool loop, but
 any tool in toolset.CONSEQUENTIAL_TOOLS pauses the run — the job is saved as
-awaiting_approval and Craig gets a tap-to-approve push. The next poll resumes
+awaiting_approval and the user gets a tap-to-approve push. The next poll resumes
 it once he's decided. Tools in toolset.UNATTENDED_EXCLUDED_TOOLS (memory/skill
 writers — prompt-visible state — and the bg-management tools) are stripped from
 the toolset entirely, so injected text in content fetched mid-job can't plant a
@@ -44,6 +44,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import requests
 
+from agent import prefs
 from agent.tools import background
 from agent.tools.notify import notify
 from tasks._common import notify_failure, setup_logger
@@ -112,14 +113,18 @@ def _load_agent_stack() -> None:
     if brief_dispatch is None:
         brief_dispatch = tasks.morning_brief.brief_dispatch
 
+# The user's name, for the model-facing prompt below. From
+# config/preferences.json; falls back to "the user".
+_NAME = prefs.user_name()
+
 BG_SYSTEM_PROMPT = (
-    "You are completing a task Craig handed off to run in the background, "
+    f"You are completing a task {_NAME} handed off to run in the background, "
     "unattended — there is no one to ask follow-up questions, so infer what you "
     "need from the task description and your tools and do your best. Use your "
     "tools to actually carry out the task, then end with a short plain-text "
-    "summary of what you did or found (this becomes the notification Craig "
+    f"summary of what you did or found (this becomes the notification {_NAME} "
     "gets). Consequential actions like sending an email are automatically routed "
-    "to Craig for his approval, so go ahead and take them when the task calls "
+    f"to {_NAME} for their approval, so go ahead and take them when the task calls "
     "for it — don't refuse or ask first."
 )
 

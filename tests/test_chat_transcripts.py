@@ -1,6 +1,6 @@
 """Tests for tasks/_chat_transcripts.py — parsing Claude Code session logs and the
 Gemini drop folder. Both sources are redirected to tmp_path by conftest, so these
-never touch the real ~/.claude transcripts or Craig's vault."""
+never touch the real ~/.claude transcripts or the user's vault."""
 
 import json
 import os

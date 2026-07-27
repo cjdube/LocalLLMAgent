@@ -1,4 +1,4 @@
-"""Push a short notification to Craig's phone via a self-hosted ntfy server.
+"""Push a short notification to the user's phone via a self-hosted ntfy server.
 
 This is Wren's one outbound push channel — used by the scheduled tasks to
 alert on a failed run, since a browser tab (chat) can't reach out and an email

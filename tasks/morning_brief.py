@@ -48,6 +48,9 @@ load_dotenv(_ROOT / "config" / ".env")
 DEFAULT_LOCATION = os.getenv("DEFAULT_LOCATION") or prefs.PREFS.get("location", "")
 STARRED_STATE_PATH = _ROOT / "config" / "github_starred_state.json"
 
+# The user's name, for the model-facing send_morning_brief description below.
+_NAME = prefs.user_name()
+
 GLANCE_SYSTEM_PROMPT = """You write a single short "Today at a Glance" blurb for a \
 personal morning brief email. Given the day's weather and calendar events as JSON, \
 write 1-2 plain sentences summarizing the day. No markdown, no headers, no quotes \
@@ -194,7 +197,7 @@ def _starred_repos_html(repos: list, intro_text: str, error: str = None) -> str:
         safe_url = _safe_url(r.get("html_url", ""))
         # Prefer a summary of what actually changed (release notes / recent
         # commit subjects) over the repo's static description, which is what
-        # Craig asked for — the description alone doesn't say what's new.
+        # the user asked for — the description alone doesn't say what's new.
         # recent_changes is already sized (including its "+N more" count
         # suffix) by the tool, so only the raw description needs cleaning —
         # re-truncating recent_changes here would chop the suffix mid-word.
@@ -248,9 +251,9 @@ SEND_BRIEF_TOOL_SCHEMA = {
     "function": {
         "name": "send_morning_brief",
         "description": (
-            "Build and send Craig's morning brief email right now (weather, "
+            f"Build and send {_NAME}'s morning brief email right now (weather, "
             "calendar, tasks due soon, starred repo updates) in the same HTML "
-            "layout as the scheduled one. Use whenever Craig asks to send or "
+            f"layout as the scheduled one. Use whenever {_NAME} asks to send or "
             "resend the morning brief — do NOT compose it yourself with "
             "send_email."
         ),

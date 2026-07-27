@@ -114,7 +114,7 @@ def test_wiki_vault_is_redirected_away_from_the_real_vault():
 
     vault = wiki._vault()
     assert vault != Path(wiki.DEFAULT_WIKI_VAULT).expanduser(), \
-        "WIKI_VAULT_PATH still resolves to Craig's real Obsidian vault"
+        "WIKI_VAULT_PATH still resolves to the user's real Obsidian vault"
 
 
 def test_a_handler_on_the_real_logs_dir_is_refused():
@@ -160,7 +160,7 @@ def test_the_wren_logger_server_binds_at_import_is_covered():
 
 
 def test_ntfy_egress_is_stubbed_for_both_verbs():
-    # notify() POSTs a push at Craig's phone; ntfy_health() GETs the live server
+    # notify() POSTs a push at the user's phone; ntfy_health() GETs the live server
     # — and load_env()s the REAL config/.env to find its URL, so nothing a test
     # sets in the environment keeps it local. Both verbs are guarded suite-wide;
     # only post was, until the dashboard's health pill added the second one.
@@ -174,5 +174,5 @@ def test_ntfy_egress_is_stubbed_for_both_verbs():
         assert fn.__module__ != "requests.api", (
             f"agent.tools.notify.requests.{verb} is the real requests function — "
             "conftest's _block_ntfy_egress is not in effect, and the suite can "
-            "reach Craig's actual ntfy server"
+            "reach the user's actual ntfy server"
         )

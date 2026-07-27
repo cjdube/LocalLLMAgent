@@ -1,7 +1,7 @@
 """Tests for the log inspector's two signals, its classifier, and its rollup.
 
 discover_tasks is monkeypatched in every test that reaches Signal B: the real one
-globs the production launchd/ directory, so an unstubbed call would read Craig's
+globs the production launchd/ directory, so an unstubbed call would read the user's
 real plists into a fixture assertion. (Its log_path builds on chat.insights.LOGS_DIR,
 which conftest now redirects suite-wide — the stub is what keeps the plists out.)
 

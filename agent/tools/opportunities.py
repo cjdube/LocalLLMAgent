@@ -29,21 +29,26 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
+from agent import prefs
 from agent.store import atomic_write_json, load_json, locked
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
 _STORE_PATH = _ROOT / "config" / "opportunities.json"
 
+# The user's name, for the model-facing tool descriptions below. From
+# config/preferences.json; falls back to "the user".
+_NAME = prefs.user_name()
+
 _ATS_KINDS = ("greenhouse", "lever", "ashby", "icims")
 
-# Craig acts on an item by marking it; everything else is lifecycle the digest
+# The user acts on an item by marking it; everything else is lifecycle the digest
 # task manages ("new" -> scored + emailed -> "digested").
 _SETTABLE_STATUSES = ("interested", "dismissed")
 
 # Keep the store bounded: it grows from daily polling, and list_opportunities
-# feeds the model's context. Items Craig has dealt with (dismissed), that were
+# feeds the model's context. Items the user has dealt with (dismissed), that were
 # reported and never acted on (digested), or whose posting came down (closed)
-# fall off after the window; "interested" is his live pipeline and "new" is
+# fall off after the window; "interested" is their live pipeline and "new" is
 # pre-digest, so both are kept — including an interested item whose posting
 # closed, which stays as a badged reminder of an outreach already in flight.
 _PRUNE_AFTER_S = 30 * 24 * 3600
@@ -56,7 +61,7 @@ LIST_OPPORTUNITIES_TOOL_SCHEMA = {
         "name": "list_opportunities",
         "description": "List fractional-work opportunity signals Wren's daily scout has gathered "
         "(funded companies, leadership openings, stalled exec searches), newest first. Use when "
-        "Craig asks about opportunities, leads, or the pipeline. Optionally filter by status "
+        f"{_NAME} asks about opportunities, leads, or the pipeline. Optionally filter by status "
         "(new, digested, interested, dismissed, or closed — the posting came down) or signal "
         "(funded, hiring, stalled_search).",
         "parameters": {
@@ -74,7 +79,7 @@ UPDATE_OPPORTUNITY_TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "update_opportunity",
-        "description": "Mark an opportunity 'interested' (Craig wants to pursue it — kept "
+        "description": f"Mark an opportunity 'interested' ({_NAME} wants to pursue it — kept "
         "indefinitely) or 'dismissed' (not a fit — ages out). Get the id from "
         "list_opportunities first.",
         "parameters": {

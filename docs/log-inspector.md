@@ -10,7 +10,7 @@ It is **quiet by default: silence means healthy.** A push always means something
 needs attention.
 
 Code: `tasks/log_inspector.py`, scheduled by
-`launchd/com.craigdube.localllmagent.loginspector.plist`. It reuses the log
+`launchd/local.wren.loginspector.plist`. It reuses the log
 parsing in `chat/insights.py` (the dashboard's data layer) rather than
 duplicating it.
 

@@ -3,30 +3,32 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.craigdube.localllmagent.dailysynthesis</string>
+    <string>local.wren.starredblurbs</string>
 
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/craigdube/Projects/LocalLLMAgent/.venv/bin/python</string>
+        <string>__WREN_ROOT__/.venv/bin/python</string>
         <string>-m</string>
-        <string>tasks.daily_synthesis</string>
+        <string>tasks.starred_blurbs</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/craigdube/Projects/LocalLLMAgent</string>
+    <string>__WREN_ROOT__</string>
 
     <key>StartCalendarInterval</key>
     <dict>
         <key>Hour</key>
-        <integer>5</integer>
+        <integer>20</integer>
         <key>Minute</key>
-        <integer>45</integer>
+        <integer>0</integer>
+        <key>Weekday</key>
+        <integer>0</integer>
     </dict>
 
     <key>StandardOutPath</key>
-    <string>/Users/craigdube/Projects/LocalLLMAgent/logs/daily_synthesis.launchd.log</string>
+    <string>__WREN_ROOT__/logs/starred_blurbs.launchd.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/craigdube/Projects/LocalLLMAgent/logs/daily_synthesis.launchd.log</string>
+    <string>__WREN_ROOT__/logs/starred_blurbs.launchd.log</string>
 
     <key>RunAtLoad</key>
     <false/>

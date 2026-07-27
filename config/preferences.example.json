@@ -1,14 +1,14 @@
 {
-  "_comment": "Personal preferences (not secrets). Edit to make Wren yours. Docs: docs/preferences.md. Restart the chat server after editing.",
+  "_comment": "Personal preferences (not secrets). Copy this to preferences.json and edit to make Wren yours — preferences.json is gitignored, so your real details never reach the repo. Docs: docs/preferences.md. Restart the chat server after editing.",
   "persona": {
-    "user_name": "Craig",
-    "positioning": "a fractional product/engineering leader (Vibe Foundry)",
+    "user_name": "Alex",
+    "positioning": "a fractional product/engineering leader",
     "engagement_model": "steps into tech companies under ~100 people for 1-2 days a week to clear roadmaps, stabilize teams, and build AI-accelerated delivery workflows"
   },
   "calendar": {
     "categories": [
-      {"name": "Work/LLC", "color_id": "1", "color_name": "Lavender", "role": "work"},
-      {"name": "AARP", "color_id": "9", "color_name": "Blueberry"},
+      {"name": "Work", "color_id": "1", "color_name": "Lavender", "role": "work"},
+      {"name": "Volunteering", "color_id": "9", "color_name": "Blueberry"},
       {"name": "Fitness", "color_id": "4", "color_name": "Flamingo", "role": "fitness"},
       {"name": "Meal Prep", "color_id": "10", "color_name": "Basil"},
       {"name": "Domestic/Chores", "color_id": "5", "color_name": "Banana"},
@@ -23,14 +23,9 @@
   "learnings": {
     "_comment": "What the daily learnings reviews ignore. Scoped to those tasks only — fetch_chrome_history and the calendar tools still return this data, so chat can answer questions about it.",
     "_comment_keywords": "Case-insensitive substrings. A calendar event whose summary matches is dropped; so is a browsed site whose title matches, and any single page path that matches.",
-    "excluded_keywords": ["aarp"],
-    "_comment_domains": "Matched on the domain and its subdomains, so 'sharepoint.com' covers 'aarpsharex.sharepoint.com'. The second group is click-through redirectors: they contribute a duplicate row for an article already listed under its real domain, and their URL paths carry query-string junk that matches on meaningless tokens (a 'utm_source' parameter matched a wiki summary saying 'open-source'). Subdomain-scoped where the parent domain is real content — 'link.skool.com' is a redirector, 'www.skool.com' is not.",
+    "excluded_keywords": [],
+    "_comment_domains": "Matched on the domain and its subdomains, so 'sharepoint.com' covers 'tenant.sharepoint.com'. The second group is click-through redirectors: they contribute a duplicate row for an article already listed under its real domain, and their URL paths carry query-string junk that matches on meaningless tokens (a 'utm_source' parameter matched a wiki summary saying 'open-source'). Subdomain-scoped where the parent domain is real content — 'link.skool.com' is a redirector, 'www.skool.com' is not.",
     "excluded_domains": [
-      "aarp.org",
-      "aarpvolunteer.my.site.com",
-      "aarpvolunteer.my.salesforce.com",
-      "blackbaudhosting.com",
-      "signupgenius.com",
       "sharepoint.com",
       "office.com",
       "office365.com",
@@ -59,5 +54,5 @@
     ],
     "states": ["MA", "NH", "ME"]
   },
-  "location": "Newfields,NH,US"
+  "location": "Portland,OR,US"
 }

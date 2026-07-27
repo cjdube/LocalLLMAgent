@@ -59,7 +59,9 @@ def load_persona(filename: str) -> str:
 
 
 WREN_CORE = load_persona("wren.md")
-CRAIG_CONTEXT = load_persona("identity.md")
+# Gitignored (see agent/identity.example.md): who Wren serves is personal data,
+# so a clone without one just gets "" and runs on wren.md alone.
+USER_CONTEXT = load_persona("identity.md")
 
 
 def with_identity(system_prompt: str) -> str:
@@ -67,7 +69,7 @@ def with_identity(system_prompt: str) -> str:
     # is present in the next conversation's system prompt.
     from agent.tools.memory import render_memory_block
 
-    parts = [p for p in (WREN_CORE, CRAIG_CONTEXT, render_memory_block(), system_prompt) if p]
+    parts = [p for p in (WREN_CORE, USER_CONTEXT, render_memory_block(), system_prompt) if p]
     return "\n\n---\n\n".join(parts)
 
 

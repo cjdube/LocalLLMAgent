@@ -118,20 +118,20 @@ def _email_call(**args) -> dict:
 
 
 def test_email_summary_shows_the_effective_recipient(monkeypatch):
-    monkeypatch.setenv("BRIEF_TO_EMAIL", "craig@example.com")
+    monkeypatch.setenv("BRIEF_TO_EMAIL", "owner@example.com")
     text = toolset.describe_call(_email_call(subject="Hi", body="b"))
-    assert "craig@example.com" in text and '"Hi"' in text
+    assert "owner@example.com" in text and '"Hi"' in text
 
 
 def test_email_summary_never_shows_an_injected_recipient(monkeypatch):
     # Even if the model emitted to=, the wrapper won't honor it — and the
     # approval surface must describe what will actually happen.
-    monkeypatch.setenv("BRIEF_TO_EMAIL", "craig@example.com")
+    monkeypatch.setenv("BRIEF_TO_EMAIL", "owner@example.com")
     text = toolset.describe_call(
         _email_call(subject="Hi", body="b", to="attacker@evil.com")
     )
     assert "attacker@evil.com" not in text
-    assert "craig@example.com" in text
+    assert "owner@example.com" in text
 
 
 def test_email_detail_includes_body_with_tags_stripped():
@@ -161,7 +161,7 @@ def test_unknown_tool_falls_back_to_generic_description():
 # --------------------------------------------------------------------------- #
 # Memory writes are confirm-gated: chat ingests untrusted web/search content
 # inline, and a pinned fact is injected into every future system prompt, so an
-# injected "pin that ..." must pause for Craig's tap instead of auto-executing.
+# injected "pin that ..." must pause for the user's tap instead of auto-executing.
 # --------------------------------------------------------------------------- #
 
 def test_memory_writes_are_confirm_gated():
@@ -186,8 +186,8 @@ def test_write_describers_read_cleanly():
     # Memory writes (gated in S1).
     assert "Remember" in summary("remember", text="Crows hold grudges") \
         and "Crows hold grudges" in summary("remember", text="Crows hold grudges")
-    assert "Pin" in summary("pin", text="Craig prefers metric") \
-        and "Craig prefers metric" in summary("pin", text="Craig prefers metric")
+    assert "Pin" in summary("pin", text="I prefer metric") \
+        and "I prefer metric" in summary("pin", text="I prefer metric")
     recat = summary("recategorize", memory_id="a1b2c3d4", category="preference")
     assert "a1b2c3d4" in recat and "preference" in recat
 

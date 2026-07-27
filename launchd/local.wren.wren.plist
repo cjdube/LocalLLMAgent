@@ -3,17 +3,17 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.craigdube.localllmagent.wren</string>
+    <string>local.wren.wren</string>
 
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/craigdube/Projects/LocalLLMAgent/.venv/bin/python</string>
+        <string>__WREN_ROOT__/.venv/bin/python</string>
         <string>-m</string>
         <string>chat.server</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/craigdube/Projects/LocalLLMAgent</string>
+    <string>__WREN_ROOT__</string>
 
     <key>RunAtLoad</key>
     <true/>
@@ -22,8 +22,8 @@
     <true/>
 
     <key>StandardOutPath</key>
-    <string>/Users/craigdube/Projects/LocalLLMAgent/logs/wren.launchd.log</string>
+    <string>__WREN_ROOT__/logs/wren.launchd.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/craigdube/Projects/LocalLLMAgent/logs/wren.launchd.log</string>
+    <string>__WREN_ROOT__/logs/wren.launchd.log</string>
 </dict>
 </plist>

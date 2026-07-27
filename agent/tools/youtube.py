@@ -1,7 +1,7 @@
-"""Fetch videos Craig Liked on YouTube within a date range.
+"""Fetch videos the user Liked on YouTube within a date range.
 
-Craig habitually Likes AI/tooling videos on his VibeFoundry Tech Advisory
-channel, which makes the Likes playlist a clean, intentional signal for the
+The user habitually Likes AI/tooling videos on their brand channel, which makes
+the Likes playlist a clean, intentional signal for the
 weekly learnings review — stronger than raw browsing history, which only shows
 what was loaded, not what was engaged with. The watch-history playlist has been
 non-functional through the API since ~2016, but the Likes playlist works.
@@ -9,7 +9,7 @@ non-functional through the API since ~2016, but the Likes playlist works.
 Uses the shared Google OAuth helper (agent/tools/google_auth.py). This needs the
 `youtube.readonly` scope — add it to that module's SCOPES, delete
 config/google_token.json, and re-run `python -m agent.tools.google_auth`,
-selecting the VibeFoundry channel at the picker (the API's mine=True operates on
+selecting the brand channel at the picker (the API's mine=True operates on
 the channel chosen during consent).
 
 Usage:
@@ -21,18 +21,23 @@ import sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from agent import prefs
 from agent.dates import DATE_ARG_GUIDANCE, local_timezone, resolve_date
 from agent.tools._http import load_env, print_result
 from agent.tools.google_auth import build_service
 
 load_env()
 
+# The user's name, for the model-facing tool descriptions below. From
+# config/preferences.json; falls back to "the user".
+_NAME = prefs.user_name()
+
 TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "fetch_liked_videos",
-        "description": "Videos Craig Liked on his VibeFoundry YouTube channel within a date "
-        "range — his primary channel for tracking AI/tooling learning. Each result has the "
+        "description": f"Videos {_NAME} Liked on their YouTube channel within a date "
+        "range — their primary channel for tracking AI/tooling learning. Each result has the "
         "video's title, channel, and description.",
         "parameters": {
             "type": "object",
@@ -48,7 +53,7 @@ TOOL_SCHEMA = {
 
 def _likes_playlist_id() -> str:
     """The authenticated channel's Likes playlist id. mine=True resolves to the
-    channel selected during OAuth consent (the VibeFoundry brand channel)."""
+    channel selected during OAuth consent (the brand channel)."""
     service = build_service("youtube", "v3")
     result = service.channels().list(part="contentDetails", mine=True).execute()
     items = result.get("items", [])
@@ -75,7 +80,7 @@ def _video_from_item(item: dict) -> dict:
 def _liked_local_date(published_at: str) -> str:
     """The local calendar date a video was Liked on, from the UTC publishedAt.
 
-    The API stamps like-times in UTC but Craig's day boundaries are local, so a
+    The API stamps like-times in UTC but the user's day boundaries are local, so a
     video Liked at 9pm EDT carries the *next* UTC date. Comparing the raw UTC
     date against a local day window silently drops every evening Like. Returns
     "" for an unparseable stamp, which no window matches."""

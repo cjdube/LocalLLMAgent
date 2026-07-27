@@ -1,9 +1,9 @@
 # Evaluation lenses — how they work
 
-A **lens** is a wiki page Craig writes that captures his own standards for a
+A **lens** is a wiki page the user writes that captures their own standards for a
 class of thing — his product principles, say — and that Wren judges targets
 against. `evaluate_app` reviews a product against a generic VC rubric baked
-into its prompt; `evaluate_against` reviews anything against *Craig's* rubric,
+into its prompt; `evaluate_against` reviews anything against *the user's* rubric,
 loaded from the vault at call time. When the standards change, he edits a
 Markdown file — no code change, no restart.
 
@@ -20,7 +20,7 @@ ObsidianWikiAgent generates, so the marker is the whole mechanism:
 ```markdown
 ---
 lens: true
-description: Craig's product & engineering standards — the lens for evaluating products, features, and pitches (used by evaluate_against)
+description: the user's product & engineering standards — the lens for evaluating products, features, and pitches (used by evaluate_against)
 ---
 
 # Product Principles
@@ -60,7 +60,7 @@ silently lowers the real cap to well under `MAX_INDEX_LENSES`.
 
 The truncation is a `break`, not a `continue`: the first line that would overflow
 ends the list, so every lens after it disappears from the prompt. Those lenses
-still work when named explicitly (in the CLI, or if Craig names the page in
+still work when named explicitly (in the CLI, or if the user names the page in
 chat) — Wren just won't know to offer them.
 
 That would be a silent degrade of exactly the kind `CLAUDE.md` warns about, so
@@ -165,7 +165,7 @@ immediately.
 
 ## Trust boundary
 
-The lens is Craig's own note — trusted. The target is untrusted web or pasted
+The lens is the user's own note — trusted. The target is untrusted web or pasted
 text, so the system prompt tells the model to ignore any instructions inside it
 and evaluate only the thing it describes. The tool is read-only (it writes
 nothing and sends nothing), so it's ungated, like `evaluate_app` and
@@ -207,14 +207,14 @@ chat twice, that's a lens.
   catch 0 of 3 versus 3 of 3 and not much finer.
 - **A rule the model can't apply reliably is worth deleting, not tuning.** `ai-slop`
   originally flagged "bullets where two sentences of prose would read better". That produced
-  false positives on Craig's own reference docs (whose bold-lead-in bullet lists are the
+  false positives on the user's own reference docs (whose bold-lead-in bullet lists are the
   intended format) and never once caught the case it was for — a bullet-crutch list in a
   narrative draft went unflagged in 0 of 6 runs across two different formulations. Deleting
   the clause cost nothing real and removed the false positives outright. Prefer that to a
   third attempt at wording.
 - **It's hand-authored, not ingested.** A lens lives in `wiki/` alongside
   ObsidianWikiAgent's generated pages but has an empty `**Sources**:` line by
-  design — it's Craig's assertion, not a summary of anything.
+  design — it's the user's assertion, not a summary of anything.
 
 Current lenses: `product-principles`, `engineering-manager-expectations`,
 `ai-slop`.
@@ -248,7 +248,7 @@ Standalone:
   (`engineering-standards`, `hiring-bar` were the motivating examples), and
   three exist today.
 - **Not wired into any scheduled task.** Like `evaluate_app`, this is
-  user-initiated: it fetches only URLs Craig names, and doesn't become a
+  user-initiated: it fetches only URLs the user names, and doesn't become a
   background pipeline.
 - **No structured (JSON) model output.** Fixed markdown headings the chat
   renders directly, with no parser to fail.

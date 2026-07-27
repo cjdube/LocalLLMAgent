@@ -1,8 +1,8 @@
-"""Compose and write a daily YouTube-learnings review to Craig's Obsidian vault
+"""Compose and write a daily YouTube-learnings review to the user's Obsidian vault
 (one file per day). Non-interactive — run by launchd every morning, covering the
 prior day's Liked videos.
 
-Craig deliberately Likes AI/tooling and product-management videos, so the day's
+The user deliberately Likes AI/tooling and product-management videos, so the day's
 Likes are a clean signal for what he chose to learn. The model writes a short synthesis of what the videos
 teach; a deterministic, scheme-validated linked list of the exact videos is
 appended in Python. A day with no Likes writes nothing (keeps the vault clean).

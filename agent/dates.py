@@ -127,7 +127,7 @@ def resolve_date(date_str: str, *, today: Optional[date] = None, prefer: str = "
 # resolve_reminder_time() can handle — and, crucially, doesn't try to compute the
 # time itself (it can't do date math reliably).
 REMINDER_WHEN_GUIDANCE = (
-    "Pass Craig's time expression verbatim — do NOT compute or convert it "
+    "Pass the user's time expression verbatim — do NOT compute or convert it "
     "yourself. Understood: relative delays ('in 2 hours', '90m'), clock times "
     "taken as the next occurrence ('3pm', '15:00'), 'tomorrow 9am', or "
     "'YYYY-MM-DD HH:MM'."

@@ -1,11 +1,11 @@
-"""Connect yesterday's activity to Craig's own accumulated knowledge and push a
+"""Connect yesterday's activity to the user's own accumulated knowledge and push a
 few high-confidence "these line up" nudges — Wren's first proactive-synthesis
 task. Non-interactive, run by launchd every morning after the daily learnings
 tasks have populated the day's signals.
 
 The design follows the small-local-model constraint (see CLAUDE.md): Python owns
 the structure. It reads yesterday's browsing + YouTube Likes + AI-agent chats (the
-"signals") and Craig's wiki pages + watched/interesting companies (the "anchors"),
+"signals") and the user's wiki pages + watched/interesting companies (the "anchors"),
 and does the matching itself via token overlap — the model never rummages through
 everything looking for connections (a small model manufactures those). The model's
 only job is a bounded pass over a short, pre-matched candidate list: keep the
@@ -22,7 +22,7 @@ Two kinds of candidate go into that list:
 The live output is an optional push; a dated copy is archived to SYNTHESIS_DIR so
 suggestions survive it. That directory is deliberately NOT the vault's raw/
 (LEARNINGS_DIR): raw/ is ObsidianWikiAgent's ingest queue, and these files are
-questions addressed to Craig, not sources. Ingesting them produced dated orphan
+questions addressed to the user, not sources. Ingesting them produced dated orphan
 wiki pages that restated "is this worth adding?" as "the current focus involves
 …" — a fabrication by restatement. Nothing consequential is done either way, so
 there is no confirmation gate.
@@ -110,7 +110,7 @@ _MIN_ECHO_OVERLAP = 2
 # is full of words that are everywhere in the vault, and the first run of it matched
 # on {agent, design}, {backend, local}, {dashboard, wren} and {agent, through} — four
 # of five candidates were vocabulary coincidences rather than topical connections. A
-# fixed stopword list can't reach this (it would have to contain half of Craig's
+# fixed stopword list can't reach this (it would have to contain half of the user's
 # domain), so the set is computed from the corpus each run and tracks what his wiki is
 # actually about. Echoes are exempt: there the coincidence is *temporal* — the same
 # word arriving through two channels in one day means something even if the word is
@@ -165,7 +165,7 @@ _SECTION_RE = re.compile(r"^\*\*(\w+)\*\*$")
 
 # Wiki pages whose name ends in a date are ObsidianWikiAgent's write-ups of the
 # daily/weekly logs — `daily-chrome-2026-07-24`, `ai-chat-learnings-2026-07-01`,
-# `strategic-weekly-review-...`. They are records of Craig's activity, not concept
+# `strategic-weekly-review-...`. They are records of the user's activity, not concept
 # knowledge, so matching yesterday's activity against them is circular: on real data
 # yesterday's browsing matched the page written from yesterday's browsing. 49 of the
 # vault's 203 pages, so excluding them also frees up a quarter of the anchor set.
@@ -278,7 +278,7 @@ def gather_signals(start, end, day, logger) -> list:
 
 
 def gather_anchors(logger) -> list:
-    """Craig's existing world as {label, summary, tokens} rows: wiki pages and the
+    """The user's existing world as {label, summary, tokens} rows: wiki pages and the
     companies he watches or has marked interesting. Same per-source guard.
 
     A page contributes its `**Summary**:` line as well as its name. Matching on the
@@ -466,7 +466,7 @@ def main() -> int:
         logger.info(f"{len(candidates)} candidate(s) after overlap match "
                     f"({sum(1 for c in candidates if c['kind'] == 'cross')} echo)")
         if not candidates:
-            # No token overlap between yesterday and Craig's world — the common
+            # No token overlap between yesterday and the user's world — the common
             # case. Log the run-complete boundary (the dashboard reads status
             # from the log) and stop before warming the model.
             logger.info("No overlaps; nothing to synthesize")
@@ -502,7 +502,7 @@ def main() -> int:
 
         # Persist a reviewable copy: one file per day in SYNTHESIS_DIR, outside the
         # vault's ingest queue (see the module docstring). The push scrolls off the
-        # phone; this is the record Craig scrolls back through later. Each nudge
+        # phone; this is the record the user scrolls back through later. Each nudge
         # already names both sides, so the bullet list is self-contained.
         body = (f"## Synthesis Suggestions: {day:%B %-d, %Y}\n\n"
                 + "\n".join(f"- {n}" for n in nudges) + "\n")

@@ -1,7 +1,7 @@
 # Background tasks
 
 Hand a multi-step job off to run detached from the chat turn; Wren works it and
-pushes Craig a summary when it's done. The chat tool `run_in_background`
+pushes the user a summary when it's done. The chat tool `run_in_background`
 (`agent/tools/background.py`) enqueues a job; the launchd poller
 `tasks/bg_worker.py` runs one job per invocation and exits. State lives in
 `config/bg_jobs.json`, written atomically under a cross-process file lock
@@ -9,7 +9,7 @@ pushes Craig a summary when it's done. The chat tool `run_in_background`
 never clobber each other.
 
 Starting a background task is itself confirmation-gated in chat
-(`run_in_background` ∈ `toolset.WRITE_TOOLS`), so a job only runs because Craig
+(`run_in_background` ∈ `toolset.WRITE_TOOLS`), so a job only runs because the user
 tapped to start it.
 
 ## Execution posture — "A + push-to-approve"
@@ -18,7 +18,7 @@ A background run has no human present to confirm, so it can't be allowed to take
 an irreversible action on its own. The worker **reads / researches / drafts
 freely**, but the moment it wants a consequential, external action
 (`toolset.CONSEQUENTIAL_TOOLS` — e.g. `send_email`, `send_morning_brief`) it
-**pauses** the job and pushes Craig a tap-to-approve notification. The next poll
+**pauses** the job and pushes the user a tap-to-approve notification. The next poll
 resumes the job once he's decided. So untrusted content pulled mid-task can never
 trigger an unattended irreversible action.
 
@@ -32,7 +32,7 @@ stays available. The background-management tools themselves are excluded too —
 job spawning or polling jobs is never useful, and `run_in_background` would let a
 job replicate.
 
-Reversible, *internal* writes to Craig's own account (creating a task, recoloring
+Reversible, *internal* writes to the user's own account (creating a task, recoloring
 an event) do run unattended — a deliberate, bounded exception. The whole policy
 is two editable sets in `agent/toolset.py`: `CONSEQUENTIAL_TOOLS` (require
 approval) and `UNATTENDED_EXCLUDED_TOOLS` (don't offer at all).
@@ -47,7 +47,7 @@ pending ──(worker)──▶ done | failed
 - **pending** — enqueued (or resumed after an approval); the next poll acts on it.
 - **awaiting_approval** — the worker hit a consequential action and pushed for
   approval; the job's full conversation + the paused call are persisted.
-- **approved / denied** — Craig's decision; the next poll resumes from *after*
+- **approved / denied** — the user's decision; the next poll resumes from *after*
   the resolved call. The resolved state is persisted **before** the run
   continues, so a transient failure + retry can't execute an approved
   consequential action twice.

@@ -3,25 +3,25 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.craigdube.localllmagent.remindersweep</string>
+    <string>local.wren.remindersweep</string>
 
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/craigdube/Projects/LocalLLMAgent/.venv/bin/python</string>
+        <string>__WREN_ROOT__/.venv/bin/python</string>
         <string>-m</string>
         <string>tasks.reminder_sweep</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/craigdube/Projects/LocalLLMAgent</string>
+    <string>__WREN_ROOT__</string>
 
     <key>StartInterval</key>
     <integer>60</integer>
 
     <key>StandardOutPath</key>
-    <string>/Users/craigdube/Projects/LocalLLMAgent/logs/reminder_sweep.launchd.log</string>
+    <string>__WREN_ROOT__/logs/reminder_sweep.launchd.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/craigdube/Projects/LocalLLMAgent/logs/reminder_sweep.launchd.log</string>
+    <string>__WREN_ROOT__/logs/reminder_sweep.launchd.log</string>
 
     <key>RunAtLoad</key>
     <true/>

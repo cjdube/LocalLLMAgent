@@ -1,4 +1,4 @@
-"""Compose and write a daily activity & tech-learnings review to Craig's
+"""Compose and write a daily activity & tech-learnings review to the user's
 Obsidian vault (one file per day). Non-interactive — run by launchd every
 morning, covering the prior day.
 

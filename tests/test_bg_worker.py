@@ -76,7 +76,7 @@ def test_consequential_action_pauses_and_is_not_executed(monkeypatch):
     # tool call routes to approval and is NOT executed unattended.
     calls = _capture_notify(monkeypatch)
     monkeypatch.setenv("WREN_PUBLIC_URL", "https://host")
-    monkeypatch.setenv("BRIEF_TO_EMAIL", "craig@example.com")
+    monkeypatch.setenv("BRIEF_TO_EMAIL", "owner@example.com")
     call = {"function": {"name": "send_email",
                          "arguments": {"to": "attacker@evil.com", "subject": "Hi",
                                        "body": "the body"}}}
@@ -93,7 +93,7 @@ def test_consequential_action_pauses_and_is_not_executed(monkeypatch):
     # The push describes what will actually happen: the pinned recipient (the
     # dispatch wrapper drops a model-emitted to=), never the injected one —
     # and it carries the body preview so a phone-only approval is informed.
-    assert "craig@example.com" in calls[-1]["message"]
+    assert "owner@example.com" in calls[-1]["message"]
     assert "attacker@evil.com" not in calls[-1]["message"]
     assert "the body" in calls[-1]["message"]
 
@@ -245,7 +245,7 @@ def test_approved_call_is_not_replayed_after_transient_failure(monkeypatch):
     jid = background.run_in_background("x")["id"]
     background.save_awaiting(jid, [{"role": "user", "content": "x"}],
                              {"function": {"name": "send_email", "arguments": {}}})
-    background.resolve_job(jid, True)  # Craig tapped Approve
+    background.resolve_job(jid, True)  # the user tapped Approve
 
     assert bg_worker.main() == 0       # transient failure after the resolve
     assert resolve_calls == [True]

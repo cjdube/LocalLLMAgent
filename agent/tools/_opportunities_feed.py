@@ -96,11 +96,11 @@ def close_missing(open_ids: set, polled_boards: list, now: str | None = None) ->
     open_ids is every ATS item id seen in this run's poll; polled_boards is the
     "<ats>:<slug>" of every board that answered *without error*. An item is only
     considered when its own board is in that list, so a timed-out board — or one
-    Craig just unwatched — can't be read as "every role there was filled".
+    the user just unwatched — can't be read as "every role there was filled".
 
     A closure isn't a judgement, so it never becomes 'dismissed': items get
     their own terminal 'closed' status (and age out on the same 30-day clock).
-    'interested' is the exception — Craig may already have reached out, so the
+    'interested' is the exception — the user may already have reached out, so the
     item keeps its status and just carries closed_at, which the page badges as
     "no longer listed". Marked once: an item that already has closed_at is left
     alone rather than having its timestamps bumped every week. Returns the

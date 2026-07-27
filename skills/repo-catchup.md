@@ -1,8 +1,8 @@
 ---
-description: Summarize what changed in Craig's starred GitHub repos over a recent window.
+description: Summarize what changed in the user's starred GitHub repos over a recent window.
 ---
 
-When Craig asks what's new in the repos he stars (e.g. "what changed this week"):
+When the user asks what's new in the repos they star (e.g. "what changed this week"):
 
 1. Call `fetch_starred_repos` with `days_ago` set to the window he named — pass
    the number of days, don't compute a date yourself.

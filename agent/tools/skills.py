@@ -1,8 +1,9 @@
 """Wren's procedural memory: reusable how-to procedures she's written down.
 
-Where memory.py stores *facts* about Craig and wiki.py reads *externally-authored*
-notes, this stores *procedure* — the multi-step recipe for a recurring task that
-Wren (or Craig) figured out once and shouldn't have to re-derive. A skill composes
+Where memory.py stores *facts* about the user and wiki.py reads
+*externally-authored* notes, this stores *procedure* — the multi-step recipe for a
+recurring task that Wren (or the user) figured out once and shouldn't have to
+re-derive. A skill composes
 existing tools; it does not replace them (e.g. "trip prep -> get_upcoming_events for
 the range, cross-check fetch_weather at the destination, summarize").
 
@@ -20,7 +21,7 @@ block, then the procedure body:
 render_skills_index() renders a capped "slug: description" list injected into the
 chat system prompt (chat-only, like the wiki tools) so Wren knows what procedures
 exist without reading every body — the bodies stay out of the prompt to protect the
-tight num_ctx budget (see agent/loop.py). Capture is deliberate (Craig-initiated),
+tight num_ctx budget (see agent/loop.py). Capture is deliberate (user-initiated),
 mirroring memory.py; write_skill and delete_skill are confirmation-gated in chat.
 
 Usage:

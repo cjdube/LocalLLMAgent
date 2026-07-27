@@ -3,9 +3,9 @@
 data the dashboard's Scheduled-tasks table shows, exposed to the chat model so
 Wren can answer "what do you run?" / "what's next?" about herself.
 
-It is deliberately distinct from Craig's Google Tasks (agent/tools/google_tasks.py)
-and his reminders (agent/tools/reminders.py): those are Craig's to-dos; this is
-Wren's own operating schedule.
+It is deliberately distinct from the user's Google Tasks
+(agent/tools/google_tasks.py) and their reminders (agent/tools/reminders.py):
+those are the user's to-dos; this is Wren's own operating schedule.
 
 Read-only. The schedule/run data is parsed from launchd/*.plist and logs/*.log
 by chat.insights (imported lazily so the tool layer doesn't pull in the
@@ -19,6 +19,12 @@ import json
 import sys
 from datetime import datetime
 
+from agent import prefs
+
+# The user's name, for the model-facing tool description below. From
+# config/preferences.json; falls back to "the user".
+_NAME = prefs.user_name()
+
 
 LIST_SCHEDULED_TASKS_TOOL_SCHEMA = {
     "type": "function",
@@ -27,9 +33,9 @@ LIST_SCHEDULED_TASKS_TOOL_SCHEMA = {
         "description": "List your OWN scheduled tasks — the automated jobs you run on a timer "
         "(e.g. the morning brief, the daily Chrome/YouTube learnings, the weekly opportunity "
         "digest and starred-repo blurbs). Each entry gives its schedule, next run time, and "
-        "the status of its last run. Use this when Craig asks what tasks you run, what's "
-        "scheduled, or when something next runs. This is about your own schedule, NOT Craig's "
-        "Google Tasks (get_tasks) or his reminders (list_reminders).",
+        f"the status of its last run. Use this when {_NAME} asks what tasks you run, what's "
+        f"scheduled, or when something next runs. This is about your own schedule, NOT {_NAME}'s "
+        "Google Tasks (get_tasks) or their reminders (list_reminders).",
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
 }

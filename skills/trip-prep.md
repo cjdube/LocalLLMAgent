@@ -2,7 +2,7 @@
 description: Pull together calendar, weather, and packing notes for an upcoming trip.
 ---
 
-When Craig asks you to help prep for a trip on given dates:
+When the user asks you to help prep for a trip on given dates:
 
 1. Call `get_events_by_date` for the trip's date range to see what's already
    scheduled (flights, meetings, reservations).
@@ -11,5 +11,5 @@ When Craig asks you to help prep for a trip on given dates:
    doesn't reach that far yet.
 3. Summarize in this order: the itinerary from the calendar, then the weather
    outlook, then a short packing suggestion driven by the weather (e.g. rain →
-   pack a shell). Keep it tight — Craig wants the shape of the trip, not a wall
+   pack a shell). Keep it tight — the user wants the shape of the trip, not a wall
    of detail.

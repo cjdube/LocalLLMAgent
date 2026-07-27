@@ -28,7 +28,7 @@ def _start_research(item: dict) -> None:
     two, far too long to hold the page's request open. The pending marker is
     written synchronously so the page shows "researching…" on its next load;
     the thread overwrites it with done/failed and pings the phone (the whole
-    point of async: Craig has usually navigated away by the time it lands)."""
+    point of async: the user has usually navigated away by the time it lands)."""
     opportunities.set_research(item["id"], {"status": "pending", "summary": None})
 
     def run():

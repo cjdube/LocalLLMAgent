@@ -16,11 +16,16 @@ import argparse
 import re
 import sys
 
+from agent import prefs
 from agent.loop import complete_text, resolve_backend
 from agent.tools._http import load_env, print_result
 from agent.tools.web_fetch import fetch_webpage
 
 load_env()
+
+# The user's name, for the model-facing tool descriptions below. From
+# config/preferences.json; falls back to "the user".
+_NAME = prefs.user_name()
 
 # Bound for the compacted page content fed to the model: leaves room for the
 # system prompt + the model's own analysis inside the context window.
@@ -59,9 +64,9 @@ TOOL_SCHEMA = {
             "Strategic/competitive teardown of a product from its website URL: "
             "fetches the page and writes a skeptical VC-style analysis — hidden "
             "risks, adoption friction, missing technical constraints. Use when "
-            "Craig asks to evaluate, tear down, or size up an app, product, or "
+            f"{_NAME} asks to evaluate, tear down, or size up an app, product, or "
             "competitor by URL. Takes a minute or two, so offer "
-            "run_in_background for it when Craig doesn't need it immediately."
+            f"run_in_background for it when {_NAME} doesn't need it immediately."
         ),
         "parameters": {
             "type": "object",

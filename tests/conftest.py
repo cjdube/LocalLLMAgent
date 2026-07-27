@@ -46,14 +46,14 @@ real task module. It was never redirected — the exact "a module that resolves 
 on its own" case. It is redirected below now, and the block is what would have made
 that gap audible.
 
-The learnings tasks write reviews to `LEARNINGS_DIR` — Craig's Obsidian vault
+The learnings tasks write reviews to `LEARNINGS_DIR` — the user's Obsidian vault
 under ~/Documents. Tests stub the writer per-test, but redirect LEARNINGS_DIR to
 tmp_path suite-wide as the backstop, so a missed stub lands a fixture file in a
 throwaway dir, never in the real vault.
 
 Those same `main()` calls also reach `notify_failure` on a failure path (e.g.
 strava_download's partial-failure alert), which POSTs to the real ntfy server when
-NTFY_URL is configured — firing an actual push to Craig's phone every test run.
+NTFY_URL is configured — firing an actual push to the user's phone every test run.
 Stub the push egress (agent.tools.notify.requests.post) for every test so the suite
 can never send a real alert; test_notify.py re-patches it per-test to exercise the
 real code. `requests.get` is stubbed alongside it: ntfy_health() probes the live
@@ -142,7 +142,7 @@ def _forbid_production_log_handlers() -> None:
             raise RuntimeError(
                 f"a test tried to open the production log {filename} — the logs/ "
                 "redirect in tests/conftest.py is not in effect for whatever built "
-                "this handler. Fixture rows would have gone into Craig's real logs "
+                "this handler. Fixture rows would have gone into the user's real logs "
                 "(and the 8am log inspector would report them as overnight failures)."
             )
         return original_init(self, filename, *args, **kwargs)
@@ -175,7 +175,7 @@ def _isolate_learnings_dir(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def _isolate_ai_chat_learnings(tmp_path, monkeypatch):
     # Redirect the Gemini-dedup store to tmp, and point both chat sources away
-    # from Craig's real data: no test may read ~/.claude session transcripts or
+    # from the user's real data: no test may read ~/.claude session transcripts or
     # the real Gemini drop folder, and none may write the production state store.
     monkeypatch.setattr(_ai_chat_learnings, "STATE_PATH",
                         tmp_path / "ai_chat_learnings_state.json")
@@ -217,7 +217,7 @@ def _isolate_remaining_config_stores(tmp_path, monkeypatch):
     # the task that writes it and the API route that reads it.
     monkeypatch.setattr(_starred_releases, "RELEASES_PATH", tmp_path / "starred_releases.json")
     # The /starred view's installed-version tracking: the hand-edited source
-    # (SOURCE_PATH — Craig's real config, which a test must never read) and the
+    # (SOURCE_PATH — the user's real config, which a test must never read) and the
     # task-written resolved cache (INSTALLED_PATH). server.py reads the cache off
     # the module at call time, so redirecting both here covers the task and the
     # API route, and keeps the version-command runner pointed at a throwaway file.
@@ -228,7 +228,7 @@ def _isolate_remaining_config_stores(tmp_path, monkeypatch):
     # missed per-test stub lands fixture escalation rows in the real store, never
     # config/escalations.json. See docs/frontier-escalation.md.
     monkeypatch.setattr(_escalations, "_STORE_PATH", tmp_path / "escalations.json")
-    # wiki.py resolves this env on every _vault() call. Craig's real vault is a
+    # wiki.py resolves this env on every _vault() call. the user's real vault is a
     # readable path on this machine, so without the redirect a wiki test that
     # forgets to stub reads his actual notes into a fixture assertion.
     monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path / "wiki_vault"))
@@ -246,7 +246,7 @@ class _StubNtfyResponse:
 def _block_ntfy_egress(monkeypatch):
     """Stub BOTH verbs the ntfy module speaks — post (publish) and get (health).
 
-    post: notify() fires a real push at Craig's phone on every task-failure path
+    post: notify() fires a real push at the user's phone on every task-failure path
     a test exercises. get: ntfy_health() probes the real ntfy server, and it
     calls load_env() first, so it reads the REAL config/.env — a test hitting
     /api/health/ntfy would reach the live box over the network no matter what
@@ -265,7 +265,7 @@ def _block_email_send(monkeypatch):
     # notify(email_fallback=True) sends a real Gmail message when a push fails,
     # which put an egress path behind the *failure* branch of a function whose
     # error paths tests exercise on purpose (test_notify.py). Without this, those
-    # tests mail Craig every run. Patched on the module so notify's call-time
+    # tests mail the user every run. Patched on the module so notify's call-time
     # lookup resolves the stub; callers that bound `send_email` at import (e.g.
     # morning_brief) still stub their own, as they always have.
     def _no_real_email(*a, **k):

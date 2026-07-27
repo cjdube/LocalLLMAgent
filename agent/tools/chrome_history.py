@@ -20,12 +20,17 @@ from pathlib import Path
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
+from agent import prefs
 from agent.dates import DATE_ARG_GUIDANCE, local_timezone, resolve_date
 
 if platform.system() == "Darwin":
     HISTORY_PATH = Path.home() / "Library/Application Support/Google/Chrome/Default/History"
 else:
     HISTORY_PATH = Path.home() / "AppData/Local/Google/Chrome/User Data/Default/History"
+
+# The user's name, for the model-facing tool descriptions below. From
+# config/preferences.json; falls back to "the user".
+_NAME = prefs.user_name()
 
 NOISE_DOMAINS = {
     "google.com", "www.google.com",
@@ -48,7 +53,7 @@ TOOL_SCHEMA = {
         "description": (
             "Get meaningful (non-noise) Chrome browsing history. Pass 'days_ago' "
             "for a recent window, or an explicit 'start'/'end' range. Day "
-            "boundaries use Craig's local timezone."
+            f"boundaries use {_NAME}'s local timezone."
         ),
         "parameters": {
             "type": "object",
@@ -82,8 +87,8 @@ _MAX_PATH_CHARS = 120
 def _extract_domain(url: str) -> str:
     """The host, without port or userinfo. Uses .hostname rather than .netloc:
     netloc keeps the port, which silently defeated the NOISE_DOMAINS match for
-    local servers — "127.0.0.1:8420" never equalled "127.0.0.1", so Craig's own
-    Wren dashboard was reported as a site he'd browsed."""
+    local servers — "127.0.0.1:8420" never equalled "127.0.0.1", so the user's own
+    Wren dashboard was reported as a site they'd browsed."""
     try:
         return (urlparse(url).hostname or "").lower()
     except Exception:

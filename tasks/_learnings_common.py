@@ -49,7 +49,7 @@ MAX_YOUTUBE_DESC_CHARS = 500
 # comparison, where the title alone is just "Gemini API".
 MAX_PAGES_PER_SITE = 6
 
-# Domains Craig doesn't want reviewed (volunteer-admin portals, M365). Scoped to
+# Domains the user doesn't want reviewed (volunteer-admin portals, M365). Scoped to
 # the learnings tasks on purpose: chrome_history.NOISE_DOMAINS would also blind
 # the fetch_chrome_history tool in chat, and he still wants to be able to ask
 # about these sites there.
@@ -59,8 +59,8 @@ _EXCLUDED_DOMAINS = [
 ]
 
 
-# Subject matter Craig doesn't want reviewed at all, whatever it's hosted on.
-# Domain exclusions can't reach this: an AARP calendar event, or an AARP page on
+# Subject matter the user doesn't want reviewed at all, whatever it's hosted on.
+# Domain exclusions can't reach this: an excluded org's calendar event, or its page on
 # a site that's otherwise worth reviewing, has no domain to match against.
 _EXCLUDED_KEYWORDS = [
     k.lower() for k in prefs.section("learnings").get("excluded_keywords", [])

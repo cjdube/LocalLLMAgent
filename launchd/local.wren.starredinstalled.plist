@@ -3,17 +3,17 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.craigdube.localllmagent.starredinstalled</string>
+    <string>local.wren.starredinstalled</string>
 
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/craigdube/Projects/LocalLLMAgent/.venv/bin/python</string>
+        <string>__WREN_ROOT__/.venv/bin/python</string>
         <string>-m</string>
         <string>tasks.starred_installed</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/craigdube/Projects/LocalLLMAgent</string>
+    <string>__WREN_ROOT__</string>
 
     <!-- launchd's default PATH is just /usr/bin:/bin:/usr/sbin:/sbin, so a
          version_cmd such as "rtk" (installed under Homebrew or Cargo) would not
@@ -23,7 +23,7 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/local/bin:/Users/craigdube/.cargo/bin:/Users/craigdube/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>/opt/homebrew/bin:/usr/local/bin:__HOME__/.cargo/bin:__HOME__/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>
 
     <key>StartCalendarInterval</key>
@@ -35,9 +35,9 @@
     </dict>
 
     <key>StandardOutPath</key>
-    <string>/Users/craigdube/Projects/LocalLLMAgent/logs/starred_installed.launchd.log</string>
+    <string>__WREN_ROOT__/logs/starred_installed.launchd.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/craigdube/Projects/LocalLLMAgent/logs/starred_installed.launchd.log</string>
+    <string>__WREN_ROOT__/logs/starred_installed.launchd.log</string>
 
     <key>RunAtLoad</key>
     <false/>

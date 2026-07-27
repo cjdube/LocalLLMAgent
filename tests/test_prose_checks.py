@@ -63,7 +63,7 @@ def test_blank_and_stray_commas_drop_out_of_the_phrase_list():
 
 def test_one_em_dash_per_sentence_is_not_a_finding():
     # The measured false positive: the model called a comma-heavy sentence an
-    # em-dash cluster. One dash per sentence is Craig's normal voice.
+    # em-dash cluster. One dash per sentence is the user's normal voice.
     text = ("Drop it — don't substitute a gray-area source. "
             "Convert before comparing — the windows are local.")
     assert pc.em_dash_sentences(text, 1) == []

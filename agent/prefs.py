@@ -1,14 +1,18 @@
-"""Personal preferences loaded from config/preferences.json (committed, not a secret).
+"""Personal preferences loaded from config/preferences.json (gitignored, not a secret).
 
 Separates who the agent serves (name, positioning, calendar categories, job-search
 terms) from the operational code that uses them, so a cloner can edit one JSON
 file instead of Python. Loaded once at import — tool-schema enums and digest
 regexes are built at module import time and need the values then.
 
+The real file is gitignored so personal details stay out of the repo;
+config/preferences.example.json is the committed template and the fallback, so a
+fresh clone boots with a valid schema before anyone has edited anything.
+
 Deliberately not agent/store.py's load_json: its corrupt-file quarantine
-os.replace()s the file aside, which is wrong for a git-tracked file (git already
-preserves history; a rename just confuses git status). A missing or unparseable
-file degrades to {} — callers fall back to their coded defaults.
+os.replace()s the file aside, which is wrong for a hand-maintained file. A
+missing or unparseable file degrades to {} — callers fall back to their coded
+defaults.
 """
 
 import json
@@ -19,6 +23,10 @@ logger = logging.getLogger(__name__)
 
 _ROOT = Path(__file__).resolve().parent.parent
 _PREFS_PATH = _ROOT / "config" / "preferences.json"
+if not _PREFS_PATH.exists():
+    # Fresh clone: nobody has made their own copy yet. The example file is the
+    # same schema with generic values, so every consumer still gets valid data.
+    _PREFS_PATH = _ROOT / "config" / "preferences.example.json"
 
 
 def _load(path: Path) -> dict:

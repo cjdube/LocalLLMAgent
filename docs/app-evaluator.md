@@ -51,7 +51,7 @@ never crash a chat turn.
 ## Deliberate non-goals
 
 - **Not wired into any scheduled/unattended task.** This is a user-initiated
-  capability; per the data sourcing policy, Firecrawl fetches only URLs Craig
+  capability; per the data sourcing policy, Firecrawl fetches only URLs the user
   names in chat, and doesn't become a background scraping pipeline.
 - **No structured (JSON) model output.** The original script forced a Pydantic
   schema through Ollama's `format` parameter; Wren asks for fixed markdown

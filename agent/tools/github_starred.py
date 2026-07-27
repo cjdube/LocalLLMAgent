@@ -1,4 +1,4 @@
-"""List Craig's starred GitHub repos and flag which have been pushed to since
+"""List the user's starred GitHub repos and flag which have been pushed to since
 a given timestamp.
 
 Usage:
@@ -18,9 +18,14 @@ from datetime import datetime, timedelta, timezone
 import requests
 from packaging.version import InvalidVersion, Version
 
+from agent import prefs
 from agent.tools._http import http_error, load_env, missing_key_error, print_result, resolve_key
 
 load_env()
+
+# The user's name, for the model-facing tool descriptions below. From
+# config/preferences.json; falls back to "the user".
+_NAME = prefs.user_name()
 
 STARRED_URL = "https://api.github.com/user/starred"
 API_ROOT = "https://api.github.com"
@@ -33,7 +38,7 @@ TOOL_SCHEMA = {
     "function": {
         "name": "fetch_starred_repos",
         "description": (
-            "List Craig's starred GitHub repos. Pass 'days_ago' to only get repos "
+            f"List {_NAME}'s starred GitHub repos. Pass 'days_ago' to only get repos "
             "pushed to in that many days (i.e. what's new), each with a "
             "'recent_changes' summary of its latest release notes or commits. Omit "
             "'days_ago' to list every starred repo, unfiltered."

@@ -33,11 +33,11 @@
 * 2026-07-09 - Set explicit Ollama num_ctx and log prompt token usage
 * 2026-07-09 - Convert daily_log to deterministic Python, dropping the model
 * 2026-07-09 - Add procedural memory (skills) to Wren's chat
-* 2026-07-09 - Merge pull request #1 from cjdube/skills-procedural-memory
+* 2026-07-09 - Merge skills-procedural-memory
 * 2026-07-09 - Make memory store writes atomic and thread-safe
 * 2026-07-09 - Make morning_brief starred-state write atomic
 * 2026-07-09 - Add YouTube liked videos as a weekly-learnings source
-* 2026-07-09 - Merge pull request #2 from cjdube/add-youtube-liked-videos
+* 2026-07-09 - Merge add-youtube-liked-videos
 * 2026-07-09 - Add /map — explorable radial system map of the agent
 * 2026-07-10 - Add proactive push: ntfy failure alerts and scheduled reminders
 * 2026-07-10 - Add background tasks with notify-on-done (A + push-to-approve)
@@ -56,7 +56,7 @@
 * 2026-07-11 - Stop task tests from writing fixture data into production logs
 * 2026-07-11 - Ignore rotated .log.bak files in logs/
 * 2026-07-11 - Fix weekly_learnings cold-model timeout with warm-up + keep-alive
-* 2026-07-11 - Block ntfy pushes in tests so the suite can't alert Craig's phone
+* 2026-07-11 - Block ntfy pushes in tests so the suite can't alert the user's phone
 * 2026-07-11 - Add /opportunities triage page to the dashboard
 * 2026-07-11 - Add company research briefs to the opportunity scout
 * 2026-07-11 - Stop server tests from spawning real research threads
@@ -80,9 +80,9 @@
 * 2026-07-13 - Add recategorize memory tool to relabel a fact in place
 * 2026-07-14 - Stop the test suite writing fixture rows into production logs
 * 2026-07-14 - Log run boundaries so the dashboard sees opportunity digest runs
-* 2026-07-14 - Keep AARP and Microsoft 365 browsing out of the daily learnings
+* 2026-07-14 - Keep volunteer-admin and Microsoft 365 browsing out of the daily learnings
 * 2026-07-14 - Give the daily review page paths, and fix the port bug hiding local servers
-* 2026-07-14 - Drop AARP from the learnings entirely, and unclamp the prompt caps
+* 2026-07-14 - Drop the volunteer-admin subject from the learnings entirely, and unclamp the prompt caps
 * 2026-07-14 - Window Liked videos on the local date, not the raw UTC stamp
 * 2026-07-14 - Log a run-complete boundary on the quiet-day early returns
 * 2026-07-14 - Write down the UTC-vs-local day-boundary rule

@@ -1,4 +1,4 @@
-"""Compose and write a daily "AI Chat Learnings" review to Craig's Obsidian vault
+"""Compose and write a daily "AI Chat Learnings" review to the user's Obsidian vault
 (one file per day). Non-interactive — run by launchd every morning, covering the
 prior day's AI-agent chats.
 
@@ -11,7 +11,7 @@ clean).
 
 Neither Claude nor Gemini exposes an API to fetch past conversations, so the
 sources are what lands on disk: Claude Code's local session logs, and a folder
-Craig drops Gemini exports into (see tasks/_chat_transcripts.py).
+the user drops Gemini exports into (see tasks/_chat_transcripts.py).
 
 Usage:
     python -m tasks.ai_chat_learnings                 # yesterday (Claude + Gemini)

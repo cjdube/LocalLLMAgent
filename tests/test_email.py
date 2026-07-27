@@ -42,21 +42,21 @@ def _decode(raw):
 
 
 def test_send_email_builds_plaintext_to_configured_recipient(monkeypatch):
-    monkeypatch.setenv("BRIEF_TO_EMAIL", "craig@example.com")
+    monkeypatch.setenv("BRIEF_TO_EMAIL", "owner@example.com")
     box = {}
     _patch_gmail(monkeypatch, box)
     result = send_email("Subject line", "Hello there")
     assert result == {"message_id": "msg-1"}
     assert box["userId"] == "me" and box["api"] == ("gmail", "v1")
     msg = _decode(box["raw"])
-    assert msg["to"] == "craig@example.com"
+    assert msg["to"] == "owner@example.com"
     assert msg["subject"] == "Subject line"
     assert msg.get_content_type() == "text/plain"
     assert "Hello there" in msg.get_payload(decode=True).decode()
 
 
 def test_send_email_html_flag_sets_html_content_type(monkeypatch):
-    monkeypatch.setenv("BRIEF_TO_EMAIL", "craig@example.com")
+    monkeypatch.setenv("BRIEF_TO_EMAIL", "owner@example.com")
     box = {}
     _patch_gmail(monkeypatch, box)
     send_email("S", "<b>hi</b>", html=True)
@@ -64,7 +64,7 @@ def test_send_email_html_flag_sets_html_content_type(monkeypatch):
 
 
 def test_send_email_explicit_to_overrides_default(monkeypatch):
-    monkeypatch.setenv("BRIEF_TO_EMAIL", "craig@example.com")
+    monkeypatch.setenv("BRIEF_TO_EMAIL", "owner@example.com")
     box = {}
     _patch_gmail(monkeypatch, box)
     send_email("S", "b", to="ops@example.com")
@@ -81,7 +81,7 @@ def test_send_email_errors_when_no_recipient(monkeypatch):
 
 
 def test_send_email_maps_api_exception_to_error(monkeypatch):
-    monkeypatch.setenv("BRIEF_TO_EMAIL", "craig@example.com")
+    monkeypatch.setenv("BRIEF_TO_EMAIL", "owner@example.com")
 
     def boom(*a, **k):
         raise RuntimeError("gmail 500")

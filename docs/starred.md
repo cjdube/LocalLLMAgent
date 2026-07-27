@@ -1,6 +1,6 @@
 # The starred view — how it works
 
-The `/starred` view lists Craig's starred GitHub repos as a table — **Repo ·
+The `/starred` view lists the user's starred GitHub repos as a table — **Repo ·
 Language · What it does · Latest release · Installed** — sorted by
 most-recently-pushed. The "what it does" blurb is written by the local model from
 each repo's README and cached; the "latest release" and "installed" columns are
@@ -51,7 +51,7 @@ python -m tasks.starred_blurbs --refresh # regenerate all
 ## When does it run?
 
 Weekly, Sundays at 8:00 PM, via launchd
-(`launchd/com.craigdube.localllmagent.starredblurbs.plist`) — a weekly cadence is
+(`launchd/local.wren.starredblurbs.plist`) — a weekly cadence is
 enough to pick up newly-starred repos since each run only summarizes the ones
 without a cached blurb. The model backend follows the global default (local
 Ollama); override just this task with `WREN_STARRED_BLURBS_BACKEND` (see
@@ -59,7 +59,7 @@ Ollama); override just this task with `WREN_STARRED_BLURBS_BACKEND` (see
 
 ## Release awareness
 
-The "Latest release" column answers the version-level question Craig actually
+The "Latest release" column answers the version-level question the user actually
 cares about — *"has this repo cut a new release?"* — without the noise of every
 push. `tasks/starred_releases.py` fetches each starred repo's **latest published
 release** (`fetch_latest_release`, one GitHub call per repo, fanned over a small
@@ -74,22 +74,22 @@ shows no version. The whole cache is rewritten from the live star list each run
 de-starred repos are pruned automatically.
 
 Runs **daily** at 8:00 PM via
-`launchd/com.craigdube.localllmagent.starredreleases.plist` — daily, unlike the
+`launchd/local.wren.starredreleases.plist` — daily, unlike the
 weekly blurbs, so a new version shows up promptly. No model, so no backend knob.
 
 ```
 python -m tasks.starred_releases
 ```
 
-**Boundary.** This surfaces new *upstream* versions. Whether Craig has a repo
+**Boundary.** This surfaces new *upstream* versions. Whether the user has a repo
 installed — and at what version — is tracked separately (see below); Wren still
-never runs an upgrade (`brew upgrade` / `git pull` stay Craig's to run). This page
+never runs an upgrade (`brew upgrade` / `git pull` stay the user's to run). This page
 is the *awareness* layer, not an installer.
 
 ## Installed-version tracking
 
 The "Installed" column answers the other half of the question — *"and am I behind
-it?"* Only the repos Craig actually has installed are tracked, and only because he
+it?"* Only the repos the user actually has installed are tracked, and only because they
 lists them: `config/starred_installed.json` (hand-edited, gitignored) maps a repo
 `full_name` to how to read its installed version. Each entry is one of two shapes:
 
@@ -103,8 +103,8 @@ lists them: `config/starred_installed.json` (hand-edited, gitignored) maps a rep
 - **`version_cmd`** — a command Wren runs to read the current version. The daily
   task runs it (no shell, split with `shlex`, 10-second timeout) and extracts the
   first version-looking token from its output (stdout *or* stderr). The command
-  string comes from Craig's own config, not from any model or web content.
-- **`version`** — a static version Craig maintains by hand. The only option for
+  string comes from the user's own config, not from any model or web content.
+- **`version`** — a static version the user maintains by hand. The only option for
   file-based skills or hosted services with no version command.
 
 `tasks/starred_installed.py` resolves every entry and caches
@@ -125,7 +125,7 @@ a blank cell — the column is opt-in per repo.
 `config/starred_installed.example.json` is a copy-and-edit starting point. The
 whole cache is rewritten from the source each run, so removing a repo from the
 config prunes it. Runs **daily** at 8:10 PM via
-`launchd/com.craigdube.localllmagent.starredinstalled.plist`. The plist sets a
+`launchd/local.wren.starredinstalled.plist`. The plist sets a
 `PATH` covering Homebrew/Cargo/`~/.local/bin` because launchd's default `PATH` is
 minimal; a tool outside those dirs can be given by absolute path in the config.
 No model, so no backend knob.

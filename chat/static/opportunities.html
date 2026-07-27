@@ -153,7 +153,7 @@ function itemRow(item, buttons) {
 
   if (item.score) row.appendChild(el("span", "badge score", item.score + "/10"));
   // Only interested items reach here closed — the scout retires the rest out of
-  // the triage view. Craig may already have reached out, so say so rather than
+  // the triage view. The user may already have reached out, so say so rather than
   // dropping it.
   if (item.closed_at) row.appendChild(el("span", "badge gone", "no longer listed"));
 
@@ -257,7 +257,7 @@ async function load() {
   anyResearchPending = false;
   if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null; }
   // The pending-research auto-refresh re-renders everything; don't collapse a
-  // brief Craig is reading.
+  // brief the user is reading.
   const openBriefs = new Set([...document.querySelectorAll("details.research[open]")]
                              .map(d => d.dataset.itemId));
   const items = data.items || [];

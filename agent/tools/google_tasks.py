@@ -1,7 +1,7 @@
 """View and edit Google Tasks.
 
-Craig keeps tasks spread across several named lists (e.g. Domestic, Travel,
-AARP) rather than a single default list, so reads aggregate across every list
+The user may keep tasks spread across several named lists (e.g. Domestic, Travel,
+Volunteering) rather than a single default list, so reads aggregate across every list
 on the account by default — set GOOGLE_TASKLIST_ID in config/.env to scope
 reads (and the default list new tasks land in) to just one list instead.
 Because task ids are scoped per list in the Tasks API, any read result

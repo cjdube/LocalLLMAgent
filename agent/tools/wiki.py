@@ -1,5 +1,5 @@
-"""Read-only access to Craig's personal learnings wiki (an Obsidian vault) so
-Wren can answer "what did I decide about X" from his own notes.
+"""Read-only access to the user's personal learnings wiki (an Obsidian vault) so
+Wren can answer "what did I decide about X" from their own notes.
 
 The vault at WIKI_VAULT_PATH is built and maintained by the sibling
 ObsidianWikiAgent project. These tools let the agent loop navigate it the way
@@ -37,16 +37,21 @@ import re
 import sys
 from pathlib import Path
 
+from agent import prefs
 from agent.tools._http import load_env, print_result
+
+# Whose wiki this is, for the model-facing strings below. From
+# config/preferences.json; falls back to "the user".
+_NAME = prefs.user_name()
 
 load_env()
 
 DEFAULT_WIKI_VAULT = str(Path.home() / "Documents" / "llm-wiki-learnings")
 
-# A "lens" is an ordinary wiki page that opts in as one of Craig's standards
+# A "lens" is an ordinary wiki page that opts in as one of the user's standards
 # rubrics by declaring `lens: true` in its YAML frontmatter — the thing
 # evaluate_against judges a target against. Nothing else distinguishes it from a
-# concept page, so the marker is how Wren tells his lenses from his 180-odd
+# concept page, so the marker is how Wren tells lenses from the 180-odd other
 # notes. Keep the injected index cheap (same budget reasoning as the skills
 # index): the chat prompt already crowds num_ctx.
 MAX_INDEX_LENSES = 8
@@ -203,7 +208,7 @@ def list_lenses() -> dict:
 
 def render_lenses_index(logger=None) -> str:
     """The capped 'name: description' block injected into the chat system prompt
-    so Wren knows which pages are Craig's standards lenses (and their exact
+    so Wren knows which pages are the user's standards lenses (and their exact
     names, to pass as evaluate_against's lens_page). "" when there are none.
     Mirrors skills.render_skills_index.
 
@@ -237,8 +242,8 @@ def render_lenses_index(logger=None) -> str:
     if not lines:
         return ""
     return (
-        "Evaluation lenses (Craig's own standards pages). When he asks to evaluate, "
-        "critique, or review something against his standards, principles, or "
+        f"Evaluation lenses ({_NAME}'s own standards pages). When they ask to evaluate, "
+        "critique, or review something against their standards, principles, or "
         "philosophy, call evaluate_against with the matching lens_page:\n"
         + "\n".join(lines)
     )
@@ -249,8 +254,8 @@ READ_WIKI_INDEX_SCHEMA = {
     "function": {
         "name": "read_wiki_index",
         "description": (
-            "Read the table of contents (index.md) of Craig's personal learnings "
-            "wiki — the concept pages built from his weekly reviews. Start here to "
+            f"Read the table of contents (index.md) of {_NAME}'s personal learnings "
+            "wiki — the concept pages built from their weekly reviews. Start here to "
             "see what topics exist before reading a page."
         ),
         "parameters": {"type": "object", "properties": {}},
@@ -261,7 +266,7 @@ LIST_WIKI_PAGES_SCHEMA = {
     "type": "function",
     "function": {
         "name": "list_wiki_pages",
-        "description": "List the concept-page filenames in Craig's learnings wiki (excludes index.md and log.md).",
+        "description": f"List the concept-page filenames in {_NAME}'s learnings wiki (excludes index.md and log.md).",
         "parameters": {"type": "object", "properties": {}},
     },
 }
@@ -270,7 +275,7 @@ READ_WIKI_PAGE_SCHEMA = {
     "type": "function",
     "function": {
         "name": "read_wiki_page",
-        "description": "Read one concept page from Craig's learnings wiki. Cite the page name in your answer.",
+        "description": f"Read one concept page from {_NAME}'s learnings wiki. Cite the page name in your answer.",
         "parameters": {
             "type": "object",
             "properties": {

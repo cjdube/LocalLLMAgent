@@ -6,10 +6,10 @@ schemas (TOOLS), the name->callable map (DISPATCH), and the confirmation sets
 (WRITE_TOOLS, CONSEQUENTIAL_TOOLS) live here rather than inside the Flask app —
 that keeps a launchd task from having to import the web server.
 
-- WRITE_TOOLS: state-changing tools the *chat* pauses on for Craig's tap.
+- WRITE_TOOLS: state-changing tools the *chat* pauses on for the user's tap.
 - CONSEQUENTIAL_TOOLS: the subset that a *background* run must get phone approval
   for — external/irreversible actions only. Reversible internal writes (to
-  Craig's own calendar/tasks/reminders) auto-execute unattended; see the Phase 2
+  the user's own calendar/tasks/reminders) auto-execute unattended; see the Phase 2
   plan for the rationale.
 """
 
@@ -17,6 +17,7 @@ import json
 import os
 import re
 
+from agent import prefs
 from agent.tools.background import (
     GET_JOB_RESULT_TOOL_SCHEMA,
     LIST_BG_JOBS_TOOL_SCHEMA,
@@ -102,6 +103,10 @@ from agent.tools.wiki import (
 )
 from tasks.morning_brief import SEND_BRIEF_TOOL_SCHEMA, brief_dispatch
 from tasks.opportunity_digest import SEND_DIGEST_TOOL_SCHEMA, digest_dispatch
+
+# The user's name, for the model-facing group blurbs and load_tools schema
+# below. From config/preferences.json; falls back to "the user".
+_NAME = prefs.user_name()
 
 
 TOOLS = [
@@ -205,12 +210,12 @@ WRITE_TOOLS = frozenset({
     # remember/pin/recategorize are gated alongside forget: chat turns ingest
     # untrusted web/search content inline, and a pinned fact is injected into
     # every future system prompt (memory.render_memory_block), so an injected
-    # "pin that ..." must not write memory without Craig's tap. This mirrors the
+    # "pin that ..." must not write memory without the user's tap. This mirrors the
     # UNATTENDED_EXCLUDED_TOOLS ban on the same tools in background runs.
     # Tradeoff to revisit if the per-save tap gets bothersome: gate these only
     # after a turn has actually pulled untrusted web content, rather than always
     # — more complex, deferred until the friction is felt (README documents this
-    # for Craig too, under the memory section).
+    # for the user too, under the memory section).
     "remember", "pin", "recategorize",
     "write_skill", "delete_skill", "set_reminder", "cancel_reminder",
     "run_in_background", "update_opportunity", "watch_company",
@@ -218,7 +223,7 @@ WRITE_TOOLS = frozenset({
 })
 
 # The subset a background run must get phone approval for: external/irreversible
-# only. Reversible internal writes (calendar/tasks/reminders on Craig's own
+# only. Reversible internal writes (calendar/tasks/reminders on the user's own
 # account) auto-execute unattended. This is the one line to move to tighten the
 # policy (e.g. add calendar writes). forget/delete_skill stay listed even though
 # UNATTENDED_EXCLUDED_TOOLS below keeps them out of background runs entirely —
@@ -236,7 +241,7 @@ CONSEQUENTIAL_TOOLS = frozenset({
 # instruction that outlives the job. Approval-gating them would be the wrong
 # shape too: a push asking to approve "save this fact" is noise, and background
 # tasks have no legitimate need to write memories or skills (the job's summary
-# reaches Craig, who can ask chat-Wren to remember things deliberately). The
+# reaches the user, who can ask chat-Wren to remember things deliberately). The
 # read side (recall, list_skills, read_skill) stays available. Also excludes
 # the bg-management tools themselves: a job spawning or polling jobs is never
 # useful, and run_in_background would let a job replicate.
@@ -297,11 +302,11 @@ TOOL_GROUP_NAMES = {
 # One-line "when to load it" blurb per group, rendered into the chat prompt so
 # the model can reach for load_tools on a keyword the pre-loader missed.
 _GROUP_BLURBS = {
-    "opportunities": "Craig's fractional-work opportunities, watchlist, and company research.",
-    "wiki": "Craig's learnings wiki — weekly reviews and concept pages.",
+    "opportunities": f"{_NAME}'s fractional-work opportunities, watchlist, and company research.",
+    "wiki": f"{_NAME}'s learnings wiki — weekly reviews and concept pages.",
     "background": "Hand a long-running task off to run detached and report back.",
     "web": "Fetch a specific web page, evaluate a web app, or list starred GitHub repos.",
-    "activity": "Craig's Strava activities and recent Chrome browsing history.",
+    "activity": f"{_NAME}'s Strava activities and recent Chrome browsing history.",
     "authoring": "Save or delete a skill (a reusable multi-step procedure).",
     "brief": "Send the morning brief, or send an email.",
 }
@@ -328,7 +333,7 @@ LOAD_TOOLS_SCHEMA = {
         "name": "load_tools",
         "description": (
             "Load an additional group of tools when the current tools can't do "
-            "what Craig asked. After loading, the group's tools become available "
+            f"what {_NAME} asked. After loading, the group's tools become available "
             "to call on your next step."
         ),
         "parameters": {
@@ -378,7 +383,7 @@ def render_toolgroups_index() -> str:
     group in with load_tools when the core tools fall short."""
     lines = [
         "Beyond the tools already available to you, these tool GROUPS can be "
-        "loaded on demand with load_tools(group) when Craig asks for something "
+        f"loaded on demand with load_tools(group) when {_NAME} asks for something "
         "the current tools can't do:",
     ]
     lines += [f"- {g}: {_GROUP_BLURBS[g]}" for g in TOOL_GROUPS]

@@ -1,6 +1,6 @@
 # The opportunity scout — how it works
 
-The fractional-work opportunity scout finds leads for Vibe Foundry from free,
+The fractional-work opportunity scout finds leads for your practice from free,
 ToS-clean sources, has the local model score them, and emails a weekly digest.
 This page explains the full lifecycle: when it runs, what it looks at, how the
 list is built, what triage does, and how deduping and scoring behave over
@@ -16,7 +16,7 @@ page). It deliberately does NOT scrape LinkedIn or use paid data SaaS — see
 ## When does it run?
 
 Weekly, Sundays at 9:00 PM, via launchd
-(`launchd/com.craigdube.localllmagent.opportunitydigest.plist`). You can also
+(`launchd/local.wren.opportunitydigest.plist`). You can also
 ask Wren in chat to "send the opportunity digest" anytime — the chat tool
 (`send_opportunity_digest`) runs the exact same pipeline
 (`build_and_send_digest()`), behind a tap-to-confirm since it sends an email.
@@ -74,7 +74,7 @@ an error this run**, any stored opening whose id isn't in that board's current
 openings has come down — filled, pulled, or retitled past the leadership
 filter. The board-by-board scoping is the whole safety of it: a timed-out
 board returns zero openings, and without it that would retire a company's
-entire pipeline in one go. A company Craig just unwatched is likewise never
+entire pipeline in one go. A company the user just unwatched is likewise never
 polled, so its items are left alone.
 
 Everything in `new` becomes the digest:
@@ -119,11 +119,11 @@ it was:
   rather than emailed as a live lead — the check runs before the digest is
   built.
 - `interested` → **kept, with a "no longer listed" badge** on `/opportunities`.
-  Craig may already have emailed them, so the closure is information, not a
+  the user may already have emailed them, so the closure is information, not a
   reason to hide the item. It keeps its research brief and never ages out.
 - `dismissed` → untouched.
 
-`closed` is deliberately separate from `dismissed`: dismissed means Craig
+`closed` is deliberately separate from `dismissed`: dismissed means the user
 judged it, closed means the market did. Conflating them would lose the record
 of which watched searches actually resolved. Nothing pushes a notification for
 a closure; the badge and the log line are the whole surface.

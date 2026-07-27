@@ -31,7 +31,7 @@ def test_url_target_returns_evaluation(stubbed_pipeline):
     assert out == {"lens": "product-principles",
                    "evaluation": "## Where It Aligns\nShips small."}
     prompt = stubbed_pipeline["prompts"][0]["user_prompt"]
-    # The model saw Craig's standards (the lens) AND the compacted target (link
+    # The model saw the user's standards (the lens) AND the compacted target (link
     # text kept, target dropped).
     assert "Ship small" in prompt and "Own the outcome" in prompt
     assert "https://quorum.example" in prompt

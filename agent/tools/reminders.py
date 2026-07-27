@@ -2,7 +2,7 @@
 (tasks/reminder_sweep.py) fires it as a phone push via notify() when it comes due.
 
 The chat model sets/lists/cancels reminders through the tools below; it passes
-Craig's time expression verbatim and resolve_reminder_time() does the date math
+the user's time expression verbatim and resolve_reminder_time() does the date math
 in Python (the model can't be trusted to). Fired reminders are removed from the
 store — the push itself is the record.
 
@@ -22,6 +22,7 @@ from pathlib import Path
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
+from agent import prefs
 from agent.dates import REMINDER_WHEN_GUIDANCE, local_timezone, resolve_reminder_time
 from agent.store import atomic_write_json, load_json, locked
 
@@ -29,19 +30,23 @@ _ROOT = Path(__file__).resolve().parent.parent.parent
 _STORE_PATH = _ROOT / "config" / "reminders.json"
 
 
+# The user's name, for the model-facing tool descriptions below. From
+# config/preferences.json; falls back to "the user".
+_NAME = prefs.user_name()
+
 SET_REMINDER_TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "set_reminder",
-        "description": "Push a reminder notification to Craig's phone at a future time — use "
-        "whenever Craig asks to be reminded of something. Fires once, then is cleared.",
+        "description": f"Push a reminder notification to {_NAME}'s phone at a future time — use "
+        f"whenever {_NAME} asks to be reminded of something. Fires once, then is cleared.",
         "parameters": {
             "type": "object",
             "properties": {
                 "when": {"type": "string", "description": "When to fire the reminder. " + REMINDER_WHEN_GUIDANCE},
                 "message": {
                     "type": "string",
-                    "description": "What to remind Craig about, phrased as the reminder text he'll "
+                    "description": f"What to remind {_NAME} about, phrased as the reminder text they'll "
                     "see (e.g. 'Call the dentist').",
                 },
             },
@@ -54,8 +59,8 @@ LIST_REMINDERS_TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "list_reminders",
-        "description": "List Craig's pending reminders (soonest first), with their id and due time. "
-        "Use this before cancelling one, or when Craig asks what reminders he has set.",
+        "description": f"List {_NAME}'s pending reminders (soonest first), with their id and due time. "
+        f"Use this before cancelling one, or when {_NAME} asks what reminders they have set.",
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
 }

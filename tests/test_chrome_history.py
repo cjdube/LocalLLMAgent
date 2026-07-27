@@ -77,7 +77,7 @@ def test_requires_days_ago_or_full_range(monkeypatch):
 
 def test_extract_domain_strips_port():
     # The bug: .netloc kept the port, so "127.0.0.1:8420" never matched the
-    # "127.0.0.1" noise entry and Craig's own dashboard looked like a real site.
+    # "127.0.0.1" noise entry and the user's own dashboard looked like a real site.
     assert ch._extract_domain("http://127.0.0.1:8420/dashboard") == "127.0.0.1"
     assert ch._extract_domain("http://localhost:3000/x") == "localhost"
 
@@ -133,7 +133,7 @@ def test_pages_drops_query_strings():
 
 
 def test_pages_dedupes_paths_that_differ_only_by_query():
-    # Real case: LinkedIn's /in/craigdube/ was reached by three tracking urls and
+    # Real case: a LinkedIn profile path was reached by three tracking urls and
     # filled three of the five page slots.
     rows = [
         {"url": "https://example.com/in/x/?tr=1", "title": "P", "visits": 5},

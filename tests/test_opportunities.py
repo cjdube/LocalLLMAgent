@@ -152,7 +152,7 @@ def test_close_missing_retires_openings_gone_from_a_polled_board():
 def test_close_missing_ignores_boards_that_did_not_poll_cleanly():
     """The failure mode worth pinning: a timed-out board returns no openings,
     which must never read as 'every role there was filled'. Same for a company
-    Craig just unwatched — its board isn't polled at all any more."""
+    the user just unwatched — its board isn't polled at all any more."""
     opp.insert_new_items([_ats("lever:acme:1"), _ats("ashby:beta:1")])
     # Only beta's board answered; acme errored, so it isn't in boards_polled.
     closed = opp.close_missing(set(), ["ashby:beta"])
@@ -171,7 +171,7 @@ def test_close_missing_badges_interested_instead_of_retiring_it():
     item_id = opp.insert_new_items([_ats("greenhouse:acme:1")])[0]["id"]
     opp.update_opportunity(item_id, "interested")
     closed = opp.close_missing(set(), ["greenhouse:acme"])
-    # Craig may already have reached out: it stays in his pipeline, flagged.
+    # the user may already have reached out: it stays in his pipeline, flagged.
     assert closed[0]["status"] == "interested" and closed[0]["closed_at"]
     assert opp.list_opportunities(status="interested")["count"] == 1
 

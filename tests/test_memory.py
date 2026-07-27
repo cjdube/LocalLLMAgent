@@ -22,21 +22,21 @@ def tmp_store(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------- #
 
 def test_remember_then_recall_round_trip():
-    saved = memory.remember("Craig prefers metric units", category="preference")
-    assert "id" in saved and saved["text"] == "Craig prefers metric units"
+    saved = memory.remember("I prefer metric units", category="preference")
+    assert "id" in saved and saved["text"] == "I prefer metric units"
 
     got = memory.recall()
     assert got["count"] == 1
     m = got["memories"][0]
-    assert m["text"] == "Craig prefers metric units"
+    assert m["text"] == "I prefer metric units"
     assert m["category"] == "preference"
     assert m["id"] == saved["id"]
     assert m["created"]  # a timestamp was stamped in
 
 
 def test_remember_dedupes_identical_text_case_insensitively():
-    first = memory.remember("Craig prefers metric units")
-    dup = memory.remember("  craig PREFERS metric units ")
+    first = memory.remember("I prefer metric units")
+    dup = memory.remember("  i PREFER metric units ")
 
     assert dup["id"] == first["id"]
     assert dup.get("already_known") is True
@@ -49,8 +49,8 @@ def test_remember_rejects_empty_text():
 
 
 def test_recall_filters_by_query_on_text_and_category():
-    memory.remember("Craig prefers metric units", category="preference")
-    memory.remember("Craig's sister's birthday is March 3", category="person")
+    memory.remember("I prefer metric units", category="preference")
+    memory.remember("My sister's birthday is March 3", category="person")
 
     assert memory.recall(query="metric")["count"] == 1
     assert memory.recall(query="person")["count"] == 1  # matches category
@@ -62,7 +62,7 @@ def test_recall_filters_by_query_on_text_and_category():
 # --------------------------------------------------------------------------- #
 
 def test_forget_removes_by_id():
-    saved = memory.remember("Craig prefers metric units")
+    saved = memory.remember("I prefer metric units")
     result = memory.forget(saved["id"])
 
     assert result["removed"] is True
@@ -70,7 +70,7 @@ def test_forget_removes_by_id():
 
 
 def test_forget_unknown_id_reports_error():
-    memory.remember("Craig prefers metric units")
+    memory.remember("I prefer metric units")
     result = memory.forget("deadbeef")
 
     assert result["removed"] is False
@@ -91,14 +91,14 @@ def test_render_memory_block_empty_when_no_memories():
 
 
 def test_render_memory_block_lists_only_active_facts():
-    memory.pin("Craig prefers metric units")
-    memory.pin("Craig's sister's birthday is March 3")
+    memory.pin("I prefer metric units")
+    memory.pin("My sister's birthday is March 3")
     memory.remember("Crows can recognize human faces")  # archival — not rendered
 
     block = memory.render_memory_block()
     assert "reference facts" in block
-    assert "- Craig prefers metric units" in block
-    assert "- Craig's sister's birthday is March 3" in block
+    assert "- I prefer metric units" in block
+    assert "- My sister's birthday is March 3" in block
     assert "Crows" not in block
 
 
@@ -114,7 +114,7 @@ def test_remember_defaults_to_archival_with_zero_access_count():
 
 
 def test_pin_saves_as_active():
-    memory.pin("Craig prefers metric units", category="preference")
+    memory.pin("I prefer metric units", category="preference")
     m = memory.recall()["memories"][0]
     assert m["scope"] == "active"
 
@@ -130,14 +130,14 @@ def test_recall_normalizes_missing_scope_to_active():
 
 
 def test_recall_returns_both_active_and_archival():
-    memory.pin("Craig prefers metric units")
+    memory.pin("I prefer metric units")
     memory.remember("Crows can recognize human faces")
     assert memory.recall()["count"] == 2
 
 
 def test_pin_promotes_existing_archival_fact():
-    saved = memory.remember("Craig prefers metric units")
-    promoted = memory.pin("craig prefers metric units")  # same text, different case
+    saved = memory.remember("I prefer metric units")
+    promoted = memory.pin("i prefer metric units")  # same text, different case
 
     assert promoted["id"] == saved["id"]
     assert promoted.get("promoted") is True
@@ -151,7 +151,7 @@ def test_pin_promotes_existing_archival_fact():
 # --------------------------------------------------------------------------- #
 
 def test_archive_demotes_active_fact():
-    saved = memory.pin("Craig prefers metric units")
+    saved = memory.pin("I prefer metric units")
     result = memory.archive(saved["id"])
 
     assert result["archived"] is True
@@ -160,7 +160,7 @@ def test_archive_demotes_active_fact():
 
 
 def test_archive_unknown_id_reports_error():
-    memory.pin("Craig prefers metric units")
+    memory.pin("I prefer metric units")
     result = memory.archive("deadbeef")
 
     assert result["archived"] is False
@@ -188,7 +188,7 @@ def test_recategorize_changes_tag_without_losing_history():
 
 
 def test_recategorize_preserves_active_scope():
-    saved = memory.pin("Craig prefers metric units", category="preference")
+    saved = memory.pin("I prefer metric units", category="preference")
     memory.recategorize(saved["id"], "other")
     assert memory.recall()["memories"][0]["scope"] == "active"
 
@@ -201,7 +201,7 @@ def test_recategorize_empty_category_clears_tag():
 
 
 def test_recategorize_unknown_id_reports_error():
-    memory.remember("Craig prefers metric units", category="preference")
+    memory.remember("I prefer metric units", category="preference")
     result = memory.recategorize("deadbeef", "other")
 
     assert result["recategorized"] is False
@@ -229,7 +229,7 @@ def test_listing_recall_does_not_increment_access_count():
 
 
 def test_active_facts_are_not_access_counted():
-    memory.pin("Craig prefers metric units")
+    memory.pin("I prefer metric units")
     memory.recall(query="metric")
     assert memory.recall()["memories"][0]["access_count"] == 0
 
@@ -240,7 +240,7 @@ def test_active_facts_are_not_access_counted():
 
 def test_recall_filters_by_category():
     memory.remember("Crows can recognize human faces", category="trivia")
-    memory.pin("Craig prefers metric units", category="preference")
+    memory.pin("I prefer metric units", category="preference")
 
     trivia = memory.recall(category="trivia")
     assert trivia["count"] == 1
@@ -263,11 +263,11 @@ def test_recall_intersects_query_and_category():
 def test_legacy_entry_without_scope_is_treated_as_active():
     # Simulate a pre-upgrade file: entries have neither scope nor access_count.
     memory._save({"memories": [
-        {"id": "legacy01", "text": "Craig does yoga on Mondays", "category": "schedule",
+        {"id": "legacy01", "text": "I do yoga on Mondays", "category": "schedule",
          "created": "2026-07-08T16:56:28"},
     ]})
 
-    assert "- Craig does yoga on Mondays" in memory.render_memory_block()
+    assert "- I do yoga on Mondays" in memory.render_memory_block()
     # recall with a query must not crash on the missing access_count.
     got = memory.recall(query="yoga")
     assert got["count"] == 1
@@ -284,7 +284,7 @@ def test_corrupt_store_degrades_to_empty_and_recovers():
     assert memory.render_memory_block() == ""
     assert memory.recall()["count"] == 0
     # The damaged file was quarantined, so a fresh save works.
-    assert "id" in memory.remember("Craig prefers metric units")
+    assert "id" in memory.remember("I prefer metric units")
     assert memory.recall()["count"] == 1
 
 
@@ -293,7 +293,7 @@ def test_corrupt_store_degrades_to_empty_and_recovers():
 # --------------------------------------------------------------------------- #
 
 def test_save_leaves_no_temp_files():
-    memory.remember("Craig prefers metric units", category="preference")
+    memory.remember("I prefer metric units", category="preference")
     memory.remember("Crows can recognize human faces", category="trivia")
     memory.recall(query="crows")  # a write on the read path too
 

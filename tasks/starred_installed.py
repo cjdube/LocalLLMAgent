@@ -1,7 +1,7 @@
-"""Resolve the installed version of each starred repo Craig actually has, for
+"""Resolve the installed version of each starred repo the user actually has, for
 the /starred view's "Installed" column. Non-interactive — run by launchd daily.
 
-Craig lists the repos he has installed in config/starred_installed.json
+The user lists the repos they have installed in config/starred_installed.json
 (hand-edited), keyed by repo full_name. Each entry is one of:
 
     "rtk-ai/rtk":        {"version_cmd": "rtk --version"}   # run it, read the version
@@ -14,7 +14,7 @@ are cached in config/starred_installed_versions.json keyed by full_name, so
 /api/starred reads a plain store and never runs a subprocess on the page's
 request path — the same off-path posture as the releases cache.
 
-The command strings come from Craig's own config file, not from any model or web
+The command strings come from the user's own config file, not from any model or web
 content, and run with a timeout and no shell. The whole cache is rewritten from
 the source each run, so a repo removed from the source is pruned.
 
@@ -54,7 +54,7 @@ def _run_version_cmd(cmd: str):
     binary, a timeout, or version-less output becomes an error string, so one
     broken command degrades to a blank cell rather than failing the run. No
     shell — the string is split with shlex and executed directly, since it comes
-    from Craig's own config and needs no shell features."""
+    from the user's own config and needs no shell features."""
     try:
         proc = subprocess.run(
             shlex.split(cmd), capture_output=True, text=True, timeout=CMD_TIMEOUT
