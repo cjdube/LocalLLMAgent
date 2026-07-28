@@ -400,7 +400,7 @@ def parse_run_detail(log_path, run_id: str) -> dict | None:
 # Run statistics (the dashboard's duration charts)
 # --------------------------------------------------------------------------- #
 
-def run_stats(days: int = 30, now: datetime | None = None) -> dict:
+def run_stats(days: int = 30, limit: int | None = 30, now: datetime | None = None) -> dict:
     """Per-task run-duration series, for charting how long each task takes.
 
     One entry per scheduled task — daemons are skipped, having no discrete runs
@@ -415,6 +415,20 @@ def run_stats(days: int = 30, now: datetime | None = None) -> dict:
     exactly the state worth seeing. Those runs are excluded from median_s/max_s
     and counted in `unfinished` instead.
 
+    `limit` caps each series at its most recent N runs (None for no cap). The
+    chart is 268 viewBox units wide and its dots are 4.8 across, so past ~57
+    points they overlap into a smear that still renders and still says nothing —
+    a slow, quiet degradation rather than a failure. Nothing today comes close
+    (the busiest task is ~40 runs in 30 days), but `days` is a request parameter
+    and only the accident of interval pollers being classified as daemons keeps
+    a 30-second poller's 86,400 runs out of here.
+
+    Because the cap is by run count and the window is by time, a busy task's
+    chart may span fewer days than `days` — the two bounds don't agree, and the
+    tighter one wins. `total` reports how many runs were in the window before
+    the cap so the caller can say so; every other statistic here describes the
+    runs actually returned, so a caption can never cite a max that isn't drawn.
+
     No timezone conversion happens here, and none belongs here: `logging` writes
     the log timestamps in local time and `now` is local, so both sides of the
     window comparison are already naive-local. (The UTC-vs-local rule in
@@ -426,12 +440,17 @@ def run_stats(days: int = 30, now: datetime | None = None) -> dict:
     for task in discover_tasks():
         if task["is_daemon"]:
             continue
-        runs = []
+        windowed = []
         for run in reversed(parse_runs(task["log_path"])):
             started = _parse_ts(run["start"])
             if started is None or started < cutoff:
                 continue
-            runs.append({k: run[k] for k in ("id", "start", "status", "duration_s")})
+            windowed.append({k: run[k] for k in ("id", "start", "status", "duration_s")})
+
+        # Keep the NEWEST `limit`, preserving oldest-first order: for a duration
+        # chart the recent shape is what's being read, so the old end is what
+        # can go.
+        runs = windowed[-limit:] if limit is not None else windowed
 
         durations = [r["duration_s"] for r in runs if r["duration_s"] is not None]
         tasks.append({
@@ -439,12 +458,13 @@ def run_stats(days: int = 30, now: datetime | None = None) -> dict:
             "display_name": task["display_name"],
             "runs": runs,
             "count": len(runs),
+            "total": len(windowed),
             "unfinished": len(runs) - len(durations),
             "failures": sum(1 for r in runs if r["status"] == "failure"),
             "median_s": round(median(durations), 1) if durations else None,
             "max_s": max(durations) if durations else None,
         })
-    return {"days": days, "tasks": tasks}
+    return {"days": days, "limit": limit, "tasks": tasks}
 
 
 # --------------------------------------------------------------------------- #

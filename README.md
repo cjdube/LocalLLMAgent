@@ -371,7 +371,8 @@ chat/
 It's a single scrollable page (no tabs). Chat lives at `/`, not here:
 
 - **Run duration** (top of the page) — one small chart per task, plotting how
-  long each of its runs took over the last 30 days, with the median as a dashed
+  long each of its runs took over the last 30 days (capped at the 30 most recent
+  runs, past which the points overlap into a smear), with the median as a dashed
   reference line and failures in red. This is the question the dot-strip below
   can't answer: a task's runs are near-uniformly green, but `morning_brief` has
   taken 8 seconds and it has taken 25 minutes, and `ai_chat_learnings` once ran

@@ -72,20 +72,48 @@ excluded from the median/max and counted separately, surfacing as
 `· 2 unfinished` in the cell caption. A task with *nothing but* unfinished runs
 says so rather than rendering an empty box.
 
-## Known limit: the window is capped by log rotation
+## Two bounds: a time window and a point cap
 
-`?days=` defaults to 30 and clamps to 1–365, but the real ceiling is what's on
-disk. `_rotated_log_paths` reads `<task>.log` plus `.log.1/.2/.3`, so history
-older than three rotations is gone. Separately, the `.bak` files sitting in
-`logs/` (`weekly_learnings.log.bak` is 368KB, `strava_download.log.bak` 105KB)
-don't match that pattern and are invisible to the parser — there is more history
-on disk than any chart currently shows.
+`?days=` defaults to 30 and clamps to 1–365. On top of that, each series is
+capped at its **30 most recent runs**.
+
+The cap is about legibility, and the threshold is arithmetic rather than taste:
+the plot area is 268 viewBox units wide and the dots are 4.8 across, so past
+~57 points they overlap into a smear that still renders and still says nothing.
+Nothing today comes close — the busiest task is ~40 runs in 30 days — but
+`days` is a request parameter, and the only thing keeping a 30-second poller's
+86,400 runs out of here is the accident that interval pollers are classified as
+daemons. Degrading into an unreadable-but-correct chart is exactly the quiet
+kind of failure this codebase keeps getting bitten by.
+
+Two consequences worth knowing:
+
+- **A busy task's chart spans fewer days than `days`.** The two bounds don't
+  agree and the tighter one wins, so different cells can cover different
+  periods. Point tooltips carry the real dates. `total` reports the pre-cap
+  count so the caption can say `212 of 232 runs · newest 30 per chart` instead
+  of claiming a window the drawing doesn't cover.
+- **Trimming moves the median.** Every statistic describes the runs actually
+  returned, never the discarded ones — a caption must not cite a max that isn't
+  drawn. When the cap dropped `strava_download`'s oldest ten runs, its reported
+  median went 9.9s → 1.9s, because those ten were the pre-speedup era.
+
+Both are downstream of one rule: the numbers describe the picture.
+
+## Known limit: history is capped by log rotation
+
+The real ceiling on `days` is what's on disk. `_rotated_log_paths` reads
+`<task>.log` plus `.log.1/.2/.3`, so history older than three rotations is gone.
+Separately, the `.bak` files sitting in `logs/` (`weekly_learnings.log.bak` is
+368KB, `strava_download.log.bak` 105KB) don't match that pattern and are
+invisible to the parser — there is more history on disk than any chart currently
+shows.
 
 ## Where it lives
 
-- `chat/insights.py` — `run_stats(days, now)`, the windowed per-task series.
-  Returns runs **oldest first**, the reverse of `parse_runs`, because that's the
-  order a chart plots.
+- `chat/insights.py` — `run_stats(days, limit, now)`, the windowed and capped
+  per-task series. Returns runs **oldest first**, the reverse of `parse_runs`,
+  because that's the order a chart plots.
 - `chat/routes_dashboard.py` — `GET /api/run_stats`. `?days=` is clamped rather
   than validated: a nonsense window should narrow the chart, not 400 the page.
 - `chat/static/run-chart.js` — the renderer. Contract is two page-supplied

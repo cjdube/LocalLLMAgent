@@ -161,9 +161,15 @@
 
     const hint = document.getElementById("runChartHint");
     if (hint) {
-      const runs = tasks.reduce((n, t) => n + t.count, 0);
-      hint.textContent =
-        `${runs} runs · last ${data.days} days · one point per run, oldest left · log scale`;
+      // Say what's plotted, not what was asked for. The server caps each series
+      // at its most recent N runs, so on a busy task "last 30 days" would be a
+      // claim the chart doesn't support — name the trim when one happened.
+      const shown = tasks.reduce((n, t) => n + t.count, 0);
+      const inWindow = tasks.reduce((n, t) => n + (t.total ?? t.count), 0);
+      const scope = shown < inWindow
+        ? `${shown} of ${inWindow} runs · newest ${data.limit} per chart`
+        : `${shown} runs · last ${data.days} days`;
+      hint.textContent = `${scope} · one point per run, oldest left · log scale`;
     }
   }
 

@@ -6,7 +6,7 @@ chronological ordering. `now` is pinned so next_run is deterministic.
 """
 
 import plistlib
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from chat import insights
 
@@ -624,3 +624,92 @@ def test_run_stats_lists_a_task_with_no_runs_in_the_window(tmp_path, monkeypatch
     assert task["count"] == 0
     assert task["median_s"] is None
     assert task["max_s"] is None
+
+
+def _many_runs(log, n, first_day=1):
+    """n successful runs, one per day, ending the day before STATS_NOW.
+
+    Dates come from real arithmetic, not f-string day numbers: 40 runs from
+    July 1 would otherwise emit "2026-07-32", which _parse_ts rejects, and the
+    runs would vanish from the series rather than failing the fixture.
+    """
+    start = datetime(2026, 7, first_day, 6, 0)
+    lines = []
+    for i in range(n):
+        day = (start + timedelta(days=i)).strftime("%Y-%m-%d")
+        lines += [
+            f"{day} 06:00:00,000 [INFO] Starting brief run",
+            f"{day} 06:00:{(i % 59) + 1:02d},000 [INFO] Brief run complete",
+        ]
+    _write_log(log, lines)
+
+
+def test_run_stats_caps_the_series_at_the_most_recent_runs(tmp_path, monkeypatch):
+    # Past ~57 points the dots overlap into a smear that still renders and says
+    # nothing, so the series is capped. Recent shape is what's read, so it's the
+    # OLD end that goes.
+    log = tmp_path / "brief.log"
+    _many_runs(log, 12, first_day=1)
+    _stub_tasks(monkeypatch, _task("brief", log))
+    task = insights.run_stats(days=365, limit=5, now=STATS_NOW)["tasks"][0]
+    assert task["count"] == 5
+    assert [r["start"][:10] for r in task["runs"]] == [
+        "2026-07-08", "2026-07-09", "2026-07-10", "2026-07-11", "2026-07-12"]
+
+
+def test_run_stats_reports_the_pre_cap_total(tmp_path, monkeypatch):
+    # Without this the caller can't tell a trimmed chart from a complete one,
+    # and the caption would claim a window the chart doesn't cover.
+    log = tmp_path / "brief.log"
+    _many_runs(log, 12, first_day=1)
+    _stub_tasks(monkeypatch, _task("brief", log))
+    task = insights.run_stats(days=365, limit=5, now=STATS_NOW)["tasks"][0]
+    assert task["total"] == 12
+    assert task["count"] == 5
+
+
+def test_run_stats_statistics_describe_only_the_plotted_runs(tmp_path, monkeypatch):
+    # A caption must never cite a max that isn't drawn: the dropped runs are the
+    # long ones here, so max has to come down with them.
+    log = tmp_path / "brief.log"
+    _write_log(log, [
+        "2026-07-01 06:00:00,000 [INFO] Starting brief run",
+        "2026-07-01 06:10:00,000 [INFO] Brief run complete",      # 600s, dropped
+        "2026-07-02 06:00:00,000 [INFO] Starting brief run",
+        "2026-07-02 06:00:20,000 [ERROR] Boom",                   # failure, dropped
+        "2026-07-03 06:00:00,000 [INFO] Starting brief run",
+        "2026-07-03 06:00:04,000 [INFO] Brief run complete",
+        "2026-07-04 06:00:00,000 [INFO] Starting brief run",
+        "2026-07-04 06:00:08,000 [INFO] Brief run complete",
+    ])
+    _stub_tasks(monkeypatch, _task("brief", log))
+    task = insights.run_stats(days=365, limit=2, now=STATS_NOW)["tasks"][0]
+    assert task["max_s"] == 8.0        # not 600.0
+    assert task["median_s"] == 6.0     # over the plotted pair only
+    assert task["failures"] == 0       # the failed run was trimmed off
+
+
+def test_run_stats_defaults_to_a_cap_of_30(tmp_path, monkeypatch):
+    log = tmp_path / "brief.log"
+    _many_runs(log, 31, first_day=1)
+    _stub_tasks(monkeypatch, _task("brief", log))
+    out = insights.run_stats(days=365, now=STATS_NOW)
+    assert out["limit"] == 30
+    assert out["tasks"][0]["count"] == 30
+    assert out["tasks"][0]["total"] == 31
+
+
+def test_run_stats_limit_none_disables_the_cap(tmp_path, monkeypatch):
+    log = tmp_path / "brief.log"
+    _many_runs(log, 40, first_day=1)
+    _stub_tasks(monkeypatch, _task("brief", log))
+    task = insights.run_stats(days=365, limit=None, now=STATS_NOW)["tasks"][0]
+    assert task["count"] == task["total"] == 40
+
+
+def test_run_stats_under_the_cap_reports_total_equal_to_count(tmp_path, monkeypatch):
+    log = tmp_path / "brief.log"
+    _many_runs(log, 3, first_day=1)
+    _stub_tasks(monkeypatch, _task("brief", log))
+    task = insights.run_stats(days=365, limit=30, now=STATS_NOW)["tasks"][0]
+    assert task["count"] == task["total"] == 3

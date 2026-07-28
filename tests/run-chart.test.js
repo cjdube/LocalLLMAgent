@@ -110,6 +110,35 @@ describe("rendering", () => {
     expect(hint).toContain("3 runs");
     expect(hint).toContain("last 14 days");
   });
+
+  test("the caption names the trim when the server capped a series", async () => {
+    // Otherwise it would claim "last 30 days" over a chart that only covers the
+    // most recent 30 runs of a busier task — a window the drawing can't support.
+    await render({
+      days: 30,
+      limit: 30,
+      tasks: [
+        task({ key: "a", runs: [run(5), run(6)], total: 40 }),
+        task({ key: "b", runs: [run(7)], total: 1 }),
+      ],
+    });
+    const hint = document.getElementById("runChartHint").textContent;
+    expect(hint).toContain("3 of 41 runs");
+    expect(hint).toContain("newest 30 per chart");
+    expect(hint).not.toContain("last 30 days");
+  });
+
+  test("nothing capped leaves the window claim intact", async () => {
+    await render({
+      days: 30,
+      limit: 30,
+      tasks: [task({ runs: [run(5), run(6)], total: 2 })],
+    });
+    const hint = document.getElementById("runChartHint").textContent;
+    expect(hint).toContain("2 runs");
+    expect(hint).toContain("last 30 days");
+    expect(hint).not.toContain("newest");
+  });
 });
 
 describe("scale arithmetic", () => {
