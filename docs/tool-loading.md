@@ -1,6 +1,6 @@
 # Lazy tool loading — how it works
 
-Wren has ~45 tools. Sending every schema to the local model on every chat turn
+Wren has more than forty tools. Sending every schema to the local model on every chat turn
 — plus a prompt paragraph describing each — wastes context the small model
 can't spare, for no benefit on the common asks ("what's the weather?"). So chat
 sessions use progressive disclosure: a small always-loaded **core** plus

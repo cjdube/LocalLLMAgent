@@ -33,8 +33,11 @@ Two environment variables in `config/.env`, resolved as
 
 `<TASK_KEY>` is the uppercased task/module name. Wired task keys:
 `DAILY_CHROME_LEARNINGS`, `DAILY_YOUTUBE_LEARNINGS`, `AI_CHAT_LEARNINGS`,
-`OPPORTUNITY_DIGEST`, `MORNING_BRIEF`, `CALENDAR_COLORIZER`, `RESEARCH`,
-`EVALUATE_APP`.
+`DAILY_SYNTHESIS`, `OPPORTUNITY_DIGEST`, `MORNING_BRIEF`, `CALENDAR_COLORIZER`,
+`STARRED_BLURBS`, `RESEARCH`, `EVALUATE_APP`, `EVALUATE_AGAINST`.
+
+(The list is the set of `resolve_backend("<key>")` call sites — `grep -rn
+'resolve_backend(' agent tasks` is the check when this drifts.)
 
 Only these keys do anything: `resolve_backend` builds the variable name from the
 key its caller passes, so a `WREN_<ANYTHING>_BACKEND` that doesn't match a call

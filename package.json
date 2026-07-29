@@ -1,7 +1,7 @@
 {
   "name": "wren",
   "private": true,
-  "description": "JS test harness for chat/static/chat-dock.js. The project is Python; this exists only so the one shared browser script has a test suite. Run: npm test",
+  "description": "JS test harness for the standalone browser scripts in chat/static/ (chat-dock.js, run-chart.js, nav.js). The project is Python; this exists only so those scripts have a test suite. Run: npm test",
   "scripts": {
     "test": "jest"
   },
