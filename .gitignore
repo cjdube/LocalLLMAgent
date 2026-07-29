@@ -19,10 +19,15 @@ config/starred_releases.json
 config/starred_installed.json
 config/starred_installed_versions.json
 config/escalations.json
+config/ai_chat_learnings_state.json
 config/*.lock
 config/*.corrupt-*
 logs/*.log
 logs/*.log.bak
+# Retired tasks' logs, moved out of the *.log glob so they stop showing up in
+# `ls logs/`. Same personal data as the live logs, so ignore the whole dir —
+# logs/*.log above does NOT match a subdirectory.
+logs/archive/
 .DS_Store
 .claude/
 scratchpad

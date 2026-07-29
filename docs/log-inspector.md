@@ -151,9 +151,12 @@ Rotated files (`.log.1`–`.3`) *are* read, via `_read_lines`, because a 24h
 window can span a `RotatingFileHandler` rollover. They're pulled in by the
 reader, not the glob, so they aren't double-read.
 
-Logs from retired tasks (e.g. `weekly_learnings.log`) have no owning plist but
-are still globbed. That's harmless and self-limiting: nothing writes to them
-anymore, so their lines can never re-enter a 24h window.
+Logs from retired tasks have no owning plist but are still globbed if they sit
+in `logs/`. That's harmless and self-limiting — nothing writes to them anymore,
+so their lines can never re-enter a 24h window — but they do clutter the
+directory, so the retired ones (`weekly_learnings.*`, the old `chat-server.log`)
+have been moved to `logs/archive/`, which the `*.log` glob doesn't reach. Either
+location is fine; the glob doesn't need a rule for them.
 
 ## What the push looks like
 

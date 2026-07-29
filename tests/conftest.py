@@ -173,6 +173,19 @@ def _isolate_learnings_dir(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_skills_dir(tmp_path, monkeypatch):
+    # skills/ is a TRACKED repo directory, not a gitignored config store, so a
+    # test that writes a fixture skill doesn't just dirty local state — it stages
+    # a file for commit. tests/test_skills.py has its own fixture; this is the
+    # backstop for everything else that reaches the skills tools without one
+    # (bg_worker's toolset, insights.system_map(), the chat system prompt's
+    # render_skills_index()), all of which otherwise READ the real skills/ dir and
+    # inherit whatever procedures happen to be saved on this machine.
+    # skills._skills_dir() reads this env on every call, so the env var is enough.
+    monkeypatch.setenv("WREN_SKILLS_DIR", str(tmp_path / "skills"))
+
+
+@pytest.fixture(autouse=True)
 def _isolate_ai_chat_learnings(tmp_path, monkeypatch):
     # Redirect the Gemini-dedup store to tmp, and point both chat sources away
     # from the user's real data: no test may read ~/.claude session transcripts or
