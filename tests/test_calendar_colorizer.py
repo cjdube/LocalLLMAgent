@@ -99,6 +99,9 @@ def test_quiet_day_still_logs_a_run_complete_boundary(monkeypatch, capsys):
     # matcher so the two can't drift apart.
     monkeypatch.setattr(cc, "get_events_in_range", lambda *a, **k: {"events": []})
     monkeypatch.setattr(cc, "complete_text", _never_called)
+    # The pre-load sits after this early return for the same reason: a quiet day
+    # must not pay the ~17GB model load to color nothing.
+    monkeypatch.setattr(cc, "warm_model", _never_called)
     monkeypatch.setattr(cc, "notify_failure", lambda *a, **k: None)
 
     assert cc.main() == 0

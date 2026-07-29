@@ -116,6 +116,9 @@ def test_score_items_batches_overflow_instead_of_dropping_it(monkeypatch):
 def test_score_items_with_nothing_to_score_makes_no_model_call(monkeypatch):
     monkeypatch.setattr(od, "complete_text",
                         lambda **k: pytest.fail("should not call the model"))
+    # Warming is a ~17GB load; a week with no new leads must not pay it either.
+    monkeypatch.setattr(od, "warm_model",
+                        lambda **k: pytest.fail("should not warm the model"))
     assert od.score_items([]) == {}
 
 
@@ -128,6 +131,14 @@ def _edgar_item(n=1):
             "company": f"Startup {n}", "title": "Form D filed 2026-07-10",
             "url": "https://www.sec.gov/x", "location": "Portsmouth, NH",
             "posted_at": "2026-07-10"}
+
+
+@pytest.fixture(autouse=True)
+def _stub_warm_model(monkeypatch):
+    """score_items pre-loads the local model before its first batch. Autouse
+    rather than part of stubbed_run: several tests reach score_items without
+    that fixture, and an unstubbed warm_model POSTs to a real Ollama."""
+    monkeypatch.setattr(od, "warm_model", lambda **k: True)
 
 
 @pytest.fixture

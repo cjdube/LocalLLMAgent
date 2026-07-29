@@ -43,7 +43,7 @@ from dotenv import load_dotenv
 import requests
 
 from agent import prefs
-from agent.loop import complete_text, resolve_backend
+from agent.loop import complete_text, resolve_backend, warm_model
 from agent.store import atomic_write_json, load_json
 from agent.tools import opportunities
 from agent.tools.email import send_email
@@ -518,14 +518,25 @@ def _parse_scores(text: str, batch: list) -> dict:
 def score_items(items: list, logger: Optional[logging.Logger] = None) -> dict:
     """Score every item, MAX_SCORE_ITEMS at a time — one model call per batch so
     a busy week's leads all get scored without any single prompt growing
-    unbounded."""
+    unbounded.
+
+    Nothing has run the model since starred_blurbs an hour earlier, well past
+    the 30m keep_alive, so the first batch always faces a cold model — and this
+    is the batch scorer, whose failure mode when a call times out or comes back
+    empty is leads going out silently unscored. Pre-load once before the loop
+    (not per batch: the later batches reuse the resident instance) and only when
+    there's actually something to score, so a quiet week pays nothing."""
+    if not items:
+        return {}
+    backend = resolve_backend("opportunity_digest")
+    warm_model(logger=logger, backend=backend)
     scores = {}
     for start in range(0, len(items), MAX_SCORE_ITEMS):
         batch = items[start:start + MAX_SCORE_ITEMS]
         raw = complete_text(
             system_prompt=SCORING_SYSTEM_PROMPT,
             user_prompt=f"leads: {json.dumps(_compact_for_scoring(batch))}",
-            backend=resolve_backend("opportunity_digest"),
+            backend=backend,
             think=False,    # fixed n|score|angle output; see complete_text
             logger=logger,  # surfaces loop.py's num_predict cut-off warning
         )

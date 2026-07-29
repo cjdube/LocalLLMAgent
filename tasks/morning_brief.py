@@ -32,7 +32,7 @@ from dotenv import load_dotenv
 
 from agent import prefs
 from agent.dates import local_timezone
-from agent.loop import complete_text, resolve_backend
+from agent.loop import complete_text, resolve_backend, warm_model
 from agent.store import atomic_write_json, load_json
 from agent.tools.calendar import get_upcoming_events
 from agent.tools.email import send_email
@@ -286,6 +286,11 @@ def build_and_send_brief(logger: Optional[logging.Logger] = None) -> dict:
         tasks = [] if tasks_error else tasks_result.get("tasks", [])
 
         brief_backend = resolve_backend("morning_brief")
+        # daily_synthesis runs 15 minutes earlier, but on a no-overlap day (its
+        # documented common case) it returns without calling the model at all —
+        # so the 6am brief finds a cold model on exactly those mornings, and the
+        # load stacks on top of prefill inside the streamed call's read timeout.
+        warm_model(logger=logger, backend=brief_backend)
         glance_text = complete_text(
             system_prompt=GLANCE_SYSTEM_PROMPT,
             user_prompt=f"weather: {weather}\ncalendar_events: {events}",

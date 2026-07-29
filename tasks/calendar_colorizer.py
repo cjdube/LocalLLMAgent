@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent import prefs
-from agent.loop import complete_text, resolve_backend
+from agent.loop import complete_text, resolve_backend, warm_model
 from agent.tools.calendar import CATEGORY_COLORS, _local_timezone, get_events_in_range, set_event_color
 from agent.tools.email import send_email
 from tasks._common import notify_failure, setup_logger
@@ -142,10 +142,17 @@ def main() -> int:
             logger.info("Colorizer run complete: 0 updated, 0 skipped")
             return 0
 
+        # Nothing else runs the model near 5pm and keep_alive is 30m, so this
+        # task always finds it cold. Pre-load it here — after the no-events
+        # return above, so a quiet day doesn't pay the ~17GB load for nothing —
+        # rather than letting the load and the prefill stack inside the streamed
+        # call's read timeout.
+        backend = resolve_backend("calendar_colorizer")
+        warm_model(logger=logger, backend=backend)
         raw_response = complete_text(
             system_prompt=CLASSIFY_SYSTEM_PROMPT,
             user_prompt=json.dumps(_classify_input(events)),
-            backend=resolve_backend("calendar_colorizer"),
+            backend=backend,
             think=False,   # picking a colorId per title needs no chain-of-thought
             logger=logger,  # surfaces loop.py's num_predict cut-off warning
         )
