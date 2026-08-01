@@ -11,6 +11,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import sys
 import threading
 import time
@@ -115,14 +116,16 @@ CHAT_SYSTEM_PROMPT = (
     "range), and search the web for current information you don't already "
     "know. Use these tools when they'd help answer the question. You can also "
     "log a calendar event or recolor an existing event by category on request; "
-    f"the app pauses those for {_NAME}'s confirmation before they execute, so just "
-    f"explain what you're about to do. You can also look up {_NAME}'s Google "
+    f"the app pauses those for {_NAME}'s confirmation before they execute, so say "
+    "what you're about to do and call the tool in the same reply — never reply "
+    f"that you'll add something and stop. You can also look up {_NAME}'s Google "
     "Tasks (get_tasks for everything open, get_tasks_due_soon for what's "
     "overdue or due soon — these span all of their task lists, e.g. Domestic, "
     "Travel, Volunteering, and each result says which list a task is in), create a "
     "new task, change a task's due date, or mark one complete — creating, "
     "rescheduling, or completing a task pauses for confirmation just like "
-    "the other write actions. To change or complete a task you need its "
+    "the other write actions, so call the tool rather than replying that you "
+    "will. To change or complete a task you need its "
     "tasklist_id as well as its id, both of which come from a prior "
     "get_tasks/get_tasks_due_soon call. You have a long-term memory "
     "with two tiers. Use remember to save a fact you can look up later with "
@@ -152,7 +155,8 @@ CHAT_SYSTEM_PROMPT = (
     "time yourself, and the reminder text as message. It fires once as a phone "
     "notification. Use list_reminders to see what's pending and cancel_reminder "
     "(with an id from list_reminders) to drop one; setting and cancelling pause "
-    "for confirmation like the other write actions. "
+    "for confirmation like the other write actions, so call the tool rather "
+    "than replying that you will. "
     "You run your own scheduled tasks on a timer — the automated jobs like the "
     "morning brief, the daily learnings, and the weekly digests. Use "
     f"list_scheduled_tasks when {_NAME} asks what tasks you run, what's scheduled, "
@@ -409,6 +413,47 @@ def _make_load_tools(sid: str, tools: list[dict]):
     return load_tools
 
 
+# First-person future-tense openers followed by an action verb — how the model
+# phrases a write it is about to make. Deliberately narrow: the verb must follow
+# the opener, so "I'll need the tasklist_id first" and "let me know" don't match.
+_PROMISE_RE = re.compile(
+    r"\b(?:i['’]ll|i will|i['’]m going to|i am going to|let me)\s+"
+    r"(?:go ahead and\s+|now\s+|just\s+)?"
+    r"(?:add|create|send|log|set|schedule|book|update|reschedule|save|remember|"
+    r"pin|delete|remove|cancel|mark|complete|archive|forget|recolor|write|put)\b",
+    re.IGNORECASE,
+)
+
+
+def _warn_if_promised_without_acting(stage: str, text: str, history: list, checkpoint: int) -> None:
+    """Log when a turn ends by *saying* it will perform a write while having
+    executed no tool at all.
+
+    This is the miss the local model actually produces. Asked to log a fetched
+    Strava activity to the calendar it replied "I'll add "Evening Volleyball" to
+    your calendar for yesterday, July 31, from 6:38 PM to 9:13 PM." and emitted
+    no tool_call, so advance() ended the turn with nothing gated and nothing
+    written (logs/wren.log, 2026-08-01 06:06). Such a reply is shaped exactly
+    like a legitimate conversational answer, so the turn left no trace of having
+    dropped the request — it surfaced only because the user asked a second time
+    five minutes later.
+
+    Per CLAUDE.md, a turn that silently does *less* is worse than one that
+    fails, because only the failure is visible. So flag it; the prompt (see
+    agent/wren_chat.md) is what's meant to prevent it. We deliberately don't
+    auto-retry: re-prompting for the tool call would re-drive a write the user
+    may have moved on from, and the honest signal is that the model ignored an
+    instruction, not that the turn needs another lap."""
+    if not text or not _PROMISE_RE.search(text):
+        return
+    if any(m.get("role") == "tool" for m in history[checkpoint:]):
+        return
+    logger.warning(
+        "chat %s promised an action but executed no tool — the model narrated a "
+        "write instead of calling it: %r", stage, text[:200],
+    )
+
+
 def _run_turn(sid: str, history: list, checkpoint: int, cancel: threading.Event,
               stage: str = "turn", backend: str | None = None):
     """Advance the session's conversation and shape the HTTP response — the
@@ -461,6 +506,7 @@ def _run_turn(sid: str, history: list, checkpoint: int, cancel: threading.Event,
 
     resp = _call_response(result)
     if result["type"] == "final":
+        _warn_if_promised_without_acting(stage, result.get("text", ""), history, checkpoint)
         if backend:
             # An escalated turn continued through a confirmation: badge its final.
             resp["escalated"] = True

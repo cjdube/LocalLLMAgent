@@ -353,6 +353,88 @@ def test_chat_rolls_back_history_when_advance_raises(auth_client, monkeypatch):
     assert history[0]["role"] == "system"
 
 
+# --------------------------------------------------------------------------- #
+# Promised-but-didn't-act detection
+# --------------------------------------------------------------------------- #
+
+def _final_reply(text):
+    """An advance() double that answers with text and calls no tool."""
+    def fake_advance(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
+                     should_cancel=None):
+        return {"type": "final", "text": text}
+    return fake_advance
+
+
+def test_chat_warns_when_the_model_promises_a_write_but_calls_no_tool(
+        auth_client, monkeypatch, caplog):
+    """The 2026-08-01 miss: asked to add a Strava activity to the calendar, the
+    model replied that it would and emitted no tool_call, so nothing was written
+    and nothing was logged. That silence is the bug being closed here."""
+    monkeypatch.setattr(
+        srv, "advance",
+        _final_reply('I\'ll add "Evening Volleyball" to your calendar for '
+                     'yesterday, July 31, from 6:38 PM to 9:13 PM.'),
+    )
+
+    with caplog.at_level(logging.WARNING, logger=srv.logger.name):
+        resp = auth_client.post("/chat", json={"message": "add it to my calendar"})
+    assert resp.status_code == 200
+    assert "promised an action but executed no tool" in caplog.text
+
+
+def test_no_promise_warning_when_the_turn_actually_ran_a_tool(
+        auth_client, monkeypatch, caplog):
+    def fake_advance(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
+                     should_cancel=None):
+        messages.append({"role": "assistant", "content": "", "tool_calls": []})
+        messages.append({"role": "tool", "content": '{"event_id": "abc"}'})
+        return {"type": "final", "text": "I'll add that — done, it's on your calendar."}
+
+    monkeypatch.setattr(srv, "advance", fake_advance)
+
+    with caplog.at_level(logging.WARNING, logger=srv.logger.name):
+        resp = auth_client.post("/chat", json={"message": "add it to my calendar"})
+    assert resp.status_code == 200
+    assert "promised an action" not in caplog.text
+
+
+def test_no_promise_warning_on_an_ordinary_conversational_reply(
+        auth_client, monkeypatch, caplog):
+    """The check must not fire on future-tense phrasing that isn't a write —
+    otherwise the warning becomes noise and stops being read."""
+    monkeypatch.setattr(
+        srv, "advance",
+        _final_reply("I'll need the tasklist_id before I can do that. "
+                     "Let me know which list it's in."),
+    )
+
+    with caplog.at_level(logging.WARNING, logger=srv.logger.name):
+        resp = auth_client.post("/chat", json={"message": "complete that task"})
+    assert resp.status_code == 200
+    assert "promised an action" not in caplog.text
+
+
+@pytest.mark.parametrize("text", [
+    "I'll add Evening Volleyball to your calendar.",
+    "I'm going to send that email now.",
+    "Let me set a reminder for 3pm.",
+    "I will create a task for that.",
+    "I’ll save that to your memory.",
+])
+def test_promise_phrasings_are_recognised(text):
+    assert srv._PROMISE_RE.search(text)
+
+
+@pytest.mark.parametrize("text", [
+    "I'll need more detail to do that.",
+    "Let me know if you'd like it on the calendar instead.",
+    "I'll explain why that date looked wrong.",
+    "Added Evening Volleyball to your calendar.",
+])
+def test_non_promise_phrasings_are_ignored(text):
+    assert not srv._PROMISE_RE.search(text)
+
+
 def test_chat_confirm_keeps_resolved_result_on_failed_continuation(auth_client, monkeypatch):
     srv.conversations[SID] = [
         {"role": "system", "content": "s"},
