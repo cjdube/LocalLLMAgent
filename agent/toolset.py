@@ -40,6 +40,7 @@ from agent.tools.chrome_history import TOOL_SCHEMA as CHROME_SCHEMA, fetch_chrom
 from agent.tools.email import TOOL_SCHEMA as EMAIL_SCHEMA, send_email_tool
 from agent.tools.evaluate_app import TOOL_SCHEMA as EVALUATE_APP_SCHEMA, evaluate_app
 from agent.tools.evaluate_against import TOOL_SCHEMA as EVALUATE_AGAINST_SCHEMA, evaluate_against
+from agent.tools.games import TOOL_SCHEMA as GAMES_SCHEMA, list_games
 from agent.tools.github_starred import TOOL_SCHEMA as GITHUB_STARRED_SCHEMA, fetch_starred_repos
 from agent.tools.google_tasks import (
     COMPLETE_TASK_TOOL_SCHEMA,
@@ -147,6 +148,7 @@ TOOLS = [
     *RESEARCH_TOOL_SCHEMAS,
     EVALUATE_APP_SCHEMA,
     EVALUATE_AGAINST_SCHEMA,
+    GAMES_SCHEMA,
 ]
 
 DISPATCH = {
@@ -202,6 +204,8 @@ DISPATCH = {
     "evaluate_app": evaluate_app,
     # Read-only: loads a wiki lens page + the target, analyzes, writes nothing.
     "evaluate_against": evaluate_against,
+    # Read-only: reads the registry and probes each game's service. Writes nothing.
+    "list_games": list_games,
 }
 
 WRITE_TOOLS = frozenset({
@@ -297,6 +301,7 @@ TOOL_GROUP_NAMES = {
     "activity": ["fetch_strava", "fetch_chrome_history"],
     "authoring": ["write_skill", "delete_skill"],
     "brief": ["send_morning_brief", "send_email"],
+    "games": ["list_games"],
 }
 
 # One-line "when to load it" blurb per group, rendered into the chat prompt so
@@ -309,6 +314,9 @@ _GROUP_BLURBS = {
     "activity": f"{_NAME}'s Strava activities and recent Chrome browsing history.",
     "authoring": "Save or delete a skill (a reusable multi-step procedure).",
     "brief": "Send the morning brief, or send an email.",
+    "games": f"The games {_NAME} can play with you, and the link to open one. "
+             "Load this for any ask about playing something — the games that exist "
+             "are only the ones the tool lists, never ones you know of.",
 }
 
 # Case-insensitive word-boundary cues that pre-load a group before the model
@@ -323,6 +331,9 @@ GROUP_KEYWORDS = {
                  "browsing", "chrome", "history"],
     "authoring": ["skill"],
     "brief": ["brief", "email"],
+    # "play" without "game" catches "let's play something" and "play weigh anchor";
+    # the game's own name is a cue too, since naming it is the likeliest way in.
+    "games": ["game", "play", "weigh anchor"],
 }
 
 # The meta-tool. Not in TOOLS/DISPATCH — its callable is bound per session in

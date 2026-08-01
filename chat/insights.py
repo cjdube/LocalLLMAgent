@@ -528,6 +528,7 @@ TOOL_SERVICES = {
     "skills": ("Skills", ["list_skills", "read_skill", "write_skill", "delete_skill"]),
     "reminders": ("Reminders", ["set_reminder", "list_reminders", "cancel_reminder"]),
     "scheduler": ("launchd Scheduler", ["list_scheduled_tasks"]),
+    "games": ("Games", ["list_games"]),
     "background": ("Background Tasks", ["run_in_background", "list_background_jobs", "get_job_result"]),
     "opportunities": ("Opportunity Scout", ["list_opportunities", "update_opportunity",
                                             "watch_company", "unwatch_company",

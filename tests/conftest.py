@@ -76,6 +76,12 @@ was in. Adding a new store means adding it there in the same commit; the
 per-test monkeypatch stays the convention, this is what makes missing it
 harmless. (agent/prefs.py is deliberately absent: it is read-only at import.)
 
+The games registry (agent/tools/games.py) is stubbed for a different reason than
+the stores above: it writes nothing, but it *reads* the machine — a loopback
+socket probe and a checkout under ~/Projects — so `available` would depend on
+whether the developer happens to have the game's dev server running. Both are
+pinned suite-wide so the answer is the same everywhere.
+
 The cloud LLM backend is a network egress like ntfy: a test that selects
 WREN_LLM_BACKEND=gemini (or forgets to stub it) must never reach Google.
 `agent.backends.gemini._gemini_client` is the single client-construction choke
@@ -96,6 +102,7 @@ from agent import loop as _loop
 from agent.backends import gemini as _gemini_backend
 from agent.tools import background as _background
 from agent.tools import email as _email
+from agent.tools import games as _games
 from agent.tools import memory as _memory
 from agent.tools import notify as _notify
 from agent.tools import opportunities as _opportunities
@@ -304,3 +311,22 @@ def _block_gemini_client(monkeypatch):
             "real Gemini client blocked in tests — stub "
             "agent.backends.gemini._gemini_client")
     monkeypatch.setattr(_gemini_backend, "_gemini_client", _no_real_gemini)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_games(tmp_path, monkeypatch):
+    # Two ambient dependencies, same treatment as the stores above.
+    #
+    # _service_up opens a real socket to a loopback port. That's a live probe of
+    # whatever the developer happens to be running, so `available` would flip with
+    # the machine's state — a test asserting "unavailable" passes on CI and fails
+    # for anyone with the game's dev server up. Stub it off; test_games.py patches
+    # it back per-test to exercise both branches.
+    #
+    # The dist path is the same shape of problem in the other direction: it
+    # defaults to a real checkout under ~/Projects, so an assertion about the
+    # not-built case depends on the developer not having built it. Point it at an
+    # empty tmp dir. Nothing here writes, so this is about determinism rather
+    # than protecting production state.
+    monkeypatch.setattr(_games, "_service_up", lambda port: False)
+    monkeypatch.setenv("WEIGH_ANCHOR_DIR", str(tmp_path / "weigh-anchor"))

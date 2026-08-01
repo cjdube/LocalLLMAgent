@@ -13,6 +13,7 @@
     { href: "/memories", label: "memories" },
     { href: "/opportunities", label: "opportunities" },
     { href: "/starred", label: "starred" },
+    { href: "/games", label: "games" },
     { href: "/map", label: "map" },
   ];
 

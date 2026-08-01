@@ -58,6 +58,7 @@ from agent.tools.wiki import render_lenses_index
 from chat.auth import _authenticated
 from chat.login_throttle import LoginThrottle
 from chat.routes_dashboard import dashboard_bp
+from chat.routes_games import games_bp
 from chat.routes_opportunities import opportunities_bp
 from tasks import starred_blurbs, starred_installed, starred_releases
 from tasks._common import setup_logger
@@ -211,11 +212,13 @@ app.config["MAX_CONTENT_LENGTH"] = 256 * 1024
 app.config["SESSION_COOKIE_SECURE"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
-# The read-only dashboard/scheduler API and the opportunities triage API live in
-# their own blueprint modules (see chat/routes_dashboard.py,
-# chat/routes_opportunities.py); the conversation engine and auth stay here.
+# The read-only dashboard/scheduler API, the opportunities triage API, and the
+# games surface live in their own blueprint modules (see chat/routes_dashboard.py,
+# chat/routes_opportunities.py, chat/routes_games.py); the conversation engine
+# and auth stay here.
 app.register_blueprint(dashboard_bp)
 app.register_blueprint(opportunities_bp)
+app.register_blueprint(games_bp)
 
 @app.after_request
 def _security_headers(resp):
@@ -803,6 +806,15 @@ def starred_page():
     if not _authenticated():
         return LOGIN_PAGE.format(error="")
     return send_from_directory(STATIC_DIR, "starred.html")
+
+
+@app.route("/games", methods=["GET"])
+def games_page():
+    # The page lives here with the other views; the games JSON API, the hosted
+    # bundles and their model proxies are the games blueprint's (routes_games.py).
+    if not _authenticated():
+        return LOGIN_PAGE.format(error="")
+    return send_from_directory(STATIC_DIR, "games.html")
 
 
 # A release cut within this many days is badged "new" on /starred. Recency —

@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The Weigh Anchor model service — the Express server that answers the game's AI
+  calls. Wren serves the game's built bundle itself and proxies /api/ai/* here
+  (chat/routes_games.py), so this process serves the API only; Vite is not
+  involved and the browser never talks to this port directly.
+
+  It binds 127.0.0.1 (server/index.ts defaults HOST to loopback) precisely so it
+  is NOT reachable over the tailnet: the game has no authentication of its own,
+  and going through Wren is what puts it behind the chat token.
+
+  This lives OUTSIDE launchd/ proper (in launchd/infra/) for the same reason
+  colima does: chat/insights.py:discover_tasks globs launchd/*.plist
+  non-recursively, so a directory down keeps another repo's service off Wren's
+  dashboard. install.sh skips this directory unless you name the file.
+
+  Install (the paths are __HOME__ placeholders — install.sh fills them in, so
+  don't cp this into place by hand). Build the bundle first, or /games will list
+  the game as "not built yet":
+      cd ~/Projects/WeighAnchor
+      VITE_BASE=/games/weigh-anchor/ npm run build
+      cd ~/Projects/LocalLLMAgent
+      ./launchd/install.sh launchd/infra/local.wren.weighanchor.plist
+
+  Note the port: WeighAnchor's own .env also sets PORT=3002, so `npm run dev`
+  and this service collide. Boot this out while hacking on the game locally:
+      launchctl bootout gui/$(id -u)/local.wren.weighanchor
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.wren.weighanchor</string>
+
+    <!-- tsx rather than a build step: the server is four TypeScript files and
+         the repo has no server build target, so running the sources directly is
+         one less artifact to keep in sync with the checkout. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/node</string>
+        <string>__HOME__/Projects/WeighAnchor/node_modules/tsx/dist/cli.mjs</string>
+        <string>server/index.ts</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__HOME__/Projects/WeighAnchor</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- launchd's default PATH is minimal and tsx re-spawns node. -->
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <!-- Must match WEIGH_ANCHOR_PORT in Wren's config/.env, which is what
+             the proxy in chat/routes_games.py dials. -->
+        <key>PORT</key>
+        <string>3002</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Always up: the /games page probes this port to decide whether the game
+         is playable, so a dead service shows as "unavailable" rather than a
+         broken board. -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Don't hot-loop if the checkout is broken (missing node_modules, a
+         syntax error): a game service is never urgent enough to retry faster. -->
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+
+    <!-- The game's own repo, not Wren's logs/ — Wren's run-chart parser reads
+         everything in there and this isn't one of its tasks. -->
+    <key>StandardOutPath</key>
+    <string>__HOME__/Projects/WeighAnchor/logs/service.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Projects/WeighAnchor/logs/service.log</string>
+</dict>
+</plist>

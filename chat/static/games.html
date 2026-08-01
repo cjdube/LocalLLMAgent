@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wren Games</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="alternate icon" type="image/png" href="/static/favicon-32.png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="stylesheet" href="/static/nav.css">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    color: #1f2328;
+    background: #f4f4f5;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    background: #ffffff;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  header img.logo { height: 38px; width: 38px; border-radius: 9px; display: block; }
+  header h1 { font-size: 17px; margin: 0; }
+  header .sub { font-size: 13px; color: #9ca3af; }
+  header .spacer { flex: 1; }
+
+  main { max-width: 960px; margin: 0 auto; padding: 20px 18px 40px; }
+  .section-label { font-size: 13px; font-weight: 600; color: #6b7280; margin-bottom: 10px; }
+  .empty { color: #9ca3af; font-size: 13px; padding: 14px 16px; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; }
+
+  .card {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 12px;
+    padding: 16px; margin-bottom: 12px;
+  }
+  .card h2 { font-size: 16px; margin: 0 0 6px; }
+  .card .blurb { font-size: 13px; line-height: 1.55; color: #374151; margin: 0 0 10px; }
+  .card .meta { font-size: 12px; line-height: 1.5; color: #6b7280; margin: 0 0 4px; }
+  .card .meta strong { color: #4b5563; font-weight: 600; }
+  .card .play {
+    display: inline-block; margin-top: 10px; padding: 8px 16px; border-radius: 8px;
+    background: #1f2328; color: #fff; font-size: 14px; font-weight: 600; text-decoration: none;
+  }
+  .card.off { opacity: 0.7; }
+  .card.off .play { background: #e5e7eb; color: #9ca3af; pointer-events: none; }
+  .reason { display: inline-block; margin-top: 10px; margin-left: 10px; font-size: 12px; color: #b45309; }
+</style>
+</head>
+<body>
+  <header>
+    <img class="logo" src="/static/favicon.svg" alt="Wren">
+    <h1>Wren</h1>
+    <span class="sub">games</span>
+    <span class="spacer"></span>
+    <nav id="wren-nav" class="wren-nav"></nav>
+  </header>
+
+  <main>
+    <div class="section-label">Games</div>
+    <div id="wrap">Loading…</div>
+  </main>
+
+<script>
+async function api(path, opts) { return (await fetch(path, opts)).json(); }
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;  // textContent only — never innerHTML
+  return e;
+}
+// The registry supplies these URLs, but they are absolute when WREN_PUBLIC_URL
+// is set, so apply the same scheme guard the other views use rather than
+// trusting a config value to be well-formed.
+function safeHref(url) { return /^(https?:\/\/|\/)/i.test(url || "") ? url : null; }
+
+function gameCard(g) {
+  const card = el("div", g.available ? "card" : "card off");
+  card.appendChild(el("h2", null, g.name));
+  card.appendChild(el("p", "blurb", g.blurb));
+
+  if (g.players) {
+    const p = el("p", "meta");
+    p.appendChild(el("strong", null, "Players: "));
+    p.appendChild(document.createTextNode(g.players));
+    card.appendChild(p);
+  }
+  if (g.note) card.appendChild(el("p", "meta", g.note));
+
+  const href = safeHref(g.url);
+  const play = el("a", "play", g.available ? "Play" : "Unavailable");
+  if (g.available && href) play.href = href;
+  card.appendChild(play);
+  if (!g.available && g.unavailable_reason) {
+    card.appendChild(el("span", "reason", g.unavailable_reason));
+  }
+  return card;
+}
+
+async function load() {
+  const wrap = document.getElementById("wrap");
+  const data = await api("/api/games");
+  wrap.textContent = "";
+  if (data.error) {
+    wrap.appendChild(el("div", "empty", "Games unavailable: " + data.error));
+    return;
+  }
+  const games = data.games || [];
+  if (!games.length) {
+    wrap.appendChild(el("div", "empty", "No games registered."));
+    return;
+  }
+  games.forEach(g => wrap.appendChild(gameCard(g)));
+}
+
+load();
+</script>
+<script src="/static/nav.js"></script>
+</body>
+</html>

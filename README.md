@@ -429,6 +429,19 @@ runs on the page's request path. Installed-version tracking is opt-in per repo,
 and Wren never runs an upgrade — this is the awareness layer, not an installer.
 See [docs/starred.md](docs/starred.md).
 
+### Games
+
+`http://127.0.0.1:8420/games` (same auth as the dashboard) lists the games Wren
+hosts, each with a Play link and whether it's playable right now; the `list_games`
+chat tool answers the same from a message ("what can we play?"). Wren implements
+no game — each lives in its own repo, and Wren serves its built bundle under her
+own origin and proxies its AI calls to a loopback service, so the game inherits
+the chat token instead of needing a tailnet port of its own. One game is
+registered today: **Weigh Anchor**, a word-deduction card game whose AI seats
+think with the same local model chat uses (so game turns and chat turns queue
+behind each other) and which is *cooperative* at two seats by design. Adding a
+game is a registry entry plus a plist. See [docs/games.md](docs/games.md).
+
 ### System map
 
 `http://127.0.0.1:8420/map` is an explorable radial visualization of the whole
