@@ -99,6 +99,17 @@ in priority order — name, then summary, then topics — so truncation costs th
 tail of the topic list, never the project's own name. A project anchor therefore
 stays in the same size class as a wiki page's (~20–25 tokens).
 
+The summary is separately bounded by `_summary_head`, to the same
+`MAX_ANCHOR_SUMMARY_CHARS` the *displayed* summary gets. This was not
+theoretical: the merge prefers the wiki page's summary, and `wren.md`'s ran to
+30 words — "…modeled after the high-output, agile characteristics of the wren
+bird" — which was more than the project's name and all ten of its topics
+combined. It pushed `rest`, `tailscale` and `tool` off the end, so a page
+describing the project *badly* was displacing terms taken from the repo itself.
+Preferring the wiki summary is only right when the page is good; the bound is
+what makes it safe when it isn't. With it, the busiest project sits at 34 and
+the ceiling is a backstop rather than the thing doing the work.
+
 ## The wiki join
 
 A project has two halves, and they live in different places:

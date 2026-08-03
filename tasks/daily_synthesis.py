@@ -290,13 +290,35 @@ def gather_signals(start, end, day, logger) -> list:
     return signals
 
 
+def _summary_head(summary: str) -> str:
+    """The summary bounded to MAX_ANCHOR_SUMMARY_CHARS, cut at a word boundary.
+
+    The same bound the *displayed* summary gets, applied before tokenizing too.
+    Without it a verbose wiki summary crowds the token budget and pushes the
+    project's own topics out: `wren.md` ran to 30 words ("...modeled after the
+    high-output, agile characteristics of the wren bird"), which was more than
+    the name and all ten topics combined and cost LocalLLMAgent the tokens
+    `rest`, `tailscale` and `tool`. A page describing the project *badly* was
+    displacing terms taken from the repo itself.
+
+    Cut at a word boundary because a mid-word slice leaves a fragment that is a
+    real token: `tailsca` matches nothing, but it still occupies a slot."""
+    if len(summary) <= MAX_ANCHOR_SUMMARY_CHARS:
+        return summary
+    head = summary[:MAX_ANCHOR_SUMMARY_CHARS]
+    return head[:head.rfind(" ")] if " " in head else head
+
+
 def _project_tokens(name: str, summary: str, topics: list) -> set:
     """A project anchor's token set, capped at MAX_PROJECT_ANCHOR_TOKENS and
     filled in priority order — the project's own name first, then what it is,
     then what it's about. Truncation therefore costs the tail of the topic list,
-    never the name."""
+    never the name.
+
+    With `_summary_head` bounding the middle term, a typical project lands near
+    30 and the cap is a backstop rather than the thing doing the work."""
     tokens = []
-    for text in (name.replace("-", " "), summary, " ".join(topics)):
+    for text in (name.replace("-", " "), _summary_head(summary), " ".join(topics)):
         for token in sorted(_tokenize(text)):
             if token not in tokens:
                 tokens.append(token)

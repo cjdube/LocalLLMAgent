@@ -671,3 +671,34 @@ def test_an_unreadable_vault_still_leaves_the_project_anchors(stub_anchors,
         anchors = ds.gather_anchors(_LOG)
     assert [a["label"] for a in anchors] == ["WeighAnchor"]
     assert "not merging" in caplog.text
+
+
+def test_a_verbose_summary_cannot_crowd_out_the_topics(stub_anchors, stub_projects,
+                                                       monkeypatch):
+    # Real case: the wiki page for the LocalLLMAgent checkout ran to 30 words
+    # ("...modeled after the high-output, agile characteristics of the wren
+    # bird") — more than the name and all ten topics combined — and pushed
+    # `rest`, `tailscale` and `tool` out of the anchor. A page describing the
+    # project badly was displacing terms taken from the repo itself.
+    monkeypatch.setattr(ds, "load_registry", lambda: [_project(
+        "Thing",
+        summary=" ".join(f"padding{i}" for i in range(80)),
+        topics=["tailscale", "ollama", "launchd"])])
+
+    tokens = ds.gather_anchors(_LOG)[0]["tokens"]
+    assert {"tailscale", "ollama", "launchd"} <= tokens
+    assert len(tokens) < ds.MAX_PROJECT_ANCHOR_TOKENS  # the cap is now a backstop
+
+
+def test_summary_head_cuts_at_a_word_boundary():
+    # A mid-word slice leaves a fragment that is a real token: "tailsca" matches
+    # nothing but still occupies a slot.
+    summary = "word " * 200
+    head = ds._summary_head(summary)
+    assert len(head) <= ds.MAX_ANCHOR_SUMMARY_CHARS
+    assert not head.endswith("wor")
+    assert all(t == "word" for t in ds._tokenize(head))
+
+
+def test_summary_head_leaves_a_short_summary_alone():
+    assert ds._summary_head("A cooperative word game.") == "A cooperative word game."
