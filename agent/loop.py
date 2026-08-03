@@ -48,6 +48,53 @@ class TurnCancelled(Exception):
     turn and reports it as stopped (see chat/server.py's /chat handlers)."""
 
 
+class OllamaUnavailable(Exception):
+    """Raised when a model call produced nothing and we have classified why.
+
+    Carries a message written for a human, because chat/server.py surfaces
+    str(e) straight into the chat UI — the alternative was the raw urllib3
+    ReadTimeout, which says "connection failed" for a server that is actually
+    up and healthy."""
+
+
+def _diagnose_stall(host: str, got_bytes: bool, waited: float) -> str:
+    """Explain a model call that timed out without finishing.
+
+    A read timeout alone cannot tell these apart, because both look identical
+    from the socket — no bytes either way:
+
+      * Ollama is down.
+      * Ollama is up but serving someone else. It runs ONE request at a time
+        (OLLAMA_NUM_PARALLEL defaults to 1) and queues the rest silently, so a
+        chat turn stuck behind a long background job gets nothing until that
+        job finishes. Observed 2026-08-03: a daily wiki-ingest run held the
+        slot for ~3h and every Wren turn in that window reported a connection
+        error against a perfectly healthy Ollama.
+      * The runner wedged — accepts the request, completes prefill, never
+        generates. Same upstream shape as ml-explore/mlx-lm#1493.
+
+    Probing /api/ps afterwards separates "down" from the other two, and the
+    loaded-model list names what is holding the slot. Best-effort: if the probe
+    itself fails we just report the timeout we already know about."""
+    waited_s = f"{waited:.0f}s"
+    stalled = "mid-reply" if got_bytes else "without producing any output"
+    try:
+        resp = requests.get(f"{host}/api/ps", timeout=5)
+        resp.raise_for_status()
+        loaded = [m.get("name", "?") for m in (resp.json().get("models") or [])]
+    except Exception:
+        return (f"Ollama at {host} did not respond within {waited_s} and is not "
+                f"answering status checks either — it looks down. Check that it "
+                f"is running.")
+    if not loaded:
+        return (f"Ollama at {host} is up but has no model loaded and stalled "
+                f"{stalled} after {waited_s}.")
+    return (f"Ollama at {host} is up (model {', '.join(loaded)} loaded) but "
+            f"stalled {stalled} after {waited_s}. It serves one request at a "
+            f"time, so it is either busy with another job or its runner is "
+            f"wedged. Retry; if it repeats, restart Ollama.")
+
+
 def load_persona(filename: str) -> str:
     """Load a persona/context markdown file from agent/, stripping HTML
     comments (those are notes for maintainers, not the model)."""
@@ -136,23 +183,39 @@ def _ollama_chat(
     content_parts: list[str] = []
     tool_calls: list[dict] = []
     prompt_tokens = eval_tokens = None
-    with requests.post(f"{host}/api/chat", json=payload, timeout=timeout, stream=True) as resp:
-        resp.raise_for_status()
-        for line in resp.iter_lines():
-            if should_cancel is not None and should_cancel():
-                raise TurnCancelled()
-            if not line:
-                continue
-            chunk = json.loads(line)
-            msg = chunk.get("message") or {}
-            if msg.get("content"):
-                content_parts.append(msg["content"])
-            if msg.get("tool_calls"):
-                tool_calls.extend(msg["tool_calls"])
-            if chunk.get("done"):
-                # The terminal chunk carries the token accounting.
-                prompt_tokens = chunk.get("prompt_eval_count")
-                eval_tokens = chunk.get("eval_count")
+    # Tracked so a timeout can say whether the stream never started (queued
+    # behind another request, or a wedged runner) or died mid-reply.
+    got_bytes = False
+    t0 = time.monotonic()
+    try:
+        with requests.post(f"{host}/api/chat", json=payload, timeout=timeout,
+                           stream=True) as resp:
+            resp.raise_for_status()
+            for line in resp.iter_lines():
+                if should_cancel is not None and should_cancel():
+                    raise TurnCancelled()
+                got_bytes = True
+                if not line:
+                    continue
+                chunk = json.loads(line)
+                msg = chunk.get("message") or {}
+                if msg.get("content"):
+                    content_parts.append(msg["content"])
+                if msg.get("tool_calls"):
+                    tool_calls.extend(msg["tool_calls"])
+                if chunk.get("done"):
+                    # The terminal chunk carries the token accounting.
+                    prompt_tokens = chunk.get("prompt_eval_count")
+                    eval_tokens = chunk.get("eval_count")
+    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+        # Both arrive as a bare "connection failed" that blames the network for
+        # what is usually a busy or wedged server; _diagnose_stall probes Ollama
+        # and says which it was. TurnCancelled is not a requests error, so a
+        # user-cancelled turn passes through untouched.
+        detail = _diagnose_stall(host, got_bytes, time.monotonic() - t0)
+        if logger:
+            logger.warning("ollama_chat stalled: %s", detail)
+        raise OllamaUnavailable(detail) from e
 
     message: dict = {"role": "assistant", "content": "".join(content_parts)}
     if tool_calls:
@@ -372,9 +435,14 @@ def advance(
     confirm_before: frozenset[str] = frozenset(),
     should_cancel: Optional[Callable[[], bool]] = None,
     backend: Optional[str] = None,
+    timeout: float = None,
 ) -> dict:
     """Advance a tool-calling conversation already seeded in `messages`
     (system + user turns, and any prior assistant/tool turns).
+
+    timeout: per-model-call read timeout, forwarded to the backend. Interactive
+             callers pass a tighter one than the scheduled tasks' default (see
+             chat/server.py:CHAT_MODEL_TIMEOUT).
 
     tools: list of OpenAI-style tool schemas (see agent/tools/*.py TOOL_SCHEMA).
     dispatch: {function_name: callable} mapping — each callable takes the
@@ -401,7 +469,7 @@ def advance(
             raise TurnCancelled()
         message = _llm_chat(
             messages, backend=backend, model=model, host=host, tools=tools,
-            logger=logger, should_cancel=should_cancel,
+            logger=logger, should_cancel=should_cancel, timeout=timeout,
         )
         messages.append(message)
 

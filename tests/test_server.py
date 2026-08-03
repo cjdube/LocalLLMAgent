@@ -256,7 +256,7 @@ def test_chat_trims_before_running_the_turn(auth_client, monkeypatch):
                               *_turn(1), *_turn(2), *_turn(3)]
 
     def fake_advance(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
-                     should_cancel=None):
+                     should_cancel=None, **_):
         return {"type": "final", "text": "done"}
 
     monkeypatch.setattr(srv, "advance", fake_advance)
@@ -278,7 +278,7 @@ def test_chat_rebuilds_system_message_every_turn(auth_client, monkeypatch):
     monkeypatch.setattr(srv, "_system_message_content", lambda: "fresh prompt")
 
     def fake_advance(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
-                     should_cancel=None):
+                     should_cancel=None, **_):
         return {"type": "final", "text": "done"}
 
     monkeypatch.setattr(srv, "advance", fake_advance)
@@ -324,7 +324,7 @@ def test_new_message_declines_pending_confirmation(auth_client, monkeypatch):
         messages.append({"role": "tool", "content": "declined"})
 
     def fake_advance(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
-                     should_cancel=None):
+                     should_cancel=None, **_):
         return {"type": "final", "text": "ok, cancelled"}
 
     monkeypatch.setattr(srv, "resolve", fake_resolve)
@@ -339,7 +339,7 @@ def test_new_message_declines_pending_confirmation(auth_client, monkeypatch):
 
 def test_chat_rolls_back_history_when_advance_raises(auth_client, monkeypatch):
     def boom(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
-             should_cancel=None):
+             should_cancel=None, **_):
         raise RuntimeError("model exploded")
 
     monkeypatch.setattr(srv, "advance", boom)
@@ -360,7 +360,7 @@ def test_chat_rolls_back_history_when_advance_raises(auth_client, monkeypatch):
 def _final_reply(text):
     """An advance() double that answers with text and calls no tool."""
     def fake_advance(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
-                     should_cancel=None):
+                     should_cancel=None, **_):
         return {"type": "final", "text": text}
     return fake_advance
 
@@ -385,7 +385,7 @@ def test_chat_warns_when_the_model_promises_a_write_but_calls_no_tool(
 def test_no_promise_warning_when_the_turn_actually_ran_a_tool(
         auth_client, monkeypatch, caplog):
     def fake_advance(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
-                     should_cancel=None):
+                     should_cancel=None, **_):
         messages.append({"role": "assistant", "content": "", "tool_calls": []})
         messages.append({"role": "tool", "content": '{"event_id": "abc"}'})
         return {"type": "final", "text": "I'll add that — done, it's on your calendar."}
@@ -447,7 +447,7 @@ def test_chat_confirm_keeps_resolved_result_on_failed_continuation(auth_client, 
         messages.append({"role": "tool", "content": "sent"})
 
     def boom(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
-             should_cancel=None):
+             should_cancel=None, **_):
         raise RuntimeError("continuation exploded")
 
     monkeypatch.setattr(srv, "resolve", fake_resolve)
@@ -465,7 +465,7 @@ def test_chat_cancelled_returns_stopped_and_rolls_back(auth_client, monkeypatch)
     # A cancel raised mid-turn is reported as stopped (200), and the partial
     # turn is rolled back so history stays clean for the next message.
     def cancelled(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
-                  should_cancel=None):
+                  should_cancel=None, **_):
         raise srv.TurnCancelled()
 
     monkeypatch.setattr(srv, "advance", cancelled)
@@ -494,7 +494,7 @@ def test_chat_logs_turn_start_before_advancing(auth_client, monkeypatch):
     logged_by_the_time_advance_ran = []
 
     def fake_advance(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
-                     should_cancel=None):
+                     should_cancel=None, **_):
         logged_by_the_time_advance_ran.extend(records)
         return {"type": "final", "text": "done"}
 
@@ -506,6 +506,26 @@ def test_chat_logs_turn_start_before_advancing(auth_client, monkeypatch):
 
     assert resp.status_code == 200
     assert any("chat turn start" in m for m in logged_by_the_time_advance_ran)
+
+
+def test_chat_turn_uses_the_interactive_timeout(auth_client, monkeypatch):
+    """An interactive turn must not inherit the scheduled tasks' patient
+    OLLAMA_TIMEOUT. On 2026-08-03 a chat turn queued behind a background job
+    and sat for the full 300s before reporting a bare connection error; the
+    person waiting is better served by failing fast (see CHAT_MODEL_TIMEOUT)."""
+    seen = {}
+
+    def fake_advance(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
+                     should_cancel=None, timeout=None, **_):
+        seen["timeout"] = timeout
+        return {"type": "final", "text": "done"}
+
+    monkeypatch.setattr(srv, "advance", fake_advance)
+    monkeypatch.setattr(srv, "CHAT_MODEL_TIMEOUT", 42.0)
+    resp = auth_client.post("/chat", json={"message": "hi"})
+
+    assert resp.status_code == 200
+    assert seen["timeout"] == 42.0
 
 
 def test_chat_cancel_sets_active_turns_event(auth_client):
@@ -836,7 +856,7 @@ def test_chat_sends_core_only_when_no_group_cued(auth_client, monkeypatch):
     seen = {}
 
     def fake_advance(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
-                     should_cancel=None):
+                     should_cancel=None, **_):
         seen["names"] = {t["function"]["name"] for t in tools}
         seen["dispatch_has_load"] = "load_tools" in dispatch
         return {"type": "final", "text": "sunny"}
@@ -856,7 +876,7 @@ def test_chat_keyword_preloads_a_group(auth_client, monkeypatch):
     seen = {}
 
     def fake_advance(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
-                     should_cancel=None):
+                     should_cancel=None, **_):
         seen["names"] = {t["function"]["name"] for t in tools}
         return {"type": "final", "text": "here's your watchlist"}
 
@@ -891,7 +911,7 @@ def test_make_load_tools_extends_live_list_and_persists(monkeypatch):
 
 def test_loaded_groups_persist_across_turns_and_clear_on_new(auth_client, monkeypatch):
     def fake_advance(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
-                     should_cancel=None):
+                     should_cancel=None, **_):
         return {"type": "final", "text": "ok"}
 
     monkeypatch.setattr(srv, "advance", fake_advance)
@@ -1052,7 +1072,7 @@ def _frontier_advance(text="strong frontier answer"):
     assistant turn and returns it. Accepts `backend` — the escalation path passes
     it, unlike the local-turn doubles elsewhere in this file."""
     def fake(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
-             should_cancel=None, backend=None):
+             should_cancel=None, backend=None, **_):
         fake.backend = backend
         messages.append({"role": "assistant", "content": text})
         return {"type": "final", "text": text}
@@ -1124,7 +1144,7 @@ def test_escalate_failure_keeps_the_local_answer_and_logs_the_error(
     before = list(srv.conversations[SID])
 
     def boom(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
-             should_cancel=None, backend=None):
+             should_cancel=None, backend=None, **_):
         raise RuntimeError("frontier unreachable")
 
     monkeypatch.setattr(srv, "advance", boom)

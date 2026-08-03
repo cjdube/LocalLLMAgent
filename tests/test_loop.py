@@ -240,6 +240,107 @@ def test_should_cancel_interrupts_stream(monkeypatch):
                           should_cancel=lambda: True)
 
 
+def _patch_post_raising(monkeypatch, exc):
+    """Drive _ollama_chat's request into a transport failure."""
+    def fake_post(url, json=None, timeout=None, stream=None):
+        raise exc
+    monkeypatch.setattr(loop.requests, "post", fake_post)
+
+
+def _patch_ps(monkeypatch, models=None, fail=False):
+    """Stand in for the /api/ps probe _diagnose_stall makes."""
+    class _Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"models": [{"name": m} for m in (models or [])]}
+
+    def fake_get(url, timeout=None):
+        assert url.endswith("/api/ps")
+        if fail:
+            raise loop.requests.exceptions.ConnectionError("refused")
+        return _Resp()
+
+    monkeypatch.setattr(loop.requests, "get", fake_get)
+
+
+def test_timeout_with_ollama_down_says_down(monkeypatch):
+    """Ollama unreachable: the message names it as down, not as busy."""
+    _patch_post_raising(monkeypatch, loop.requests.exceptions.ReadTimeout("timed out"))
+    _patch_ps(monkeypatch, fail=True)
+
+    with pytest.raises(loop.OllamaUnavailable) as excinfo:
+        loop._ollama_chat([{"role": "user", "content": "hey"}])
+
+    msg = str(excinfo.value)
+    assert "looks down" in msg
+    assert "busy" not in msg
+
+
+def test_timeout_with_ollama_up_says_busy_and_names_model(monkeypatch):
+    """The 2026-08-03 outage: Ollama healthy, but serving one request at a time
+    with the slot held elsewhere. The user must not be told the connection
+    failed — that sent us looking at the network instead of the queue."""
+    _patch_post_raising(monkeypatch, loop.requests.exceptions.ReadTimeout("timed out"))
+    _patch_ps(monkeypatch, models=["gemma4:26b-mlx"])
+
+    with pytest.raises(loop.OllamaUnavailable) as excinfo:
+        loop._ollama_chat([{"role": "user", "content": "hey"}])
+
+    msg = str(excinfo.value)
+    assert "is up" in msg
+    assert "gemma4:26b-mlx" in msg
+    assert "one request at a time" in msg
+    assert "without producing any output" in msg
+
+
+def test_timeout_after_partial_stream_says_mid_reply(monkeypatch):
+    """A stream that starts and then stalls is a different fault from one that
+    never starts, so the two must not report the same cause."""
+    class _StallingResponse(_FakeResponse):
+        def iter_lines(self):
+            yield _json.dumps({"message": {"content": "par"}}).encode()
+            raise loop.requests.exceptions.ReadTimeout("timed out")
+
+    monkeypatch.setattr(loop.requests, "post",
+                        lambda url, json=None, timeout=None, stream=None: _StallingResponse([]))
+    _patch_ps(monkeypatch, models=["gemma4:26b-mlx"])
+
+    with pytest.raises(loop.OllamaUnavailable) as excinfo:
+        loop._ollama_chat([{"role": "user", "content": "hey"}])
+
+    assert "mid-reply" in str(excinfo.value)
+
+
+def test_cancel_is_not_swallowed_by_the_timeout_handler(monkeypatch):
+    """TurnCancelled must still propagate as itself — a user pressing stop is
+    not an Ollama fault and must not be reported as one."""
+    chunks = [{"message": {"content": "partial"}}, {"message": {}, "done": True}]
+    _patch_post_chunks(monkeypatch, {}, chunks)
+
+    with pytest.raises(loop.TurnCancelled):
+        loop._ollama_chat([{"role": "user", "content": "hey"}],
+                          should_cancel=lambda: True)
+
+
+def test_advance_forwards_timeout_to_the_backend(monkeypatch):
+    """advance() must accept and forward `timeout` — chat/server.py passes one
+    per interactive turn. Pinned against the real advance(), because the
+    server-side doubles absorb **kwargs and would hide a signature mismatch."""
+    seen = {}
+
+    def fake_llm_chat(messages, **kwargs):
+        seen.update(kwargs)
+        return {"role": "assistant", "content": "done"}
+
+    monkeypatch.setattr(loop, "_llm_chat", fake_llm_chat)
+    result = loop.advance([{"role": "user", "content": "hey"}], [], {}, timeout=42.0)
+
+    assert result == {"type": "final", "text": "done"}
+    assert seen["timeout"] == 42.0
+
+
 def test_advance_checks_cancel_before_calling_model(monkeypatch):
     """advance() raises TurnCancelled up front without hitting the model when
     the turn is already cancelled."""

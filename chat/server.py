@@ -83,6 +83,13 @@ MAX_MESSAGE_CHARS = 8000
 # message up to MAX_MESSAGE_CHARS plus tool results up to
 # OLLAMA_MAX_TOOL_RESULT_CHARS each). Raise together with OLLAMA_NUM_CTX.
 MAX_HISTORY_CHARS = int(os.getenv("WREN_CHAT_MAX_HISTORY_CHARS", "16000"))
+# Read timeout for an interactive turn, deliberately tighter than the
+# OLLAMA_TIMEOUT the scheduled tasks use. It is a between-chunks timeout, so it
+# only has to cover the wait for the FIRST token: model load plus prefill of a
+# full context, measured at ~50s cold on a 40k-token prompt. Past that, someone
+# waiting on their phone is better served by a fast, accurate "Ollama is busy"
+# than by a five-minute spinner — the value 300 gave us on 2026-08-03.
+CHAT_MODEL_TIMEOUT = float(os.getenv("WREN_CHAT_MODEL_TIMEOUT", "120"))
 
 if not WREN_CHAT_TOKEN or not FLASK_SECRET_KEY:
     raise RuntimeError(
@@ -487,7 +494,8 @@ def _run_turn(sid: str, history: list, checkpoint: int, cancel: threading.Event,
     backend_kwargs = {"backend": backend} if backend else {}
     try:
         result = advance(history, tools, dispatch, confirm_before=WRITE_TOOLS,
-                         logger=logger, should_cancel=cancel.is_set, **backend_kwargs)
+                         logger=logger, should_cancel=cancel.is_set,
+                         timeout=CHAT_MODEL_TIMEOUT, **backend_kwargs)
     except TurnCancelled:
         del history[checkpoint:]  # discard the stopped turn so the next one starts clean
         logger.info(f"chat {stage} cancelled by user")
