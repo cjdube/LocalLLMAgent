@@ -529,6 +529,8 @@ TOOL_SERVICES = {
     "reminders": ("Reminders", ["set_reminder", "list_reminders", "cancel_reminder"]),
     "scheduler": ("launchd Scheduler", ["list_scheduled_tasks"]),
     "games": ("Games", ["list_games"]),
+    # Local checkouts under PROJECTS_DIR, not a hosted service — same as games.
+    "projects": ("Projects", ["list_projects", "read_project"]),
     "background": ("Background Tasks", ["run_in_background", "list_background_jobs", "get_job_result"]),
     "opportunities": ("Opportunity Scout", ["list_opportunities", "update_opportunity",
                                             "watch_company", "unwatch_company",
@@ -553,7 +555,7 @@ ROUTINE_USES = {
     "starred_blurbs": ["github", "ntfy"],
     "starred_releases": ["github", "ntfy"],
     "starred_installed": ["ntfy"],  # runs local version commands + reads local config; no external source
-    "project_scan": ["ntfy"],  # reads local checkouts under PROJECTS_DIR; no external source
+    "project_scan": ["projects", "ntfy"],  # reads local checkouts under PROJECTS_DIR; no external source
     "log_inspector": ["gmail", "ntfy"],  # rollup push via ntfy, email fallback on ntfy outage
 }
 

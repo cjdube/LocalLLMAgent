@@ -114,6 +114,7 @@ from agent.tools import games as _games
 from agent.tools import memory as _memory
 from agent.tools import notify as _notify
 from agent.tools import opportunities as _opportunities
+from agent.tools import projects as _projects_tool
 from agent.tools import reminders as _reminders
 from chat import insights as _insights
 from tasks import _chat_transcripts as _chat_transcripts
@@ -121,7 +122,7 @@ from tasks import _common
 from tasks import ai_chat_learnings as _ai_chat_learnings
 from tasks import morning_brief as _morning_brief
 from tasks import opportunity_digest as _opportunity_digest
-from tasks import project_scan as _project_scan
+
 from tasks import starred_blurbs as _starred_blurbs
 from tasks import starred_installed as _starred_installed
 from tasks import starred_releases as _starred_releases
@@ -257,10 +258,10 @@ def _isolate_remaining_config_stores(tmp_path, monkeypatch):
     # missed per-test stub lands fixture escalation rows in the real store, never
     # config/escalations.json. See docs/frontier-escalation.md.
     monkeypatch.setattr(_escalations, "_STORE_PATH", tmp_path / "escalations.json")
-    # The local project registry. project_scan.load_projects() resolves this at
-    # call time, so this one redirect covers both the task that writes it and
-    # daily_synthesis, which reads it to build project anchors.
-    monkeypatch.setattr(_project_scan, "PROJECTS_PATH", tmp_path / "projects.json")
+    # The local project registry. load_registry() resolves this at
+    # call time, so this one redirect covers the task that writes it, the chat
+    # tools that read it, and daily_synthesis's project anchors.
+    monkeypatch.setattr(_projects_tool, "PROJECTS_PATH", tmp_path / "projects.json")
     # wiki.py resolves this env on every _vault() call. the user's real vault is a
     # readable path on this machine, so without the redirect a wiki test that
     # forgets to stub reads his actual notes into a fixture assertion.

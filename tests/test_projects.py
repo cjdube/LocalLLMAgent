@@ -187,3 +187,118 @@ def test_a_hung_git_command_degrades_rather_than_raising(root, monkeypatch):
     row = _by_name(projects.scan_projects())["Alpha"]
     assert row["last_commit"] is None
     assert row["readme"].startswith("# Alpha")
+
+
+# --- the chat tools ---------------------------------------------------------
+# Both read the checkouts LIVE and merge the cached distillation, so the git
+# facts a chat answer quotes are true now rather than up to 24 hours stale.
+
+def _seed_registry(monkeypatch, tmp_path, *entries):
+    from agent.store import atomic_write_json
+    path = tmp_path / "projects.json"
+    monkeypatch.setattr(projects, "PROJECTS_PATH", path)
+    atomic_write_json(path, {"projects": list(entries)})
+
+
+def test_list_projects_merges_the_cached_summary_onto_a_live_scan(root, monkeypatch, tmp_path):
+    _repo(root, "WeighAnchor", {"README.md": "# Weigh Anchor"})
+    _seed_registry(monkeypatch, tmp_path,
+                   {"name": "WeighAnchor", "summary": "A word-deduction game.",
+                    "topics": ["sse", "lobby"]})
+
+    row = projects.list_projects()["projects"][0]
+    assert row["name"] == "WeighAnchor"
+    assert row["summary"] == "A word-deduction game."
+    assert row["last_commit"] and row["dirty"] is False   # live, not cached
+    # The list stays compact: detail is read_project's job.
+    assert "topics" not in row and "readme" not in row
+
+
+def test_list_projects_without_a_registry_still_lists_them(root, monkeypatch, tmp_path):
+    # The scan has never run. The projects are still real and their git state is
+    # still true; they just have no summary yet.
+    _repo(root, "WeighAnchor", {"README.md": "# Weigh Anchor"}, commit=False)
+    monkeypatch.setattr(projects, "PROJECTS_PATH", tmp_path / "absent.json")
+
+    assert projects.list_projects()["projects"][0]["summary"] == ""
+
+
+def test_read_project_returns_the_detail(root, monkeypatch, tmp_path):
+    _repo(root, "WeighAnchor", {"README.md": "# Weigh Anchor",
+                                "docs/design.md": "# Engine design"})
+    _seed_registry(monkeypatch, tmp_path,
+                   {"name": "WeighAnchor", "summary": "A word game.",
+                    "topics": ["sse", "lobby"]})
+    monkeypatch.setattr(projects, "list_project_pages", lambda: {"projects": []})
+
+    project = projects.read_project("WeighAnchor")
+    assert project["summary"] == "A word game."
+    assert project["topics"] == ["sse", "lobby"]
+    assert project["doc_titles"] == ["Engine design"]
+    assert project["branch"] == "main"
+    assert project["wiki_page"] is None
+    # The document bodies are never handed to the model here.
+    assert "readme" not in project and "claude_md" not in project
+
+
+def test_read_project_attaches_the_wiki_page(root, monkeypatch, tmp_path):
+    # Joined on the page's `path:` frontmatter, not its name — the page for the
+    # LocalLLMAgent checkout is called `wren`.
+    _repo(root, "LocalLLMAgent", {"README.md": "# Wren"}, commit=False)
+    _seed_registry(monkeypatch, tmp_path, {"name": "LocalLLMAgent", "summary": "An agent."})
+    monkeypatch.setattr(projects, "list_project_pages", lambda: {"projects": [
+        {"name": "wren", "repo": "cjdube/LocalLLMAgent", "path": "LocalLLMAgent",
+         "summary": "Why it was built local-first."}]})
+
+    project = projects.read_project("LocalLLMAgent")
+    assert project["wiki_page"] == {"name": "wren",
+                                    "summary": "Why it was built local-first."}
+
+
+def test_read_project_survives_a_missing_vault(root, monkeypatch, tmp_path):
+    _repo(root, "WeighAnchor", {"README.md": "# Weigh Anchor"}, commit=False)
+    _seed_registry(monkeypatch, tmp_path, {"name": "WeighAnchor", "summary": "A word game."})
+
+    def _boom():
+        raise OSError("vault gone")
+    monkeypatch.setattr(projects, "list_project_pages", _boom)
+
+    assert projects.read_project("WeighAnchor")["wiki_page"] is None
+
+
+def test_read_project_is_forgiving_about_case_and_spacing(root, monkeypatch, tmp_path):
+    # The model is passing back a name the user typed, not an identifier it was
+    # handed, so "weigh anchor" has to find WeighAnchor.
+    _repo(root, "WeighAnchor", {"README.md": "# Weigh Anchor"}, commit=False)
+    monkeypatch.setattr(projects, "list_project_pages", lambda: {"projects": []})
+
+    for spelling in ("WeighAnchor", "weighanchor", "weigh anchor", "Weigh-Anchor"):
+        assert projects.read_project(spelling)["name"] == "WeighAnchor"
+
+
+def test_read_project_names_the_real_projects_when_it_misses(root, monkeypatch, tmp_path):
+    # The error is what stops the model inventing a second guess: it gets the
+    # actual list back instead of a bare "not found".
+    _repo(root, "WeighAnchor", {"README.md": "# Weigh Anchor"}, commit=False)
+
+    result = projects.read_project("Wordle")
+    assert "no project named 'Wordle'" in result["error"]
+    assert "WeighAnchor" in result["error"]
+
+
+def test_read_project_rejects_an_empty_name(root):
+    assert "error" in projects.read_project("")
+    assert "error" in projects.read_project("   ")
+
+
+def test_list_projects_description_forbids_inventing_one():
+    # Measured on list_games, whose failure this shares: with a description that
+    # only said WHEN to call it, the model answered a vague ask from pretraining
+    # in 2 of 12 replays and invented entries with fabricated links. The risk is
+    # worse here — a made-up project name reads as completely ordinary and
+    # nothing downstream can catch it. Pinned so a future trim can't quietly
+    # drop the denial.
+    description = projects.LIST_PROJECTS_SCHEMA["function"]["description"]
+    assert "NOT something you know" in description
+    assert "Never name a project from your own knowledge" in description
+    assert "never invent a repository" in description

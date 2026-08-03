@@ -29,9 +29,9 @@ note-taking and plenty to say to the repo that just moved to server-sent events.
 
 | Piece | Role |
 |---|---|
-| `agent/tools/projects.py` | Deterministic scan of `PROJECTS_DIR`. No model. |
-| `tasks/project_scan.py` | Distils each project to a summary + topics; writes `config/projects.json`. Daily 5:30 AM. |
-| `agent/tools/wiki.py` (`list_projects`) | Finds the vault pages marked `project: true`. |
+| `agent/tools/projects.py` | Deterministic scan of `PROJECTS_DIR`, the `config/projects.json` store, and the two chat tools. |
+| `tasks/project_scan.py` | Distils each project to a summary + topics; writes the store. Daily 5:30 AM. |
+| `agent/tools/wiki.py` (`list_project_pages`) | Finds the vault pages marked `project: true`. |
 | `tasks/daily_synthesis.py` (`gather_project_anchors`) | Merges the two into one anchor per project. |
 
 ### The scan
@@ -155,6 +155,61 @@ on match strength alone. That answers the question the design deliberately left
 open: they neither flood the shortlist nor get shut out, so no reserved slot or
 per-kind cap is needed. Revisit it from a dry run, not from a guess, if that
 stops being true.
+
+## The chat tools
+
+Two read-only tools in the deferred `projects` group (see
+[docs/tool-loading.md](tool-loading.md)):
+
+- **`list_projects`** — every checkout with its summary, last commit day,
+  30-day commit count and dirty flag.
+- **`read_project(name)`** — one project in full, plus its topics, docs page
+  titles, and its wiki page if it has one. Name matching is deliberately
+  forgiving about case and spacing, because the model is passing back a name
+  the user typed, not an identifier it was handed: `weigh anchor` finds
+  `WeighAnchor`.
+
+Both scan the checkouts **live** and merge the cached distillation, rather than
+serving the registry alone. The summary and topics need a model call so they
+come from the nightly cache, but "when did I last commit" and "is the tree
+dirty" are what a chat ask is usually really about, and a cached answer to
+those is wrong for up to 24 hours. A full scan is ~300ms, which a chat turn can
+afford. Same live-fetch/cached-blurb split the [starred view](starred.md) uses.
+
+### The description does most of the work
+
+This is a catalogue tool — the one shape where pretraining supplies a
+*plausible* answer, so the model skips the tool and invents entries. `list_games`
+hit exactly this: asked the vague "let's play a game" with a description that
+only said *when* to call it, the model named Wordle, Sudoku and Chess with
+fabricated links in 2 of 12 replays. The risk is worse here, because an invented
+project name reads as completely ordinary — nothing in the reply would look
+wrong, and no tool ran, so nothing is logged.
+
+So the description states flatly that the list is **not something the model
+knows**, that only what the tool returns exists, and what to say when it returns
+nothing. The same denial is repeated in the group blurb, because when the group
+hasn't been pre-loaded the model can only see the blurb, not the description.
+Both are pinned by tests.
+
+Measured over 24 replays against the live model, 8 phrasings:
+
+| Phrasing | Called the tool |
+|---|---|
+| "what am I working on?" | 3/3 |
+| "tell me about my projects" | 3/3 |
+| "what have I built?" | 3/3 |
+| "which of my repos have I not touched in a while?" | 3/3 |
+| "what code have I written lately?" (no keyword → `load_tools` hop) | 3/3 |
+| "show me everything I have made" (`load_tools` hop) | 3/3 |
+| "what is in my dev folder?" (`load_tools` hop) | 3/3 |
+| "give me a rundown of my stuff" | 0/3 |
+
+**Zero fabricated projects in all 24 runs** — the failure this guards against
+never occurred. The last row is not that failure: on a genuinely ambiguous ask
+the model read "my stuff" as the day ahead and answered correctly from calendar,
+tasks and reminders. Widening the keywords to catch it would misfire constantly,
+so it's left alone.
 
 ## Configuration
 

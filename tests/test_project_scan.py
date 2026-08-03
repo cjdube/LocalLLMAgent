@@ -12,6 +12,7 @@ import logging
 import pytest
 
 from agent.store import atomic_write_json, load_json
+from agent.tools import projects as pt
 from tasks import project_scan as ps
 
 
@@ -56,7 +57,7 @@ def _scan(monkeypatch, *rows):
 
 
 def _stored():
-    return {p["name"]: p for p in load_json(ps.PROJECTS_PATH, {}).get("projects", [])}
+    return {p["name"]: p for p in load_json(pt.PROJECTS_PATH, {}).get("projects", [])}
 
 
 # --- distillation parsing ---------------------------------------------------
@@ -193,7 +194,7 @@ def test_falls_back_to_the_readme_when_the_model_returns_nothing(stub, monkeypat
 def test_a_project_whose_blurb_never_landed_is_retried(stub, monkeypatch):
     # An empty summary in the cache is a failed run, not a cache hit — without
     # this the first bad distillation would be frozen in forever.
-    atomic_write_json(ps.PROJECTS_PATH, {"projects": [
+    atomic_write_json(pt.PROJECTS_PATH, {"projects": [
         {"name": "Alpha", "content_hash": "hash-Alpha", "summary": "", "topics": []}]})
     _scan(monkeypatch, _row("Alpha"))
 
@@ -230,5 +231,5 @@ def test_a_failing_scan_notifies_and_exits_nonzero(stub, monkeypatch):
     assert sent
 
 
-def test_load_projects_without_a_store_is_empty(monkeypatch):
-    assert ps.load_projects() == []
+def test_load_registry_without_a_store_is_empty(monkeypatch):
+    assert pt.load_registry() == []

@@ -42,6 +42,7 @@ from agent.tools.evaluate_app import TOOL_SCHEMA as EVALUATE_APP_SCHEMA, evaluat
 from agent.tools.evaluate_against import TOOL_SCHEMA as EVALUATE_AGAINST_SCHEMA, evaluate_against
 from agent.tools.games import TOOL_SCHEMA as GAMES_SCHEMA, list_games
 from agent.tools.github_starred import TOOL_SCHEMA as GITHUB_STARRED_SCHEMA, fetch_starred_repos
+from agent.tools.projects import PROJECT_TOOL_SCHEMAS, list_projects, read_project
 from agent.tools.google_tasks import (
     COMPLETE_TASK_TOOL_SCHEMA,
     CREATE_TASK_TOOL_SCHEMA,
@@ -149,6 +150,7 @@ TOOLS = [
     EVALUATE_APP_SCHEMA,
     EVALUATE_AGAINST_SCHEMA,
     GAMES_SCHEMA,
+    *PROJECT_TOOL_SCHEMAS,
 ]
 
 DISPATCH = {
@@ -206,6 +208,9 @@ DISPATCH = {
     "evaluate_against": evaluate_against,
     # Read-only: reads the registry and probes each game's service. Writes nothing.
     "list_games": list_games,
+    # Read-only: scans the local checkouts and reads the cached registry.
+    "list_projects": list_projects,
+    "read_project": read_project,
 }
 
 WRITE_TOOLS = frozenset({
@@ -302,6 +307,7 @@ TOOL_GROUP_NAMES = {
     "authoring": ["write_skill", "delete_skill"],
     "brief": ["send_morning_brief", "send_email"],
     "games": ["list_games"],
+    "projects": ["list_projects", "read_project"],
 }
 
 # One-line "when to load it" blurb per group, rendered into the chat prompt so
@@ -317,6 +323,10 @@ _GROUP_BLURBS = {
     "games": f"The games {_NAME} can play with you, and the link to open one. "
              "Load this for any ask about playing something — the games that exist "
              "are only the ones the tool lists, never ones you know of.",
+    "projects": f"{_NAME}'s software projects — what he has built, what each one is, "
+                "and how recently he touched it. Load this for any ask about his "
+                "projects, repos, or what he is working on; the projects that exist "
+                "are only the ones the tool lists, never ones you know of.",
 }
 
 # Case-insensitive word-boundary cues that pre-load a group before the model
@@ -334,6 +344,9 @@ GROUP_KEYWORDS = {
     # "play" without "game" catches "let's play something" and "play weigh anchor";
     # the game's own name is a cue too, since naming it is the likeliest way in.
     "games": ["game", "play", "weigh anchor"],
+    # "repo" and "built" are the other ways in; "project" covers the direct ask.
+    "projects": ["project", "repo", "repos", "codebase", "built", "building",
+                 "working on", "stale"],
 }
 
 # The meta-tool. Not in TOOLS/DISPATCH — its callable is bound per session in

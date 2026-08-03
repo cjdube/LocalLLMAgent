@@ -28,6 +28,9 @@ lives in `chat/server.py`.
   - `activity` — Strava activities, Chrome browsing history
   - `authoring` — write/delete a skill
   - `brief` — send the morning brief, or send an email
+  - `games` — the games he can play, and the link to open one
+  - `projects` — his local checkouts: what each is, and how recently he
+    touched it
 
 Every tool in `TOOLS` is in exactly one of core or a group — enforced by
 `tests/test_toolset.py::test_core_and_groups_partition_the_registry`, so adding

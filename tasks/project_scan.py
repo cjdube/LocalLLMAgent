@@ -41,14 +41,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from dotenv import load_dotenv
 
 from agent.loop import complete_text, resolve_backend, warm_model
-from agent.store import atomic_write_json, load_json, locked
-from agent.tools.projects import scan_projects
+from agent.store import atomic_write_json, locked
+from agent.tools import projects as projects_tool
+from agent.tools.projects import load_registry, scan_projects
 from tasks._common import notify_failure, setup_logger
 
 _ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(_ROOT / "config" / ".env")
-
-PROJECTS_PATH = _ROOT / "config" / "projects.json"
 
 # How many topic terms to keep. The anchor's token set is name + summary +
 # topics; a wiki-page anchor (name + a one-line summary) lands around 20-25
@@ -77,15 +76,6 @@ No markdown, no headings, no quotes, no preamble. Just the two lines."""
 
 _SUMMARY_RE = re.compile(r"^\s*summary\s*:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
 _TOPICS_RE = re.compile(r"^\s*topics\s*:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
-
-
-def load_projects() -> list:
-    """The registry rows this task last wrote, for readers (daily_synthesis).
-    Resolves PROJECTS_PATH at call time so one redirect of that module attribute
-    covers both the writer and every reader — the same arrangement
-    tasks/starred_blurbs.py's BLURBS_PATH has with the /starred route. A missing
-    store is an empty list: the scan hasn't run yet, which is not a failure."""
-    return load_json(PROJECTS_PATH, {}).get("projects", [])
 
 
 def has_docs(row: dict) -> bool:
@@ -173,7 +163,7 @@ def main(argv=None) -> int:
 
         # Cached distillations keyed by project name, so a rename regenerates
         # (the right call — a renamed project is usually a repurposed one).
-        cached = {p["name"]: p for p in load_json(PROJECTS_PATH, {}).get("projects", [])}
+        cached = {p["name"]: p for p in load_registry()}
 
         documented = [r for r in rows if has_docs(r)]
         undocumented = [r["name"] for r in rows if not has_docs(r)]
@@ -229,8 +219,8 @@ def main(argv=None) -> int:
 
         # Whole store rewritten from the scan each run, so a deleted project is
         # pruned rather than lingering as a phantom anchor.
-        with locked(PROJECTS_PATH):
-            atomic_write_json(PROJECTS_PATH, {
+        with locked(projects_tool.PROJECTS_PATH):
+            atomic_write_json(projects_tool.PROJECTS_PATH, {
                 "scanned_at": datetime.now(timezone.utc).isoformat(),
                 "projects": out,
             })

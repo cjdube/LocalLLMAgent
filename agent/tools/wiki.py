@@ -187,7 +187,7 @@ def _project_meta(head: str) -> dict | None:
             "path": path.group(1).strip() if path else ""}
 
 
-def _list_projects(vault: Path) -> list:
+def _list_project_pages(vault: Path) -> list:
     """Every wiki page marked `project: true`, as {name, repo, path, summary}
     rows. Head-reads each page to classify it, like _list_lenses, so scanning
     the whole vault stays cheap."""
@@ -249,7 +249,7 @@ def page_summaries() -> dict:
     return err or {"pages": _page_summaries(vault)}
 
 
-def list_projects() -> dict:
+def list_project_pages() -> dict:
     """The vault's project pages — those marked `project: true`. Not a
     registered tool: it exists for tasks/daily_synthesis.py, which merges a
     project's wiki page (the decisions and rationale) with the same project's
@@ -259,7 +259,7 @@ def list_projects() -> dict:
     vault, err = _require_vault()
     if err:
         return {"projects": []}
-    return {"projects": _list_projects(vault)}
+    return {"projects": _list_project_pages(vault)}
 
 
 def list_lenses() -> dict:

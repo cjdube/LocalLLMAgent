@@ -45,7 +45,8 @@ from agent.tools.chrome_history import fetch_chrome_history
 from agent.tools.learnings_file import read_entry
 from agent.tools.notify import notify
 from agent.tools.opportunities import get_watchlist, list_opportunities
-from agent.tools.wiki import list_projects, page_summaries
+from agent.tools.projects import load_registry
+from agent.tools.wiki import list_project_pages, page_summaries
 from agent.tools.youtube import fetch_liked_videos
 from tasks._common import notify_failure, setup_logger
 from tasks._learnings_common import (
@@ -54,7 +55,7 @@ from tasks._learnings_common import (
     persist_or_email,
     prior_day,
 )
-from tasks.project_scan import load_projects
+
 
 # Where the nudge archive lands: a vault folder ObsidianWikiAgent does not walk
 # (it ingests raw/ only), so Obsidian can still browse the history without the
@@ -322,7 +323,7 @@ def gather_project_anchors(logger) -> tuple[list, set]:
     _one_per_side dedupes by side identity it would happily place both — showing
     the model one story twice, the exact thing that function exists to prevent."""
     try:
-        projects = load_projects()
+        projects = load_registry()
     except Exception as e:
         logger.warning(f"project anchors unavailable: {e}")
         return [], set()
@@ -330,7 +331,7 @@ def gather_project_anchors(logger) -> tuple[list, set]:
         return [], set()
 
     try:
-        pages = {p["path"]: p for p in list_projects()["projects"] if p.get("path")}
+        pages = {p["path"]: p for p in list_project_pages()["projects"] if p.get("path")}
     except Exception as e:
         # The registry is still usable without the vault; only the merge is lost.
         logger.warning(f"wiki project pages unavailable, not merging: {e}")

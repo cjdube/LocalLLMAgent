@@ -212,12 +212,12 @@ def _add_project(root, name, repo="cjdube/Thing", path="Thing",
     )
 
 
-def test_list_projects_only_returns_marked_pages(tmp_path, monkeypatch):
+def test_list_project_pages_only_returns_marked_pages(tmp_path, monkeypatch):
     monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
     _build_vault(tmp_path)  # speakers-bureau has no frontmatter — not a project
     _add_project(tmp_path, "wren", repo="cjdube/LocalLLMAgent", path="LocalLLMAgent")
 
-    assert wiki.list_projects()["projects"] == [
+    assert wiki.list_project_pages()["projects"] == [
         {"name": "wren", "repo": "cjdube/LocalLLMAgent", "path": "LocalLLMAgent",
          "summary": "A thing he built."}
     ]
@@ -228,7 +228,7 @@ def test_a_lens_is_not_a_project(tmp_path, monkeypatch):
     _build_vault(tmp_path)
     _add_lens(tmp_path, "product-principles")
 
-    assert wiki.list_projects()["projects"] == []
+    assert wiki.list_project_pages()["projects"] == []
     assert [lens["name"] for lens in wiki.list_lenses()["lenses"]] == ["product-principles"]
 
 
@@ -240,14 +240,14 @@ def test_project_page_without_a_path_is_still_listed(tmp_path, monkeypatch):
     (tmp_path / "wiki" / "orphan.md").write_text(
         "---\nproject: true\n---\n\n# Orphan\n\n**Summary**: No path given.")
 
-    assert wiki.list_projects()["projects"] == [
+    assert wiki.list_project_pages()["projects"] == [
         {"name": "orphan", "repo": "", "path": "", "summary": "No path given."}]
 
 
-def test_list_projects_degrades_to_empty_without_a_vault(tmp_path, monkeypatch):
+def test_list_project_pages_degrades_to_empty_without_a_vault(tmp_path, monkeypatch):
     # The merge is optional; a misconfigured vault must cost it, not the run.
     monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path / "gone"))
-    assert wiki.list_projects() == {"projects": []}
+    assert wiki.list_project_pages() == {"projects": []}
 
 
 def test_an_empty_repo_does_not_capture_the_next_line(tmp_path, monkeypatch):
@@ -258,7 +258,7 @@ def test_an_empty_repo_does_not_capture_the_next_line(tmp_path, monkeypatch):
     _build_vault(tmp_path)
     _add_project(tmp_path, "screenwatch", repo="", path="screenwatch-kit")
 
-    project = wiki.list_projects()["projects"][0]
+    project = wiki.list_project_pages()["projects"][0]
     assert project["repo"] == ""
     assert project["path"] == "screenwatch-kit"
 
