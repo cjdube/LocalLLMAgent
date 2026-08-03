@@ -103,6 +103,7 @@ from agent.tools.wiki import (
     read_wiki_index,
     read_wiki_page,
 )
+from agent.tools.youtube import TOOL_SCHEMA as YOUTUBE_SCHEMA, fetch_liked_videos
 from tasks.morning_brief import SEND_BRIEF_TOOL_SCHEMA, brief_dispatch
 from tasks.opportunity_digest import SEND_DIGEST_TOOL_SCHEMA, digest_dispatch
 
@@ -117,6 +118,7 @@ TOOLS = [
     CALENDAR_BY_DATE_SCHEMA,
     CALENDAR_RECOLOR_SCHEMA,
     CHROME_SCHEMA,
+    YOUTUBE_SCHEMA,
     EMAIL_SCHEMA,
     STRAVA_SCHEMA,
     WEATHER_SCHEMA,
@@ -159,6 +161,7 @@ DISPATCH = {
     "get_events_by_date": get_events_by_date,
     "recolor_event": recolor_event,
     "fetch_chrome_history": fetch_chrome_history,
+    "fetch_liked_videos": fetch_liked_videos,
     # The wrapper, not send_email itself: it drops model-supplied arguments the
     # schema doesn't declare (to, html), pinning the recipient to BRIEF_TO_EMAIL.
     "send_email": send_email_tool,
@@ -303,7 +306,7 @@ TOOL_GROUP_NAMES = {
     "wiki": ["read_wiki_index", "list_wiki_pages", "read_wiki_page"],
     "background": ["run_in_background", "list_background_jobs", "get_job_result"],
     "web": ["fetch_webpage", "evaluate_app", "evaluate_against", "fetch_starred_repos"],
-    "activity": ["fetch_strava", "fetch_chrome_history"],
+    "activity": ["fetch_strava", "fetch_chrome_history", "fetch_liked_videos"],
     "authoring": ["write_skill", "delete_skill"],
     "brief": ["send_morning_brief", "send_email"],
     "games": ["list_games"],
@@ -317,7 +320,8 @@ _GROUP_BLURBS = {
     "wiki": f"{_NAME}'s learnings wiki — weekly reviews and concept pages.",
     "background": "Hand a long-running task off to run detached and report back.",
     "web": "Fetch a specific web page, evaluate a web app, or list starred GitHub repos.",
-    "activity": f"{_NAME}'s Strava activities and recent Chrome browsing history.",
+    "activity": f"{_NAME}'s Strava activities, recent Chrome browsing history, "
+                "and the videos he Liked on YouTube.",
     "authoring": "Save or delete a skill (a reusable multi-step procedure).",
     "brief": "Send the morning brief, or send an email.",
     "games": f"The games {_NAME} can play with you, and the link to open one. "
@@ -337,8 +341,11 @@ GROUP_KEYWORDS = {
     "wiki": ["wiki", "learning", "weekly review", "working on"],
     "background": ["background", "kick off", "hand off", "handoff"],
     "web": ["webpage", "web page", "fetch", "url", "evaluate", "starred", "github"],
+    # "liked"/"video" rather than "like"/"watch": \blike matches "likely", and
+    # "watch" is already an opportunities cue (watchlist).
     "activity": ["strava", "run", "ran", "ride", "cycling", "workout",
-                 "browsing", "chrome", "history"],
+                 "browsing", "chrome", "history",
+                 "youtube", "liked", "video"],
     "authoring": ["skill"],
     "brief": ["brief", "email"],
     # "play" without "game" catches "let's play something" and "play weigh anchor";

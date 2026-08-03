@@ -2,8 +2,45 @@
 model-facing send_email hardening, and the confirmation describers used by both
 the chat card and the background approval push."""
 
+import importlib
+import pkgutil
+
+import agent.tools
 from agent import toolset
 from agent.tools import email as email_mod
+
+
+# Tool modules that define a model-facing schema on purpose but keep it out of
+# the registry. Empty by design: a schema written at the model and never
+# registered is dead code the partition test below cannot see, because that test
+# partitions TOOLS and an unregistered schema never enters TOOLS. This is how
+# fetch_liked_videos sat unreachable in chat from 5c40332 until 2026-08-03.
+# Adding a name here is a deliberate "task-only, and the schema stays" choice —
+# the usual answer is to register the tool or delete the schema.
+TASK_ONLY_SCHEMAS: set[str] = set()
+
+
+def test_every_model_facing_schema_is_registered():
+    """Every *_SCHEMA under agent/tools/ is in TOOLS, or explicitly allowlisted."""
+    unregistered = {}
+    registered = {t["function"]["name"] for t in toolset.TOOLS}
+    for info in pkgutil.iter_modules(agent.tools.__path__):
+        mod = importlib.import_module(f"agent.tools.{info.name}")
+        for attr in dir(mod):
+            if not attr.endswith("_SCHEMA"):
+                continue
+            schema = getattr(mod, attr)
+            # Tool schemas only — skip unrelated constants ending in _SCHEMA.
+            if not (isinstance(schema, dict) and "function" in schema):
+                continue
+            name = schema["function"]["name"]
+            if name not in registered and name not in TASK_ONLY_SCHEMAS:
+                unregistered[name] = f"agent.tools.{info.name}.{attr}"
+    assert not unregistered, (
+        f"model-facing schemas missing from TOOLS: {unregistered}. Register the "
+        "tool (TOOLS + DISPATCH + CORE_TOOL_NAMES or a TOOL_GROUP_NAMES group), "
+        "delete the unused schema, or allowlist it in TASK_ONLY_SCHEMAS."
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -68,6 +105,11 @@ def test_groups_for_message_matches_on_word_boundaries():
     assert "opportunities" in toolset.groups_for_message("any new job openings?")
     assert "activity" in toolset.groups_for_message("how were my strava runs")
     assert "wiki" in toolset.groups_for_message("what have I been learning about?")
+    assert "activity" in toolset.groups_for_message("what did I like on youtube?")
+    # "liked"/"video" are the YouTube cues, not "like"/"watch": \blike would fire
+    # on "likely", and "watch" belongs to opportunities (watchlist).
+    assert "activity" not in toolset.groups_for_message("is that likely to work")
+    assert "activity" not in toolset.groups_for_message("what's on my watchlist")
     # No cues -> no groups (a plain weather ask stays core-only).
     assert toolset.groups_for_message("what's the temperature outside") == set()
 

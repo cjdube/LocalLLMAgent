@@ -24,8 +24,9 @@ lives in `chat/server.py`.
   - `opportunities` — fractional-work scout, watchlist, company research
   - `wiki` — the learnings wiki
   - `background` — hand a long task off to run detached
-  - `web` — fetch a page, evaluate an app, list starred repos
-  - `activity` — Strava activities, Chrome browsing history
+  - `web` — fetch a page, evaluate an app, evaluate a target against a wiki
+    lens, list starred repos
+  - `activity` — Strava activities, Chrome browsing history, YouTube Likes
   - `authoring` — write/delete a skill
   - `brief` — send the morning brief, or send an email
   - `games` — the games he can play, and the link to open one
@@ -36,6 +37,15 @@ Every tool in `TOOLS` is in exactly one of core or a group — enforced by
 `tests/test_toolset.py::test_core_and_groups_partition_the_registry`, so adding
 a new tool without slotting it makes that test fail rather than silently making
 the tool unreachable in chat.
+
+That test partitions `TOOLS`, so it cannot see the *other* way a tool goes
+missing: a schema written at the model but never added to `TOOLS` at all, which
+never enters the partition. `fetch_liked_videos` sat that way from `5c40332`
+until 2026-08-03 — a full model-facing schema in `agent/tools/youtube.py`, used
+only as a scheduled-task data source, unreachable in chat and invisible to every
+test. `test_every_model_facing_schema_is_registered` now walks `agent/tools/`
+and asserts each `*_SCHEMA` is either in `TOOLS` or named in the (currently
+empty) `TASK_ONLY_SCHEMAS` allowlist.
 
 ## How a group gets loaded (two paths)
 

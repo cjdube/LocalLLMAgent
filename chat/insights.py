@@ -520,7 +520,7 @@ TOOL_SERVICES = {
     "web_search": ("Tavily Search", ["search_web", "research_company"]),
     "firecrawl": ("Firecrawl", ["fetch_webpage", "evaluate_app", "evaluate_against"]),
     "github": ("GitHub", ["fetch_starred_repos"]),
-    "youtube": ("YouTube", []),  # daily_youtube_learnings-only; no chat tool
+    "youtube": ("YouTube", ["fetch_liked_videos"]),
     "ntfy": ("ntfy Push", []),  # routine failure-alert channel; no chat tool
     "brief": ("Morning Brief", ["send_morning_brief"]),
     "memory": ("Memory", ["remember", "pin", "recall", "recategorize", "archive", "forget"]),
