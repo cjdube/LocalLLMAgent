@@ -52,7 +52,7 @@ The on-device model is small; design around it:
 - **Config**: `os.getenv()` with inline defaults; document every new variable in `config/.env.example`.
 - **Tests**: one `tests/test_<module>.py` per module; monkeypatch all network/model/Google collaborators; no real network calls.
 - **Git**: commit straight to `main` — no feature branches.
-- **Docs**: update `README.md` whenever a capability is added. Detailed capability docs go in `docs/<name>.md` with a short linked summary in the README.
+- **Docs**: update `README.md` whenever a capability is added. Detailed capability docs go in `docs/<name>.md` with a short linked summary in the README — and a README table row that links to a doc states *what it does and when it runs*, not *how it works*. Keep the facts that stop a false bug report ("silence is the common case", "nothing new → no email"); the mechanics belong in the doc.
 - **Writing this file**: when an incident bullet here outgrows ~3 lines, move the narrative to `docs/` and keep the imperative, the measured result, and the link. CLAUDE.md is loaded on every session; the evidence only needs to be reachable.
 
 ## Tests must never touch production state
