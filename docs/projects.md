@@ -75,14 +75,22 @@ actually changes. A commit that touches no docs doesn't invalidate the cache, so
 the daily run is normally a git refresh and zero model calls. `--refresh`
 regenerates everything.
 
-Two degradations are reported rather than swallowed, because both are otherwise
-invisible — the project still appears in the registry and simply stops matching
-anything:
+Three degradations are reported rather than swallowed, because all three are
+otherwise invisible — the project still appears in the registry and simply stops
+matching anything:
 
 - a project with no README, CLAUDE.md or `docs/` is named in a WARNING (on the
   real machine: `AgenticOS`, `AIChatScraper`, `my-agent-hq`, `SortOfCardGame` —
   the fix is a README in that repo, not code here)
+- a project whose `docs/` tree outgrew `MAX_DOC_TITLES` (20) is named with the
+  pre-cap count, since `_doc_titles` drops the alphabetical tail. The blurb still
+  reads normally; it just stops reflecting part of what the project documents.
+  LocalLLMAgent sat at exactly 20 when this was added
 - a distillation returning fewer than 4 topics is named with counts
+
+The cap itself stays — 20 one-line titles is the right bound for a prompt, and a
+project with a 60-page docs tree shouldn't spend it all here. What was wrong was
+truncating in silence.
 
 ### Why a distillation and not the raw docs
 

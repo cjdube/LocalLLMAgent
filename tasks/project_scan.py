@@ -176,6 +176,18 @@ def main(argv=None) -> int:
                 f"and so get no anchor: {', '.join(undocumented)}"
             )
 
+        # Same reasoning one step further in: a project whose docs/ outgrew
+        # MAX_DOC_TITLES still distils fine, it just distils off a truncated
+        # picture. Nothing else would ever say so — the blurb looks normal.
+        cap = projects_tool.MAX_DOC_TITLES   # module attribute: resolved at call time
+        truncated = [f"{r['name']} ({r['docs_found']} docs, capped at {cap})"
+                     for r in rows if r.get("docs_found", 0) > len(r.get("doc_titles", []))]
+        if truncated:
+            logger.warning(
+                f"{len(truncated)} project(s) have more docs/ pages than the cap, so "
+                f"the tail is missing from their anchor: {', '.join(truncated)}"
+            )
+
         todo = [r for r in documented
                 if args.refresh
                 or cached.get(r["name"], {}).get("content_hash") != r["content_hash"]

@@ -1,7 +1,8 @@
 """Tests for tasks/project_scan.py — main() distils each documented project into
 a summary + topics, caches on content_hash, skips unchanged projects, prunes
-deleted ones, and reports the two silent degradations (a project with no docs,
-and a distillation that comes back too thin to match anything).
+deleted ones, and reports the three silent degradations (a project with no docs,
+a docs/ tree that outgrew MAX_DOC_TITLES, and a distillation that comes back too
+thin to match anything).
 
 Collaborators are monkeypatched; no model access. The registry store is
 redirected to tmp_path by conftest.
@@ -166,6 +167,26 @@ def test_a_project_with_no_docs_gets_a_row_but_no_blurb(stub, monkeypatch, caplo
     stored = _stored()["Empty"]
     assert stored["summary"] == "" and stored["topics"] == []
     assert "no README" in caplog.text and "Empty" in caplog.text
+
+
+def test_reports_a_project_whose_docs_outgrew_the_cap(stub, monkeypatch, caplog):
+    # This repo hit exactly 20 docs/ pages against MAX_DOC_TITLES=20, so the next
+    # one would have dropped a title with nothing said. The blurb still looks
+    # normal — it just stops reflecting part of what the project documents.
+    _scan(monkeypatch, _row("Alpha", doc_titles=["A", "B"], docs_found=25))
+
+    with caplog.at_level(logging.WARNING):
+        assert ps.main([]) == 0
+    assert "more docs/ pages than the cap" in caplog.text
+    assert "Alpha (25 docs" in caplog.text
+
+
+def test_no_cap_warning_when_every_doc_fits(stub, monkeypatch, caplog):
+    _scan(monkeypatch, _row("Alpha", doc_titles=["A", "B"], docs_found=2))
+
+    with caplog.at_level(logging.WARNING):
+        assert ps.main([]) == 0
+    assert "more docs/ pages than the cap" not in caplog.text
 
 
 def test_reports_a_distillation_too_thin_to_match(stub, monkeypatch, caplog):

@@ -145,6 +145,45 @@ def test_doc_titles_are_capped(root, monkeypatch):
     assert len(_by_name(projects.scan_projects())["Alpha"]["doc_titles"]) == 3
 
 
+def test_capping_doc_titles_reports_how_many_were_found(root, monkeypatch):
+    """The cap is fine; the cap being invisible is not. docs_found carries the
+    pre-cap count so project_scan can say the tail was dropped."""
+    monkeypatch.setattr(projects, "MAX_DOC_TITLES", 3)
+    _repo(root, "Alpha", {f"docs/page{i}.md": f"# Page {i}" for i in range(10)},
+          commit=False)
+
+    row = _by_name(projects.scan_projects())["Alpha"]
+    assert row["docs_found"] == 10
+    assert len(row["doc_titles"]) == 3
+
+
+def test_docs_found_equals_titles_when_under_the_cap(root):
+    _repo(root, "Alpha", {"docs/one.md": "# One", "docs/two.md": "# Two"},
+          commit=False)
+
+    row = _by_name(projects.scan_projects())["Alpha"]
+    assert row["docs_found"] == len(row["doc_titles"]) == 2
+
+
+def test_a_project_with_no_docs_dir_reports_zero_found(root):
+    _repo(root, "Alpha", {"README.md": "# Alpha"})
+
+    row = _by_name(projects.scan_projects())["Alpha"]
+    assert row["docs_found"] == 0 and row["doc_titles"] == []
+
+
+def test_outgrowing_the_cap_does_not_change_the_content_hash(root, monkeypatch):
+    """Re-distilling every project because one gained a doc past the cap would
+    cost a model call per project for no change in what any of them is."""
+    monkeypatch.setattr(projects, "MAX_DOC_TITLES", 2)
+    _repo(root, "Alpha", {"docs/a.md": "# A", "docs/b.md": "# B"}, commit=False)
+    before = _by_name(projects.scan_projects())["Alpha"]["content_hash"]
+
+    (root / "Alpha" / "docs" / "c.md").write_text("# C")
+
+    assert _by_name(projects.scan_projects())["Alpha"]["content_hash"] == before
+
+
 def test_content_hash_tracks_the_docs_not_the_commits(root):
     path = _repo(root, "Alpha", {"README.md": "# Alpha"})
     before = _by_name(projects.scan_projects())["Alpha"]["content_hash"]

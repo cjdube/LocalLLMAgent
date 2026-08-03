@@ -131,15 +131,22 @@ def _readme(path: Path) -> str:
     return ""
 
 
-def _doc_titles(path: Path) -> list:
-    """Each docs/*.md as its first Markdown heading, falling back to the stem.
-    Titles only — the bodies would be tens of thousands of characters, and what
-    a project documents is the part that discriminates."""
+def _doc_titles(path: Path) -> tuple:
+    """Each docs/*.md as its first Markdown heading, falling back to the stem,
+    plus how many were found before MAX_DOC_TITLES capped the list. Titles only
+    — the bodies would be tens of thousands of characters, and what a project
+    documents is the part that discriminates.
+
+    The count is returned rather than discarded so tasks/project_scan.py can say
+    that a project outgrew the cap. A slice that silently drops the tail is the
+    "degrade without logging" failure CLAUDE.md warns about: the blurb just
+    quietly stops reflecting part of what the project documents."""
     docs = path / "docs"
     if not docs.is_dir():
-        return []
+        return [], 0
+    found = sorted(docs.glob("*.md"))
     titles = []
-    for doc in sorted(docs.glob("*.md"))[:MAX_DOC_TITLES]:
+    for doc in found[:MAX_DOC_TITLES]:
         title = doc.stem
         try:
             for line in doc.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -149,7 +156,7 @@ def _doc_titles(path: Path) -> list:
         except OSError:
             pass
         titles.append(title)
-    return titles
+    return titles, len(found)
 
 
 def _content_hash(readme: str, claude_md: str, doc_titles: list) -> str:
@@ -168,13 +175,17 @@ def _scan_one(path: Path) -> dict:
     """One checkout -> one row. Wrapped by scan_projects' per-directory guard."""
     readme = _readme(path)
     claude_md = _read_head(path / _CLAUDE_NAME)
-    doc_titles = _doc_titles(path)
+    doc_titles, docs_found = _doc_titles(path)
     return {
         "name": path.name,
         "path": str(path),
         "readme": readme,
         "claude_md": claude_md,
         "doc_titles": doc_titles,
+        # Pre-cap count, so the task can warn when the tail was dropped. Kept
+        # out of content_hash: outgrowing the cap doesn't change what the
+        # project *is*, and shouldn't cost every project a re-distillation.
+        "docs_found": docs_found,
         "content_hash": _content_hash(readme, claude_md, doc_titles),
         **_git_facts(path),
     }
@@ -200,7 +211,8 @@ def scan_projects() -> dict:
             # One unreadable checkout must not cost the rest. The row still
             # exists so the caller can see the project and say what went wrong.
             rows.append({"name": entry.name, "path": str(entry), "readme": "",
-                         "claude_md": "", "doc_titles": [], "content_hash": "",
+                         "claude_md": "", "doc_titles": [], "docs_found": 0,
+                         "content_hash": "",
                          "remote": None, "branch": None, "last_commit": None,
                          "commits_30d": None, "dirty": None,
                          "error": f"{type(e).__name__}: {e}"})
@@ -248,7 +260,7 @@ def list_projects() -> dict:
     cached = {p["name"]: p for p in load_registry()}
     return {"projects": [
         {k: v for k, v in _merge(row, cached.get(row["name"], {})).items()
-         if k not in ("topics", "doc_titles", "content_hash", "path")}
+         if k not in ("topics", "doc_titles", "docs_found", "content_hash", "path")}
         for row in scanned["projects"]
     ]}
 
