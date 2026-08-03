@@ -43,6 +43,16 @@ swap: the **chat server** relies on Ollama's tool-calling protocol (`tools` /
 reliably — the scheduled tasks only need plain text completion (or, for
 `strava_download`, no model at all).
 
+**Wren shares that Ollama with other projects, and it serves one request at a
+time.** A long background job therefore starves chat silently — the queued
+request just gets no bytes, which looks exactly like a dead server. Wren probes
+`/api/ps` on a timeout and says which it actually was, and interactive turns
+give up sooner than scheduled tasks do (`WREN_CHAT_MODEL_TIMEOUT`, 120s). The
+separate, nastier case is the MLX runner wedging — healthy HTTP, no generation,
+clears only on a runner kill. How to tell the two apart, and what has already
+been ruled out as a cause, is in
+[docs/ollama-serving.md](docs/ollama-serving.md).
+
 **The backend is swappable too.** All model calls route through one seam
 (`agent/loop.py:_llm_chat`), which defaults to local Ollama but can be pointed at
 a cloud model (Gemini) via `WREN_LLM_BACKEND` — globally, or per-task with

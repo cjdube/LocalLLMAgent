@@ -128,3 +128,6 @@ instead of vanishing.
 - [CLAUDE.md](../CLAUDE.md) — the rules themselves, in short form
 - [docs/llm-backend.md](llm-backend.md) — the backend seam and Gemini's knobs
 - [docs/tool-loading.md](tool-loading.md) — how a tool reaches the model at all
+- [docs/ollama-serving.md](ollama-serving.md) — failure modes of *serving* the
+  model rather than of its output: a shared single-slot Ollama, and a runner
+  that stops generating

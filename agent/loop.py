@@ -75,7 +75,10 @@ def _diagnose_stall(host: str, got_bytes: bool, waited: float) -> str:
 
     Probing /api/ps afterwards separates "down" from the other two, and the
     loaded-model list names what is holding the slot. Best-effort: if the probe
-    itself fails we just report the timeout we already know about."""
+    itself fails we just report the timeout we already know about.
+
+    Telling a busy Ollama from a wedged runner (and what has already been ruled
+    out as a cause) is in docs/ollama-serving.md."""
     waited_s = f"{waited:.0f}s"
     stalled = "mid-reply" if got_bytes else "without producing any output"
     try:
