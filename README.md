@@ -127,8 +127,10 @@ Every system prompt gets two persona layers prepended automatically (via
 
 Both are hand-maintained and deliberately short — every token is paid for on
 every call, scheduled or chat. A third file, **`agent/wren_chat.md`**, holds
-*behavioral* instructions (ask questions when useful, narrate intent before an
-action) that only make sense in an interactive session — it's loaded only by
+*behavioral* instructions (ask questions when useful; call a gated tool in the
+same turn rather than promising to — see
+[docs/model-constraints.md](docs/model-constraints.md)) that only make sense in
+an interactive session — it's loaded only by
 `chat/server.py`, not injected into scheduled tasks, since those are
 explicitly told not to ask questions or wait for confirmation (there's nobody
 to ask at 5am). Since every task and the chat server talk to Ollama through
