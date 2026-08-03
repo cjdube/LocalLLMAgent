@@ -82,6 +82,14 @@ socket probe and a checkout under ~/Projects — so `available` would depend on
 whether the developer happens to have the game's dev server running. Both are
 pinned suite-wide so the answer is the same everywhere.
 
+The project scanner (agent/tools/projects.py) gets the games treatment for the
+games reason: it reads the machine rather than writing it. Unpinned it walks the
+developer's real ~/Projects and shells out to git for every checkout there, so
+assertions would depend on which repos they happen to have cloned. PROJECTS_DIR
+is pinned at an empty tmp dir suite-wide; the registry it feeds
+(config/projects.json, via tasks/project_scan.py) is a store like any other and
+is redirected with the rest.
+
 The cloud LLM backend is a network egress like ntfy: a test that selects
 WREN_LLM_BACKEND=gemini (or forgets to stub it) must never reach Google.
 `agent.backends.gemini._gemini_client` is the single client-construction choke
@@ -113,6 +121,7 @@ from tasks import _common
 from tasks import ai_chat_learnings as _ai_chat_learnings
 from tasks import morning_brief as _morning_brief
 from tasks import opportunity_digest as _opportunity_digest
+from tasks import project_scan as _project_scan
 from tasks import starred_blurbs as _starred_blurbs
 from tasks import starred_installed as _starred_installed
 from tasks import starred_releases as _starred_releases
@@ -248,6 +257,10 @@ def _isolate_remaining_config_stores(tmp_path, monkeypatch):
     # missed per-test stub lands fixture escalation rows in the real store, never
     # config/escalations.json. See docs/frontier-escalation.md.
     monkeypatch.setattr(_escalations, "_STORE_PATH", tmp_path / "escalations.json")
+    # The local project registry. project_scan.load_projects() resolves this at
+    # call time, so this one redirect covers both the task that writes it and
+    # daily_synthesis, which reads it to build project anchors.
+    monkeypatch.setattr(_project_scan, "PROJECTS_PATH", tmp_path / "projects.json")
     # wiki.py resolves this env on every _vault() call. the user's real vault is a
     # readable path on this machine, so without the redirect a wiki test that
     # forgets to stub reads his actual notes into a fixture assertion.
@@ -330,3 +343,16 @@ def _isolate_games(tmp_path, monkeypatch):
     # than protecting production state.
     monkeypatch.setattr(_games, "_service_up", lambda port: False)
     monkeypatch.setenv("WEIGH_ANCHOR_DIR", str(tmp_path / "weigh-anchor"))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_projects_dir(tmp_path, monkeypatch):
+    """Pin the project scanner at an empty tmp dir, for the same reason the games
+    registry above is stubbed: agent/tools/projects.py *reads the machine*. Left
+    alone it walks the developer's real ~/Projects, so a test's result would
+    depend on which checkouts they happen to have — and it would shell out to git
+    a few dozen times per test while doing it. Nothing here writes, so this is
+    about determinism, not protecting production state. _projects_dir() reads the
+    env on every call, so the env var is enough; test_projects.py points it at
+    its own fixture tree per-test."""
+    monkeypatch.setenv("PROJECTS_DIR", str(tmp_path / "projects_dir"))

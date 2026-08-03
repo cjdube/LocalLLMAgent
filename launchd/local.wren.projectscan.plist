@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.wren.projectscan</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__WREN_ROOT__/.venv/bin/python</string>
+        <string>-m</string>
+        <string>tasks.project_scan</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__WREN_ROOT__</string>
+
+    <!-- After dailychromelearnings (5:15) and before dailysynthesis (5:45), so
+         the project anchors are current when synthesis builds its shortlist. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>5</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>__WREN_ROOT__/logs/project_scan.launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>__WREN_ROOT__/logs/project_scan.launchd.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

@@ -198,3 +198,82 @@ def test_truncation_without_a_logger_does_not_raise(tmp_path, monkeypatch):
 
     # The prompt build must never break on a logger-less call (the CLI path).
     assert "aaa-lens" in wiki.render_lenses_index()
+
+
+# --- project pages ----------------------------------------------------------
+# The marker exists because page names and directory names routinely disagree:
+# the page for the LocalLLMAgent checkout is `wren`, which no slug rule reaches.
+
+def _add_project(root, name, repo="cjdube/Thing", path="Thing",
+                 summary="A thing he built."):
+    (root / "wiki" / f"{name}.md").write_text(
+        f"---\nproject: true\nrepo: {repo}\npath: {path}\n---\n\n"
+        f"# {name}\n\n**Summary**: {summary}\n\nWhy it was built this way."
+    )
+
+
+def test_list_projects_only_returns_marked_pages(tmp_path, monkeypatch):
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)  # speakers-bureau has no frontmatter — not a project
+    _add_project(tmp_path, "wren", repo="cjdube/LocalLLMAgent", path="LocalLLMAgent")
+
+    assert wiki.list_projects()["projects"] == [
+        {"name": "wren", "repo": "cjdube/LocalLLMAgent", "path": "LocalLLMAgent",
+         "summary": "A thing he built."}
+    ]
+
+
+def test_a_lens_is_not_a_project(tmp_path, monkeypatch):
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    _add_lens(tmp_path, "product-principles")
+
+    assert wiki.list_projects()["projects"] == []
+    assert [lens["name"] for lens in wiki.list_lenses()["lenses"]] == ["product-principles"]
+
+
+def test_project_page_without_a_path_is_still_listed(tmp_path, monkeypatch):
+    # It just can't be joined to a checkout — the caller reports that rather
+    # than guessing which directory was meant.
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    (tmp_path / "wiki" / "orphan.md").write_text(
+        "---\nproject: true\n---\n\n# Orphan\n\n**Summary**: No path given.")
+
+    assert wiki.list_projects()["projects"] == [
+        {"name": "orphan", "repo": "", "path": "", "summary": "No path given."}]
+
+
+def test_list_projects_degrades_to_empty_without_a_vault(tmp_path, monkeypatch):
+    # The merge is optional; a misconfigured vault must cost it, not the run.
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path / "gone"))
+    assert wiki.list_projects() == {"projects": []}
+
+
+def test_an_empty_repo_does_not_capture_the_next_line(tmp_path, monkeypatch):
+    # `\s*` around an empty value eats the newline and swallows whatever follows.
+    # On the real vault this made screenwatch's repo come back as
+    # "path: screenwatch-kit", which would have silently mis-joined the page.
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    _add_project(tmp_path, "screenwatch", repo="", path="screenwatch-kit")
+
+    project = wiki.list_projects()["projects"][0]
+    assert project["repo"] == ""
+    assert project["path"] == "screenwatch-kit"
+
+
+def test_an_empty_description_does_not_capture_the_next_line(tmp_path, monkeypatch):
+    # Same `\s`-crosses-the-newline bug as the empty-repo case above, on the
+    # older lens regex. A blank description made the FOLLOWING frontmatter key
+    # the lens's description — and render_lenses_index puts that straight into
+    # the chat system prompt, spending its char budget on "tone: blunt".
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    (tmp_path / "wiki" / "product-principles.md").write_text(
+        "---\nlens: true\ndescription:\ntone: blunt\n---\n\n# Product Principles")
+
+    assert wiki.list_lenses()["lenses"] == [
+        {"name": "product-principles", "description": ""}]
+    # A lens with no usable description still renders — as its bare name.
+    assert "- product-principles\n" in wiki.render_lenses_index() + "\n"

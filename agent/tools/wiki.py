@@ -61,8 +61,27 @@ MAX_INDEX_CHARS = 600
 # without pulling whole bodies for all of them every turn.
 _HEAD_CHARS = 2048
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
-_LENS_RE = re.compile(r"^\s*lens:\s*true\s*$", re.IGNORECASE | re.MULTILINE)
-_DESC_RE = re.compile(r"^\s*description:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
+
+# Every pattern below matches horizontal whitespace only ([ \t]), never `\s`.
+# `\s` matches newlines, so around an EMPTY value it eats the line break and the
+# capture group takes the next frontmatter line instead. `repo:` on the real
+# vault came back as "path: screenwatch-kit" that way, and a lens whose author
+# leaves `description:` blank would have had the following key injected into the
+# chat system prompt as its description. An empty value is a normal thing to
+# write, so the captures are `(.*?)` — an absent key and a blank one both mean
+# "no value", and the callers already treat them the same.
+_LENS_RE = re.compile(r"^[ \t]*lens:[ \t]*true[ \t]*$", re.IGNORECASE | re.MULTILINE)
+_DESC_RE = re.compile(r"^[ \t]*description:[ \t]*(.*?)[ \t]*$", re.IGNORECASE | re.MULTILINE)
+
+# A page about one of the user's own projects opts in the same way a lens does,
+# with `project: true` plus the checkout it describes. The marker exists because
+# the page name and the directory name routinely disagree and no amount of slug
+# matching can bridge it: the page for the LocalLLMAgent checkout is `wren.md`,
+# and `sort-of-card-game` has to be told apart from `umbrella-card-game`. `path`
+# is what tasks/daily_synthesis.py joins on; `repo` is recorded for readers.
+_PROJECT_RE = re.compile(r"^[ \t]*project:[ \t]*true[ \t]*$", re.IGNORECASE | re.MULTILINE)
+_REPO_RE = re.compile(r"^[ \t]*repo:[ \t]*(.*?)[ \t]*$", re.IGNORECASE | re.MULTILINE)
+_PATH_RE = re.compile(r"^[ \t]*path:[ \t]*(.*?)[ \t]*$", re.IGNORECASE | re.MULTILINE)
 
 # ObsidianWikiAgent gives every concept page a one-line `**Summary**:` under its
 # title — all 203 pages had one when this was added. It's the cheapest description
@@ -153,6 +172,40 @@ def _list_lenses(vault: Path) -> list:
     return lenses
 
 
+def _project_meta(head: str) -> dict | None:
+    """If `head` (a page's leading bytes) declares `project: true` in its
+    frontmatter, return {"repo": ..., "path": ...}; else None. Mirrors
+    _lens_meta. A page may declare the marker without a `path` — it's still a
+    project page, it just can't be joined to a checkout, which the caller
+    reports rather than guessing at."""
+    m = _FRONTMATTER_RE.search(head)
+    if not m or not _PROJECT_RE.search(m.group(1)):
+        return None
+    repo = _REPO_RE.search(m.group(1))
+    path = _PATH_RE.search(m.group(1))
+    return {"repo": repo.group(1).strip() if repo else "",
+            "path": path.group(1).strip() if path else ""}
+
+
+def _list_projects(vault: Path) -> list:
+    """Every wiki page marked `project: true`, as {name, repo, path, summary}
+    rows. Head-reads each page to classify it, like _list_lenses, so scanning
+    the whole vault stays cheap."""
+    projects = []
+    for name in _list_wiki_pages(vault)["pages"]:
+        try:
+            head = (vault / "wiki" / name).read_text(encoding="utf-8")[:_HEAD_CHARS]
+        except OSError:
+            continue
+        meta = _project_meta(head)
+        if meta is None:
+            continue
+        summary = _SUMMARY_RE.search(head)
+        projects.append({"name": name[:-3], "repo": meta["repo"], "path": meta["path"],
+                         "summary": summary.group(1) if summary else ""})
+    return projects
+
+
 def _page_summaries(vault: Path) -> list:
     """Every wiki page as {name, summary}, the summary being its own `**Summary**:`
     line ("" if it somehow lacks one). Head-reads each page like _list_lenses, so
@@ -194,6 +247,19 @@ def page_summaries() -> dict:
     only ever find lexical identity)."""
     vault, err = _require_vault()
     return err or {"pages": _page_summaries(vault)}
+
+
+def list_projects() -> dict:
+    """The vault's project pages — those marked `project: true`. Not a
+    registered tool: it exists for tasks/daily_synthesis.py, which merges a
+    project's wiki page (the decisions and rationale) with the same project's
+    scanned checkout (the current facts) into one anchor. Degrades to no
+    projects if the vault is missing, so a misconfigured WIKI_VAULT_PATH costs
+    the merge, not the run."""
+    vault, err = _require_vault()
+    if err:
+        return {"projects": []}
+    return {"projects": _list_projects(vault)}
 
 
 def list_lenses() -> dict:

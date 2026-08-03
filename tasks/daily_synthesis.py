@@ -45,7 +45,7 @@ from agent.tools.chrome_history import fetch_chrome_history
 from agent.tools.learnings_file import read_entry
 from agent.tools.notify import notify
 from agent.tools.opportunities import get_watchlist, list_opportunities
-from agent.tools.wiki import page_summaries
+from agent.tools.wiki import list_projects, page_summaries
 from agent.tools.youtube import fetch_liked_videos
 from tasks._common import notify_failure, setup_logger
 from tasks._learnings_common import (
@@ -54,6 +54,7 @@ from tasks._learnings_common import (
     persist_or_email,
     prior_day,
 )
+from tasks.project_scan import load_projects
 
 # Where the nudge archive lands: a vault folder ObsidianWikiAgent does not walk
 # (it ingests raw/ only), so Obsidian can still browse the history without the
@@ -72,6 +73,17 @@ MAX_NUDGES = 3
 # A wiki page's summary as shown to the model. One line in the vault, so this rarely
 # binds; it's here so one long summary can't dominate the shortlist's size.
 MAX_ANCHOR_SUMMARY_CHARS = 200
+
+# Hard ceiling on a project anchor's token set. A project has far more text
+# available than a wiki page — a README, a CLAUDE.md, a docs tree — and feeding
+# that in raw would rebuild the bug _ai_chat_signals documents below: a token set
+# that large overlaps everything and outranks every real pair. tasks/project_scan.py
+# already distils each project to a summary and ~15 topics for this reason; this is
+# the belt-and-braces bound, so a project anchor stays the same size class as a wiki
+# page's (~20-25 tokens) no matter what the model returns. Tokens are taken in
+# priority order — name, then summary, then topics — so the truncation drops the
+# tail of the topic list rather than the project's own name.
+MAX_PROJECT_ANCHOR_TOKENS = 40
 
 # Bullets taken from the AI-chat log. Bounds the prompt on a heavy chat day; the
 # file's bullets are ordered by session, so this keeps the earliest ones.
@@ -277,16 +289,88 @@ def gather_signals(start, end, day, logger) -> list:
     return signals
 
 
+def _project_tokens(name: str, summary: str, topics: list) -> set:
+    """A project anchor's token set, capped at MAX_PROJECT_ANCHOR_TOKENS and
+    filled in priority order — the project's own name first, then what it is,
+    then what it's about. Truncation therefore costs the tail of the topic list,
+    never the name."""
+    tokens = []
+    for text in (name.replace("-", " "), summary, " ".join(topics)):
+        for token in sorted(_tokenize(text)):
+            if token not in tokens:
+                tokens.append(token)
+                if len(tokens) >= MAX_PROJECT_ANCHOR_TOKENS:
+                    return set(tokens)
+    return set(tokens)
+
+
+def gather_project_anchors(logger) -> tuple[list, set]:
+    """The user's own checkouts as anchors, plus the set of wiki page names those
+    anchors absorbed. Returns ([], set()) on any failure — a project scan that
+    hasn't run costs the merge, not the run.
+
+    This is the one anchor source that knows what he is *building* rather than
+    what he has written down, so it reaches connections no wiki page can: an
+    article on SSE reconnection has nothing to say to a page about note-taking,
+    but plenty to say to the repo that just moved to server-sent events.
+
+    Where a project also has a wiki page (matched on the page's `path:`
+    frontmatter — see agent/tools/wiki.py, and note the page for LocalLLMAgent is
+    called `wren`, which no slug rule could ever match), the two are merged into
+    ONE anchor and the page name is returned so the wiki loop can skip it.
+    Without that, the same project stands as two separate anchors, and since
+    _one_per_side dedupes by side identity it would happily place both — showing
+    the model one story twice, the exact thing that function exists to prevent."""
+    try:
+        projects = load_projects()
+    except Exception as e:
+        logger.warning(f"project anchors unavailable: {e}")
+        return [], set()
+    if not projects:
+        return [], set()
+
+    try:
+        pages = {p["path"]: p for p in list_projects()["projects"] if p.get("path")}
+    except Exception as e:
+        # The registry is still usable without the vault; only the merge is lost.
+        logger.warning(f"wiki project pages unavailable, not merging: {e}")
+        pages = {}
+
+    anchors, absorbed = [], set()
+    for project in projects:
+        name = project.get("name") or ""
+        topics = project.get("topics") or []
+        page = pages.get(name)
+        # The wiki page's summary is preferred: it carries the decisions and
+        # rationale the repo's own README leaves out, which is the half of a
+        # project the model can actually say something interesting about.
+        summary = (page.get("summary") if page else "") or project.get("summary") or ""
+        if not summary and not topics:
+            # Nothing but a name. Anchoring on that can only match its own
+            # spelling — the tautology the docstring above warns about — so skip
+            # it. project_scan already logged which projects these are and why.
+            continue
+        if page:
+            absorbed.add(page["name"])
+        anchors.append({"kind": "project you're building", "label": name,
+                        "summary": summary[:MAX_ANCHOR_SUMMARY_CHARS],
+                        "tokens": _project_tokens(name, summary, topics)})
+
+    logger.info(f"{len(anchors)} project anchor(s), {len(absorbed)} merged with a wiki page")
+    return anchors, absorbed
+
+
 def gather_anchors(logger) -> list:
-    """The user's existing world as {label, summary, tokens} rows: wiki pages and the
-    companies he watches or has marked interesting. Same per-source guard.
+    """The user's existing world as {label, summary, tokens} rows: his own projects,
+    wiki pages, and the companies he watches or has marked interesting. Same
+    per-source guard.
 
     A page contributes its `**Summary**:` line as well as its name. Matching on the
     name alone can only find lexical identity — "the thing you looked at is spelled
     like a page you have" — which is tautological by construction and exactly the
     reason the early nudges only ever restated the day back at him. The summary is
     what lets "columnar store" reach a page called `duckdb-analytics`."""
-    anchors = []
+    anchors, absorbed = gather_project_anchors(logger)
 
     try:
         result = page_summaries()
@@ -294,7 +378,9 @@ def gather_anchors(logger) -> list:
             logger.warning(f"wiki anchors unavailable: {result['error']}")
         for page in result.get("pages", []):
             name, summary = page["name"], page.get("summary") or ""
-            if _DATED_PAGE_RE.search(name):
+            # `absorbed`: this page is already standing as part of a project
+            # anchor. See gather_project_anchors.
+            if _DATED_PAGE_RE.search(name) or name in absorbed:
                 continue
             anchors.append({"kind": "wiki page", "label": name, "summary": summary,
                             "tokens": _tokenize(f"{name.replace('-', ' ')} {summary}")})

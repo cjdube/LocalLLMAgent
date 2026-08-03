@@ -20,6 +20,7 @@ config/starred_installed.json
 config/starred_installed_versions.json
 config/escalations.json
 config/ai_chat_learnings_state.json
+config/projects.json
 config/*.lock
 config/*.corrupt-*
 logs/*.log

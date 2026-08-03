@@ -529,3 +529,145 @@ def test_company_anchor_matches_browsing(stub_sources, monkeypatch):
 
     assert ds.main() == 0
     assert len(stub_sources["pushes"]) == 1
+
+
+# --------------------------------------------------------------------------- #
+# project anchors — what he's building, merged with what he's written about it
+# --------------------------------------------------------------------------- #
+
+@pytest.fixture
+def stub_projects(monkeypatch):
+    """Default both halves of the project merge to empty. Tests override each."""
+    monkeypatch.setattr(ds, "load_projects", lambda: [])
+    monkeypatch.setattr(ds, "list_projects", lambda: {"projects": []})
+
+
+def _project(name, summary="A cooperative word game.", topics=None):
+    return {"name": name, "summary": summary,
+            "topics": topics if topics is not None else ["sse", "lobby", "wordplay"]}
+
+
+def test_project_anchors_carry_the_summary_and_topics(stub_anchors, stub_projects,
+                                                      monkeypatch):
+    # The whole point: an article on server-sent events has nothing to say to a
+    # note about note-taking, but plenty to say to the repo that just moved to SSE.
+    monkeypatch.setattr(ds, "page_summaries", lambda: {"pages": []})
+    monkeypatch.setattr(ds, "load_projects", lambda: [_project("WeighAnchor")])
+
+    anchor = ds.gather_anchors(_LOG)[0]
+    assert anchor["kind"] == "project you're building"
+    assert anchor["label"] == "WeighAnchor"
+    assert {"cooperative", "word", "game"} <= anchor["tokens"]  # from the summary
+    assert {"lobby", "wordplay"} <= anchor["tokens"]            # from the topics
+
+
+def test_a_project_with_a_wiki_page_becomes_one_anchor_not_two(stub_anchors,
+                                                               stub_projects,
+                                                               monkeypatch):
+    # _one_per_side dedupes by side identity, so two anchors for one project both
+    # place and the model is shown the same story twice — the exact thing that
+    # function exists to prevent.
+    monkeypatch.setattr(ds, "page_summaries", lambda: {"pages": [
+        {"name": "weigh-anchor", "summary": "Moved to server-side authority."},
+        {"name": "duckdb-analytics", "summary": "A columnar store."},
+    ]})
+    monkeypatch.setattr(ds, "load_projects", lambda: [_project("WeighAnchor")])
+    monkeypatch.setattr(ds, "list_projects", lambda: {"projects": [
+        {"name": "weigh-anchor", "repo": "cjdube/WeighAnchor",
+         "path": "WeighAnchor", "summary": "Moved to server-side authority."}]})
+
+    anchors = ds.gather_anchors(_LOG)
+    assert [a["label"] for a in anchors] == ["WeighAnchor", "duckdb-analytics"]
+    # The wiki page's summary wins: it carries the decisions the README omits.
+    assert anchors[0]["summary"] == "Moved to server-side authority."
+    assert "authority" in anchors[0]["tokens"]
+
+
+def test_the_join_is_on_frontmatter_not_the_slug(stub_anchors, stub_projects,
+                                                 monkeypatch):
+    # The page for the LocalLLMAgent checkout is called `wren`. Nothing about
+    # those two strings matches, which is why the marker exists at all.
+    monkeypatch.setattr(ds, "page_summaries", lambda: {"pages": [
+        {"name": "wren", "summary": "A local-first personal agent."}]})
+    monkeypatch.setattr(ds, "load_projects",
+                        lambda: [_project("LocalLLMAgent", summary="An agent.")])
+    monkeypatch.setattr(ds, "list_projects", lambda: {"projects": [
+        {"name": "wren", "repo": "cjdube/LocalLLMAgent", "path": "LocalLLMAgent",
+         "summary": "A local-first personal agent."}]})
+
+    anchors = ds.gather_anchors(_LOG)
+    assert [a["label"] for a in anchors] == ["LocalLLMAgent"]
+    assert anchors[0]["summary"] == "A local-first personal agent."
+
+
+def test_an_unmatched_wiki_project_page_stays_a_wiki_anchor(stub_anchors,
+                                                            stub_projects,
+                                                            monkeypatch):
+    # A page marked as a project whose checkout is gone (or never scanned) must
+    # not silently disappear from the corpus.
+    monkeypatch.setattr(ds, "page_summaries", lambda: {"pages": [
+        {"name": "agentos", "summary": "Pluggable agent configs."}]})
+    monkeypatch.setattr(ds, "load_projects", lambda: [_project("WeighAnchor")])
+    monkeypatch.setattr(ds, "list_projects", lambda: {"projects": [
+        {"name": "agentos", "repo": "cjdube/AgentOS", "path": "AgentOS",
+         "summary": "Pluggable agent configs."}]})
+
+    assert {a["label"] for a in ds.gather_anchors(_LOG)} == {"WeighAnchor", "agentos"}
+
+
+def test_a_project_with_nothing_but_a_name_is_skipped(stub_anchors, stub_projects,
+                                                      monkeypatch):
+    # Anchoring on a bare name can only match its own spelling — the tautology
+    # gather_anchors' docstring warns about. project_scan already logged why
+    # these have no summary (no README in the repo).
+    monkeypatch.setattr(ds, "load_projects",
+                        lambda: [_project("my-agent-hq", summary="", topics=[])])
+
+    assert ds.gather_anchors(_LOG) == []
+
+
+def test_project_anchor_tokens_are_capped(stub_anchors, stub_projects, monkeypatch):
+    # The bug _ai_chat_signals documents: a token set large enough to overlap
+    # everything outranks every real pair. A project has a README, a CLAUDE.md
+    # and a docs tree behind it, so the bound is enforced, not assumed.
+    monkeypatch.setattr(ds, "load_projects", lambda: [_project(
+        "Huge",
+        summary=" ".join(f"summaryword{i}" for i in range(200)),
+        topics=[f"topicword{i}" for i in range(200)])])
+
+    anchor = ds.gather_anchors(_LOG)[0]
+    assert len(anchor["tokens"]) == ds.MAX_PROJECT_ANCHOR_TOKENS
+
+
+def test_project_tokens_drop_the_topic_tail_not_the_name(monkeypatch):
+    tokens = ds._project_tokens("weigh-anchor", "A cooperative word game.",
+                                [f"topicword{i}" for i in range(200)])
+    assert len(tokens) == ds.MAX_PROJECT_ANCHOR_TOKENS
+    # Name and summary survive; the topic list is what gets truncated.
+    assert {"weigh", "anchor", "cooperative", "word", "game"} <= tokens
+
+
+def test_a_missing_project_registry_costs_only_the_project_anchors(stub_anchors,
+                                                                   stub_projects,
+                                                                   monkeypatch, caplog):
+    monkeypatch.setattr(ds, "page_summaries", lambda: {"pages": [
+        {"name": "duckdb-analytics", "summary": "A columnar store."}]})
+    monkeypatch.setattr(ds, "load_projects",
+                        lambda: (_ for _ in ()).throw(OSError("store unreadable")))
+
+    with caplog.at_level(logging.WARNING):
+        assert [a["label"] for a in ds.gather_anchors(_LOG)] == ["duckdb-analytics"]
+    assert "store unreadable" in caplog.text
+
+
+def test_an_unreadable_vault_still_leaves_the_project_anchors(stub_anchors,
+                                                              stub_projects,
+                                                              monkeypatch, caplog):
+    monkeypatch.setattr(ds, "load_projects", lambda: [_project("WeighAnchor")])
+    monkeypatch.setattr(ds, "list_projects",
+                        lambda: (_ for _ in ()).throw(OSError("vault gone")))
+
+    with caplog.at_level(logging.WARNING):
+        anchors = ds.gather_anchors(_LOG)
+    assert [a["label"] for a in anchors] == ["WeighAnchor"]
+    assert "not merging" in caplog.text
