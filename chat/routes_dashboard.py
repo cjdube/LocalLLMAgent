@@ -53,6 +53,7 @@ def api_schedules():
             "display_name": task["display_name"],
             "human_schedule": task["human_schedule"],
             "is_daemon": task["is_daemon"],
+            "external": task["external"],
             "next_run": next_run(task["schedule"]),
             "last_run": _run_summary(runs[0] if runs else None),
             "recent_statuses": [r["status"] for r in runs],

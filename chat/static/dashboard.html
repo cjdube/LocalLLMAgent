@@ -341,12 +341,17 @@ function taskRow(task) {
     actionsTd.appendChild(el("span", "muted", "—"));
   } else {
     const actions = el("div", "actions");
-    const runBtn = el("button", "btn primary", "Run now");
-    runBtn.title = "Runs the real task now, including its side effects (emails / calendar writes).";
-    runBtn.addEventListener("click", (e) => { e.stopPropagation(); runNow(task, runBtn); });
+    // External tasks (another repo's launchd jobs) are report-only: the wiki
+    // ingest can run for hours on the single Ollama slot, and starting it from
+    // a phone would starve chat for the duration.
+    if (!task.external) {
+      const runBtn = el("button", "btn primary", "Run now");
+      runBtn.title = "Runs the real task now, including its side effects (emails / calendar writes).";
+      runBtn.addEventListener("click", (e) => { e.stopPropagation(); runNow(task, runBtn); });
+      actions.appendChild(runBtn);
+    }
     const runs = el("button", "btn", "See runs");
     runs.addEventListener("click", (e) => { e.stopPropagation(); openRuns(task.key); });
-    actions.appendChild(runBtn);
     actions.appendChild(runs);
     actionsTd.appendChild(actions);
     tr.addEventListener("click", () => openRuns(task.key));

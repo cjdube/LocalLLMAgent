@@ -386,7 +386,10 @@ It's a single scrollable page (no tabs). Chat lives at `/`, not here:
   from `launchd/*.plist` and run history is parsed from `logs/<task>.log`
   (rotated backups included) using the loggers' own `Starting … run` /
   `… run complete` / `… run failed` markers. The always-on chat server is a
-  muted last row (no Run now).
+  muted last row (no Run now). The table also carries the three
+  ObsidianWikiAgent jobs that maintain the learnings wiki — they run from a
+  sibling repo, so they report here but have no Run now button. See
+  [docs/external-tasks.md](docs/external-tasks.md).
 - **Run detail** — clicking a row (or **See runs**) opens a right-side
   slide-over with the task's run history; click a run for its tool-call timeline
   (`name → args → result`) and the final response or the error/traceback.

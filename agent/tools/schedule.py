@@ -11,6 +11,10 @@ Read-only. The schedule/run data is parsed from launchd/*.plist and logs/*.log
 by chat.insights (imported lazily so the tool layer doesn't pull in the
 dashboard data layer at import time). Degrades to an empty list on any error.
 
+"Wren's own" includes the sibling repos named by WREN_EXTERNAL_TASK_ROOTS —
+ObsidianWikiAgent's ingest/lint/snapshot jobs are the other half of the
+learnings pipeline these tasks feed (docs/external-tasks.md).
+
 Usage:
     python -m agent.tools.schedule
 """
@@ -32,7 +36,8 @@ LIST_SCHEDULED_TASKS_TOOL_SCHEMA = {
         "name": "list_scheduled_tasks",
         "description": "List your OWN scheduled tasks — the automated jobs you run on a timer "
         "(e.g. the morning brief, the daily Chrome/YouTube learnings, the weekly opportunity "
-        "digest and starred-repo blurbs). Each entry gives its schedule, next run time, and "
+        "digest and starred-repo blurbs, and the jobs that file new notes into your learnings "
+        "wiki). Each entry gives its schedule, next run time, and "
         f"the status of its last run. Use this when {_NAME} asks what tasks you run, what's "
         f"scheduled, or when something next runs. This is about your own schedule, NOT {_NAME}'s "
         "Google Tasks (get_tasks) or their reminders (list_reminders).",

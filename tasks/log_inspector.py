@@ -1,5 +1,9 @@
-"""Inspect Wren's own operational logs and push one rollup when something's wrong.
+"""Inspect Wren's operational logs and push one rollup when something's wrong.
 Non-interactive — run by launchd.
+
+"Wren's logs" includes the sibling repos named by WREN_EXTERNAL_TASK_ROOTS (see
+docs/external-tasks.md): their jobs alert on their own failures, but nothing
+noticed a job launchd never fired at all, which is exactly Signal B below.
 
 Every task and the chat server already log their failures, and agent/loop.py
 already logs the small model's strain signals (a prompt that overflowed num_ctx
@@ -36,7 +40,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent.tools.notify import notify, ntfy_health
-from chat.insights import _LINE_RE, _parse_ts, _read_lines, discover_tasks, parse_runs
+from chat.insights import (
+    _LINE_RE,
+    _external_roots,
+    _parse_ts,
+    _read_lines,
+    discover_tasks,
+    parse_runs,
+)
 from tasks import _common
 from tasks._common import notify_failure, setup_logger
 
@@ -113,11 +124,20 @@ def _classify(level: str, msg: str) -> tuple[str, str | None]:
     return "warn", None
 
 
+def _scan_log_dirs() -> list[Path]:
+    """Wren's logs/ plus the logs/ of every external task root, so a sibling
+    repo's scheduled jobs report into the same rollup. Signal B needs no
+    equivalent — _task_outcomes goes through discover_tasks(), which is already
+    federated."""
+    return [_common.LOGS_DIR] + [root / "logs" for _, root in _external_roots()]
+
+
 def _scan_lines(now: datetime) -> list[dict]:
     """Signal A: every reportable log line in the window, oldest first."""
     cutoff = now - timedelta(hours=WINDOW_HOURS)
     findings = []
-    for path in sorted(_common.LOGS_DIR.glob("*.log")):
+    paths = [p for d in _scan_log_dirs() for p in sorted(d.glob("*.log"))]
+    for path in paths:
         if _skip_log(path.name):
             continue
         for line in _read_lines(path):

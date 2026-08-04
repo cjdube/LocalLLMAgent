@@ -13,11 +13,15 @@ Three sources:
   - tool schemas     -> Wren's capabilities (describe_tools, given the lists
                         server.py already assembles)
 
+Task discovery also reaches into sibling repos named by WREN_EXTERNAL_TASK_ROOTS
+— see _external_roots() and docs/external-tasks.md.
+
 system_map() additionally pulls the memory store, wiki page names, and saved
 skills (via their agent.tools modules) to feed the /map visualization.
 """
 
 import json
+import logging
 import os
 import plistlib
 import re
@@ -46,16 +50,61 @@ _TS_FMT = "%Y-%m-%d %H:%M:%S,%f"
 _WEEKDAYS = {0: "Sunday", 1: "Monday", 2: "Tuesday", 3: "Wednesday",
              4: "Thursday", 5: "Friday", 6: "Saturday", 7: "Sunday"}
 
+# Sibling repos whose launchd jobs the dashboard reports on. Value is a
+# comma-separated list of `name=path` entries, e.g.
+#   WREN_EXTERNAL_TASK_ROOTS=wiki=~/Projects/ObsidianWikiAgent
+EXTERNAL_ROOTS_ENV = "WREN_EXTERNAL_TASK_ROOTS"
+
+# Optional key in an external plist's EnvironmentVariables naming the structured
+# log to read that job's run history from. Needed because a repo's log filenames
+# need not match its plist's StandardOutPath basename — ObsidianWikiAgent's
+# `learnings-ingest` job writes `wiki_ingest.llm-wiki-learnings.log` — and
+# hard-coding a sibling's naming rule here would be worse than one explicit key.
+RUN_LOG_ENV = "WREN_RUN_LOG"
+
 
 # --------------------------------------------------------------------------- #
 # Task discovery (schedules)
 # --------------------------------------------------------------------------- #
 
+def _external_roots() -> list[tuple[str, Path]]:
+    """[(short_name, repo_root)] parsed from WREN_EXTERNAL_TASK_ROOTS.
+
+    Read at call time, not import, so the value a test sets is the value used.
+    A malformed or nonexistent entry is skipped rather than raised: a sibling
+    repo that has been moved or unmounted means "no tasks from there", not a
+    500 on every dashboard poll.
+    """
+    roots = []
+    for entry in os.getenv(EXTERNAL_ROOTS_ENV, "").split(","):
+        name, sep, path = entry.partition("=")
+        name, path = name.strip(), path.strip()
+        if not sep or not name or not path:
+            continue
+        root = Path(path).expanduser()
+        if root.is_dir():
+            roots.append((name, root))
+    return roots
+
+
+def _task_sources() -> list[tuple[str | None, Path, Path]]:
+    """[(source, plist_dir, logs_dir)] — Wren's own first, source None.
+
+    Wren's own pair comes from the LAUNCHD_DIR / LOGS_DIR module globals rather
+    than from _ROOT, because tests/conftest.py redirects those to tmp_path.
+    """
+    sources: list[tuple[str | None, Path, Path]] = [(None, LAUNCHD_DIR, LOGS_DIR)]
+    for name, root in _external_roots():
+        sources.append((name, root / "launchd", root / "logs"))
+    return sources
+
 def _prettify(key: str) -> str:
     special = {"wren": "Wren Chat Server"}
     if key in special:
         return special[key]
-    return key.replace("_", " ").title()
+    # Hyphens as well as underscores: Wren's own keys use underscores, but an
+    # external repo's needn't (ObsidianWikiAgent's are `learnings-ingest`).
+    return key.replace("_", " ").replace("-", " ").title()
 
 
 def _log_key_from_stdout(std_out_path: str) -> str:
@@ -75,12 +124,13 @@ _TASKS_CACHE_LOCK = threading.Lock()
 
 def _launchd_signature() -> tuple:
     sig = []
-    for path in sorted(LAUNCHD_DIR.glob("*.plist")):
-        try:
-            st = path.stat()
-        except OSError:
-            continue
-        sig.append((path.name, st.st_mtime_ns))
+    for source, plist_dir, _ in _task_sources():
+        for path in sorted(plist_dir.glob("*.plist")):
+            try:
+                st = path.stat()
+            except OSError:
+                continue
+            sig.append((source, path.name, st.st_mtime_ns))
     return tuple(sig)
 
 
@@ -103,43 +153,68 @@ def discover_tasks() -> list[dict]:
 
 def _discover_tasks_uncached() -> list[dict]:
     tasks = []
-    for plist_path in sorted(LAUNCHD_DIR.glob("*.plist")):
-        with plist_path.open("rb") as fh:
-            data = plistlib.load(fh)
-
-        program_args = data.get("ProgramArguments", [])
-        module = program_args[-1] if program_args else ""
-        std_out = data.get("StandardOutPath", "")
-        key = _log_key_from_stdout(std_out) if std_out else module.split(".")[-1]
-        sci = data.get("StartCalendarInterval")
-        interval = data.get("StartInterval")
-        # Interval pollers (bg_worker, reminder_sweep) are classified as
-        # daemons ON PURPOSE, not by accident: is_daemon is what blocks the
-        # dashboard's "Run now" — a manually spawned poller could race
-        # launchd's copy and pick up the same job twice — and skips run-history
-        # parsing of their poll-shaped logs. Only the label distinguishes them
-        # from the always-on chat server.
-        is_daemon = sci is None or bool(data.get("KeepAlive"))
-        if is_daemon and interval:
-            human = f"Every {interval}s (poll)"
-        elif is_daemon:
-            human = "Always on"
-        else:
-            human = human_schedule(sci)
-
-        tasks.append({
-            "key": key,
-            "display_name": _prettify(key),
-            "label": data.get("Label", ""),
-            "module": module,
-            "schedule": sci,
-            "human_schedule": human,
-            "log_path": str(LOGS_DIR / f"{key}.log"),
-            "is_daemon": is_daemon,
-        })
+    for source, plist_dir, logs_dir in _task_sources():
+        for plist_path in sorted(plist_dir.glob("*.plist")):
+            try:
+                tasks.append(_task_from_plist(plist_path, source, logs_dir))
+            except Exception as e:
+                # One bad plist costs its own row, not the whole dashboard.
+                # External roots aren't ours to keep well-formed, and `--` in an
+                # XML comment is the live example: illegal XML that plutil and
+                # launchd both accept, so the file works everywhere except here.
+                logging.getLogger("wren").warning(
+                    f"skipping unreadable plist {plist_path.name}: {e}")
 
     tasks.sort(key=lambda t: (t["is_daemon"], _sort_time(t["schedule"])))
     return tasks
+
+
+def _task_from_plist(plist_path: Path, source: str | None, logs_dir: Path) -> dict:
+    """One task entry. `source` is None for Wren's own plists, else the short
+    name the external root was configured under."""
+    with plist_path.open("rb") as fh:
+        data = plistlib.load(fh)
+
+    program_args = data.get("ProgramArguments", [])
+    module = program_args[-1] if program_args else ""
+    std_out = data.get("StandardOutPath", "")
+    key = _log_key_from_stdout(std_out) if std_out else module.split(".")[-1]
+    sci = data.get("StartCalendarInterval")
+    interval = data.get("StartInterval")
+    # Interval pollers (bg_worker, reminder_sweep) are classified as
+    # daemons ON PURPOSE, not by accident: is_daemon is what blocks the
+    # dashboard's "Run now" — a manually spawned poller could race
+    # launchd's copy and pick up the same job twice — and skips run-history
+    # parsing of their poll-shaped logs. Only the label distinguishes them
+    # from the always-on chat server.
+    is_daemon = sci is None or bool(data.get("KeepAlive"))
+    if is_daemon and interval:
+        human = f"Every {interval}s (poll)"
+    elif is_daemon:
+        human = "Always on"
+    else:
+        human = human_schedule(sci)
+
+    # An external repo may name its structured log anything; WREN_RUN_LOG in the
+    # plist's EnvironmentVariables says which file to read. Wren's own plists
+    # don't set it and keep the <key>.log convention.
+    run_log = (data.get("EnvironmentVariables") or {}).get(RUN_LOG_ENV)
+    log_path = Path(run_log).expanduser() if run_log else logs_dir / f"{key}.log"
+
+    return {
+        # Prefixed so two repos can't collide on a key, and because the key is
+        # a URL segment in /api/runs/<task_key>.
+        "key": key if source is None else f"{source}-{key}",
+        "display_name": _prettify(key) if source is None
+                        else f"{source.title()}: {_prettify(key)}",
+        "label": data.get("Label", ""),
+        "module": module,
+        "schedule": sci,
+        "human_schedule": human,
+        "log_path": str(log_path),
+        "is_daemon": is_daemon,
+        "external": source is not None,
+    }
 
 
 def _sort_time(sci: dict | None) -> tuple:
@@ -557,6 +632,13 @@ ROUTINE_USES = {
     "starred_installed": ["ntfy"],  # runs local version commands + reads local config; no external source
     "project_scan": ["projects", "ntfy"],  # reads local checkouts under PROJECTS_DIR; no external source
     "log_inspector": ["gmail", "ntfy"],  # rollup push via ntfy, email fallback on ntfy outage
+    # Federated from ObsidianWikiAgent (WREN_EXTERNAL_TASK_ROOTS). These are the
+    # other half of the learnings pipeline: the daily tasks above write into the
+    # vault's raw/, and these file it into wiki/ — which is what agent/tools/wiki.py
+    # and daily_synthesis then read.
+    "wiki-learnings-ingest": ["wiki", "ntfy"],
+    "wiki-learnings-lint": ["wiki"],  # report-only; no push, no vault writes without --fix
+    "wiki-learnings-snapshot": ["wiki", "github"],
 }
 
 # Keep the payload bounded: memory texts are truncated for the map (the detail
@@ -653,6 +735,12 @@ class RunManager:
         task = task_by_key(task_key)
         if task is None:
             return {"ok": False, "error": "unknown task"}
+        # Checked before is_daemon: an external task isn't ours to spawn (the
+        # `-m module` command below is a Wren convention), and the one we'd most
+        # want to trigger — the wiki ingest — routinely runs one to three hours
+        # holding the only Ollama slot, starving chat for the duration.
+        if task["external"]:
+            return {"ok": False, "error": "runs from another repo — start it with launchctl"}
         if task["is_daemon"]:
             return {"ok": False, "error": "the chat server is always-on and can't be run on demand"}
 

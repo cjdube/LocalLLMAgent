@@ -180,6 +180,16 @@ def _isolate_task_logs(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_external_task_roots(monkeypatch):
+    # discover_tasks() reaches into whatever sibling repos this env var names,
+    # reading their launchd/ and logs/. Unset, so the suite never depends on
+    # which checkouts happen to exist on this machine and never parses a real
+    # repo's production logs into a test assertion. Reads are at call time, so
+    # a test that wants external roots sets it back itself.
+    monkeypatch.delenv("WREN_EXTERNAL_TASK_ROOTS", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_learnings_dir(tmp_path, monkeypatch):
     # learnings_file._learnings_dir() reads this env at call time.
     monkeypatch.setenv("LEARNINGS_DIR", str(tmp_path))

@@ -178,6 +178,33 @@ def test_rotated_logs_are_scanned():
         "pre-rotation error", "post-rotation error"]
 
 
+def test_external_root_logs_are_scanned(tmp_path, monkeypatch):
+    """A sibling repo's scheduled jobs report into the same rollup — they alert
+    on their own failures, but nothing else notices a stalled or wedged run."""
+    root = tmp_path / "sibling"
+    (root / "logs").mkdir(parents=True)
+    (root / "logs" / "wiki_ingest.llm-wiki-learnings.log").write_text(
+        _line(NOW - timedelta(hours=1), "ERROR", "Run budget exhausted after 45 min") + "\n")
+    monkeypatch.setenv("WREN_EXTERNAL_TASK_ROOTS", f"wiki={root}")
+
+    (finding,) = log_inspector._scan_lines(NOW)
+    assert finding["msg"] == "Run budget exhausted after 45 min"
+    assert finding["source"] == "wiki_ingest.llm-wiki-learnings"
+
+
+def test_external_launchd_mirror_is_not_double_counted(tmp_path, monkeypatch):
+    """The external repo's setup_logger mirrors to stdout too, so the same line
+    lands in its .launchd.log — _skip_log has to cover both roots."""
+    root = tmp_path / "sibling"
+    (root / "logs").mkdir(parents=True)
+    err = _line(NOW - timedelta(hours=1), "ERROR", "Run budget exhausted") + "\n"
+    (root / "logs" / "wiki_ingest.llm-wiki-learnings.log").write_text(err)
+    (root / "logs" / "learnings-ingest.launchd.log").write_text(err)
+    monkeypatch.setenv("WREN_EXTERNAL_TASK_ROOTS", f"wiki={root}")
+
+    assert len(log_inspector._scan_lines(NOW)) == 1
+
+
 def test_traceback_continuation_does_not_double_count():
     _write_log(
         "wren.log",

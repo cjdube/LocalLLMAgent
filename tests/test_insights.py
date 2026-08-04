@@ -380,6 +380,143 @@ def test_discover_tasks_reuses_cache_and_invalidates(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# External task roots (sibling repos' launchd jobs — docs/external-tasks.md)
+# --------------------------------------------------------------------------- #
+
+def _make_external_root(tmp_path, name="wiki", key="learnings-ingest", run_log=None):
+    """A minimal sibling repo: <root>/launchd/<key>.plist + <root>/logs/."""
+    root = tmp_path / "sibling"
+    (root / "launchd").mkdir(parents=True)
+    (root / "logs").mkdir()
+    data = {
+        "Label": f"com.other.{key}",
+        "ProgramArguments": [str(root / ".venv/bin/python"), str(root / "ingest.py")],
+        "StandardOutPath": str(root / "logs" / f"{key}.launchd.log"),
+        "StartCalendarInterval": {"Hour": 9, "Minute": 0},
+    }
+    if run_log is not None:
+        data["EnvironmentVariables"] = {"WREN_RUN_LOG": str(run_log)}
+    with open(root / "launchd" / f"{key}.plist", "wb") as fh:
+        plistlib.dump(data, fh)
+    return root
+
+
+def test_external_root_tasks_are_discovered_and_prefixed(tmp_path, monkeypatch):
+    root = _make_external_root(tmp_path)
+    monkeypatch.setattr(insights, "LAUNCHD_DIR", tmp_path / "empty")
+    (tmp_path / "empty").mkdir()
+    monkeypatch.setenv("WREN_EXTERNAL_TASK_ROOTS", f"wiki={root}")
+    insights._TASKS_CACHE.clear()
+
+    (task,) = insights.discover_tasks()
+    # Prefixed so two repos can't collide, and because the key is a URL segment.
+    assert task["key"] == "wiki-learnings-ingest"
+    assert task["display_name"] == "Wiki: Learnings Ingest"
+    assert task["external"] is True
+    assert task["human_schedule"] == "Daily 9:00 AM"
+    insights._TASKS_CACHE.clear()
+
+
+def test_external_task_log_path_defaults_to_key(tmp_path, monkeypatch):
+    root = _make_external_root(tmp_path)
+    monkeypatch.setattr(insights, "LAUNCHD_DIR", tmp_path / "empty")
+    (tmp_path / "empty").mkdir()
+    monkeypatch.setenv("WREN_EXTERNAL_TASK_ROOTS", f"wiki={root}")
+    insights._TASKS_CACHE.clear()
+
+    (task,) = insights.discover_tasks()
+    assert task["log_path"] == str(root / "logs" / "learnings-ingest.log")
+    insights._TASKS_CACHE.clear()
+
+
+def test_external_task_run_log_env_overrides_log_path(tmp_path, monkeypatch):
+    # ObsidianWikiAgent's `learnings-ingest` job writes its structured log as
+    # wiki_ingest.<vault>.log, which the plist key can't predict — WREN_RUN_LOG
+    # in the plist is how an external repo says which file to read.
+    root = _make_external_root(tmp_path)
+    actual = root / "logs" / "wiki_ingest.llm-wiki-learnings.log"
+    root2 = _make_external_root(tmp_path / "b", run_log=actual)
+    monkeypatch.setattr(insights, "LAUNCHD_DIR", tmp_path / "empty")
+    (tmp_path / "empty").mkdir()
+    monkeypatch.setenv("WREN_EXTERNAL_TASK_ROOTS", f"wiki={root2}")
+    insights._TASKS_CACHE.clear()
+
+    (task,) = insights.discover_tasks()
+    assert task["log_path"] == str(actual)
+    insights._TASKS_CACHE.clear()
+
+
+def test_wren_own_tasks_are_not_external(tmp_path, monkeypatch):
+    monkeypatch.setattr(insights, "LAUNCHD_DIR", tmp_path)
+    insights._TASKS_CACHE.clear()
+    _write_plist(tmp_path / "foo.plist", {"Hour": 6, "Minute": 0})
+
+    (task,) = insights.discover_tasks()
+    assert task["external"] is False
+    assert task["key"] == "foo"
+    insights._TASKS_CACHE.clear()
+
+
+def test_missing_external_root_is_skipped_not_raised(tmp_path, monkeypatch):
+    # A sibling repo that has been moved or unmounted means "no tasks from
+    # there", not a 500 on every dashboard poll.
+    monkeypatch.setattr(insights, "LAUNCHD_DIR", tmp_path)
+    _write_plist(tmp_path / "foo.plist", {"Hour": 6, "Minute": 0})
+    monkeypatch.setenv("WREN_EXTERNAL_TASK_ROOTS", f"wiki={tmp_path / 'gone'}")
+    insights._TASKS_CACHE.clear()
+
+    assert [t["key"] for t in insights.discover_tasks()] == ["foo"]
+    insights._TASKS_CACHE.clear()
+
+
+def test_unreadable_plist_is_skipped_not_fatal(tmp_path, monkeypatch):
+    # `--` inside an XML comment is illegal XML that plutil and launchd both
+    # accept, so a plist can work everywhere except here. One bad file costs its
+    # own row, not the whole dashboard.
+    monkeypatch.setattr(insights, "LAUNCHD_DIR", tmp_path)
+    _write_plist(tmp_path / "good.plist", {"Hour": 6, "Minute": 0})
+    (tmp_path / "bad.plist").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        "<!-- a comment -- with an illegal double hyphen -->\n"
+        '<plist version="1.0"><dict/></plist>\n')
+    insights._TASKS_CACHE.clear()
+
+    assert [t["key"] for t in insights.discover_tasks()] == ["good"]
+    insights._TASKS_CACHE.clear()
+
+
+def test_malformed_external_root_entry_is_skipped(monkeypatch):
+    monkeypatch.setenv("WREN_EXTERNAL_TASK_ROOTS", "no-equals-sign,=/tmp,name=")
+    assert insights._external_roots() == []
+
+
+def test_external_plist_change_invalidates_the_tasks_cache(tmp_path, monkeypatch):
+    root = _make_external_root(tmp_path)
+    monkeypatch.setattr(insights, "LAUNCHD_DIR", tmp_path / "empty")
+    (tmp_path / "empty").mkdir()
+    monkeypatch.setenv("WREN_EXTERNAL_TASK_ROOTS", f"wiki={root}")
+    insights._TASKS_CACHE.clear()
+
+    assert len(insights.discover_tasks()) == 1
+    _write_plist(root / "launchd" / "second.plist", {"Hour": 23, "Minute": 0})
+    assert len(insights.discover_tasks()) == 2
+    insights._TASKS_CACHE.clear()
+
+
+def test_run_manager_refuses_external_tasks(tmp_path, monkeypatch):
+    root = _make_external_root(tmp_path)
+    monkeypatch.setattr(insights, "LAUNCHD_DIR", tmp_path / "empty")
+    (tmp_path / "empty").mkdir()
+    monkeypatch.setenv("WREN_EXTERNAL_TASK_ROOTS", f"wiki={root}")
+    insights._TASKS_CACHE.clear()
+
+    result = insights.RunManager().start("wiki-learnings-ingest")
+    assert result["ok"] is False
+    assert "launchctl" in result["error"]
+    insights._TASKS_CACHE.clear()
+
+
+# --------------------------------------------------------------------------- #
 # system_map
 # --------------------------------------------------------------------------- #
 
