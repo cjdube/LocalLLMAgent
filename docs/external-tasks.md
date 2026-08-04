@@ -106,6 +106,46 @@ that launchd never fired — or that started and never finished — now lands in
 root's `logs/` too, skipping `*.launchd.log` there for the same
 double-count reason it skips Wren's.
 
+## The vault health card
+
+Everything above answers **"did the job run?"** — it reads launchd schedules and
+log markers. The dashboard's *Learnings wiki* card answers a different question,
+**"is the wiki actually in good shape?"**, by reading the vault instead of the
+logs (`vault_health()` in `chat/insights.py`, served at `/api/vault_health`).
+
+The two don't overlap. An ingest that skips a source still starts, still logs
+`Wiki ingest run complete`, and still shows a green row — the run *was* a
+success; the outcome was incomplete. `Daily-YouTube-2026-08-02.md` sat unfiled
+for two days that way, behind a healthy-looking row.
+
+Four signals:
+
+- **Pages** — concept pages in `wiki/`, excluding `index.md` and `log.md`.
+- **Files waiting** — raw sources whose basename isn't in `wiki/.ingested.json`,
+  oldest first, and the card warns at two days. One file waiting at 8am is the
+  normal state before the 9am ingest; age is what separates that from stuck.
+- **Last backup** — the vault's last commit date and how many commits the remote
+  doesn't have. Read against the local remote-tracking ref, never a fetch, which
+  is also what makes it the right signal: the snapshot job's push is what
+  advances `origin/main`, so a push that keeps failing leaves this climbing.
+- **Binaries** — reported apart from the queue, never as pending. The ingest
+  excludes them by design (read as text, a PNG produced a page of fabricated
+  claims that each carried a citation, 2026-08-02), so one counted as "waiting"
+  would cry wolf forever.
+
+Two details worth knowing. Pending is matched on **bare basenames**, mirroring
+`list_raw_files` in the sibling repo: `raw/` gets sorted into subdirectories
+after the fact, and `.ingested.json` records bare names so that sorting doesn't
+trigger a re-ingest. And the text/binary test is git's — a NUL byte in the first
+8 KB — reimplemented here rather than imported, since the whole point is that
+neither repo depends on the other.
+
+This card reads `raw/`, which the module docstring in `agent/tools/wiki.py`
+tells you not to do. That rule is about *model-facing tools* reading raw file
+contents, and it stands. This counts filenames, isn't a tool, and can't
+silently return nothing the way those tools did — zero pending is itself a
+number on the page.
+
 ## Adding another root
 
 1. Make the repo's logs satisfy the three requirements above.

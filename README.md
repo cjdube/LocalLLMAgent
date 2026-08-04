@@ -390,6 +390,13 @@ It's a single scrollable page (no tabs). Chat lives at `/`, not here:
   ObsidianWikiAgent jobs that maintain the learnings wiki — they run from a
   sibling repo, so they report here but have no Run now button. See
   [docs/external-tasks.md](docs/external-tasks.md).
+- **Learnings wiki** (below the table) — page count, how many raw sources are
+  waiting to be filed and how long the oldest has waited, and the vault's last
+  backup with any unpushed commits. This is the question the task rows can't
+  answer: an ingest that skips a source still logs `run complete` and still
+  shows green, so a file can sit unfiled for days behind a healthy-looking row.
+  Read live from the vault, not from the logs. See
+  [docs/external-tasks.md](docs/external-tasks.md).
 - **Run detail** — clicking a row (or **See runs**) opens a right-side
   slide-over with the task's run history; click a run for its tool-call timeline
   (`name → args → result`) and the final response or the error/traceback.

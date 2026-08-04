@@ -48,6 +48,15 @@
   .section-label .hint { font-weight: 400; font-size: 12px; color: #9ca3af; }
 
   .panel { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px 16px; }
+
+  .stats { display: flex; flex-wrap: wrap; gap: 28px; }
+  .stat { min-width: 110px; }
+  .stat .figure { font-size: 22px; font-weight: 600; color: #111827; line-height: 1.2; }
+  .stat .figure.warn { color: #b54708; }
+  .stat .label { font-size: 12px; color: #6b7280; margin-top: 2px; }
+  /* pre-line: the pending list is one filename per line, joined with \n. */
+  .stat .detail { font-size: 11px; color: #9ca3af; margin-top: 4px; line-height: 1.5; white-space: pre-line; }
+
   .cap-group-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: #9ca3af; margin-bottom: 8px; }
   .cap-group-label:not(:first-child) { margin-top: 14px; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -156,6 +165,10 @@
       <section>
         <div class="section-label">Scheduled tasks <span id="taskHint" class="hint"></span></div>
         <div id="tasksWrap"></div>
+      </section>
+      <section>
+        <div class="section-label">Learnings wiki <span id="vaultHint" class="hint"></span></div>
+        <div id="vaultPanel" class="panel muted">Loading…</div>
       </section>
       <section>
         <div class="section-label">Capabilities</div>
@@ -291,6 +304,61 @@ async function loadPushHealth() {
     return;
   }
   setPushPill(state.cls, state.text, health.error);
+}
+
+// --- learnings wiki health ----------------------------------------------- //
+function stat(figure, label, detail, warn) {
+  const box = el("div", "stat");
+  box.appendChild(el("div", "figure" + (warn ? " warn" : ""), figure));
+  box.appendChild(el("div", "label", label));
+  if (detail) box.appendChild(el("div", "detail", detail));
+  return box;
+}
+
+async function loadVaultHealth() {
+  const panel = document.getElementById("vaultPanel");
+  const hint = document.getElementById("vaultHint");
+  const v = await api("/api/vault_health");
+
+  panel.textContent = "";
+  if (!v.available) {
+    panel.className = "panel muted";
+    panel.textContent = v.error || "vault unavailable";
+    hint.textContent = "";
+    return;
+  }
+  panel.className = "panel";
+  hint.textContent = v.vault;
+
+  const stats = el("div", "stats");
+  stats.appendChild(stat(String(v.wiki_pages), "pages"));
+
+  // The oldest pending age is the signal, not the count: one file dropped this
+  // morning is the normal state before the 9am ingest. Two days is not.
+  const oldest = v.pending.length ? v.pending[0].days : 0;
+  stats.appendChild(stat(
+    String(v.pending_count),
+    v.pending_count === 1 ? "file waiting" : "files waiting",
+    v.pending.map(p => `${p.name} · ${p.days === 0 ? "today" : p.days + "d"}`).join("\n"),
+    oldest >= 2));
+
+  const commit = v.last_commit || "never";
+  stats.appendChild(stat(
+    commit,
+    "last backup",
+    v.unpushed === null ? "no remote configured"
+      : v.unpushed === 0 ? "pushed"
+      : `${v.unpushed} commit${v.unpushed === 1 ? "" : "s"} not pushed`,
+    !!v.unpushed));
+
+  panel.appendChild(stats);
+
+  if (v.binaries) {
+    // Not pending, ever: the ingest skips binaries by design, so without saying
+    // so the pages/waiting numbers look like they don't add up.
+    panel.appendChild(el("div", "detail",
+      `${v.binaries} binary file${v.binaries === 1 ? "" : "s"} in raw/ — skipped by the ingest, never filed.`));
+  }
 }
 
 // --- scheduled tasks table ---------------------------------------------- //
@@ -469,6 +537,7 @@ async function openRun(key, runId) {
 // --- boot ---------------------------------------------------------------- //
 loadCapabilities();
 loadTasks();
+loadVaultHealth();
 loadPushHealth();
 </script>
 <script src="/static/run-chart.js"></script>

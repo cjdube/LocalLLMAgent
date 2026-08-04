@@ -24,6 +24,7 @@ from chat.insights import (
     run_stats,
     system_map,
     task_by_key,
+    vault_health,
 )
 
 logger = logging.getLogger("wren")
@@ -126,6 +127,15 @@ def api_system_map():
     if not _authenticated():
         return jsonify({"error": "not authenticated"}), 401
     return jsonify(system_map(TOOLS, WRITE_TOOLS))
+
+
+@dashboard_bp.route("/api/vault_health", methods=["GET"])
+def api_vault_health():
+    """Is the learnings wiki in good shape — as opposed to /api/schedules, which
+    says whether its jobs ran. A skipped source leaves a green run row."""
+    if not _authenticated():
+        return jsonify({"error": "not authenticated"}), 401
+    return jsonify(vault_health())
 
 
 @dashboard_bp.route("/api/memories", methods=["GET"])

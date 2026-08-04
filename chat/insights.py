@@ -33,8 +33,11 @@ from statistics import median
 
 from agent.loop import active_model_label
 from agent.tools.memory import recall
+# _git is the same "degrade to None, never raise" wrapper project_scan reads its
+# checkouts with (timeout included); the vault is one more local repo.
+from agent.tools.projects import _git
 from agent.tools.skills import list_skills, read_skill
-from agent.tools.wiki import list_wiki_pages
+from agent.tools.wiki import _vault, list_wiki_pages
 
 _ROOT = Path(__file__).resolve().parent.parent
 LAUNCHD_DIR = _ROOT / "launchd"
@@ -716,6 +719,113 @@ def system_map(tools: list[dict], write_tools) -> dict:
         "memory": {"entries": entries, "wiki_pages": wiki_pages},
         "skills": skills,
     }
+
+
+# --------------------------------------------------------------------------- #
+# Vault health
+# --------------------------------------------------------------------------- #
+
+# The pending list is a prompt to go look, not the list itself — show the oldest
+# few and a count.
+_PENDING_SHOWN = 5
+
+
+def _is_text_source(path: Path) -> bool:
+    """Whether the ingest can actually read this raw file.
+
+    Git's heuristic, mirroring ObsidianWikiAgent's list_raw_files: a NUL byte in
+    the first 8 KB means binary. That repo excludes binaries from the ingest
+    queue on purpose — read as text, a PNG returns hundreds of thousands of
+    replacement characters and the model writes what the *filename* implies,
+    citing the file for every claim (observed 2026-08-02). So a binary in raw/
+    is never going to be filed, and counting it as "waiting" would cry wolf
+    forever. They're reported separately instead.
+    """
+    try:
+        with path.open("rb") as fh:
+            return b"\x00" not in fh.read(8192)
+    except OSError:
+        return False
+
+
+def vault_health(now: datetime | None = None) -> dict:
+    """Is the learnings wiki in good shape? — as distinct from "did its jobs run".
+
+    The scheduled-task rows answer the second question and cannot answer the
+    first: an ingest that skips a file still starts, still logs "Wiki ingest run
+    complete", and still shows green. Daily-YouTube-2026-08-02.md sat unfiled for
+    two days that way. So this reads the vault itself rather than the logs.
+
+    Read-only, and degrades rather than raises: the vault lives outside this repo
+    and may be missing, unmounted, or not a git checkout at all.
+    """
+    now = now or datetime.now()
+    vault = _vault()
+    if not vault.is_dir():
+        return {"available": False, "vault": str(vault),
+                "error": f"vault not found (check WIKI_VAULT_PATH): {vault}"}
+
+    pages = list_wiki_pages()
+    wiki_pages = 0 if "error" in pages else len(pages.get("pages", []))
+
+    # Basenames, recursed, exactly as the ingest tracks them: raw/ is sorted into
+    # subdirectories after the fact, and .ingested.json records bare names so
+    # that sorting doesn't cause a re-ingest.
+    ingested, binaries, pending = set(), 0, []
+    ingested_path = vault / "wiki" / ".ingested.json"
+    try:
+        loaded = json.loads(ingested_path.read_text())
+        ingested = set(loaded) if isinstance(loaded, list) else set()
+    except (OSError, ValueError):
+        pass  # no state file yet, or unreadable — everything reads as pending
+
+    raw_dir = vault / "raw"
+    if raw_dir.is_dir():
+        seen = set()
+        for path in raw_dir.rglob("*"):
+            if not path.is_file() or path.name.startswith(".") or path.name in seen:
+                continue
+            seen.add(path.name)
+            if not _is_text_source(path):
+                binaries += 1
+            elif path.name not in ingested:
+                try:
+                    age = (now - datetime.fromtimestamp(path.stat().st_mtime)).days
+                except OSError:
+                    age = 0
+                pending.append({"name": path.name, "days": max(age, 0)})
+
+    # Oldest first: age is the signal. One file dropped this morning is the
+    # normal state before the 9am ingest; the same file still there on Thursday
+    # is the thing worth seeing.
+    pending.sort(key=lambda p: -p["days"])
+
+    return {
+        "available": True,
+        "vault": str(vault),
+        "wiki_pages": wiki_pages,
+        "pending": pending[:_PENDING_SHOWN],
+        "pending_count": len(pending),
+        "binaries": binaries,
+        # %cs is the committer date as a bare ISO day — no parsing and no
+        # timezone slicing, matching agent/tools/projects.py.
+        "last_commit": _git(vault, "log", "-1", "--format=%cs"),
+        "unpushed": _unpushed(vault),
+    }
+
+
+def _unpushed(vault: Path) -> int | None:
+    """Commits the vault has that its remote doesn't, or None if it isn't a
+    checkout / has no upstream.
+
+    Read against the local remote-tracking ref, never a fetch: this runs on a
+    dashboard poll. That's also what makes it the right signal here — the
+    snapshot job's push is what advances origin/main, so a push that keeps
+    failing leaves this number climbing, which is exactly the state that went
+    unnoticed from 2026-08-02.
+    """
+    count = _git(vault, "rev-list", "--count", "@{upstream}..HEAD")
+    return int(count) if count and count.isdigit() else None
 
 
 # --------------------------------------------------------------------------- #

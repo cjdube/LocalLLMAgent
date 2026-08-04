@@ -5,7 +5,10 @@ _is_run_success, run grouping (success/failure/running), and rotated-file
 chronological ordering. `now` is pinned so next_run is deterministic.
 """
 
+import json
+import os
 import plistlib
+import subprocess
 from datetime import datetime, timedelta
 
 from chat import insights
@@ -514,6 +517,127 @@ def test_run_manager_refuses_external_tasks(tmp_path, monkeypatch):
     assert result["ok"] is False
     assert "launchctl" in result["error"]
     insights._TASKS_CACHE.clear()
+
+
+# --------------------------------------------------------------------------- #
+# vault_health — "is the wiki in good shape", not "did its jobs run"
+# --------------------------------------------------------------------------- #
+
+def _make_vault(tmp_path, pages=(), raw=(), ingested=()):
+    """A throwaway learnings vault. conftest already points WIKI_VAULT_PATH at
+    tmp_path/wiki_vault, so building it there is all the wiring needed."""
+    vault = tmp_path / "wiki_vault"
+    (vault / "wiki").mkdir(parents=True)
+    (vault / "raw").mkdir()
+    for name in pages:
+        (vault / "wiki" / name).write_text("# page\n")
+    for name in raw:
+        (vault / "raw" / name).write_text("source\n")
+    (vault / "wiki" / ".ingested.json").write_text(json.dumps(list(ingested)))
+    return vault
+
+
+def test_vault_health_missing_vault_degrades(tmp_path):
+    # The vault lives outside this repo — unmounted or misconfigured is an
+    # ordinary outcome, not a 500 on every dashboard poll.
+    health = insights.vault_health()
+    assert health["available"] is False
+    assert "WIKI_VAULT_PATH" in health["error"]
+
+
+def test_vault_health_counts_pages_and_pending(tmp_path):
+    _make_vault(tmp_path,
+                pages=["a.md", "b.md", "index.md", "log.md"],
+                raw=["filed.md", "waiting.md"],
+                ingested=["filed.md"])
+
+    health = insights.vault_health()
+    assert health["available"] is True
+    assert health["wiki_pages"] == 2  # index.md and log.md aren't concept pages
+    assert health["pending_count"] == 1
+    assert [p["name"] for p in health["pending"]] == ["waiting.md"]
+
+
+def test_vault_health_pending_is_oldest_first(tmp_path):
+    # Age is the signal, not the count: a file dropped this morning is normal
+    # before the 9am ingest, and the same file still there on Thursday is not.
+    vault = _make_vault(tmp_path, raw=["fresh.md", "stale.md"])
+    old = (datetime.now() - timedelta(days=4)).timestamp()
+    os.utime(vault / "raw" / "stale.md", (old, old))
+
+    pending = insights.vault_health()["pending"]
+    assert [p["name"] for p in pending] == ["stale.md", "fresh.md"]
+    assert pending[0]["days"] == 4
+    assert pending[1]["days"] == 0
+
+
+def test_vault_health_recurses_sort_subdirectories(tmp_path):
+    # The ingest sorts raw/ into subdirectories after the fact and tracks files
+    # by bare basename, so a sorted file must not reappear as pending.
+    vault = _make_vault(tmp_path, ingested=["sorted.md"])
+    (vault / "raw" / "daily-notes").mkdir()
+    (vault / "raw" / "daily-notes" / "sorted.md").write_text("moved\n")
+
+    assert insights.vault_health()["pending_count"] == 0
+
+
+def test_vault_health_binaries_are_reported_not_pending(tmp_path):
+    # The ingest skips binaries by design, so one counted as "waiting" would
+    # cry wolf forever.
+    vault = _make_vault(tmp_path, raw=["real.md"])
+    (vault / "raw" / "chart.png").write_bytes(b"\x89PNG\x00\x00binary")
+
+    health = insights.vault_health()
+    assert health["binaries"] == 1
+    assert [p["name"] for p in health["pending"]] == ["real.md"]
+
+
+def test_vault_health_missing_state_file_means_everything_pending(tmp_path):
+    vault = _make_vault(tmp_path, raw=["one.md", "two.md"])
+    (vault / "wiki" / ".ingested.json").unlink()
+
+    assert insights.vault_health()["pending_count"] == 2
+
+
+def test_vault_health_non_repo_has_no_git_facts(tmp_path):
+    _make_vault(tmp_path)
+    health = insights.vault_health()
+    assert health["last_commit"] is None
+    assert health["unpushed"] is None
+
+
+def test_vault_health_counts_unpushed_commits(tmp_path):
+    """Real git against a local bare 'remote' — no network.
+
+    This is the signal a run-status row can't give: the snapshot job commits and
+    then fails to push, so it looks like it worked while the offsite copy falls
+    further behind. Read against the local remote-tracking ref, never a fetch.
+    """
+    def git(repo, *args):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+
+    vault = _make_vault(tmp_path, raw=["one.md"], ingested=["one.md"])
+    git(vault, "init", "-q", "-b", "main")
+    git(vault, "config", "user.email", "test@example.com")
+    git(vault, "config", "user.name", "Test")
+    git(vault, "remote", "add", "origin", str(remote))
+    git(vault, "add", "-A")
+    git(vault, "commit", "-q", "-m", "first")
+    git(vault, "push", "-q", "-u", "origin", "main")
+
+    assert insights.vault_health()["unpushed"] == 0
+
+    # A commit that never reached the remote — what a failing push leaves behind.
+    (vault / "wiki" / "new.md").write_text("# new\n")
+    git(vault, "add", "-A")
+    git(vault, "commit", "-q", "-m", "second")
+
+    health = insights.vault_health()
+    assert health["unpushed"] == 1
+    assert health["last_commit"] == datetime.now().strftime("%Y-%m-%d")
 
 
 # --------------------------------------------------------------------------- #
