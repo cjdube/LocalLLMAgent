@@ -60,7 +60,9 @@ PROJECTS_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "proj
 DOC_CHARS = 2000
 
 # docs/ headings are one line each; this bounds a project with a big docs tree.
-MAX_DOC_TITLES = 20
+# Raised from 20 when this repo's own docs/ reached 21 and started truncating —
+# a title is one line, so headroom is cheap next to the 2000-char README.
+MAX_DOC_TITLES = 30
 
 # Bound a hung git invocation so one wedged checkout can't stall the scan. Same
 # posture as tasks/starred_installed.py:_run_version_cmd — no shell, argv list.
