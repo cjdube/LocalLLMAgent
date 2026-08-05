@@ -698,9 +698,10 @@ contents, email bodies, browsing history — in cleartext (secrets in tool
 *arguments* are redacted, but results are not). The logs are gitignored;
 treat them as personal data if you back the directory up elsewhere.
 
-Periodic codebase audits land in [`docs/reviews/`](docs/reviews/), one dated
-file each. They're history, not live guidance — a finding still worth acting on
-belongs in the code or in the doc it's about, not in a review file.
+Periodic codebase audits write a dated plan to `docs/reviews/`, which is
+gitignored — the plans are a working scratchpad about the repo, not part of it.
+A finding still worth acting on belongs in the code or in the doc it's about,
+not in a review file.
 
 ## Security model / trust boundaries
 

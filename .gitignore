@@ -29,6 +29,11 @@ logs/*.log.bak
 # `ls logs/`. Same personal data as the live logs, so ignore the whole dir —
 # logs/*.log above does NOT match a subdirectory.
 logs/archive/
+# Periodic codebase-audit plans. Kept on disk (each audit reads the previous
+# one's "verified clean" section to skip re-deriving it) but deliberately not
+# committed: they're a working scratchpad about the repo, not part of it, and a
+# finding worth keeping belongs in the code or in the doc it's about.
+docs/reviews/
 .DS_Store
 .claude/
 scratchpad
