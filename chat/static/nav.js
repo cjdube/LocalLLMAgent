@@ -10,6 +10,7 @@
   const VIEWS = [
     { href: "/", label: "chat" },
     { href: "/dashboard", label: "dashboard" },
+    { href: "/logs", label: "logs" },
     { href: "/memories", label: "memories" },
     { href: "/opportunities", label: "opportunities" },
     { href: "/starred", label: "starred" },

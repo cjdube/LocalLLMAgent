@@ -419,6 +419,28 @@ New dashboard routes on the chat server, all behind the same auth:
 tables), `POST /api/run/<task>`, `GET /api/run/<task>/status`. All of them live
 in `chat/routes_dashboard.py`.
 
+### Logs
+
+`http://127.0.0.1:8420/logs` reads any file under `logs/` as a formatted stream,
+**newest first** (same auth as the dashboard): a severity rail and tinted rows
+for warnings and errors, the date hoisted onto a day divider, continuation lines
+and oversized payloads folded behind an expander, and `key=value` /
+`name(args) -> result` highlighted. Filter by level or text; a filtered view
+keeps two rows of context either side of each hit, because the cause of a
+warning usually sits above it. **Live** (on by default) polls every 4 seconds
+and puts new lines on top without moving your scroll position.
+
+This is the only way to read the **chat server's own log** — the dashboard's run
+drawer covers scheduled-task runs and refuses daemons. Both files per task are
+reachable: the structured log and launchd's stdout capture, which is where a
+crash before the logger initialises lands.
+
+Reads are bounded to a 512 KB window from the end of the file with a `load older`
+cursor, so the counts describe the window read, not the whole file — the caption
+says which. Backed by `GET /api/logs` and `GET /api/logs/entries` in
+`chat/routes_logs.py`, over the reader in `chat/logview.py`. See
+[docs/logs.md](docs/logs.md).
+
 ### Memories
 
 `http://127.0.0.1:8420/memories` is a read-only view of `memory.py`'s store

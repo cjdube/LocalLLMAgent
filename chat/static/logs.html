@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wren Logs</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="alternate icon" type="image/png" href="/static/favicon-32.png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="stylesheet" href="/static/nav.css">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    color: #1f2328;
+    background: #f4f4f5;
+  }
+  header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 16px; background: #ffffff; border-bottom: 1px solid #e5e7eb;
+  }
+  header img.logo { height: 38px; width: 38px; border-radius: 9px; display: block; }
+  header h1 { font-size: 17px; margin: 0; }
+  header .sub { font-size: 13px; color: #9ca3af; }
+  header .spacer { flex: 1; }
+
+  main { max-width: 1100px; margin: 0 auto; padding: 18px 18px 40px; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  .controls select, .controls input {
+    font: inherit; font-size: 13px; padding: 6px 9px;
+    border: 1px solid #d5d8dd; border-radius: 8px; background: #fff; color: #1f2328;
+  }
+  .controls select:disabled { color: #9ca3af; background: #f7f7f8; }
+  .controls input[type="search"] { flex: 1; min-width: 160px; }
+  .controls .spacer { flex: 1; }
+  .controls .live { display: flex; align-items: center; gap: 5px; font-size: 13px; color: #6b7280; white-space: nowrap; }
+  .controls .live input { accent-color: #d64545; }
+
+  /* The overview bar: one cell per bucket of entries, worst level wins. */
+  .log-map { display: flex; gap: 1px; height: 8px; border-radius: 3px; overflow: hidden; margin-bottom: 10px; }
+  .log-map .map-cell { flex: 1; background: #d6d3cc; }
+  .log-map .map-cell.lvl-warning { background: #e9a13b; }
+  .log-map .map-cell.lvl-error, .log-map .map-cell.lvl-critical { background: #d64545; }
+
+  .log-note { font-size: 12px; color: #6b7280; margin: 0 0 10px; font-variant-numeric: tabular-nums; }
+
+  .console {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.55;
+  }
+
+  .log-day {
+    position: sticky; top: 0; z-index: 2;
+    padding: 5px 12px; background: #f0f1f3; color: #6b7280;
+    font-size: 11px; letter-spacing: 0.03em; border-bottom: 1px solid #e5e7eb;
+  }
+  .log-run {
+    padding: 6px 12px; background: #fafafa; color: #374151;
+    border-top: 1px solid #eef0f2; border-bottom: 1px solid #eef0f2;
+  }
+  .log-run.is-end { color: #6b7280; }
+
+  /* The severity rail. A 3px stripe in the gutter is what makes the shape of a
+     file readable before any of its words are. */
+  .log-entry {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    padding: 3px 12px 3px 9px; border-left: 3px solid #cfcdc6;
+  }
+  .log-entry:hover { background: #fafafa; }
+  .log-entry.is-context { opacity: 0.55; }
+  .log-entry.lvl-warning { border-left-color: #e9a13b; background: #fdf6ea; }
+  .log-entry.lvl-error, .log-entry.lvl-critical { border-left-color: #d64545; background: #fdeded; }
+
+  .log-time { color: #9ca3af; width: 58px; flex: none; font-variant-numeric: tabular-nums; }
+  .log-level { color: #9ca3af; width: 42px; flex: none; }
+  .lvl-warning .log-time, .lvl-warning .log-level { color: #92610d; }
+  .lvl-error .log-level, .lvl-error .log-time,
+  .lvl-critical .log-level, .lvl-critical .log-time { color: #a12b2b; }
+  .log-msg { flex: 1 1 320px; min-width: 0; word-break: break-word; }
+  .lvl-warning .log-msg { color: #6b4708; }
+  .lvl-error .log-msg, .lvl-critical .log-msg { color: #8a2020; }
+
+  .tok-key { color: #9ca3af; }
+  .tok-val { color: #1a6a52; }
+  .tok-arrow { color: #9ca3af; }
+  .tok-result { color: #4b5563; }
+
+  .log-fold {
+    flex-basis: 100%; margin-left: 108px; text-align: left;
+    background: none; border: none; padding: 1px 0; cursor: pointer;
+    font: inherit; font-size: 11px; color: #6b7280;
+  }
+  .log-fold:hover { color: #1f2328; text-decoration: underline; }
+  .log-body {
+    flex-basis: 100%; margin: 4px 0 6px 108px; padding: 9px 11px;
+    background: #f7f8f9; border: 1px solid #eef0f2; border-radius: 8px;
+    max-height: 380px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+  }
+
+  .older { display: block; width: 100%; padding: 9px; background: #fafafa; border: none;
+           border-top: 1px solid #eef0f2; font: inherit; font-size: 12px; color: #6b7280; cursor: pointer; }
+  .older:hover { color: #1f2328; background: #f4f4f5; }
+
+  @media (max-width: 600px) {
+    .log-fold, .log-body { margin-left: 0; }
+    .log-entry { gap: 6px; }
+  }
+</style>
+</head>
+<body>
+  <header>
+    <img class="logo" src="/static/favicon.svg" alt="Wren">
+    <h1>Wren</h1>
+    <span class="sub">logs</span>
+    <span class="spacer"></span>
+    <nav id="wren-nav" class="wren-nav"></nav>
+  </header>
+
+  <main>
+    <div class="controls">
+      <select id="logPick" aria-label="Log file"></select>
+      <select id="logStreamPick" aria-label="Stream"></select>
+      <select id="logLevel" aria-label="Minimum level">
+        <option value="">all levels</option>
+        <option value="warning">warnings and errors</option>
+        <option value="error">errors only</option>
+      </select>
+      <input id="logSearch" type="search" placeholder="filter text…" aria-label="Filter text">
+      <label class="live"><input id="logLive" type="checkbox" checked> live</label>
+    </div>
+
+    <div id="logMap"></div>
+    <p id="logNote" class="log-note"></p>
+
+    <div class="console">
+      <div id="logStream"></div>
+      <button id="logOlder" class="older" hidden>load older</button>
+    </div>
+  </main>
+
+  <script src="/static/nav.js"></script>
+  <script src="/static/log-view.js"></script>
+</body>
+</html>
