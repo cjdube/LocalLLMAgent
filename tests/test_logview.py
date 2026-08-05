@@ -6,8 +6,10 @@ that quietly loads the whole file would work fine today and degrade silently as
 the file grows. Those assertions (window size, per-entry caps) are pinned against
 the constants rather than against a fixture's contents.
 
-conftest redirects insights.LOGS_DIR to tmp_path suite-wide, so every log written
-here lands in a throwaway dir; discover_tasks() is fed fixture plists the same way.
+conftest redirects both of task discovery's inputs suite-wide — insights.LOGS_DIR
+and insights.LAUNCHD_DIR — so every log written here lands in a throwaway dir and
+the task list is whatever these tests put in it, never this checkout's real
+plists. The `launchd_dir` fixture below just hands back that pinned dir.
 """
 
 import plistlib
@@ -17,21 +19,16 @@ import pytest
 from chat import insights, logview
 
 
-@pytest.fixture(autouse=True)
-def _fixture_dirs(tmp_path, monkeypatch):
-    """Point both halves of task discovery at tmp dirs.
+@pytest.fixture
+def launchd_dir():
+    """The empty plist dir conftest pins task discovery at, to write fixtures into.
 
-    LOGS_DIR is already redirected by conftest; LAUNCHD_DIR is not, and
-    discover_tasks() would otherwise parse the repo's real plists and hand back
-    paths into the production logs/.
+    Both halves of discovery are already redirected suite-wide — `LOGS_DIR` by
+    `_isolate_task_logs` and `LAUNCHD_DIR` by `_isolate_launchd_dir`, which also
+    clears the signature cache around each test. This only hands back the path
+    so a test can put plists in it.
     """
-    launchd = tmp_path / "launchd"
-    launchd.mkdir()
-    monkeypatch.setattr(insights, "LAUNCHD_DIR", launchd)
-    monkeypatch.setattr(insights, "LOGS_DIR", tmp_path)
-    insights._TASKS_CACHE.clear()
-    yield launchd
-    insights._TASKS_CACHE.clear()
+    return insights.LAUNCHD_DIR
 
 
 def write_plist(launchd_dir, key, *, daemon=False):
@@ -55,8 +52,8 @@ def line(ts, level, msg):
 # Catalogue and path safety
 # --------------------------------------------------------------------------- #
 
-def test_lists_both_streams_for_a_task(tmp_path, _fixture_dirs):
-    write_plist(_fixture_dirs, "morning_brief")
+def test_lists_both_streams_for_a_task(tmp_path, launchd_dir):
+    write_plist(launchd_dir, "morning_brief")
     (tmp_path / "morning_brief.log").write_text(line("06:00:00", "INFO", "hi") + "\n")
     (tmp_path / "morning_brief.launchd.log").write_text("crash\n")
 
@@ -65,13 +62,13 @@ def test_lists_both_streams_for_a_task(tmp_path, _fixture_dirs):
     assert set(entry["streams"]) == {"log", "stdout"}
 
 
-def test_a_task_with_no_log_file_is_omitted(tmp_path, _fixture_dirs):
-    write_plist(_fixture_dirs, "never_ran")
+def test_a_task_with_no_log_file_is_omitted(tmp_path, launchd_dir):
+    write_plist(launchd_dir, "never_ran")
     assert logview.list_logs() == []
 
 
-def test_orphan_log_is_listed_after_tasks(tmp_path, _fixture_dirs):
-    write_plist(_fixture_dirs, "morning_brief")
+def test_orphan_log_is_listed_after_tasks(tmp_path, launchd_dir):
+    write_plist(launchd_dir, "morning_brief")
     (tmp_path / "morning_brief.log").write_text(line("06:00:00", "INFO", "hi") + "\n")
     (tmp_path / "retired_task.log").write_text(line("06:00:00", "INFO", "old") + "\n")
 
@@ -79,14 +76,14 @@ def test_orphan_log_is_listed_after_tasks(tmp_path, _fixture_dirs):
     assert keys == ["morning_brief", "file:retired_task.log"]
 
 
-def test_bak_files_are_not_listed(tmp_path, _fixture_dirs):
+def test_bak_files_are_not_listed(tmp_path, launchd_dir):
     (tmp_path / "weekly_learnings.log.bak").write_text("frozen\n")
     assert logview.list_logs() == []
 
 
-def test_rotated_siblings_are_counted_not_read(tmp_path, _fixture_dirs):
+def test_rotated_siblings_are_counted_not_read(tmp_path, launchd_dir):
     """The viewer reads the live file only; `rotated` is how the page says so."""
-    write_plist(_fixture_dirs, "morning_brief")
+    write_plist(launchd_dir, "morning_brief")
     (tmp_path / "morning_brief.log").write_text(line("06:00:00", "INFO", "live") + "\n")
     (tmp_path / "morning_brief.log.1").write_text(line("05:00:00", "INFO", "older") + "\n")
 
@@ -102,16 +99,16 @@ def test_rotated_siblings_are_counted_not_read(tmp_path, _fixture_dirs):
     "file:/etc/passwd",
     "morning_brief/../../../etc/passwd",
 ])
-def test_path_traversal_keys_resolve_to_nothing(tmp_path, _fixture_dirs, key):
-    write_plist(_fixture_dirs, "morning_brief")
+def test_path_traversal_keys_resolve_to_nothing(tmp_path, launchd_dir, key):
+    write_plist(launchd_dir, "morning_brief")
     (tmp_path / "morning_brief.log").write_text(line("06:00:00", "INFO", "hi") + "\n")
 
     assert logview.resolve(key) is None
     assert logview.read_log(key) is None
 
 
-def test_unknown_stream_resolves_to_nothing(tmp_path, _fixture_dirs):
-    write_plist(_fixture_dirs, "morning_brief")
+def test_unknown_stream_resolves_to_nothing(tmp_path, launchd_dir):
+    write_plist(launchd_dir, "morning_brief")
     (tmp_path / "morning_brief.log").write_text(line("06:00:00", "INFO", "hi") + "\n")
     assert logview.resolve("morning_brief", stream="stdout") is None
 
@@ -120,7 +117,7 @@ def test_unknown_stream_resolves_to_nothing(tmp_path, _fixture_dirs):
 # Entry folding
 # --------------------------------------------------------------------------- #
 
-def test_continuation_lines_fold_into_the_entry_above(tmp_path, _fixture_dirs):
+def test_continuation_lines_fold_into_the_entry_above(tmp_path, launchd_dir):
     """~31% of real lines are continuations; a line-per-row read shreds them."""
     (tmp_path / "t.log").write_text("\n".join([
         line("06:00:00", "INFO", "Drafted entry:"),
@@ -135,7 +132,7 @@ def test_continuation_lines_fold_into_the_entry_above(tmp_path, _fixture_dirs):
     assert entries[1]["extra"] == []
 
 
-def test_leading_partial_entry_is_dropped_not_shown_whole(tmp_path, _fixture_dirs, monkeypatch):
+def test_leading_partial_entry_is_dropped_not_shown_whole(tmp_path, launchd_dir, monkeypatch):
     """A window that starts mid-line must not present the fragment as an entry."""
     monkeypatch.setattr(logview, "WINDOW_BYTES", 120)
     (tmp_path / "t.log").write_text("\n".join([
@@ -149,7 +146,7 @@ def test_leading_partial_entry_is_dropped_not_shown_whole(tmp_path, _fixture_dir
     assert data["scanned"]["complete"] is False
 
 
-def test_offsets_point_at_the_start_of_each_entry(tmp_path, _fixture_dirs):
+def test_offsets_point_at_the_start_of_each_entry(tmp_path, launchd_dir):
     body = "\n".join([
         line("06:00:00", "INFO", "first"),
         line("06:00:01", "INFO", "second"),
@@ -165,7 +162,7 @@ def test_offsets_point_at_the_start_of_each_entry(tmp_path, _fixture_dirs):
 # Bounds — why this module exists
 # --------------------------------------------------------------------------- #
 
-def test_read_is_bounded_by_the_window_not_the_file(tmp_path, _fixture_dirs):
+def test_read_is_bounded_by_the_window_not_the_file(tmp_path, launchd_dir):
     """The launchd logs grow without limit, so a full read would degrade silently."""
     filler = line("06:00:00", "INFO", "x" * 200) + "\n"
     big = tmp_path / "t.log"
@@ -179,7 +176,7 @@ def test_read_is_bounded_by_the_window_not_the_file(tmp_path, _fixture_dirs):
     assert data["size"] == big.stat().st_size
 
 
-def test_long_message_is_capped_and_the_drop_reported(tmp_path, _fixture_dirs):
+def test_long_message_is_capped_and_the_drop_reported(tmp_path, launchd_dir):
     """The 46,683-char calendar result of 2026-07-10 is the case this bounds."""
     (tmp_path / "t.log").write_text(line("06:00:00", "INFO", "j" * 46_683) + "\n")
 
@@ -188,7 +185,7 @@ def test_long_message_is_capped_and_the_drop_reported(tmp_path, _fixture_dirs):
     assert entry["dropped_chars"] == 46_683 - logview.MAX_MSG_CHARS
 
 
-def test_long_continuation_block_is_capped_and_the_drop_reported(tmp_path, _fixture_dirs):
+def test_long_continuation_block_is_capped_and_the_drop_reported(tmp_path, launchd_dir):
     extra = ["line %d" % i for i in range(logview.MAX_EXTRA_LINES + 25)]
     (tmp_path / "t.log").write_text(
         "\n".join([line("06:00:00", "INFO", "Drafted entry:")] + extra) + "\n")
@@ -198,7 +195,7 @@ def test_long_continuation_block_is_capped_and_the_drop_reported(tmp_path, _fixt
     assert entry["dropped_lines"] == 25
 
 
-def test_limit_is_clamped(tmp_path, _fixture_dirs):
+def test_limit_is_clamped(tmp_path, launchd_dir):
     (tmp_path / "t.log").write_text(
         "".join(line("06:00:00", "INFO", f"m{i}") + "\n" for i in range(50)))
     assert len(logview.read_log("file:t.log", limit=10_000)["entries"]) == 50
@@ -209,7 +206,7 @@ def test_limit_is_clamped(tmp_path, _fixture_dirs):
 # Paging
 # --------------------------------------------------------------------------- #
 
-def test_paging_backwards_covers_every_entry_exactly_once(tmp_path, _fixture_dirs):
+def test_paging_backwards_covers_every_entry_exactly_once(tmp_path, launchd_dir):
     (tmp_path / "t.log").write_text(
         "".join(line("06:00:00", "INFO", f"m{i}") + "\n" for i in range(25)))
 
@@ -223,12 +220,12 @@ def test_paging_backwards_covers_every_entry_exactly_once(tmp_path, _fixture_dir
     assert seen == [f"m{i}" for i in range(25)]
 
 
-def test_last_page_reports_no_more(tmp_path, _fixture_dirs):
+def test_last_page_reports_no_more(tmp_path, launchd_dir):
     (tmp_path / "t.log").write_text(line("06:00:00", "INFO", "only") + "\n")
     assert logview.read_log("file:t.log")["next_before"] is None
 
 
-def test_entries_are_returned_oldest_first(tmp_path, _fixture_dirs):
+def test_entries_are_returned_oldest_first(tmp_path, launchd_dir):
     """The page renders newest-first, but the reversal is the client's job — runs
     pair start-to-end forwards and continuation lines attach downwards."""
     (tmp_path / "t.log").write_text("\n".join([
@@ -243,7 +240,7 @@ def test_entries_are_returned_oldest_first(tmp_path, _fixture_dirs):
 # The live tail
 # --------------------------------------------------------------------------- #
 
-def test_after_returns_only_what_was_appended(tmp_path, _fixture_dirs):
+def test_after_returns_only_what_was_appended(tmp_path, launchd_dir):
     log = tmp_path / "t.log"
     log.write_text(line("06:00:00", "INFO", "before the poll") + "\n")
     cursor = logview.read_log("file:t.log")["next_after"]
@@ -256,13 +253,13 @@ def test_after_returns_only_what_was_appended(tmp_path, _fixture_dirs):
     assert page["next_after"] > cursor
 
 
-def test_a_poll_with_nothing_new_returns_nothing(tmp_path, _fixture_dirs):
+def test_a_poll_with_nothing_new_returns_nothing(tmp_path, launchd_dir):
     (tmp_path / "t.log").write_text(line("06:00:00", "INFO", "quiet") + "\n")
     cursor = logview.read_log("file:t.log")["next_after"]
     assert logview.read_log("file:t.log", after=cursor)["entries"] == []
 
 
-def test_a_half_written_line_is_not_read_until_it_is_complete(tmp_path, _fixture_dirs):
+def test_a_half_written_line_is_not_read_until_it_is_complete(tmp_path, launchd_dir):
     """Without this the tail shows a fragment, and the next poll re-reads the
     same line from its start and renders it a second time."""
     log = tmp_path / "t.log"
@@ -281,7 +278,7 @@ def test_a_half_written_line_is_not_read_until_it_is_complete(tmp_path, _fixture
     assert [e["msg"] for e in done["entries"]] == ["still being written"]
 
 
-def test_falling_far_behind_jumps_to_the_tail_and_says_so(tmp_path, _fixture_dirs):
+def test_falling_far_behind_jumps_to_the_tail_and_says_so(tmp_path, launchd_dir):
     """A burst, or a Mac that slept: the catch-up read stays bounded like the
     rest, rather than growing to match the gap."""
     log = tmp_path / "t.log"
@@ -297,7 +294,7 @@ def test_falling_far_behind_jumps_to_the_tail_and_says_so(tmp_path, _fixture_dir
     assert page["scanned"]["to"] - page["scanned"]["from"] <= logview.WINDOW_BYTES
 
 
-def test_a_truncated_file_restarts_from_its_end(tmp_path, _fixture_dirs):
+def test_a_truncated_file_restarts_from_its_end(tmp_path, launchd_dir):
     """Rotation, or someone emptying the file, leaves the cursor past EOF."""
     log = tmp_path / "t.log"
     log.write_text(line("06:00:00", "INFO", "old and long" * 50) + "\n")
@@ -309,7 +306,7 @@ def test_a_truncated_file_restarts_from_its_end(tmp_path, _fixture_dirs):
     assert page["next_after"] <= log.stat().st_size
 
 
-def test_after_wins_over_before_when_both_are_given(tmp_path, _fixture_dirs):
+def test_after_wins_over_before_when_both_are_given(tmp_path, launchd_dir):
     (tmp_path / "t.log").write_text("\n".join([
         line("06:00:00", "INFO", "a"),
         line("06:00:01", "INFO", "b"),
@@ -322,7 +319,7 @@ def test_after_wins_over_before_when_both_are_given(tmp_path, _fixture_dirs):
 # Filtering
 # --------------------------------------------------------------------------- #
 
-def test_level_filter_keeps_surrounding_context(tmp_path, _fixture_dirs):
+def test_level_filter_keeps_surrounding_context(tmp_path, launchd_dir):
     """The cause of a warning sits above it: the 46KB tool result that overflowed
     num_ctx on 2026-07-10 is three lines above the WARNING that reported it. A
     filter showing bare matches reports symptoms and hides causes."""
@@ -342,7 +339,7 @@ def test_level_filter_keeps_surrounding_context(tmp_path, _fixture_dirs):
     assert [e["context"] for e in entries] == [True, True, False, True, True]
 
 
-def test_level_filter_is_a_minimum_not_an_equality(tmp_path, _fixture_dirs):
+def test_level_filter_is_a_minimum_not_an_equality(tmp_path, launchd_dir):
     (tmp_path / "t.log").write_text("\n".join([
         line("06:00:00", "WARNING", "warn"),
         line("06:00:01", "ERROR", "err"),
@@ -353,7 +350,7 @@ def test_level_filter_is_a_minimum_not_an_equality(tmp_path, _fixture_dirs):
     assert hits == ["warn", "err"]
 
 
-def test_text_filter_searches_continuation_lines_too(tmp_path, _fixture_dirs):
+def test_text_filter_searches_continuation_lines_too(tmp_path, launchd_dir):
     (tmp_path / "t.log").write_text("\n".join([
         line("06:00:00", "ERROR", "chat turn failed"),
         "Traceback (most recent call last):",
@@ -365,7 +362,7 @@ def test_text_filter_searches_continuation_lines_too(tmp_path, _fixture_dirs):
     assert len(hits) == 1
 
 
-def test_counts_describe_the_scanned_window(tmp_path, _fixture_dirs):
+def test_counts_describe_the_scanned_window(tmp_path, launchd_dir):
     (tmp_path / "t.log").write_text("\n".join([
         line("06:00:00", "INFO", "a"),
         line("06:00:01", "WARNING", "b"),
@@ -383,7 +380,7 @@ def test_counts_describe_the_scanned_window(tmp_path, _fixture_dirs):
 # Run boundaries
 # --------------------------------------------------------------------------- #
 
-def test_run_boundaries_are_marked_for_grouping(tmp_path, _fixture_dirs):
+def test_run_boundaries_are_marked_for_grouping(tmp_path, launchd_dir):
     (tmp_path / "t.log").write_text("\n".join([
         line("06:00:00", "INFO", "Starting morning brief run"),
         line("06:00:01", "INFO", "fetch_weather -> {}"),
@@ -394,7 +391,7 @@ def test_run_boundaries_are_marked_for_grouping(tmp_path, _fixture_dirs):
         == ["start", None, "end"]
 
 
-def test_daemon_log_has_no_run_boundaries(tmp_path, _fixture_dirs):
+def test_daemon_log_has_no_run_boundaries(tmp_path, launchd_dir):
     """The chat server's log is the one with no runs — and the one the dashboard
     drawer refuses outright, which is why the viewer must handle it."""
     (tmp_path / "t.log").write_text("\n".join([
@@ -405,7 +402,7 @@ def test_daemon_log_has_no_run_boundaries(tmp_path, _fixture_dirs):
     assert [e["boundary"] for e in logview.read_log("file:t.log")["entries"]] == [None, None]
 
 
-def test_undecodable_bytes_do_not_raise(tmp_path, _fixture_dirs):
+def test_undecodable_bytes_do_not_raise(tmp_path, launchd_dir):
     (tmp_path / "t.log").write_bytes(
         line("06:00:00", "INFO", "caf").encode() + b"\xff\xfe\n")
     assert len(logview.read_log("file:t.log")["entries"]) == 1

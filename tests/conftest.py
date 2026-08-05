@@ -46,6 +46,12 @@ real task module. It was never redirected — the exact "a module that resolves 
 on its own" case. It is redirected below now, and the block is what would have made
 that gap audible.
 
+That module has two more ambient inputs, both redirected below for determinism
+rather than for safety: `LAUNCHD_DIR` (it globs the repo's real `launchd/`, so
+the task list a test sees depends on which plists this checkout has installed)
+and `WREN_EXTERNAL_TASK_ROOTS` (it reaches into whatever sibling repos that
+names). Neither writes anything; both make an assertion depend on the machine.
+
 The learnings tasks write reviews to `LEARNINGS_DIR` — the user's Obsidian vault
 under ~/Documents. Tests stub the writer per-test, but redirect LEARNINGS_DIR to
 tmp_path suite-wide as the backstop, so a missed stub lands a fixture file in a
@@ -177,6 +183,41 @@ def _isolate_task_logs(tmp_path, monkeypatch):
     # (run_task_now), so _common's redirect never covered it. Reads resolve it at
     # call time, so the fixture is enough — there is no import-time binding here.
     monkeypatch.setattr(_insights, "LOGS_DIR", tmp_path)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_launchd_dir(tmp_path, monkeypatch):
+    """Pin task discovery at an empty plist dir — the games/projects treatment,
+    for the games/projects reason: `chat/insights.py` *reads the machine*.
+
+    `LAUNCHD_DIR` is the last of insights' three ambient inputs to get a
+    backstop. `LOGS_DIR` is redirected above and `WREN_EXTERNAL_TASK_ROOTS` is
+    unset below, but discover_tasks() also globs the repo's real `launchd/`, so
+    which tasks a test sees depends on which plists are installed in this
+    checkout — /api/schedules, /api/capabilities, system_map and /api/logs all
+    reach it without asking for any particular task. Nothing here writes, so
+    this is about determinism rather than protecting production state: the log
+    paths those plists produce already resolve under the redirected LOGS_DIR.
+
+    _TASKS_CACHE has to be cleared with it. discover_tasks() caches on a
+    signature of (plist name, mtime), NOT on the directory — so an entry built
+    under one test's dir can be served to the next test whose dir happens to
+    hash the same way, which is exactly what two empty dirs do. Clearing on both
+    sides makes the redirect mean what it says. _RUNS_CACHE is keyed on the full
+    log path and so can't collide, but it costs nothing to clear alongside.
+
+    Per-test redirects stay the convention (test_insights.py and
+    test_logview.py write their own fixture plists); this is what makes missing
+    one harmless.
+    """
+    launchd = tmp_path / "launchd"
+    launchd.mkdir(exist_ok=True)
+    monkeypatch.setattr(_insights, "LAUNCHD_DIR", launchd)
+    _insights._TASKS_CACHE.clear()
+    _insights._RUNS_CACHE.clear()
+    yield
+    _insights._TASKS_CACHE.clear()
+    _insights._RUNS_CACHE.clear()
 
 
 @pytest.fixture(autouse=True)

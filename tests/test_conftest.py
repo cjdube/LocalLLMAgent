@@ -148,6 +148,29 @@ def test_insights_logs_dir_is_redirected_away_from_production():
     assert Path(insights.LOGS_DIR).resolve() != _REAL_LOGS_DIR
 
 
+def test_insights_launchd_dir_is_redirected_away_from_the_repo():
+    # The other half of task discovery. insights globs LAUNCHD_DIR for plists, so
+    # unpinned, the task list a test sees is whatever this checkout has installed
+    # — /api/schedules, /api/capabilities, system_map and /api/logs all reach it
+    # without naming a task. Nothing writes, so the risk is a machine-dependent
+    # assertion rather than production damage, which is also why it would go
+    # unnoticed: it fails only on someone else's checkout.
+    real_launchd = Path(insights.__file__).resolve().parent.parent / "launchd"
+    assert Path(insights.LAUNCHD_DIR).resolve() != real_launchd
+    assert not list(Path(insights.LAUNCHD_DIR).glob("*.plist"))
+
+
+def test_task_discovery_cache_does_not_survive_between_tests():
+    # discover_tasks() caches on a signature of (plist name, mtime) — NOT on the
+    # directory — so an entry built under one test's tmp dir can be served to the
+    # next test whose dir hashes the same way, which two empty dirs do. The
+    # redirect above is only as good as this clearing, and a stale hit would look
+    # like a passing test reading another test's fixtures.
+    assert insights._TASKS_CACHE == {}
+    insights.discover_tasks()
+    assert insights._TASKS_CACHE != {}, "expected discover_tasks to populate its cache"
+
+
 def test_the_wren_logger_server_binds_at_import_is_covered():
     # chat/server.py's module-level setup_logger("wren") is the specific call that
     # defeated the autouse fixture; pin it so the guard has teeth even if the
