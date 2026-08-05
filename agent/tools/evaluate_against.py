@@ -17,6 +17,7 @@ Usage:
 """
 
 import argparse
+import logging
 import sys
 
 from agent import prefs
@@ -28,6 +29,12 @@ from agent.tools.web_fetch import fetch_webpage
 from agent.tools.wiki import read_wiki_page
 
 load_env()
+
+# The chat server's logger (chat/server.py configures "wren"), so loop.py's
+# truncation and cut-off warnings for the call below land in logs/wren.log
+# rather than vanishing. Falls back to logging's stderr handler of last resort
+# when this module is run from its own CLI.
+logger = logging.getLogger("wren")
 
 # Whose standards the lens holds, for the model-facing strings below. From
 # config/preferences.json; falls back to "the user".
@@ -171,7 +178,8 @@ def evaluate_against(lens_page: str = "", target_url: str = "",
         # more specifically. See CLAUDE.md.
         evaluation = complete_text(system_prompt=EVAL_SYSTEM_PROMPT, user_prompt=user_prompt,
                                    backend=resolve_backend("evaluate_against"),
-                                   think=False)
+                                   think=False,
+                                   logger=logger)  # surfaces loop.py's num_predict cut-off warning
         if not evaluation.strip():
             return {"error": "the model returned an empty evaluation — retry; if it "
                              "persists the prompt is too large for one generation"}

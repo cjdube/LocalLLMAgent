@@ -30,8 +30,15 @@ games_bp = Blueprint("games", __name__)
 # warmup — see WeighAnchor src/agent/client.ts), because the game depends on the
 # server being the side that gives up first: a browser-side abort does not stop
 # an Ollama generation, so if this proxy timed out first the model would still be
-# busy and the retry would queue behind it. Flask runs threaded, so a warmup
-# parked here for ten minutes doesn't block chat.
+# busy and the retry would queue behind it.
+#
+# Flask runs threaded, so a warmup parked here for ten minutes doesn't block the
+# *server* — but it does block chat, one layer down: Ollama runs with
+# OLLAMA_NUM_PARALLEL=1, so the generation holds the single slot and a chat turn
+# started during a warmup queues behind it silently, looking like a hang rather
+# than a wait. That is the real cost of raising these numbers. See
+# docs/games.md ("Game turns and chat turns queue behind each other") and
+# docs/ollama-serving.md (starvation).
 AI_TIMEOUT_S = 160
 WARMUP_TIMEOUT_S = 620
 

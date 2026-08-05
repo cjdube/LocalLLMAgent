@@ -23,6 +23,7 @@ Usage:
 """
 
 import argparse
+import logging
 import os
 import re
 import sys
@@ -38,6 +39,12 @@ from agent.tools._http import load_env, print_result
 from agent.tools.web_search import search_web
 
 load_env()
+
+# The chat server's logger (chat/server.py configures "wren"), so loop.py's
+# truncation and cut-off warnings for the call below land in logs/wren.log
+# rather than vanishing. Falls back to logging's stderr handler of last resort
+# when this module is run from its own CLI.
+logger = logging.getLogger("wren")
 
 _TIMEOUT_S = 15
 # Bounds for the summarization prompt: a few results per search, snippets cut
@@ -186,7 +193,8 @@ def research(company: str, context: str = None, filing: dict = None) -> dict:
         # Measured: 3 of 3 complete briefs at 4% of the budget, ~6x faster, with
         # the same facts. See CLAUDE.md.
         summary = complete_text(system_prompt=RESEARCH_SYSTEM_PROMPT, user_prompt=user_prompt,
-                                backend=resolve_backend("research"), think=False)
+                                backend=resolve_backend("research"), think=False,
+                                logger=logger)  # surfaces loop.py's num_predict cut-off warning
         if not summary.strip():
             return {"error": f"the model returned an empty brief for {company!r} — retry"}
         return {"company": company, "summary": summary}

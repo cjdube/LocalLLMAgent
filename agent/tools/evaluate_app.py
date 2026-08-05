@@ -13,6 +13,7 @@ Usage:
 """
 
 import argparse
+import logging
 import re
 import sys
 
@@ -22,6 +23,12 @@ from agent.tools._http import load_env, print_result
 from agent.tools.web_fetch import fetch_webpage
 
 load_env()
+
+# The chat server's logger (chat/server.py configures "wren"), so loop.py's
+# truncation and cut-off warnings for the call below land in logs/wren.log
+# rather than vanishing. Falls back to logging's stderr handler of last resort
+# when this module is run from its own CLI.
+logger = logging.getLogger("wren")
 
 # The user's name, for the model-facing tool descriptions below. From
 # config/preferences.json; falls back to "the user".
@@ -112,9 +119,13 @@ def evaluate_app(url: str = "", **_) -> dict:
         # Thinking stays ON here, unlike its two siblings: skepticism is the
         # product, and this one was measured healthy — 12 runs across two sites
         # peaked at 1288 of 3072 tokens, never truncated. The guard below is the
-        # backstop if a longer page ever changes that.
+        # backstop if a longer page ever changes that — and `logger` is what
+        # makes it diagnostic: the empty-teardown branch can only say "retry",
+        # so loop.py's cut-off warning is the only thing that names thinking
+        # overrun as the cause rather than a wedged runner or a dead fetch.
         teardown = complete_text(system_prompt=TEARDOWN_SYSTEM_PROMPT, user_prompt=user_prompt,
-                                 backend=resolve_backend("evaluate_app"))
+                                 backend=resolve_backend("evaluate_app"),
+                                 logger=logger)
         if not teardown.strip():
             return {"error": f"the model returned an empty teardown for {url} — retry"}
         return {"url": url, "teardown": teardown}
