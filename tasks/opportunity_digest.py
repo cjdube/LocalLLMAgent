@@ -33,7 +33,7 @@ import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote
 from xml.etree import ElementTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -49,6 +49,7 @@ from agent.tools import opportunities
 from agent.tools.email import send_email
 from agent.tools.notify import notify
 from tasks._common import notify_failure, setup_logger, today_str
+from tasks._urls import safe_url
 
 _ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(_ROOT / "config" / ".env")
@@ -588,19 +589,9 @@ _SECTIONS = (
 )
 
 
-def _safe_url(url: str) -> str:
-    """Return url only if it's an http(s) link, else "". Guards against
-    javascript:/data: (or other) schemes in externally-sourced URLs —
-    html.escape() alone does not neutralize a dangerous scheme."""
-    try:
-        return url if urlparse(url).scheme in ("http", "https") else ""
-    except (ValueError, AttributeError):
-        return ""
-
-
 def _item_html(item: dict) -> str:
     company = html.escape(item["company"])
-    url = _safe_url(item.get("url") or "")
+    url = safe_url(item.get("url") or "")
     name_html = f'<a href="{html.escape(url)}">{company}</a>' if url else company
     title = html.escape(item.get("title") or "")
     score = item.get("score")
@@ -617,7 +608,7 @@ def _triage_footer() -> str:
     """Link to the dashboard's /opportunities triage page — the digest itself
     is read-only. Empty when WREN_PUBLIC_URL isn't configured."""
     base = os.getenv("WREN_PUBLIC_URL", "").rstrip("/")
-    url = _safe_url(f"{base}/opportunities") if base else ""
+    url = safe_url(f"{base}/opportunities") if base else ""
     if not url:
         return ""
     return (f'<p class="footer"><a href="{html.escape(url)}">'

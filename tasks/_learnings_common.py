@@ -8,7 +8,6 @@ entry is never silently lost). This module holds the pieces they share.
 """
 
 from datetime import datetime, timedelta
-from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 from agent import prefs
@@ -16,6 +15,7 @@ from agent.tools.calendar import _local_timezone
 from agent.tools.email import send_email
 from agent.tools.learnings_file import write_entry
 from tasks._common import notify_failure
+from tasks._urls import safe_url
 
 
 def prior_day(now: datetime | None = None) -> tuple[datetime, datetime, "datetime.date"]:
@@ -121,17 +121,6 @@ def compact_videos(videos: list) -> list:
         }
         for v in videos[:MAX_YOUTUBE_VIDEOS]
     ]
-
-
-def safe_url(url: str) -> str:
-    """Return url only if it's an http(s) link, else "". A video's URL is built
-    by agent.tools.youtube from the API's videoId, but the fields are still
-    externally sourced — scheme-validate before rendering into the Markdown
-    (same guard as tasks/morning_brief._safe_url)."""
-    try:
-        return url if urlparse(url).scheme in ("http", "https") else ""
-    except (ValueError, AttributeError):
-        return ""
 
 
 def videos_section(videos: list) -> str:

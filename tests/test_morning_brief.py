@@ -1,8 +1,9 @@
 """Tests for the pure helpers in tasks.morning_brief.
 
 Importing tasks.morning_brief pulls in the whole brief pipeline module but runs
-no network — only the small pure functions (_safe_url, _clean_snippet,
-_tasks_html) are exercised here.
+no network — only the small pure functions (_clean_snippet, _tasks_html) are
+exercised here. The scheme allow-list it renders links through now lives in
+tasks._urls; see tests/test_urls.py.
 """
 
 from datetime import date
@@ -10,35 +11,6 @@ from datetime import date
 from tasks import morning_brief as mb
 
 TODAY = date(2026, 7, 7)  # a Tuesday
-
-
-# --------------------------------------------------------------------------- #
-# _safe_url — scheme allow-list guarding externally-sourced URLs
-# --------------------------------------------------------------------------- #
-
-def test_safe_url_allows_http():
-    assert mb._safe_url("http://example.com/x") == "http://example.com/x"
-
-
-def test_safe_url_allows_https():
-    assert mb._safe_url("https://example.com/x") == "https://example.com/x"
-
-
-def test_safe_url_rejects_javascript_scheme():
-    assert mb._safe_url("javascript:alert(1)") == ""
-
-
-def test_safe_url_rejects_data_scheme():
-    assert mb._safe_url("data:text/html,<script>alert(1)</script>") == ""
-
-
-def test_safe_url_rejects_other_schemes():
-    assert mb._safe_url("ftp://example.com/x") == ""
-
-
-def test_safe_url_rejects_relative_and_empty():
-    assert mb._safe_url("/relative/path") == ""
-    assert mb._safe_url("") == ""
 
 
 # --------------------------------------------------------------------------- #

@@ -23,7 +23,6 @@ import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -40,6 +39,7 @@ from agent.tools.github_starred import fetch_starred_repos
 from agent.tools.google_tasks import get_tasks_due_soon
 from agent.tools.weather import fetch_weather
 from tasks._common import notify_failure, setup_logger, today_str
+from tasks._urls import safe_url
 
 _ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(_ROOT / "config" / ".env")
@@ -168,16 +168,6 @@ def _weather_html(weather: dict) -> str:
     )
 
 
-def _safe_url(url: str) -> str:
-    """Return url only if it's an http(s) link, else "". Guards against
-    javascript:/data: (or other) schemes in externally-sourced URLs —
-    html.escape() alone does not neutralize a dangerous scheme."""
-    try:
-        return url if urlparse(url).scheme in ("http", "https") else ""
-    except (ValueError, AttributeError):
-        return ""
-
-
 def _clean_snippet(text: str, max_len: int = 160) -> str:
     text = re.sub(r"#+\s*", "", text)  # strip markdown heading markers
     text = re.sub(r"\s+", " ", text).strip()  # collapse newlines/whitespace
@@ -194,7 +184,7 @@ def _starred_repos_html(repos: list, intro_text: str, error: str = None) -> str:
     items = []
     for r in repos:
         name = html.escape(r.get("full_name") or r.get("name", "(unnamed)"))
-        safe_url = _safe_url(r.get("html_url", ""))
+        url = safe_url(r.get("html_url", ""))
         # Prefer a summary of what actually changed (release notes / recent
         # commit subjects) over the repo's static description, which is what
         # the user asked for — the description alone doesn't say what's new.
@@ -203,7 +193,7 @@ def _starred_repos_html(repos: list, intro_text: str, error: str = None) -> str:
         # re-truncating recent_changes here would chop the suffix mid-word.
         changes = r.get("recent_changes") or _clean_snippet(r.get("description") or "")
         changes_html = f" — {html.escape(changes)}" if changes else ""
-        name_html = f'<a href="{html.escape(safe_url)}">{name}</a>' if safe_url else name
+        name_html = f'<a href="{html.escape(url)}">{name}</a>' if url else name
         items.append(f"<li>{name_html}{changes_html}</li>")
     intro_html = f'<p class="intro">{html.escape(intro_text)}</p>' if intro_text else ""
     return intro_html + "<ul>" + "".join(items) + "</ul>"

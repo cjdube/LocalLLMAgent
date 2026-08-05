@@ -79,7 +79,8 @@ injected activity text to hijack. (It replaced an earlier `run_agent` path fed b
 Strava activity *names*.)
 
 **Rendered output is escaped and scheme-validated.** All model output rendered to
-HTML is `html.escape`d and any URL passes a scheme allow-list (`_safe_url`)
+HTML is `html.escape`d and any URL passes a scheme allow-list
+(`tasks/_urls.py:safe_url`, the single copy every emitter imports)
 before it reaches a page or an email, so injected output can't smuggle scripts or
 `javascript:`/`data:` links in. The browser pages assign every model- or
 log-derived string via `textContent`, never `innerHTML`.
