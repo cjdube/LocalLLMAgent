@@ -220,7 +220,7 @@ function showOverview(data) {
      ["Chat tools", toolCount],
      ["Routines", data.routines.length],
      ["Memories", data.memory.entries.length],
-     ["Wiki pages", data.memory.wiki_pages.length],
+     ["Wiki pages", data.memory.wiki_page_count],
      ["Skills", data.skills.length],
     ].forEach(([label, n]) => {
       const li = el("li", null, label);

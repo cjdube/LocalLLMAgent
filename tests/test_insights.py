@@ -747,6 +747,22 @@ def test_system_map_memory_and_wiki_degrade_gracefully(tmp_path, monkeypatch):
     assert out["skills"] == []
 
 
+def test_system_map_wiki_count_is_the_total_not_the_drawn_cap(tmp_path, monkeypatch):
+    _isolate_map_sources(tmp_path, monkeypatch)
+    wiki_dir = tmp_path / "vault" / "wiki"
+    wiki_dir.mkdir(parents=True)
+    total = insights._WIKI_PAGES_MAX + 7
+    for i in range(total):
+        (wiki_dir / f"page-{i:03d}.md").write_text("x", encoding="utf-8")
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path / "vault"))
+
+    out = insights.system_map(SAMPLE_TOOLS, write_tools=[])
+    # The band is capped for payload size; the count still reports every page,
+    # so /map and /dashboard agree.
+    assert len(out["memory"]["wiki_pages"]) == insights._WIKI_PAGES_MAX
+    assert out["memory"]["wiki_page_count"] == total
+
+
 def test_discover_tasks_returns_fresh_list(tmp_path, monkeypatch):
     monkeypatch.setattr(insights, "LAUNCHD_DIR", tmp_path)
     insights._TASKS_CACHE.clear()

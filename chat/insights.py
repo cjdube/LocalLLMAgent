@@ -704,7 +704,10 @@ def system_map(tools: list[dict], write_tools) -> dict:
     # dict when it isn't mounted — the map just shows an empty wiki band.
     wiki = list_wiki_pages()
     pages = [] if "error" in wiki else wiki.get("pages", [])
+    # The drawn band is capped, so send the true total too — otherwise the map's
+    # page count reads as the cap and disagrees with the dashboard's.
     wiki_pages = [p[:-3] if p.endswith(".md") else p for p in pages[:_WIKI_PAGES_MAX]]
+    wiki_page_count = len(pages)
 
     skills = []
     for s in list_skills()["skills"]:
@@ -716,7 +719,8 @@ def system_map(tools: list[dict], write_tools) -> dict:
         "identity": {"name": "Wren", "model": active_model_label()},
         "services": services,
         "routines": routines,
-        "memory": {"entries": entries, "wiki_pages": wiki_pages},
+        "memory": {"entries": entries, "wiki_pages": wiki_pages,
+                   "wiki_page_count": wiki_page_count},
         "skills": skills,
     }
 
