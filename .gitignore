@@ -27,8 +27,16 @@ logs/*.log
 logs/*.log.bak
 # Retired tasks' logs, moved out of the *.log glob so they stop showing up in
 # `ls logs/`. Same personal data as the live logs, so ignore the whole dir —
-# logs/*.log above does NOT match a subdirectory.
+# logs/*.log above does NOT match a subdirectory. (Currently empty: its contents
+# were rolled into the tarball below on 2026-08-05. The rule stays so a future
+# archive/ can't be committed by the accident of the directory not existing yet.)
 logs/archive/
+# Compressed cold storage of pre-2026-07-15 backups (the retired weekly_learnings
+# task's only run history, plus four .bak files denser than their live logs).
+# Same personal data as everything else in logs/, but NEITHER of the two globs
+# above matches a .tar.gz — it landed untracked, 612KB, one `git add .` from
+# being committed.
+logs/*.tar.gz
 # Periodic codebase-audit plans. Kept on disk (each audit reads the previous
 # one's "verified clean" section to skip re-deriving it) but deliberately not
 # committed: they're a working scratchpad about the repo, not part of it, and a
