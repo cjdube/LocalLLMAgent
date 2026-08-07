@@ -83,3 +83,24 @@ def test_log_event_without_source_id_never_queries(fake_events):
     assert result["event_id"] == "new-event"
     assert events.list_kwargs == []  # no pointless dedupe round-trip
     assert "extendedProperties" not in events.inserted[0]
+
+
+def test_events_in_range_surfaces_source_id(fake_events):
+    # The other half of the dedupe pairing: a reader has to be able to tell an
+    # event Wren stamped from one the user made by hand. calendar_colorizer
+    # depends on this to leave the session blocks it must not recolor alone.
+    fake_events["events"] = _FakeEvents(existing_items=[
+        {"id": "e1", "summary": "AI · Wren — added the digest",
+         "start": {"dateTime": "2026-07-10T08:00:00-04:00"},
+         "end": {"dateTime": "2026-07-10T09:00:00-04:00"},
+         "extendedProperties": {"private": {"source_id": "claude-time:2026-07-10:0800"}}},
+        {"id": "e2", "summary": "Dentist",
+         "start": {"dateTime": "2026-07-10T10:00:00-04:00"},
+         "end": {"dateTime": "2026-07-10T11:00:00-04:00"}},
+    ])
+
+    result = cal.get_events_in_range("2026-07-10T00:00:00", "2026-07-10T23:59:59")
+
+    assert [e["source_id"] for e in result["events"]] == [
+        "claude-time:2026-07-10:0800", None,
+    ]

@@ -1,4 +1,5 @@
-"""Read past AI-agent chat transcripts for the daily ai_chat_learnings task.
+"""Read past AI-agent chat transcripts for the daily tasks that review them —
+ai_chat_learnings (what was accomplished) and claude_time_blocks (when it happened).
 
 Two sources, both local and ToS-clean (there is no API to fetch past chats from
 either consumer product, so we use what lands on disk):
@@ -164,6 +165,85 @@ def fetch_claude_sessions(start: datetime, end: datetime,
 
     sessions.sort(key=lambda s: s["started_at"])
     return sessions
+
+
+def _session_files(start: datetime) -> list[Path]:
+    """Every session log that could hold an event at or after `start`. The
+    mtime prefilter is the same one fetch_claude_sessions relies on: these are
+    append-only logs, so a file last written before the window began can't hold
+    any of its events and is skipped without being parsed."""
+    if not CLAUDE_PROJECTS_DIR.exists():
+        return []
+    start_ts = start.timestamp()
+    keep = []
+    for path in sorted(CLAUDE_PROJECTS_DIR.glob("*/*.jsonl")):
+        try:
+            if path.stat().st_mtime >= start_ts:
+                keep.append(path)
+        except OSError:
+            continue
+    return keep
+
+
+def fetch_session_activity(start: datetime, end: datetime) -> list[dict]:
+    """Every timestamped Claude Code event between `start` and `end` (tz-aware
+    local bounds), oldest first, as
+    [{"ts", "project", "slug", "session", "text"}].
+
+    Where fetch_claude_sessions returns one compacted blob per session, this
+    returns the raw beat of the day — one entry per event, timestamps converted
+    to the caller's local zone — which is what reconstructing working hours
+    needs. It deliberately keeps records fetch_claude_sessions drops (tool
+    results, subagent sidechains, meta): an agent grinding through tools for
+    twenty minutes with nothing said out loud is still time at the keyboard.
+    `text` carries _record_text()'s human/assistant text and is None for those
+    records, so a caller can still build a prompt from what was actually said."""
+    out = []
+    for path in _session_files(start):
+        try:
+            lines = path.read_text(errors="replace").splitlines()
+        except OSError:
+            continue
+
+        events, project, slug = [], None, None
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            ts = _parse_ts(record.get("timestamp"))
+            if ts is None:
+                continue
+            ts_local = ts.astimezone(start.tzinfo)
+            if not (start <= ts_local <= end):
+                continue
+            if project is None and record.get("cwd"):
+                project = Path(record["cwd"]).name
+            if not slug and record.get("slug"):
+                slug = record["slug"]
+            events.append((ts_local, _record_text(record)))
+
+        if not events:
+            continue
+        # Real session files sometimes carry no cwd on any of a day's events.
+        # Claude Code's per-project dir name is the cwd with its separators
+        # flattened ("-Users-x-Projects-MyApp"), so its last segment is the
+        # same directory name Path(cwd).name would have given.
+        fallback = path.parent.name.rsplit("-", 1)[-1] or "unknown"
+        for ts_local, text in events:
+            out.append({
+                "ts": ts_local,
+                "project": project or fallback,
+                "slug": slug or "",
+                "session": path.stem,
+                "text": text,
+            })
+
+    out.sort(key=lambda e: e["ts"])
+    return out
 
 
 def gemini_dir() -> Path:

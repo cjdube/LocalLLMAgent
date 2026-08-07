@@ -22,6 +22,12 @@ from agent.tools.google_auth import build_service
 _ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(_ROOT / "config" / ".env")
 
+# source_id prefix for the events tasks/claude_time_blocks.py logs. It lives here,
+# next to log_calendar_event (which owns source_id), so the writer and the
+# colorizer that must leave those events alone can share it without either task
+# importing the other.
+SESSION_BLOCK_SOURCE_PREFIX = "claude-time:"
+
 LIST_TOOL_SCHEMA = {
     "type": "function",
     "function": {
@@ -154,6 +160,11 @@ def get_events_in_range(time_min: str, time_max: str) -> dict:
             "end": end,
             "colorId": e.get("colorId"),
             "status": e.get("status"),
+            # The id log_calendar_event stamped on events Wren created, so a
+            # caller can tell its own writes apart from the user's (None for a
+            # hand-made event). tasks/calendar_colorizer.py uses it to skip the
+            # session blocks, which arrive already colored.
+            "source_id": e.get("extendedProperties", {}).get("private", {}).get("source_id"),
         })
 
     return {"event_count": len(events), "events": events}

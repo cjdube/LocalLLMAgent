@@ -129,6 +129,30 @@ def test_apply_maps_numbers_back_to_the_right_event_ids(monkeypatch):
     assert patched == [("e1", WORK), ("e3", FITNESS)]
 
 
+def test_session_blocks_are_left_alone_but_other_sourced_events_are_not(monkeypatch):
+    # claude_time_blocks logs these hours at 4:45am already colored; this run
+    # always re-classifies, so without the skip it would guess from the title and
+    # overwrite that color four hours later. Strava's events also carry a
+    # source_id and must keep being classified ("Morning run" -> Fitness).
+    monkeypatch.setattr(cc, "get_events_in_range", lambda *a, **k: {"events": [
+        {"id": "e1", "summary": "AI · Wren — added the digest", "source_id": "claude-time:2026-08-05:0800"},
+        {"id": "e2", "summary": "Morning run", "source_id": "strava-42"},
+        {"id": "e3", "summary": "Sprint planning", "source_id": None},
+    ]})
+    monkeypatch.setattr(cc, "warm_model", lambda *a, **k: True)
+    monkeypatch.setattr(cc, "complete_text", lambda *a, **k: '{"1": "%s", "2": "%s"}' % (FITNESS, WORK))
+    patched = []
+    monkeypatch.setattr(cc, "set_event_color",
+                        lambda eid, cid: (patched.append((eid, cid)) or {"updated": True}))
+    monkeypatch.setattr(cc, "notify_failure", lambda *a, **k: None)
+
+    assert cc.main() == 0
+    # Two events reached the model, numbered 1 and 2 — the session block was
+    # never in the list, so the classification maps onto the Strava run and the
+    # hand-made meeting.
+    assert patched == [("e2", FITNESS), ("e3", WORK)]
+
+
 def test_valid_color_ids_derive_from_category_colors():
     # The validation set must track the single source of truth, not a copy.
     assert cc.VALID_COLOR_IDS == {cid for cid, _ in CATEGORY_COLORS.values()}

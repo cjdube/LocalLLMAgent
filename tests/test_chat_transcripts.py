@@ -94,6 +94,60 @@ def test_gemini_dir_expands_a_tilde_path(monkeypatch):
     assert resolved == Path.home() / "Documents" / "llm-wiki-learnings" / "gemini_inbox"
 
 
+def test_fetch_session_activity_keeps_every_timestamped_event():
+    _write_session([
+        {"timestamp": _ts(1, 10, 0), "cwd": "/Users/x/Projects/MyApp", "slug": "fix login",
+         "message": {"role": "user", "content": "Please fix the login bug"}},
+        # tool traffic carries no text but IS working time — the difference from
+        # fetch_claude_sessions, which drops these entirely.
+        {"timestamp": _ts(1, 10, 2), "toolUseResult": {"ok": True},
+         "message": {"role": "user", "content": [{"type": "tool_result", "content": "out"}]}},
+        {"timestamp": _ts(1, 10, 5), "isSidechain": True,
+         "message": {"role": "assistant", "content": [{"type": "text", "text": "subagent"}]}},
+        # no timestamp at all — nothing to place on a timeline
+        {"message": {"role": "user", "content": "undated"}},
+        {"timestamp": _ts(2, 10, 0), "message": {"role": "user", "content": "next day"}},
+    ])
+
+    events = ct.fetch_session_activity(START, END)
+
+    assert [e["ts"].hour for e in events] == [10, 10, 10]
+    assert [e["ts"].minute for e in events] == [0, 2, 5]
+    assert {e["project"] for e in events} == {"MyApp"}
+    assert {e["slug"] for e in events} == {"fix login"}
+    assert {e["session"] for e in events} == {"sess"}
+    # Only the first event said anything a human wrote.
+    assert [bool(e["text"]) for e in events] == [True, False, False]
+
+
+def test_fetch_session_activity_falls_back_to_the_project_dir_name():
+    # Real session files sometimes carry no cwd on any of a day's events; the
+    # per-project dir name is the cwd with its separators flattened.
+    _write_session([
+        {"timestamp": _ts(1, 9, 0), "message": {"role": "user", "content": "hi"}},
+    ])
+    assert ct.fetch_session_activity(START, END)[0]["project"] == "MyApp"
+
+
+def test_fetch_session_activity_sorts_across_sessions():
+    project_dir = ct.CLAUDE_PROJECTS_DIR / "-Users-x-Projects-MyApp"
+    project_dir.mkdir(parents=True)
+    for name, hour in (("late.jsonl", 14), ("early.jsonl", 9)):
+        path = project_dir / name
+        path.write_text(json.dumps(
+            {"timestamp": _ts(1, hour), "cwd": f"/Users/x/Projects/{name}",
+             "message": {"role": "user", "content": "hi"}}))
+        os.utime(path, (END.timestamp(), END.timestamp()))
+
+    # Concurrent sessions have to interleave on one timeline — the whole point of
+    # pooling them is that idle gaps are a property of the day, not of a file.
+    assert [e["ts"].hour for e in ct.fetch_session_activity(START, END)] == [9, 14]
+
+
+def test_fetch_session_activity_empty_when_store_absent():
+    assert ct.fetch_session_activity(START, END) == []
+
+
 def test_compact_trims_the_middle():
     out = ct._compact(["X" * 200], max_chars=60)
     assert out.startswith("X")
