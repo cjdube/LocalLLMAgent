@@ -383,34 +383,71 @@ def test_yesterdays_run_does_not_count_as_today(monkeypatch, tmp_path):
 # Rollup
 # --------------------------------------------------------------------------- #
 
-def test_rollup_reports_counts_not_raw_lines():
+def _finding(source, severity, label=None, msg="something went wrong", ts=None):
+    """The shape _scan_lines emits — ts and msg included, since the rollup now
+    quotes them."""
+    return {"source": source, "severity": severity, "label": label,
+            "msg": msg, "ts": ts or "2026-07-16 03:14:15,926"}
+
+
+def test_rollup_leads_with_counts():
     outcomes = {"failed": ["morning_brief", "ai_chat_learnings"],
                 "stalled": [], "missing": ["strava_download"]}
     findings = [
-        {"source": "wren", "severity": "warn", "label": "context overflow"},
-        {"source": "wren", "severity": "warn", "label": "context overflow"},
-        {"source": "wren", "severity": "critical", "label": None},
-        {"source": "bg_worker", "severity": "warn", "label": None},
+        _finding("wren", "warn", "context overflow"),
+        _finding("wren", "warn", "context overflow"),
+        _finding("wren", "critical"),
+        _finding("bg_worker", "warn"),
     ]
     summary = log_inspector._rollup(outcomes, findings)
     assert "2 failed: morning_brief, ai_chat_learnings" in summary
     assert "1 didn't run: strava_download" in summary
     assert "Model strain: 2x context overflow" in summary
-    assert "1 error lines: wren(1)" in summary
-    assert "1 warnings: bg_worker(1)" in summary
+    assert "1 error line: wren(1)" in summary
+    assert "1 warning: bg_worker(1)" in summary
 
 
 def test_rollup_of_a_clean_window_is_empty():
     assert log_inspector._rollup({"failed": [], "stalled": [], "missing": []}, []) == ""
 
 
+def test_a_lone_finding_is_quoted_rather_than_counted():
+    """The 2026-08-07 push, which read "1 warnings: wren(1)" and nothing else.
+    With one finding there are ~480 unused characters; spend them."""
+    outcomes = {"failed": [], "stalled": [], "missing": []}
+    msg = "skipping unreadable plist com.craigdube.wikiagent.learnings-lint.plist"
+    summary = log_inspector._rollup(
+        outcomes, [_finding("wren", "warn", msg=msg, ts="2026-08-06 12:28:03,312")])
+    assert summary.startswith("1 warning: wren(1)")
+    assert "12:28 wren: " + msg in summary
+
+
+def test_detail_leads_with_the_critical_lines():
+    """Budget spent on a WARNING that pushed an ERROR out would inverse the point."""
+    outcomes = {"failed": [], "stalled": [], "missing": []}
+    findings = [_finding(f"w{i}", "warn", msg="warned") for i in range(20)]
+    findings.append(_finding("boom", "critical", msg="the one that matters"))
+    detail = log_inspector._rollup(outcomes, findings).split("\n")[2:]
+    assert detail[0].endswith("boom: the one that matters")
+
+
+def test_one_verbose_finding_cannot_eat_the_whole_budget():
+    outcomes = {"failed": [], "stalled": [], "missing": []}
+    findings = [_finding("noisy", "critical", msg="x" * 2000),
+                _finding("quiet", "critical", msg="but I still fit")]
+    summary = log_inspector._rollup(outcomes, findings)
+    assert "quiet: but I still fit" in summary
+    assert summary.count("...") == 1
+
+
 def test_rollup_stays_within_the_ntfy_cap():
-    """notify() truncates at 500 chars — a busy night must not lose the headline."""
+    """notify() truncates the message — a busy night must not lose the headline,
+    and the detail lines must not push the counts out."""
     outcomes = {"failed": [f"task_{i}" for i in range(8)], "stalled": [], "missing": []}
-    findings = [{"source": f"src_{i % 5}", "severity": "critical", "label": None}
+    findings = [_finding(f"src_{i % 5}", "critical", msg=f"failure number {i}")
                 for i in range(60)]
     summary = log_inspector._rollup(outcomes, findings)
-    assert len(summary) < 500
+    assert len(summary) <= log_inspector._MAX_MESSAGE_CHARS
     assert summary.startswith("8 failed:")
 
 
@@ -471,7 +508,8 @@ def test_findings_push_once_and_still_exit_zero(pushes):
     assert log_inspector.main() == 0
     assert len(pushes) == 1
     assert pushes[0]["priority"] == "high"
-    assert "1 error lines: wren(1)" in pushes[0]["message"]
+    assert "1 error line: wren(1)" in pushes[0]["message"]
+    assert "wren: chat turn failed: boom" in pushes[0]["message"]
 
 
 def test_strain_only_pushes_at_default_priority(pushes):

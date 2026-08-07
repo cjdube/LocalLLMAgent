@@ -39,7 +39,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent.tools.notify import notify, ntfy_health
+from agent.tools.notify import _MAX_MESSAGE_CHARS, notify, ntfy_health
 from chat.insights import (
     _LINE_RE,
     _external_roots,
@@ -222,9 +222,55 @@ def _by_source(findings: list[dict]) -> str:
     return ", ".join(f"{src}({n})" for src, n in counts.most_common())
 
 
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}" if n == 1 else f"{n} {word}s"
+
+
+# Per-line cap on quoted finding text. A single message can be a whole exception
+# repr, and without this one verbose warning eats the budget three terser ones
+# would have shared.
+MAX_DETAIL_LINE = 150
+
+# ASCII on purpose. The cap notify() enforces counts CHARACTERS, while ntfy's
+# own limits are on BYTES, so multi-byte punctuation would make the two
+# disagree. The counts lines are already plain ASCII; keep these the same.
+_ELLIPSIS = "..."
+
+
+def _detail(findings: list[dict], budget: int) -> list[str]:
+    """Verbatim finding text, most severe first, for as many findings as fit.
+
+    The counts answer "how much broke"; these answer "what". When the budget
+    runs out the rollup degrades to counts alone — which is a busy night's old
+    behaviour, reached by arithmetic rather than by a threshold to tune.
+    """
+    # Stable sort, so criticals lead and each severity keeps its ts order.
+    lines = []
+    for f in sorted(findings, key=lambda f: f["severity"] != "critical"):
+        # ts is our own naive-local log stamp (see the note in main()), so
+        # slicing out HH:MM is display formatting, not the local-vs-UTC slice
+        # the repo bans.
+        text = f"- {f['ts'][11:16]} {f['source']}: {f['msg']}"
+        if len(text) > MAX_DETAIL_LINE:
+            text = text[:MAX_DETAIL_LINE - len(_ELLIPSIS)] + _ELLIPSIS
+        if len(text) + 1 > budget:  # +1 for the newline joining it on
+            break
+        lines.append(text)
+        budget -= len(text) + 1
+    return lines
+
+
 def _rollup(outcomes: dict[str, list[str]], findings: list[dict],
             channel_error: str | None = None) -> str:
-    """The push body: counts, never raw lines — notify() truncates at 500 chars."""
+    """The push body: a counts header, then as much verbatim finding text as the
+    ntfy cap leaves room for.
+
+    It was counts and nothing else until 2026-08-07, on the reasoning that
+    notify() truncates at 500 chars. That holds for a fifty-finding night. On a
+    one-finding night it spent 19 of those characters and discarded the other
+    481, so the push read "1 warnings: wren(1)" while the message that said
+    exactly what was wrong stayed in the log where no phone could reach it.
+    """
     lines = []
     if channel_error:
         # First line on purpose: this one only ever arrives by email (the push
@@ -241,13 +287,16 @@ def _rollup(outcomes: dict[str, list[str]], findings: list[dict],
 
     errors = [f for f in findings if f["severity"] == "critical"]
     if errors:
-        lines.append(f"{len(errors)} error lines: {_by_source(errors)}")
+        lines.append(f"{_plural(len(errors), 'error line')}: {_by_source(errors)}")
 
     other = [f for f in findings if f["severity"] == "warn" and not f["label"]]
     if other:
-        lines.append(f"{len(other)} warnings: {_by_source(other)}")
+        lines.append(f"{_plural(len(other), 'warning')}: {_by_source(other)}")
 
-    return "\n".join(lines)
+    counts = "\n".join(lines)
+    if not counts:
+        return ""
+    return "\n".join([counts] + _detail(findings, _MAX_MESSAGE_CHARS - len(counts)))
 
 
 def _is_urgent(outcomes: dict[str, list[str]], findings: list[dict],

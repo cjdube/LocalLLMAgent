@@ -160,8 +160,8 @@ location is fine; the glob doesn't need a rule for them.
 
 ## What the push looks like
 
-`notify()` truncates at 500 chars, so the push is a **rollup of counts, never
-raw lines**:
+`notify()` truncates at 500 chars, so the push **leads with counts** and then
+spends whatever room is left on the findings' own text:
 
 ```
 PUSH CHANNEL DOWN: ntfy unreachable: Connection refused
@@ -169,7 +169,27 @@ PUSH CHANNEL DOWN: ntfy unreachable: Connection refused
 1 didn't run: strava_download
 Model strain: 5x repetition loop, 1x context overflow
 2 error lines: wren(2)
+- 03:14 wren: chat turn failed: HTTPConnectionPool(host='localhost', ...
 ```
+
+Detail lines are ordered **criticals first** (a WARNING must never push an ERROR
+out of the budget), each capped at `MAX_DETAIL_LINE` so one exception repr can't
+crowd out three terser findings, and plain ASCII — the 500 counts *characters*
+while ntfy's own limits count *bytes*, and multi-byte punctuation would make the
+two disagree.
+
+On a busy night the budget runs out after a line or two and the rollup is counts
+plus a sample; on a quiet night it quotes everything. That degradation is
+arithmetic, **not a threshold to tune** — there is no "quote detail if fewer than
+N findings" knob to get wrong.
+
+> The rollup was counts and nothing else until 2026-08-07, when a single benign
+> warning arrived as `1 warnings: wren(1)`. Nineteen characters used, 481
+> discarded, and the message that said exactly what was wrong — a plist read
+> mid-rewrite, harmless — stayed in the log where no phone could reach it. The
+> "counts, never raw lines" rule was right for fifty findings and wrong for one.
+> The general form of the earlier lesson still holds: **summarise noise, don't
+> discard it** — but when there's no noise to suppress, say what happened.
 
 The rollup is sent with `email_fallback=True`: it fires once a day and nothing
 retries it, so a push that doesn't land means the findings are simply lost —
