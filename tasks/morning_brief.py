@@ -46,15 +46,22 @@ load_dotenv(_ROOT / "config" / ".env")
 
 # Env wins; otherwise the location from config/preferences.json.
 DEFAULT_LOCATION = os.getenv("DEFAULT_LOCATION") or prefs.PREFS.get("location", "")
+# How far ahead the Calendar section looks, from config/preferences.json.
+CALENDAR_HOURS_AHEAD = prefs.brief_calendar_hours()
 STARRED_STATE_PATH = _ROOT / "config" / "github_starred_state.json"
 
 # The user's name, for the model-facing send_morning_brief description below.
 _NAME = prefs.user_name()
 
 GLANCE_SYSTEM_PROMPT = """You write a single short "Today at a Glance" blurb for a \
-personal morning brief email. Given the day's weather and calendar events as JSON, \
-write 1-2 plain sentences summarizing the day. No markdown, no headers, no quotes \
-around the output — just the sentences themselves. Be concise and friendly."""
+personal morning brief email. You are given the weather, today's calendar events \
+(events_today), and a separate list of events on later days (events_later). The two \
+lists are already sorted for you and each event carries the day it falls on — never \
+describe an event from events_later as happening today. Write 1-2 plain sentences: \
+first the day's weather, then today's events. If events_today is empty, say there is \
+nothing scheduled today. Only if something in events_later is worth a heads-up, add \
+one short clause that names its day. No markdown, no headers, no quotes around the \
+output — just the sentences themselves. Be concise and friendly."""
 
 STARRED_REPOS_SYSTEM_PROMPT = """You write a single short intro sentence for the "Starred \
 Repos" section of a personal morning brief email. Given a JSON list of GitHub repos the \
@@ -104,9 +111,10 @@ def _section(icon: str, title: str, body_html: str) -> str:
     </div>"""
 
 
-def _events_html(events: list) -> str:
+def _events_html(events: list, hours_ahead: int = None) -> str:
     if not events:
-        return '<span class="empty">Nothing on the calendar in the next 24 hours.</span>'
+        hours = CALENDAR_HOURS_AHEAD if hours_ahead is None else hours_ahead
+        return f'<span class="empty">Nothing on the calendar in the next {hours} hours.</span>'
     items = []
     for e in events:
         start = e.get("start", "")
@@ -118,6 +126,46 @@ def _events_html(events: list) -> str:
         summary = html.escape(e.get("summary", "(no title)"))
         items.append(f"<li><strong>{time_str}</strong> — {summary}</li>")
     return "<ul>" + "".join(items) + "</ul>"
+
+
+def _glance_buckets(events: list, today: date = None) -> tuple[list, list]:
+    """Split upcoming events into today's and later days', each event compacted
+    to {"when": <rendered day/time>, "summary": ...} for the glance prompt.
+
+    The calendar window is wider than a day, so without this the model would
+    have to work out both "is this today?" and "which day is it?" from ISO
+    timestamps — date math it gets wrong. Starts are UTC-offset (Google) or a
+    bare date for all-day events; both are read in the local zone, since an
+    evening event is the case where the UTC day and the local day disagree.
+    An unparseable start sinks into `later`: the failure worth avoiding is
+    announcing something as today's when it isn't."""
+    tz = ZoneInfo(local_timezone())
+    today = today or datetime.now(tz).date()
+    todays, later = [], []
+    for e in events:
+        summary = e.get("summary", "(no title)")
+        try:
+            dt = datetime.fromisoformat(e.get("start", ""))
+        except ValueError:
+            later.append({"when": "date unknown", "summary": summary})
+            continue
+        # All-day events parse to a naive datetime (a bare date), timed ones to
+        # an aware one — so tzinfo is what tells the two apart.
+        if dt.tzinfo is None:
+            day, time_str = dt.date(), ""
+        else:
+            local = dt.astimezone(tz)
+            day, time_str = local.date(), f" {local.strftime('%-I:%M %p')}"
+        if day == today:
+            label = "today"
+        elif day == today + timedelta(days=1):
+            label = "tomorrow"
+        else:
+            label = day.strftime("%A, %b %-d")
+        (todays if day == today else later).append(
+            {"when": f"{label}{time_str}", "summary": summary}
+        )
+    return todays, later
 
 
 def _tasks_html(tasks: list, error: str = None, today: date = None) -> str:
@@ -264,7 +312,7 @@ def build_and_send_brief(logger: Optional[logging.Logger] = None) -> dict:
         if logger:
             logger.info(f"fetch_weather -> {weather}")
 
-        events_result = get_upcoming_events(hours_ahead=24)
+        events_result = get_upcoming_events(hours_ahead=CALENDAR_HOURS_AHEAD)
         if logger:
             logger.info(f"get_upcoming_events -> {events_result}")
         events = events_result.get("events", [])
@@ -281,9 +329,18 @@ def build_and_send_brief(logger: Optional[logging.Logger] = None) -> dict:
         # so the 6am brief finds a cold model on exactly those mornings, and the
         # load stacks on top of prefill inside the streamed call's read timeout.
         warm_model(logger=logger, backend=brief_backend)
+        # The calendar window runs past today, so the split happens in Python —
+        # the model is told which events are today's rather than deriving it.
+        events_today, events_later = _glance_buckets(events)
+        if logger:
+            logger.info(f"glance buckets -> today={events_today} later={events_later}")
         glance_text = complete_text(
             system_prompt=GLANCE_SYSTEM_PROMPT,
-            user_prompt=f"weather: {weather}\ncalendar_events: {events}",
+            user_prompt=(
+                f"weather: {weather}\n"
+                f"events_today: {events_today}\n"
+                f"events_later: {events_later}"
+            ),
             backend=brief_backend,
             think=False,
             logger=logger,

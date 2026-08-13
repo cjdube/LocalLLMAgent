@@ -74,5 +74,13 @@ def category_color_by_role(role: str, default: str) -> str:
                  if c.get("role") == role), default)
 
 
+def brief_calendar_hours(default: int = 48) -> int:
+    """How far ahead the morning brief's calendar section looks. A missing or
+    non-positive value falls back to `default` — a bad edit should shorten
+    nothing, since an empty calendar section reads like a quiet day."""
+    value = section("morning_brief").get("calendar_hours_ahead")
+    return value if isinstance(value, int) and value > 0 else default
+
+
 def job_search() -> dict:
     return section("job_search")

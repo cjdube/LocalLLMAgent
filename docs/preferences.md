@@ -61,6 +61,23 @@ breaks nothing. Recognized values, each expected on exactly one category:
   place if event bucketing returns. Nothing reads them today — retagging or
   removing them changes no behavior.
 
+### `morning_brief`
+
+| Key | Purpose |
+|---|---|
+| `calendar_hours_ahead` | How far ahead the brief's Calendar section looks, in hours (default 48) |
+
+Only the Calendar section moves with this; the Tasks Due Soon window is a
+separate, fixed 48 hours in `get_tasks_due_soon`. A missing, zero, or
+non-numeric value falls back to 48.
+
+Widening the window past a day splits the "Today at a Glance" blurb's input:
+`_glance_buckets()` sorts the events into today's and later days' in local
+time and renders each one's day label ("tomorrow", "Saturday, Aug 15") in
+Python, so the model is *told* what is today's rather than deriving it from
+ISO timestamps. Nine live replays across five event shapes kept every later
+event labelled as later.
+
 ### `learnings`
 
 What the daily learnings reviews ignore. Scoped to those tasks only:

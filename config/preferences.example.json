@@ -20,6 +20,10 @@
       {"name": "Uncategorized", "color_id": "11", "color_name": "Tomato", "hint": "(only if genuinely unable to tell)", "role": "fallback"}
     ]
   },
+  "morning_brief": {
+    "_comment_calendar_hours_ahead": "How far ahead the brief's Calendar section looks, in hours. Omitted, zero, or non-numeric falls back to 48.",
+    "calendar_hours_ahead": 48
+  },
   "learnings": {
     "_comment": "What the daily learnings reviews ignore. Scoped to those tasks only — fetch_chrome_history and the calendar tools still return this data, so chat can answer questions about it.",
     "_comment_keywords": "Case-insensitive substrings. A calendar event whose summary matches is dropped; so is a browsed site whose title matches, and any single page path that matches.",

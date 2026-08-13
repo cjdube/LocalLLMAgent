@@ -55,6 +55,27 @@ def test_location_present():
     assert prefs.PREFS.get("location")
 
 
+# ---- morning_brief.calendar_hours_ahead ------------------------------------
+
+def test_brief_calendar_hours_reads_configured_value(monkeypatch):
+    monkeypatch.setattr(prefs, "PREFS", {"morning_brief": {"calendar_hours_ahead": 72}})
+    assert prefs.brief_calendar_hours() == 72
+
+
+def test_brief_calendar_hours_defaults_when_absent(monkeypatch):
+    monkeypatch.setattr(prefs, "PREFS", {})
+    assert prefs.brief_calendar_hours() == 48
+    assert prefs.brief_calendar_hours(24) == 24
+
+
+def test_brief_calendar_hours_rejects_unusable_values(monkeypatch):
+    # A bad edit must not shorten the window to nothing: an empty Calendar
+    # section reads like a quiet day rather than like a broken config.
+    for bad in (0, -12, "48", None, 12.5):
+        monkeypatch.setattr(prefs, "PREFS", {"morning_brief": {"calendar_hours_ahead": bad}})
+        assert prefs.brief_calendar_hours() == 48, f"{bad!r} should have fallen back"
+
+
 # ---- loader degradation -----------------------------------------------------
 
 def test_load_missing_file_returns_empty(tmp_path):
