@@ -59,6 +59,28 @@ def test_prunes_destarred_repos(stub, monkeypatch):
     assert "a/one" in store
 
 
+def test_caches_the_repo_list_for_the_pages_fallback(stub, monkeypatch):
+    # /starred falls back to this when the live GitHub fetch fails, so the page
+    # renders a stale list instead of going blank (chat/routes_starred.py).
+    monkeypatch.setattr(sr, "fetch_starred_repos", lambda: _repos("a/one", "b/two"))
+
+    assert sr.main() == 0
+    cached = load_json(sr.REPOS_PATH, {})
+    assert [r["full_name"] for r in cached["repos"]] == ["a/one", "b/two"]
+    assert "fetched_at" in cached
+
+
+def test_the_repo_list_is_cached_even_if_the_release_fanout_fails(stub, monkeypatch):
+    # The list is written before the per-repo release fetches, so the half that
+    # is slow and rate-limit-prone can't cost the page its fallback.
+    monkeypatch.setattr(sr, "fetch_starred_repos", lambda: _repos("a/one"))
+    monkeypatch.setattr(sr, "fetch_latest_release",
+                        lambda full_name: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    assert sr.main() == 1
+    assert [r["full_name"] for r in load_json(sr.REPOS_PATH, {})["repos"]] == ["a/one"]
+
+
 def test_fetch_error_notifies_and_returns_nonzero(stub, monkeypatch):
     failures = []
     monkeypatch.setattr(sr, "notify_failure", lambda name, detail, logger=None: failures.append(detail))

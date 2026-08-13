@@ -55,33 +55,73 @@ EMAIL_CALL = {"function": {"name": "send_email", "arguments": {"subject": "Hi", 
 # Auth gating
 # --------------------------------------------------------------------------- #
 
-@pytest.mark.parametrize("method,path,kwargs", [
-    ("post", "/chat", {"json": {"message": "hi"}}),
-    ("post", "/chat/confirm", {"json": {"approved": True}}),
-    ("post", "/chat/escalate", {}),
-    ("post", "/chat/cancel", {}),
-    ("post", "/chat/new", {}),
-    ("get", "/api/schedules", {}),
-    ("get", "/api/runs/morning_brief", {}),
-    ("get", "/api/runs/morning_brief/someid", {}),
-    ("get", "/api/capabilities", {}),
-    ("get", "/api/run_stats", {}),
-    ("get", "/api/health/ntfy", {}),
-    ("post", "/api/run/morning_brief", {}),
-    ("get", "/api/run/morning_brief/status", {}),
-    ("get", "/api/memories", {}),
-    ("get", "/api/system_map", {}),
-    ("get", "/api/opportunities", {}),
-    ("get", "/api/starred", {}),
-    ("post", "/api/opportunities/abc/status", {"json": {"status": "interested"}}),
-    ("post", "/api/opportunities/watchlist", {"json": {"company": "X"}}),
-    ("delete", "/api/opportunities/watchlist/abc", {}),
-    ("post", "/api/opportunities/abc/research", {}),
-])
-def test_endpoints_require_auth(client, method, path, kwargs):
-    resp = getattr(client, method)(path, **kwargs)
-    assert resp.status_code == 401
-    assert resp.get_json()["error"] == "not authenticated"
+# The auth boundary is enumerated from app.url_map rather than hand-listed. A
+# hand-list silently stops covering what gets added after it: /api/logs,
+# /api/logs/entries and /api/vault_health were all unguarded here for exactly
+# that reason. Adding an exemption is now a deliberate edit to a commented set,
+# not an omission nobody notices.
+
+# Routes that deliberately do NOT answer 401 to an unauthenticated caller.
+_AUTH_EXEMPT = {
+    "login",       # the auth endpoint itself
+    "static",      # static assets, no user data
+    "bg_resolve",  # token-authenticated instead; see docs/security-model.md
+}
+# Page routes render the login form (200) rather than a JSON 401 — a browser
+# navigation showing raw JSON is worse than showing the form.
+_LOGIN_PAGE_ENDPOINTS = {
+    "index", "dashboard", "games_page", "logs_page", "map_page",
+    "memories_page", "opportunities_page", "starred_page",
+}
+# A game's bundle is a browser navigation too, but redirects to "/" instead of
+# rendering the form inline (routes_games.py avoids importing LOGIN_PAGE, which
+# would be a circular import).
+_REDIRECT_ENDPOINTS = {"games.game_asset"}
+
+# Sample values for URL parameters, so a rule can be turned into a concrete
+# request. A new parameter with no value here raises a KeyError rather than
+# silently skipping the route — the whole point is that nothing goes uncovered.
+_URL_ARGS = {
+    "task_key": "morning_brief", "run_id": "someid", "item_id": "abc",
+    "watch_id": "abc", "game_id": "weigh-anchor", "asset": "index.html",
+    "endpoint": "decide", "filename": "favicon.svg",
+}
+
+
+def _routes():
+    """(endpoint, method, url) for every rule that should enforce auth."""
+    out = []
+    for rule in srv.app.url_map.iter_rules():
+        if rule.endpoint in _AUTH_EXEMPT:
+            continue
+        method = sorted(rule.methods - {"HEAD", "OPTIONS"})[0]
+        url = rule.build({a: _URL_ARGS[a] for a in rule.arguments})[1]
+        out.append((rule.endpoint, method, url))
+    return sorted(out)
+
+
+@pytest.mark.parametrize("endpoint,method,url", _routes())
+def test_every_route_enforces_auth(client, endpoint, method, url):
+    resp = getattr(client, method.lower())(url)
+    if endpoint in _LOGIN_PAGE_ENDPOINTS:
+        assert resp.status_code == 200
+        assert "Access token" in resp.get_data(as_text=True)
+    elif endpoint in _REDIRECT_ENDPOINTS:
+        assert resp.status_code == 302
+        assert resp.headers["Location"] == "/"
+    else:
+        assert resp.status_code == 401
+        assert resp.get_json()["error"] == "not authenticated"
+
+
+def test_the_auth_sweep_actually_covers_the_app():
+    """Guard on the guard: if _routes() ever silently returned nothing (a bad
+    filter, a rename), every case above would vacuously pass."""
+    endpoints = {e for e, _, _ in _routes()}
+    assert len(endpoints) > 25
+    # The three that were missing from the old hand-list, pinned by name.
+    assert {"logs.api_logs", "logs.api_log_entries",
+            "dashboard.api_vault_health"} <= endpoints
 
 
 def test_security_headers_present(client):
@@ -93,88 +133,38 @@ def test_security_headers_present(client):
 
 
 # --------------------------------------------------------------------------- #
-# /api/starred — live repo list merged with cached blurbs
+# The chat system prompt — assembled from two soft-wrapped persona files
 # --------------------------------------------------------------------------- #
 
-def test_api_starred_merges_cached_blurb_and_falls_back_to_description(auth_client, monkeypatch):
-    from agent.store import atomic_write_json
-    monkeypatch.setattr(srv, "fetch_starred_repos", lambda: {"repos": [
-        {"full_name": "a/one", "description": "desc one", "language": "Rust"},
-        {"full_name": "b/two", "description": "desc two", "language": "Go"},
-    ]})
-    # a/one is cached; b/two is not, so it falls back to its GitHub description.
-    atomic_write_json(srv.starred_blurbs.BLURBS_PATH,
-                      {"a/one": {"blurb": "cached blurb", "generated_at": "x"}})
-
-    resp = auth_client.get("/api/starred")
-    assert resp.status_code == 200
-    repos = {r["full_name"]: r["blurb"] for r in resp.get_json()["repos"]}
-    assert repos == {"a/one": "cached blurb", "b/two": "desc two"}
+def test_unwrap_collapses_soft_wraps_but_keeps_paragraph_breaks():
+    assert srv._unwrap("one\ntwo") == "one two"
+    assert srv._unwrap("one\n\ntwo") == "one\n\ntwo"
+    assert srv._unwrap("a\nb\n\nc\nd") == "a b\n\nc d"
 
 
-def test_api_starred_merges_cached_release_with_new_badge(auth_client, monkeypatch):
-    from datetime import datetime, timedelta, timezone
-
-    from agent.store import atomic_write_json
-    monkeypatch.setattr(srv, "fetch_starred_repos", lambda: {"repos": [
-        {"full_name": "a/recent", "description": "d", "language": "Rust"},
-        {"full_name": "b/old", "description": "d", "language": "Go"},
-        {"full_name": "c/none", "description": "d", "language": "C"},
-    ]})
-    recent = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
-    old = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
-    atomic_write_json(srv.starred_releases.RELEASES_PATH, {
-        "a/recent": {"tag": "v1.3", "name": "1.3", "published_at": recent, "html_url": "u"},
-        "b/old": {"tag": "v0.9", "name": "0.9", "published_at": old, "html_url": "u"},
-    })
-
-    resp = auth_client.get("/api/starred")
-    assert resp.status_code == 200
-    repos = {r["full_name"]: r for r in resp.get_json()["repos"]}
-    assert repos["a/recent"]["latest_release"]["tag"] == "v1.3"
-    assert repos["a/recent"]["release_is_new"] is True
-    assert repos["b/old"]["release_is_new"] is False        # released, but outside the window
-    assert repos["c/none"]["latest_release"] is None         # no cached release
-    assert repos["c/none"]["release_is_new"] is False
+def test_the_tools_prompt_reaches_the_model_as_one_paragraph():
+    """agent/wren_chat_tools.md is wrapped for editing, and the model must see it
+    unwrapped — exactly as it did when it was a concatenated literal here. A
+    stray blank line would silently split it, so pin the shape rather than the
+    (frequently edited) wording."""
+    head, _, tools = srv.CHAT_SYSTEM_PROMPT.partition("\n\n---\n\n")
+    assert head, "the behaviour half (wren_chat.md) is missing"
+    assert tools, "the tools half (wren_chat_tools.md) is missing"
+    assert "\n" not in tools, "wren_chat_tools.md gained a paragraph break"
+    # The placeholder is substituted, not shipped to the model verbatim.
+    assert "{name}" not in srv.CHAT_SYSTEM_PROMPT
+    assert srv._NAME in tools
 
 
-def test_api_starred_merges_installed_version_and_update_flag(auth_client, monkeypatch):
-    from agent.store import atomic_write_json
-    monkeypatch.setattr(srv, "fetch_starred_repos", lambda: {"repos": [
-        {"full_name": "a/outdated", "description": "d", "language": "Rust"},
-        {"full_name": "b/current", "description": "d", "language": "Go"},
-        {"full_name": "c/untracked", "description": "d", "language": "C"},
-        {"full_name": "d/broken", "description": "d", "language": "C"},
-    ]})
-    atomic_write_json(srv.starred_releases.RELEASES_PATH, {
-        "a/outdated": {"tag": "v1.3.0", "name": "1.3.0", "published_at": None, "html_url": "u"},
-        "b/current": {"tag": "v2.0.0", "name": "2.0.0", "published_at": None, "html_url": "u"},
-    })
-    atomic_write_json(srv.starred_installed.INSTALLED_PATH, {
-        "a/outdated": {"version": "1.1.0", "source": "cmd", "error": None},
-        "b/current": {"version": "v2.0.0", "source": "manual", "error": None},
-        "d/broken": {"version": None, "source": "cmd", "error": "FileNotFoundError: rtk"},
-    })
-
-    resp = auth_client.get("/api/starred")
-    assert resp.status_code == 200
-    repos = {r["full_name"]: r for r in resp.get_json()["repos"]}
-    assert repos["a/outdated"]["installed_version"] == "1.1.0"
-    assert repos["a/outdated"]["update_available"] is True       # 1.1.0 < v1.3.0
-    assert repos["b/current"]["update_available"] is False        # v2.0.0 == v2.0.0
-    assert repos["c/untracked"]["installed_version"] is None      # not tracked
-    assert repos["c/untracked"]["update_available"] is None
-    assert repos["d/broken"]["installed_version"] is None
-    assert repos["d/broken"]["installed_error"] == "FileNotFoundError: rtk"
-
-
-def test_api_starred_passes_fetch_error_through(auth_client, monkeypatch):
-    monkeypatch.setattr(srv, "fetch_starred_repos", lambda: {"error": "rate limited"})
-    resp = auth_client.get("/api/starred")
-    assert resp.status_code == 200
-    body = resp.get_json()
-    assert body["error"] == "rate limited"
-    assert body["repos"] == []
+def test_the_tools_prompt_still_names_its_confirmation_gated_tools():
+    """Per CLAUDE.md, an instruction about a gated tool must tell the model to
+    call it in the same turn rather than promise to — the wording that took the
+    replay from 2-of-3 failing to 9 of 9. Pin that the instruction survives an
+    edit to the file."""
+    tools = srv.CHAT_SYSTEM_PROMPT.partition("\n\n---\n\n")[2]
+    for name in ("set_reminder", "recategorize", "list_scheduled_tasks", "recall"):
+        assert name in tools
+    assert "call the tool" in tools
 
 
 # --------------------------------------------------------------------------- #

@@ -297,6 +297,10 @@ def _isolate_remaining_config_stores(tmp_path, monkeypatch):
     # the starred_releases module at call time, so this one redirect covers both
     # the task that writes it and the API route that reads it.
     monkeypatch.setattr(_starred_releases, "RELEASES_PATH", tmp_path / "starred_releases.json")
+    # The /starred view's cached repo LIST — the fallback the page renders when
+    # the live GitHub fetch fails. Same call-time lookup, so this covers both the
+    # task that writes it and chat/routes_starred.py:_repo_list, which reads it.
+    monkeypatch.setattr(_starred_releases, "REPOS_PATH", tmp_path / "starred_repos.json")
     # The /starred view's installed-version tracking: the hand-edited source
     # (SOURCE_PATH — the user's real config, which a test must never read) and the
     # task-written resolved cache (INSTALLED_PATH). server.py reads the cache off

@@ -595,7 +595,27 @@ def main() -> int:
 
         nudges = parse_nudges(raw)
         if not nudges:
-            logger.info("No genuine connections; nothing to push")
+            # Three different things end up here, and only one of them is healthy:
+            # the model judged nothing genuine (it says NONE), the model returned
+            # nothing at all, or it returned prose that held no "- " bullets. They
+            # used to share one INFO line, which made a broken run indistinguishable
+            # from a quiet one — and silence is this task's common case, so nobody
+            # would ever look. Per CLAUDE.md, a task that silently produces LESS is
+            # worse than one that fails, because only the failure pushes an alert.
+            # These WARNINGs reach the 8am log_inspector; the INFO does not.
+            if not (raw or "").strip():
+                logger.warning(
+                    f"model returned EMPTY content for {len(candidates)} candidate(s) "
+                    "— thinking is ON for this call, so the budget may have gone to "
+                    "scratchpad; nothing pushed"
+                )
+            elif "NONE" not in raw:
+                logger.warning(
+                    f"model returned {len(raw)} chars but no parsable '- ' bullets "
+                    f"from {len(candidates)} candidate(s); nothing pushed"
+                )
+            else:
+                logger.info("No genuine connections; nothing to push")
             logger.info("Daily synthesis run complete")
             return 0
 

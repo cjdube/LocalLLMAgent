@@ -31,6 +31,10 @@ _ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(_ROOT / "config" / ".env")
 
 RELEASES_PATH = _ROOT / "config" / "starred_releases.json"
+# The star list itself, cached so /starred has something to render when GitHub is
+# slow or rate-limiting. This job already walks the live list, so caching it here
+# costs nothing and needs no new task. See chat/routes_starred.py:_repo_list.
+REPOS_PATH = _ROOT / "config" / "starred_repos.json"
 
 # fetch_latest_release makes one HTTP round-trip per repo and never raises, so a
 # small pool cuts wall-clock without changing behaviour — same courtesy to
@@ -52,6 +56,11 @@ def main() -> int:
         logger.info(f"{len(repos)} starred repos")
 
         checked_at = datetime.now(timezone.utc).isoformat()
+        # Cache the list before the (slower) release fan-out, so a failure in
+        # that half still leaves /starred a fresh list to fall back on.
+        with locked(REPOS_PATH):
+            atomic_write_json(REPOS_PATH, {"fetched_at": checked_at, "repos": repos})
+
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
             releases = pool.map(lambda r: fetch_latest_release(r["full_name"]), repos)
 

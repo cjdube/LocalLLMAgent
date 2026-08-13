@@ -31,6 +31,18 @@ def stub_sources(monkeypatch):
     override individual sources to shape a scenario."""
     calls = {"pushes": [], "model": 0}
 
+    # setup_logger builds a logger with propagate=False (so a task's output stays
+    # in its own file), which caplog cannot see. Swap in a propagating one — the
+    # WARNINGs on an unusable model reply are part of this task's contract, since
+    # silence is its common case and only a WARNING reaches the log inspector.
+    def _logger(task_name):
+        logger = logging.getLogger(f"test_{task_name}")
+        logger.setLevel(logging.INFO)
+        logger.handlers.clear()
+        logger.propagate = True
+        return logger
+    monkeypatch.setattr(ds, "setup_logger", _logger)
+
     monkeypatch.setattr(ds, "fetch_chrome_history", lambda *a, **k: {"sites": []})
     monkeypatch.setattr(ds, "fetch_liked_videos", lambda *a, **k: {"videos": []})
     monkeypatch.setattr(ds, "page_summaries", lambda: {"pages": []})
@@ -496,14 +508,54 @@ def test_echo_across_channels_reaches_the_model(stub_sources, tmp_path, monkeypa
     assert len(stub_sources["pushes"]) == 1
 
 
-def test_model_says_none_pushes_nothing(stub_sources, monkeypatch):
+@pytest.fixture
+def one_candidate(monkeypatch):
+    """Shape a run that reaches the model with exactly one candidate, so a test
+    only has to say what the model replied."""
     monkeypatch.setattr(ds, "fetch_liked_videos",
                         lambda *a, **k: {"videos": [{"title": "DuckDB deep dive", "channel": "X"}]})
-    monkeypatch.setattr(ds, "page_summaries", lambda: {"pages": [{"name": "duckdb-analytics", "summary": ""}]})
+    monkeypatch.setattr(ds, "page_summaries",
+                        lambda: {"pages": [{"name": "duckdb-analytics", "summary": ""}]})
+
+
+def test_model_says_none_pushes_nothing(stub_sources, one_candidate, monkeypatch, caplog):
     monkeypatch.setattr(ds, "complete_text", lambda **k: "NONE")
 
-    assert ds.main() == 0
+    with caplog.at_level(logging.WARNING):
+        assert ds.main() == 0
     assert stub_sources["pushes"] == []
+    # The healthy silence path stays quiet: a WARNING here would cry wolf every
+    # ordinary day and get muted, taking the two real ones below with it.
+    assert caplog.text == ""
+
+
+def test_empty_model_reply_warns_rather_than_reading_as_a_quiet_day(
+        stub_sources, one_candidate, monkeypatch, caplog):
+    # An empty reply is what a thinking model that spent num_predict on scratchpad
+    # returns. Without this it logged the same INFO as a genuine NONE, so a
+    # permanently broken run looked exactly like a healthy one for weeks.
+    monkeypatch.setattr(ds, "complete_text", lambda **k: "")
+
+    with caplog.at_level(logging.WARNING):
+        assert ds.main() == 0
+    assert stub_sources["pushes"] == []
+    assert "EMPTY content" in caplog.text
+    assert "1 candidate(s)" in caplog.text
+
+
+def test_unparsable_model_reply_warns_with_the_counts(
+        stub_sources, one_candidate, monkeypatch, caplog):
+    # Non-empty, no "- " bullets, and no NONE: the model ignored the output format.
+    # Distinct from empty, so the warning names the char count that empty can't.
+    reply = "I found nothing of interest today."
+    monkeypatch.setattr(ds, "complete_text", lambda **k: reply)
+
+    with caplog.at_level(logging.WARNING):
+        assert ds.main() == 0
+    assert stub_sources["pushes"] == []
+    assert "no parsable" in caplog.text
+    assert f"{len(reply)} chars" in caplog.text
+    assert "1 candidate(s)" in caplog.text
 
 
 def test_dead_source_degrades_and_still_runs(stub_sources, monkeypatch):

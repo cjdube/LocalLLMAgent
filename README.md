@@ -252,13 +252,17 @@ chat/
   login_throttle.py        # per-client failed-login limiter
   routes_dashboard.py      # read-only dashboard/scheduler JSON API (blueprint)
   routes_opportunities.py  # opportunity triage API (blueprint)
+  routes_starred.py        # starred-repo API, live list + cached fallback (blueprint)
+  routes_games.py          # games API, hosted bundles, AI proxy (blueprint)
+  routes_logs.py           # log-viewer JSON API (blueprint)
   insights.py              # no-Flask data layer: plists, logs, capabilities, /map
+  logview.py               # no-Flask log reader behind routes_logs.py
   static/index.html        # single-page chat UI (vanilla JS, no build step)
 ```
 
-The conversation engine and auth stay in `server.py`; the read-only dashboard
-API and the opportunity triage API are Flask blueprints, and `insights.py`
-imports no Flask at all so it stays unit-testable and runnable standalone.
+The conversation engine and auth stay in `server.py`; every feature API is a
+Flask blueprint, and `insights.py` and `logview.py` import no Flask at all so
+they stay unit-testable and runnable standalone.
 
 - **Tools available in chat:** the whole registry in `agent/toolset.py` — the
   same tools listed in the [`agent/tools/` table](#agenttools--one-module-per-capability)
@@ -473,7 +477,9 @@ starred GitHub repos — **Repo · Language · What it does · Latest release ·
 Installed** — sorted by most-recently-pushed. `GET /api/starred` fetches the repo
 list live and merges in three caches written by scheduled tasks
 (`starred_blurbs`, `starred_releases`, `starred_installed`), so the model never
-runs on the page's request path. Installed-version tracking is opt-in per repo,
+runs on the page's request path. When GitHub is unreachable the list falls back
+to its own nightly cache and the page says so, rather than going blank.
+Installed-version tracking is opt-in per repo,
 and Wren never runs an upgrade — this is the awareness layer, not an installer.
 See [docs/starred.md](docs/starred.md).
 
@@ -520,7 +526,8 @@ registered tool is unmapped; an unmapped one would otherwise just land under
 ## Scheduling — launchd
 
 Each task (and the always-on chat server) has a `.plist` in `launchd/`,
-copied to `~/Library/LaunchAgents/` and loaded with `launchctl load`.
+installed with `./launchd/install.sh`, which substitutes the path placeholders
+and `bootstrap`s each agent into `gui/$(id -u)`.
 `launchd` was chosen over `cron` because it survives sleep/wake and is the
 native macOS mechanism — no Claude Code/Cowork involvement in scheduling at
 all. The calendar-driven tasks use `StartCalendarInterval`; Wren's chat server
@@ -671,13 +678,22 @@ mostly useful if the Python process fails to start at all).
 ## Adding a new scheduled skill
 
 1. Add any new tool module(s) to `agent/tools/` (a `TOOL_SCHEMA` dict + a
-   plain callable function, following the existing modules as a template).
-2. Write `tasks/<name>.py` — decide upfront whether it needs the
+   plain callable function, following the existing modules as a template), then
+   register each in `agent/toolset.py` — `TOOLS`, `DISPATCH`, the right gating
+   set — and slot it into `CORE_TOOL_NAMES` or a `TOOL_GROUP_NAMES` group so
+   chat can offer it. The partition test in `tests/test_toolset.py` fails if you
+   skip the slotting; see [docs/tool-loading.md](docs/tool-loading.md).
+2. Write `tasks/<name>.py` with a `main() -> int`, using `setup_logger` and
+   `notify_failure` from `tasks/_common.py`. Decide upfront whether it needs the
    `advance()`/`resolve()` tool-calling loop (multi-step, like
    `tasks/bg_worker.py`) or `complete_text` (deterministic Python structure +
    one narrative paragraph from the model). Prefer `complete_text`
    where possible — it's far more reliable with a small local model.
-3. Write a `.plist` in `launchd/`, copy it to `~/Library/LaunchAgents/`, load it.
+3. Write a `.plist` in `launchd/` (copy the closest existing one; keep the
+   `__WREN_ROOT__` / `__HOME__` placeholders), then install it:
+   `./launchd/install.sh launchd/local.wren.<name>.plist`. Never `cp` it into
+   `~/Library/LaunchAgents/` by hand — launchd expands neither `~` nor `$HOME`
+   in `ProgramArguments`, so an unsubstituted plist silently fails to start.
 4. Run the task manually first and check `logs/<name>.log` before relying on
    the schedule.
 
@@ -691,9 +707,11 @@ Run the suite from the repo root:
 .venv/bin/pytest        # or: .venv/bin/pytest -q
 ```
 
-The one exception to "this project is Python" is a trio of shared browser
-scripts. `chat/static/chat-dock.js` is the chat page's dock and
-`chat/static/run-chart.js` the dashboard's duration charts.
+The one exception to "this project is Python" is a quartet of shared browser
+scripts. `chat/static/chat-dock.js` is the chat page's dock,
+`chat/static/run-chart.js` the dashboard's duration charts, and
+`chat/static/log-view.js` the `/logs` viewer's renderer (see
+[docs/logs.md](docs/logs.md)).
 `chat/static/nav.js` renders the top-nav menu on
 every view from one canonical list, with `chat/static/nav.css` owning its look
 and mobile-wrap behavior — so the menu stays consistent instead of drifting per
@@ -701,9 +719,10 @@ page. **Adding a new view?** Give its page three things and it inherits the menu
 automatically: `<link rel="stylesheet" href="/static/nav.css">` in the head, a
 `<nav id="wren-nav" class="wren-nav"></nav>` mount in the header, and
 `<script src="/static/nav.js"></script>` before `</body>`; then add the view to
-the `VIEWS` list in `nav.js` so every page links to it. All three have their own
+the `VIEWS` list in `nav.js` so every page links to it. All four have their own
 jest/jsdom suite under `tests/` (`chat-dock.test.js`, `run-chart.test.js`,
-`nav.test.js`) — install with `npm install` and run from the repo root:
+`log-view.test.js`, `nav.test.js`) — install with `npm install` and run from the
+repo root:
 
 ```bash
 npm test

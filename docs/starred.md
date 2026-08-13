@@ -7,8 +7,9 @@ each repo's README and cached; the "latest release" and "installed" columns are
 filled from separate caches. All are precomputed by scheduled tasks, so the page
 loads instantly and the model never sits on the request path.
 
-Code: `chat/static/starred.html` + the `/starred` and `/api/starred` routes in
-`chat/server.py` (the view), `tasks/starred_blurbs.py` (the cached-blurb job),
+Code: `chat/static/starred.html` + the `/starred` page route in `chat/server.py`
+and the `/api/starred` blueprint in `chat/routes_starred.py` (the view),
+`tasks/starred_blurbs.py` (the cached-blurb job),
 `tasks/starred_releases.py` (the cached-release job), `tasks/starred_installed.py`
 (the installed-version job), and `fetch_starred_repos` / `fetch_readme` /
 `fetch_latest_release` / `compare_versions` in `agent/tools/github_starred.py`
@@ -20,9 +21,20 @@ the morning brief).
 `/api/starred` fetches the full starred list live from GitHub on each load
 (so newly-starred repos and fresh push dates appear immediately) and merges in
 each repo's cached blurb, falling back to the repo's GitHub description for any
-repo not yet cached. If the GitHub fetch fails (rate limit, bad token) the page
-shows the error rather than crashing. Repo links are scheme-guarded
-(`safeHref`) and every cell is set via `textContent`, never `innerHTML`.
+repo not yet cached. Repo links are scheme-guarded (`safeHref`) and every cell is
+set via `textContent`, never `innerHTML`.
+
+**The live list has a cached fallback.** The star list is the one thing on this
+page fetched live, and GitHub paginates it — up to 10 sequential requests at a
+15s timeout each. A slow or rate-limited API used to blank the page entirely,
+even though three caches on disk already held most of what it renders. So the
+list is cached too, in `config/starred_repos.json`, written by
+`tasks/starred_releases.py` (which already walks the live list nightly, so this
+needs no extra job). When the live fetch fails, `_repo_list` serves that cache
+and the response carries `stale: true` and `fetched_at`; the page shows a
+"GitHub is unreachable — showing the cached list from …" note above the table.
+Only when *both* the live fetch and the cache come up empty does the page show
+the error instead — a first run, or a fresh checkout.
 
 Reachable from the nav on the dashboard, opportunities, memories, and system-map
 pages.

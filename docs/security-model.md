@@ -106,13 +106,18 @@ trifecta (untrusted input × consequential action × no confirmation) is removed
 for exactly those actions.
 
 Going further, the tools that write **prompt-visible state** —
-`remember`/`pin`/`archive`/`forget` and `write_skill`/`delete_skill` — aren't in
-a background run's toolset **at all** (`toolset.UNATTENDED_EXCLUDED_TOOLS`), not
-merely gated. Pinned memories and skills feed *future* system prompts, so a
-poisoned page read mid-job must not be able to plant a durable instruction that
-outlives the job, even behind an approval tap. The read side (`recall`,
-`read_skill`) stays available. Starting a background task is itself
-confirmation-gated in chat, so a job only runs because the user said to. See
+`remember`/`pin`/`archive`/`recategorize`/`forget` and
+`write_skill`/`delete_skill` — aren't in a background run's toolset **at all**
+(`toolset.UNATTENDED_EXCLUDED_TOOLS`), not merely gated. Pinned memories and
+skills feed *future* system prompts, so a poisoned page read mid-job must not be
+able to plant a durable instruction that outlives the job, even behind an
+approval tap. The read side (`recall`, `read_skill`) stays available.
+
+The same set also excludes `run_in_background`, `list_background_jobs` and
+`get_job_result`, for a separate reason: a background job has no business
+spawning or inspecting background jobs. That closes a job-queue recursion, not
+an injection path. Starting a background task is itself confirmation-gated in
+chat, so a job only runs because the user said to. See
 [background.md](background.md).
 
 ## The rule, and where the policy lives

@@ -16,6 +16,7 @@ config/opportunities.json
 config/opportunities_state.json
 config/starred_blurbs.json
 config/starred_releases.json
+config/starred_repos.json
 config/starred_installed.json
 config/starred_installed_versions.json
 config/escalations.json
