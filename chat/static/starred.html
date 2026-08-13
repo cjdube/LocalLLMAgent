@@ -29,26 +29,50 @@
   header .sub { font-size: 13px; color: #9ca3af; }
   header .spacer { flex: 1; }
 
-  main { max-width: 960px; margin: 0 auto; padding: 20px 18px 40px; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 18px 40px; }
   .section-label { font-size: 13px; font-weight: 600; color: #6b7280; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: baseline; }
   .section-label .hint { font-weight: 400; font-size: 12px; color: #9ca3af; }
   .empty { color: #9ca3af; font-size: 13px; padding: 14px 16px; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; }
   .stale { color: #92400e; font-size: 13px; padding: 10px 14px; margin-bottom: 10px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 10px; }
 
-  table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden; }
+  /* Fixed layout, explicit widths: with auto layout the four short columns
+     take their full intrinsic width and the blurb gets the remainder — a
+     one-word-per-line column that makes every row hundreds of pixels tall. */
+  table { width: 100%; table-layout: fixed; border-collapse: collapse; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden; }
   thead th { text-align: left; background: #fafafa; color: #6b7280; font-weight: 600; font-size: 11px; padding: 9px 12px; border-bottom: 1px solid #eef0f2; }
+  thead th:nth-child(1) { width: 23%; }
+  thead th:nth-child(2) { width: 10%; }
+  thead th:nth-child(3) { width: 36%; }
+  thead th:nth-child(4) { width: 17%; }
+  thead th:nth-child(5) { width: 14%; }
   tbody td { padding: 12px; font-size: 13px; border-top: 1px solid #f1f2f4; vertical-align: top; }
-  td.repo { font-weight: 600; white-space: nowrap; }
+  td.repo { font-weight: 600; overflow-wrap: anywhere; }
   td.repo a { color: #2563eb; text-decoration: none; }
-  td.lang { color: #4b5563; white-space: nowrap; }
+  td.lang { color: #4b5563; }
   td.blurb { color: #374151; line-height: 1.5; }
-  td.release { color: #4b5563; white-space: nowrap; }
+  td.release { color: #4b5563; }
   td.release a { color: #2563eb; text-decoration: none; }
-  td.release .date { color: #9ca3af; font-size: 12px; }
+  td.release .date { display: block; color: #9ca3af; font-size: 12px; }
   .badge { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 999px; background: #dcfce7; color: #166534; font-size: 11px; font-weight: 600; }
   .badge.update { background: #fef3c7; color: #92400e; }
-  td.installed { color: #4b5563; white-space: nowrap; }
+  td.installed { color: #4b5563; }
   td.installed .warn { color: #b45309; font-size: 12px; cursor: help; }
+
+  /* Phone: five columns don't fit, so stack each repo into its own card. */
+  @media (max-width: 700px) {
+    thead { display: none; }
+    table, tbody, tr, tbody td { display: block; }
+    table { border: none; background: none; border-radius: 0; }
+    tr { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; }
+    tbody td { padding: 0; border-top: none; }
+    td.repo { font-size: 14px; }
+    td.lang { font-size: 12px; color: #6b7280; margin-top: 2px; }
+    td.blurb { margin: 8px 0; }
+    td.release, td.installed { display: inline-block; vertical-align: top; margin-right: 16px; font-size: 12px; }
+    td.release .date { display: inline; }
+    td.release .date::before { content: " · "; }
+    td.release::before, td.installed::before { content: attr(data-label) " "; color: #9ca3af; }
+  }
 </style>
 </head>
 <body>
@@ -83,17 +107,30 @@ function fmtTs(ts) {
 // server-side _safe_url guard.
 function safeHref(url) { return /^https?:\/\//i.test(url || "") ? url : null; }
 
+// `owner/name` is one unbroken token, so a name too long for the column breaks
+// mid-word ("destructive_co / mmand_guard"). A <wbr> after the slash makes that
+// the preferred break point. Built as DOM nodes, not innerHTML.
+function repoLabel(name, parent) {
+  const cut = name.indexOf("/");
+  if (cut < 0) { parent.textContent = name; return; }
+  parent.appendChild(document.createTextNode(name.slice(0, cut + 1)));
+  parent.appendChild(document.createElement("wbr"));
+  parent.appendChild(document.createTextNode(name.slice(cut + 1)));
+}
+
 function repoRow(r) {
   const tr = el("tr");
 
   const repo = el("td", "repo");
+  const name = r.full_name || r.name || "";
   const href = safeHref(r.html_url);
   if (href) {
-    const a = el("a", null, r.full_name || r.name);
+    const a = el("a");
     a.href = href; a.target = "_blank"; a.rel = "noopener noreferrer";
+    repoLabel(name, a);
     repo.appendChild(a);
   } else {
-    repo.textContent = r.full_name || r.name;
+    repoLabel(name, repo);
   }
   tr.appendChild(repo);
 
@@ -111,6 +148,7 @@ function repoRow(r) {
 // server-side error as its tooltip. textContent only, never innerHTML.
 function installedCell(r) {
   const td = el("td", "installed");
+  td.dataset.label = "Installed";
   const v = r.installed_version;
   if (!v) {
     if (r.installed_error) {
@@ -129,6 +167,7 @@ function installedCell(r) {
 
 function releaseCell(r) {
   const td = el("td", "release");
+  td.dataset.label = "Release";
   const rel = r.latest_release;
   if (!rel || !rel.tag) { td.textContent = "—"; return td; }
   const href = safeHref(rel.html_url);
@@ -139,8 +178,10 @@ function releaseCell(r) {
   } else {
     td.appendChild(document.createTextNode(rel.tag));
   }
-  if (rel.published_at) td.appendChild(el("span", "date", " · " + fmtTs(rel.published_at)));
+  // Badge before the date so it sits beside the tag; the date is a block and
+  // would otherwise push the badge onto a third line in every row.
   if (r.release_is_new) td.appendChild(el("span", "badge", "🆕 new"));
+  if (rel.published_at) td.appendChild(el("span", "date", fmtTs(rel.published_at)));
   return td;
 }
 
