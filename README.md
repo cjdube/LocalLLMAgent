@@ -563,7 +563,22 @@ launchctl start local.wren.<name>
 
 # reload after editing a .plist (boots out the old one, then bootstraps)
 ./launchd/install.sh launchd/local.wren.<name>.plist
+
+# after any `brew upgrade` that touches python — see below
+./launchd/reload-after-upgrade.sh
 ```
+
+**Run `./launchd/reload-after-upgrade.sh` after upgrading Homebrew's Python.**
+`brew upgrade python@3.12` deletes the old Cellar directory, and launchd then
+refuses to exec the replacement because it cached the old binary's code
+signature. Jobs die with `OS_REASON_CODESIGNING` *before* any of our code runs
+— no log line, and `notify_failure` never gets the chance to push, so a job
+that never ran looks exactly like a job with nothing to do. The chat server has
+its own version of this: it keeps serving from the deleted path, and any module
+imported lazily afterwards raises `ModuleNotFoundError` (on 2026-08-13 that
+emptied the dashboard graphs and `/map` while the rest of the page worked).
+The script reloads only what's stale, skips jobs that are mid-run, and takes
+`--check` to report without changing anything.
 
 The plists in `launchd/` carry `__WREN_ROOT__` and `__HOME__` placeholders
 rather than absolute paths, so they're checkout-independent — `install.sh`
