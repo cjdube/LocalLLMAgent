@@ -162,6 +162,50 @@ def test_the_fetcher_is_asked_for_more_than_its_own_default(stubbed_pipeline):
 
 
 # --------------------------------------------------------------------------- #
+# truncation is declared, never silent
+# --------------------------------------------------------------------------- #
+
+def test_our_own_slice_marks_the_target_truncated(stubbed_pipeline):
+    out = eg.evaluate_against("product-principles", target_text="t" * (eg._TARGET_CHARS + 1))
+
+    assert out["truncated"] is True
+    assert "TRUNCATED" in stubbed_pipeline["prompts"][0]["user_prompt"]
+    assert "ending was not read" in out["evaluation"]
+
+
+def test_the_fetchers_own_cut_marks_the_target_truncated(stubbed_pipeline, monkeypatch):
+    # The fetcher can cut below _TARGET_CHARS, so length alone doesn't detect it.
+    # It already reported this and we used to drop the flag on the floor.
+    monkeypatch.setattr(eg, "fetch_webpage",
+                        lambda url, **k: {"url": url, "title": "T",
+                                          "markdown": "short", "truncated": True})
+
+    out = eg.evaluate_against("product-principles", target_url="https://quorum.example")
+
+    assert out["truncated"] is True
+    assert "TRUNCATED" in stubbed_pipeline["prompts"][0]["user_prompt"]
+
+
+def test_a_whole_target_says_nothing_about_truncation(stubbed_pipeline):
+    out = eg.evaluate_against("product-principles", target_text="a short draft")
+
+    assert "truncated" not in out
+    assert "TRUNCATED" not in stubbed_pipeline["prompts"][0]["user_prompt"]
+    assert "ending was not read" not in out["evaluation"]
+
+
+def test_the_model_is_told_not_to_judge_an_ending_it_cannot_see(stubbed_pipeline):
+    # Asked whether a Medium article was AI slop, the model reported a
+    # summary-recap ending on a target cut to its first half — a finding shaped
+    # exactly like a real one, about text that was never sent.
+    eg.evaluate_against("product-principles", target_text="anything")
+
+    system = stubbed_pipeline["prompts"][0]["system_prompt"]
+    assert "TRUNCATED" in system
+    assert "how it ends" in system
+
+
+# --------------------------------------------------------------------------- #
 # deterministic pre-pass — see agent/tools/prose_checks.py
 # --------------------------------------------------------------------------- #
 

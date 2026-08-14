@@ -95,6 +95,11 @@ computed facts about the target. Report the ones that found something, and never
 one or add a finding of the same kind — if it says a check found none, there is nothing of \
 that kind to report.
 
+If the target is marked TRUNCATED, you are seeing only its beginning. Judge what is there \
+and nothing else. Never report on how it ends, what it concludes with, whether it trails \
+off, or what it leaves out — the missing text was cut by us, not omitted by its author, \
+and a finding about it is always false.
+
 Open with ONE verdict line, before the headings, in exactly this form:
 
 **Verdict:** <Meets the standards|Mixed|Falls short> — one sentence giving the main reason.
@@ -179,20 +184,36 @@ def evaluate_against(lens_page: str = "", target_url: str = "",
 
         target_url = (target_url or "").strip()
         target_text = (target_text or "").strip()
+        # Truncation has two sources and the model must be told about either:
+        # the fetcher's own cut (it reports "truncated") and our _TARGET_CHARS
+        # slice below.
         if target_url:
             page = fetch_webpage(target_url, max_chars=_FETCH_CHARS)
             if "error" in page:
                 return {"error": f"could not fetch the target: {page['error']}"}
-            content = _compact(page.get("markdown", ""))[:_TARGET_CHARS]
+            full = _compact(page.get("markdown", ""))
+            truncated = bool(page.get("truncated"))
             source, title = target_url, page.get("title") or "(none)"
         elif target_text:
-            content = _compact(target_text)[:_TARGET_CHARS]
+            full = _compact(target_text)
+            truncated = False
             source, title = "(inline text)", "(inline text)"
         else:
             return {"error": "provide either target_url or target_text to evaluate"}
 
+        content = full[:_TARGET_CHARS]
+        truncated = truncated or len(full) > _TARGET_CHARS
+
         if not content:
             return {"error": "no usable target content to evaluate"}
+
+        if truncated:
+            # Not a WARNING: cutting a very long document is the design working,
+            # and log_inspector is default-open on WARNINGs. What must not be
+            # silent is the *evaluation* claiming to have judged a whole document
+            # — which the note appended to the output is what fixes.
+            logger.info("evaluate_against target truncated: sent %d chars of %s",
+                        len(content), source)
 
         # Run the lens's deterministic checks on the SAME text the model sees, so a
         # reported finding can never quote something outside the truncated target.
@@ -202,7 +223,10 @@ def evaluate_against(lens_page: str = "", target_url: str = "",
             f"{lens_text}\n\n"
             f"---\n\n"
             + (f"{checks_block}\n\n---\n\n" if checks_block else "")
-            + f"Target to evaluate (source: {source}, title: {title}):\n\n{content}"
+            + f"Target to evaluate (source: {source}, title: {title})"
+            + (" — TRUNCATED: this is the beginning of a longer document and stops "
+               "mid-way; its ending is NOT here." if truncated else "")
+            + f":\n\n{content}"
         )
         # think=False: judging a target against standards that are both IN the
         # prompt is comparison, not chain-of-thought, and the scratchpad competes
@@ -217,7 +241,19 @@ def evaluate_against(lens_page: str = "", target_url: str = "",
         if not evaluation.strip():
             return {"error": "the model returned an empty evaluation — retry; if it "
                              "persists the prompt is too large for one generation"}
-        return {"lens": lens_page, "evaluation": evaluation}
+        out = {"lens": lens_page, "evaluation": evaluation}
+        if truncated:
+            # Python appends this, not the model: how much of the document was
+            # judged is a fact we hold and it doesn't (CLAUDE.md — deterministic
+            # Python owns structure). Telling the model to stay quiet about the
+            # ending fixes the false findings but leaves the report looking
+            # complete; this is what stops the reader assuming it is.
+            out["truncated"] = True
+            out["evaluation"] += (
+                f"\n\n_Judged on the first {len(content):,} characters — the target "
+                f"was longer than the limit, so its ending was not read._"
+            )
+        return out
     except Exception as e:
         return {"error": f"evaluate_against failed: {e}"}
 

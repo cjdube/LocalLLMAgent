@@ -148,6 +148,42 @@ Measured after, on the same article at n=3: it fetches whole (15694 chars,
 untruncated), 11323 reach the model, and all 3 runs name and quote the article's
 actual closing section instead of inferring one.
 
+### Truncation is declared, never silent
+
+Raising the bounds shrinks the problem; it doesn't remove it. Something will
+always be longer, so the remaining question is what the model does with a
+document it can only half see — and the answer was: report on the half it
+couldn't. Asked whether a Medium article was slop, it produced a
+*summary-recap endings* finding, hedged as "the structure suggests a buildup
+toward…". A finding shaped exactly like a real one, about text never sent.
+
+That's the bad kind of degrade (`CLAUDE.md`): not a crash, not an empty answer,
+but a *confident* one that reads as complete. Three parts fix it, because the
+model and the reader each need telling:
+
+- **Detect both cuts.** The fetcher's own truncation and our `_TARGET_CHARS`
+  slice. Length alone can't spot the first — a long Wikipedia page fetched at
+  `_FETCH_CHARS` compacts to 12613 chars, *under* `_TARGET_CHARS`, and looks
+  whole. `fetch_webpage` already reported `truncated: True`; this tool used to
+  drop it on the floor.
+- **Mark it in the prompt**, and tell the model in the system prompt that a
+  finding about how a TRUNCATED target ends is *always* false — the missing text
+  is our cut, not the author's omission.
+- **Append the note in Python**, not the model: `_Judged on the first N
+  characters…_`, plus `truncated: True` in the returned dict. How much was read
+  is a fact we hold and the model doesn't (deterministic Python owns structure).
+  Silencing the model fixes the false findings but leaves the report *looking*
+  complete; the note is what stops the reader assuming it is.
+
+Measured at n=3 on an over-long draft: the flag, the note, and **zero** findings
+about the ending — where the lens's own `summary-recap endings` and
+`fake-profound kickers` patterns were exactly the bait. The article that now
+fits whole reports neither flag nor note, and still flags its real ending.
+
+The log line is INFO, not WARNING. Cutting a very long document is the design
+working, and `log_inspector` is default-open on WARNINGs — the thing that must
+not be silent is the *evaluation*, and the note is what makes it loud.
+
 ### The verdict line
 
 The three headings answer *what did you find?* and never *so what?*. Asked
