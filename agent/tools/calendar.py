@@ -9,7 +9,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -96,7 +96,9 @@ GET_BY_DATE_TOOL_SCHEMA = {
     "function": {
         "name": "get_events_by_date",
         "description": "Get Google Calendar events (including colorId) between two dates, "
-        "inclusive — for past or future dates, not just what's upcoming.",
+        "inclusive — for past or future dates, not just what's upcoming. The result's "
+        "'range' field names the day(s) actually looked up: state that date in your "
+        "reply rather than one you worked out yourself.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -172,22 +174,59 @@ def get_events_in_range(time_min: str, time_max: str) -> dict:
 
 def get_events_by_date(start: str, end: str) -> dict:
     """Chat-friendly wrapper over get_events_in_range() — takes dates in any
-    form agent.dates.resolve_date() accepts ('today'/'yesterday', a bare
-    'MM-DD', or a full 'YYYY-MM-DD') and builds the full-day ISO 8601 range in
-    local time, so the model never has to know the current year or construct a
+    form agent.dates.resolve_date() accepts ('today'/'tomorrow'/'yesterday', a
+    weekday phrase like 'next tuesday', a bare 'MM-DD', or a full 'YYYY-MM-DD')
+    and builds the full-day ISO 8601 range in local time, so the model never has
+    to know the current year, do weekday arithmetic, or construct a
     timezone-aware datetime itself.
 
     Uses prefer="nearest" for bare month/day input: calendars are queried
     forward at least as often as backward, so "July 10th" asked on July 7th
     must resolve to *this* year's July 10th, not last year's (which would
-    silently return no events)."""
+    silently return no events).
+
+    The result carries the resolved dates back (`resolved_start`/`resolved_end`
+    and a human `range`) because the model otherwise narrates the day from its
+    own memory: it once reported an empty "Tuesday, August 19th" for a lookup it
+    had aimed at the 19th, a Wednesday. Echoing the tool's own date makes a
+    mis-aimed lookup visible in the reply instead of self-consistent."""
     tz = ZoneInfo(_local_timezone())
     today = datetime.now(tz).date()
     start = resolve_date(start, today=today, prefer="nearest")
     end = resolve_date(end, today=today, prefer="nearest")
-    start_dt = datetime.fromisoformat(start).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=tz)
-    end_dt = datetime.fromisoformat(end).replace(hour=23, minute=59, second=59, microsecond=999999, tzinfo=tz)
-    return get_events_in_range(start_dt.isoformat(), end_dt.isoformat())
+    try:
+        start_dt = datetime.fromisoformat(start).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=tz)
+        end_dt = datetime.fromisoformat(end).replace(hour=23, minute=59, second=59, microsecond=999999, tzinfo=tz)
+    except ValueError:
+        # An expression resolve_date() couldn't place. Degrade to an error the
+        # model can relay rather than raising, which would 500 the chat turn.
+        return {"error": f"couldn't understand the date range {start!r} to {end!r}"}
+
+    # A backwards range returns nothing at all, which reads exactly like a free
+    # day. Seen live: building "the week of next Monday" the model paired a
+    # start of next Monday with an end of the *nearest* Sunday, the day before.
+    if start_dt > end_dt:
+        return {"error": f"the range runs backwards: {start} is after {end}"}
+
+    result = get_events_in_range(start_dt.isoformat(), end_dt.isoformat())
+    if "error" in result:
+        return result
+    return {
+        "resolved_start": start_dt.date().isoformat(),
+        "resolved_end": end_dt.date().isoformat(),
+        "range": _human_range(start_dt.date(), end_dt.date()),
+        **result,
+    }
+
+
+def _human_range(start: date, end: date) -> str:
+    """'Tuesday, August 18, 2026' for a single day, or 'Monday, August 17, 2026
+    through Friday, August 21, 2026' for a span — the phrasing the model should
+    repeat back."""
+    fmt = "%A, %B %-d, %Y"
+    if start == end:
+        return start.strftime(fmt)
+    return f"{start.strftime(fmt)} through {end.strftime(fmt)}"
 
 
 def log_calendar_event(

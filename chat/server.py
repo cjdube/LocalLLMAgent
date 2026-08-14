@@ -144,9 +144,11 @@ def _system_message_content() -> str:
     today = datetime.now().strftime("%A, %B %-d, %Y")
     dated = (
         CHAT_SYSTEM_PROMPT
-        + f"\n\nToday's date is {today}. When {_NAME} names a date without a year "
-        "(e.g. 'July 2nd') or a relative day, resolve it against today's date — "
-        "never guess the year."
+        + f"\n\nToday's date is {today}. When {_NAME} names a relative day "
+        "('tomorrow', 'next Tuesday', 'last Friday'), pass that phrase through to "
+        "the tool verbatim — the tool resolves it, and you report the date the "
+        "tool hands back. Do not work out the date yourself: you get weekday "
+        "arithmetic wrong."
     )
     # Skills are chat-only (like the wiki tools), so the index lives here rather
     # than in with_identity() where the scheduled tasks would also carry it.

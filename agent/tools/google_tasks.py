@@ -20,7 +20,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -242,6 +242,16 @@ def get_tasks_due_soon(hours_ahead: int = 48) -> dict:
     return _list_tasks(show_completed=False, due_max=due_max, max_results=100)
 
 
+def _human_due(due_date: str) -> str:
+    """'Tuesday, August 18, 2026' for a resolved YYYY-MM-DD, echoed back so the
+    model states the day the tool actually set rather than one it worked out.
+    Falls back to the raw string for anything resolve_date() passed through."""
+    try:
+        return date.fromisoformat(due_date).strftime("%A, %B %-d, %Y")
+    except ValueError:
+        return due_date
+
+
 def create_task(title: str, notes: str = "", due: str = None, list_name: str = None) -> dict:
     try:
         tasklist_id = _resolve_tasklist_id(list_name)
@@ -251,6 +261,7 @@ def create_task(title: str, notes: str = "", due: str = None, list_name: str = N
     body = {"title": title}
     if notes:
         body["notes"] = notes
+    due_date = None
     if due:
         tz = ZoneInfo(_local_timezone())
         today = datetime.now(tz).date()
@@ -263,12 +274,15 @@ def create_task(title: str, notes: str = "", due: str = None, list_name: str = N
     except Exception as e:
         return {"error": str(e)}
 
-    return {
+    result = {
         "task_id": created.get("id"),
         "tasklist_id": tasklist_id,
         "title": created.get("title"),
         "due": created.get("due"),
     }
+    if due_date:
+        result["due_date"] = _human_due(due_date)
+    return result
 
 
 def update_task_due_date(task_id: str, tasklist_id: str, due: str, task_title: str = "") -> dict:
@@ -284,7 +298,7 @@ def update_task_due_date(task_id: str, tasklist_id: str, due: str, task_title: s
     except Exception as e:
         return {"error": str(e)}
 
-    return {"task_id": updated.get("id"), "due": updated.get("due")}
+    return {"task_id": updated.get("id"), "due": updated.get("due"), "due_date": _human_due(due_date)}
 
 
 def complete_task(task_id: str, tasklist_id: str, task_title: str = "") -> dict:

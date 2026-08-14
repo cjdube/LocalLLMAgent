@@ -7,7 +7,13 @@ from datetime import date, datetime
 
 from zoneinfo import ZoneInfo
 
-from agent.dates import local_timezone, resolve_date, resolve_reminder_time
+from agent.dates import (
+    DATE_ARG_GUIDANCE,
+    REMINDER_WHEN_GUIDANCE,
+    local_timezone,
+    resolve_date,
+    resolve_reminder_time,
+)
 
 TODAY = date(2026, 7, 7)  # a Tuesday
 
@@ -61,10 +67,6 @@ def test_full_iso_is_honored_even_when_future():
 
 def test_full_iso_in_the_past_is_honored():
     assert resolve_date("2020-02-29", today=TODAY) == "2020-02-29"
-
-
-def test_unparseable_string_is_returned_unchanged():
-    assert resolve_date("next tuesday", today=TODAY) == "next tuesday"
 
 
 def test_non_numeric_parts_are_returned_unchanged():
@@ -124,6 +126,86 @@ def test_prefer_nearest_still_passes_through_impossible_date():
     assert resolve_date("02-30", today=TODAY, prefer="nearest") == "02-30"
 
 
+# --- relative days ------------------------------------------------------------
+#
+# Weekday arithmetic lives here rather than in the model: asked on Friday
+# 2026-08-14 for "next Tuesday", the model answered with the 19th (a Wednesday),
+# looked up an empty day, and reported that wrong date as fact.
+
+def test_the_reported_bug_next_tuesday_from_a_friday():
+    # The exact failing case, with the calendar tool's own prefer=.
+    assert resolve_date("next tuesday", today=date(2026, 8, 14), prefer="nearest") == "2026-08-18"
+
+
+def test_tomorrow():
+    assert resolve_date("tomorrow", today=TODAY) == "2026-07-08"
+
+
+def test_next_weekday_is_the_next_one_after_today():
+    # TODAY is a Tuesday: "next tuesday" is a week out, never today.
+    assert resolve_date("next tuesday", today=TODAY) == "2026-07-14"
+    assert resolve_date("next friday", today=TODAY) == "2026-07-10"
+
+
+def test_next_weekday_asked_the_day_before_means_tomorrow():
+    # Monday 2026-08-17 -> the very next Tuesday, not the following week's.
+    assert resolve_date("next tuesday", today=date(2026, 8, 17)) == "2026-08-18"
+
+
+def test_last_weekday_looks_back():
+    assert resolve_date("last tuesday", today=TODAY) == "2026-06-30"
+    assert resolve_date("last friday", today=TODAY) == "2026-07-03"
+
+
+def test_bare_weekday_follows_prefer():
+    # A bare weekday has no direction of its own, so the caller's bias decides:
+    # Chrome history / Strava look back, the calendar and tasks look forward.
+    assert resolve_date("tuesday", today=TODAY, prefer="past") == "2026-06-30"
+    assert resolve_date("tuesday", today=TODAY, prefer="nearest") == "2026-07-14"
+    assert resolve_date("tuesday", today=TODAY, prefer="future") == "2026-07-14"
+
+
+def test_explicit_qualifier_beats_prefer():
+    assert resolve_date("next tuesday", today=TODAY, prefer="past") == "2026-07-14"
+    assert resolve_date("last tuesday", today=TODAY, prefer="future") == "2026-06-30"
+
+
+def test_weekday_phrasing_variants():
+    # "the following sunday" / "the next sunday" are phrasings the model
+    # actually produced when asked to build a week-long range.
+    for phrase in ("Next Tuesday", "  next   tuesday ", "on tuesday", "this tue",
+                   "coming tues", "the next tuesday", "the following tuesday"):
+        assert resolve_date(phrase, today=TODAY, prefer="nearest") == "2026-07-14"
+
+
+def test_unrecognised_day_phrase_is_returned_unchanged():
+    # Falls through to the numeric parsing and then to passthrough — the caller
+    # degrades rather than resolving to a plausible wrong day.
+    assert resolve_date("monday morning", today=TODAY) == "monday morning"
+    assert resolve_date("sometime next week", today=TODAY) == "sometime next week"
+
+
+# --- DATE_ARG_GUIDANCE wording ------------------------------------------------
+#
+# This string is the entire fix as the model sees it. Pinned like the list_games
+# description in tests/test_games.py: softening it back into "work out the date"
+# reintroduces the bug with every test still green.
+
+def test_guidance_tells_the_model_to_pass_the_phrase_verbatim():
+    assert "verbatim" in DATE_ARG_GUIDANCE
+    assert "do NOT work out the date yourself" in DATE_ARG_GUIDANCE
+
+
+def test_guidance_names_the_relative_forms_it_accepts():
+    for form in ("today", "tomorrow", "yesterday", "next tuesday", "last friday"):
+        assert form in DATE_ARG_GUIDANCE
+
+
+def test_reminder_guidance_names_weekday_phrases():
+    assert "verbatim" in REMINDER_WHEN_GUIDANCE
+    assert "next friday" in REMINDER_WHEN_GUIDANCE
+
+
 # --- resolve_reminder_time -------------------------------------------------
 
 def _r(when):
@@ -153,6 +235,17 @@ def test_reminder_clock_already_passed_rolls_to_tomorrow():
 def test_reminder_tomorrow_with_time():
     assert _r("tomorrow 9am") == datetime(2026, 7, 8, 9, 0, tzinfo=_TZ)
     assert _r("tomorrow at 15:00") == datetime(2026, 7, 8, 15, 0, tzinfo=_TZ)
+
+
+def test_reminder_weekday_with_time():
+    # NOW is Tuesday 2026-07-07; a reminder is always forward-looking.
+    assert _r("tuesday 3pm") == datetime(2026, 7, 14, 15, 0, tzinfo=_TZ)
+    assert _r("next friday at 9am") == datetime(2026, 7, 10, 9, 0, tzinfo=_TZ)
+
+
+def test_reminder_day_without_a_time_defaults_to_9am():
+    assert _r("monday") == datetime(2026, 7, 13, 9, 0, tzinfo=_TZ)
+    assert _r("tomorrow") == datetime(2026, 7, 8, 9, 0, tzinfo=_TZ)
 
 
 def test_reminder_explicit_datetime():

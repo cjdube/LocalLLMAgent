@@ -134,6 +134,56 @@ turn took the replay to **9 of 9**.
 that promises an action while the turn executed no tool now logs a WARNING
 instead of vanishing.
 
+## Weekday arithmetic is date math — resolve it in Python
+
+**Rule:** a tool that takes a day takes the user's *phrase* verbatim
+(`'tomorrow'`, `'next tuesday'`, `'last friday'`) and resolves it in
+`agent/dates.py`. Never ask the model which date a weekday falls on. A tool
+whose answer depends on the day should also return the day it used, so the
+reply quotes the tool rather than the model's memory.
+
+**Incident.** Asked on Friday 2026-08-14 what was on the calendar for "next
+Tuesday", the model looked up **08-19** — a Wednesday — found nothing, and
+answered:
+
+> You have nothing on your calendar for next Tuesday, August 19th.
+
+The real next Tuesday, the 18th, had an event on it. `logs/wren.log` 2026-08-14
+19:07.
+
+**Why it was wrong shaped like right.** Nothing failed. The tool ran, returned
+a valid empty list, and the prose agreed with the lookup — the model had simply
+aimed both at the same wrong day. There is no error to log and no count to
+compare, so none of the existing backstops could have caught it. Only someone
+who knew the event existed would notice.
+
+`resolve_date()` already owned `today`/`yesterday`/`MM-DD`/`YYYY-MM-DD` —
+weekdays were the one date shape never moved into Python. Both instructions
+pointed at the model asked for exactly the arithmetic it can't do:
+`DATE_ARG_GUIDANCE` said "pass just 'MM-DD'" (a weekday phrase can't be passed,
+so it had to convert), and the chat system prompt said to resolve "a relative
+day … against today's date". A test even pinned the gap:
+`resolve_date("next tuesday") == "next tuesday"`.
+
+**Fix.** `_resolve_relative_day()` in `agent/dates.py` handles `tomorrow` and
+weekday phrases, with `next`/`last` overriding the caller's `prefer` and a bare
+weekday following it (Chrome history looks back, the calendar forward).
+`DATE_ARG_GUIDANCE` was rewritten in the shape of `REMINDER_WHEN_GUIDANCE` —
+pass verbatim, "do NOT work out the date yourself" — and its wording is pinned
+by tests, because softening it back reintroduces the bug with every test green.
+`get_events_by_date` now returns `resolved_start`/`resolved_end` and a human
+`range`, and its schema tells the model to state that date.
+
+**Result.** 3 of 3 replays correct, each passing `'next Tuesday'` through
+verbatim; `tomorrow`, `last Friday` and a week-long range also correct.
+
+**Two things the replay caught that the unit tests could not.** Building "the
+week of next Monday", the model produced `'the following Sunday'` and `'the next
+Sunday'` — filler forms now stripped — and then paired next Monday with the
+*nearest* Sunday, the day before it. A backwards range returns nothing, which
+reads exactly like a free week, so `get_events_by_date` rejects it outright.
+Both are the same failure shape as the original: a plausible empty answer.
+
 ## Related
 
 - [CLAUDE.md](../CLAUDE.md) — the rules themselves, in short form

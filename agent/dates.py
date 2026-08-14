@@ -19,10 +19,17 @@ from zoneinfo import ZoneInfo
 # Reusable JSON-schema description for a "which day" tool argument. Append it
 # to a tool's own lead-in (e.g. "The day to look up. " + DATE_ARG_GUIDANCE) so
 # the model passes something resolve_date() can handle.
+#
+# Phrased like REMINDER_WHEN_GUIDANCE below: pass the phrase verbatim, don't
+# compute. The model gets weekday arithmetic wrong (it answered "next Tuesday"
+# with the Wednesday), so the only safe instruction is one that never asks it to
+# do the math — see docs/model-constraints.md.
 DATE_ARG_GUIDANCE = (
-    "Use 'today'/'yesterday' as-is. When no year is stated, pass just 'MM-DD' "
-    "(e.g. '07-02') and the year is filled in automatically; use 'YYYY-MM-DD' "
-    "only when a year is stated."
+    "Pass the user's day expression verbatim — do NOT work out the date "
+    "yourself. Understood: 'today', 'tomorrow', 'yesterday'; weekday phrases "
+    "('next tuesday', 'last friday', 'monday'); a bare 'MM-DD' (e.g. '07-02') "
+    "when a month and day are named without a year; 'YYYY-MM-DD' only when a "
+    "year is stated."
 )
 
 
@@ -46,6 +53,76 @@ def local_timezone() -> str:
         return "/".join(parts[idx + 1:])
     except (OSError, ValueError):
         return "UTC"
+
+
+# Weekday name -> Python weekday() index (Mon=0). Common short forms included
+# because the model shortens them even when the user didn't.
+_WEEKDAYS = {
+    "monday": 0, "mon": 0,
+    "tuesday": 1, "tue": 1, "tues": 1,
+    "wednesday": 2, "wed": 2,
+    "thursday": 3, "thu": 3, "thur": 3, "thurs": 3,
+    "friday": 4, "fri": 4,
+    "saturday": 5, "sat": 5,
+    "sunday": 6, "sun": 6,
+}
+
+# Words that pin a weekday phrase to one direction, overriding `prefer`.
+_BACKWARD_QUALIFIERS = {"last", "past", "previous"}
+_FORWARD_QUALIFIERS = {"next", "this", "coming", "upcoming", "following"}
+
+_RELATIVE_DAY_OFFSETS = {"today": 0, "tomorrow": 1, "yesterday": -1}
+
+
+def _resolve_relative_day(text: str, today: date, prefer: str) -> Optional[date]:
+    """Resolve a relative day phrase ('tomorrow', 'next tuesday') to a date, or
+    None if it isn't one — in which case resolve_date() falls through to its
+    numeric parsing, so no existing input changes behavior.
+
+    This lives in Python because the small local model can't do weekday
+    arithmetic: asked on a Friday for "next Tuesday" it answered with the
+    following Wednesday, looked up an empty day, and reported the wrong date as
+    fact. See docs/model-constraints.md.
+
+    'next tuesday' means the next Tuesday *after* today, not the Tuesday of the
+    following calendar week — so asked on Monday it means tomorrow. A bare
+    weekday has no direction of its own and follows the caller's `prefer`:
+    "past" looks back (Chrome history, Strava), "future"/"nearest" look forward
+    (calendar, tasks). An explicit qualifier always wins over `prefer`.
+    """
+    # Strip the filler the model puts in front of a day when it builds a range:
+    # it asked for "the following Sunday" and "the next Sunday" before settling.
+    normalized = re.sub(r"\s+", " ", text.strip().lower())
+    normalized = re.sub(r"^(?:on\s+)?(?:the\s+)?", "", normalized)
+
+    offset = _RELATIVE_DAY_OFFSETS.get(normalized)
+    if offset is not None:
+        return today + timedelta(days=offset)
+
+    parts = normalized.split(" ")
+    if len(parts) == 2 and parts[0] in _BACKWARD_QUALIFIERS | _FORWARD_QUALIFIERS:
+        qualifier, name = parts
+    elif len(parts) == 1:
+        qualifier, name = "", parts[0]
+    else:
+        return None
+
+    target = _WEEKDAYS.get(name)
+    if target is None:
+        return None
+
+    if qualifier in _BACKWARD_QUALIFIERS:
+        backward = True
+    elif qualifier in _FORWARD_QUALIFIERS:
+        backward = False
+    else:
+        backward = prefer == "past"
+
+    # Strictly before / after today: "tuesday" asked on a Tuesday means the
+    # neighbouring one, never today — the user would have said "today".
+    delta = (today.weekday() - target) % 7 if backward else (target - today.weekday()) % 7
+    delta = delta or 7
+    return today - timedelta(days=delta) if backward else today + timedelta(days=delta)
 
 
 def _resolve_bare_month_day(month: int, day: int, today: date, prefer: str) -> date:
@@ -88,7 +165,9 @@ def _resolve_bare_month_day(month: int, day: int, today: date, prefer: str) -> d
 def resolve_date(date_str: str, *, today: Optional[date] = None, prefer: str = "past") -> str:
     """Map a user-supplied date onto a concrete 'YYYY-MM-DD' string.
 
-    - 'today' / 'yesterday'        -> relative to `today` (defaults to now)
+    - 'today' / 'tomorrow' / 'yesterday' -> relative to `today` (defaults to now)
+    - 'next tuesday' / 'last friday' / a bare weekday -> see
+      _resolve_relative_day; a bare weekday follows `prefer`
     - 'YYYY-MM-DD'                 -> honored as-is (an explicit year wins)
     - 'MM-DD' / 'M-D' (also '/')   -> a bare month/day, with the year filled in
       per `prefer` ("past" | "future" | "nearest"; see
@@ -105,11 +184,9 @@ def resolve_date(date_str: str, *, today: Optional[date] = None, prefer: str = "
     """
     today = today or datetime.now().date()
 
-    normalized = date_str.strip().lower()
-    if normalized == "today":
-        return today.isoformat()
-    if normalized == "yesterday":
-        return (today - timedelta(days=1)).isoformat()
+    relative = _resolve_relative_day(date_str, today, prefer)
+    if relative is not None:
+        return relative.isoformat()
 
     parts = date_str.strip().replace("/", "-").split("-")
     try:
@@ -129,8 +206,9 @@ def resolve_date(date_str: str, *, today: Optional[date] = None, prefer: str = "
 REMINDER_WHEN_GUIDANCE = (
     "Pass the user's time expression verbatim — do NOT compute or convert it "
     "yourself. Understood: relative delays ('in 2 hours', '90m'), clock times "
-    "taken as the next occurrence ('3pm', '15:00'), 'tomorrow 9am', or "
-    "'YYYY-MM-DD HH:MM'."
+    "taken as the next occurrence ('3pm', '15:00'), 'tomorrow 9am', weekday "
+    "phrases ('tuesday 3pm', 'next friday at 9am', 'monday' — 9am if no time is "
+    "given), or 'YYYY-MM-DD HH:MM'."
 )
 
 # Relative-delay units accepted by resolve_reminder_time, in seconds.
@@ -169,6 +247,7 @@ def resolve_reminder_time(when: str, *, now: Optional[datetime] = None) -> Optio
     now = now or datetime.now(tz)
     s = (when or "").strip().lower()
     s = re.sub(r"^at\s+", "", s)  # "at 3pm" -> "3pm"
+    s = re.sub(r"\s+at\s+", " ", s)  # "next friday at 9am" -> "next friday 9am"
     if not s:
         return None
 
@@ -177,13 +256,23 @@ def resolve_reminder_time(when: str, *, now: Optional[datetime] = None) -> Optio
     if m and m.group(2) in _DELAY_UNIT_SECONDS:
         return now + timedelta(seconds=int(m.group(1)) * _DELAY_UNIT_SECONDS[m.group(2)])
 
-    # "tomorrow [at] <clock>".
-    m = re.fullmatch(r"tomorrow(?:\s+at)?\s+(.+)", s)
-    if m:
-        clock = _parse_clock(m.group(1))
+    # "<day phrase> [clock]": 'tomorrow 9am', 'tuesday 3pm', 'next friday'.
+    # The day resolves in _resolve_relative_day (never in the model, which gets
+    # weekday arithmetic wrong); prefer="future" because a reminder is always
+    # forward-looking. A day with no clock defaults to 9am rather than failing
+    # the whole expression. Two words are tried before one so the qualifier in
+    # "next friday" isn't mistaken for a time.
+    words = s.split(" ")
+    for take in (2, 1):
+        if len(words) < take:
+            continue
+        day = _resolve_relative_day(" ".join(words[:take]), now.date(), prefer="future")
+        if day is None:
+            continue
+        rest = " ".join(words[take:])
+        clock = _parse_clock(rest) if rest else (9, 0)
         if clock:
-            return (now + timedelta(days=1)).replace(
-                hour=clock[0], minute=clock[1], second=0, microsecond=0)
+            return datetime(day.year, day.month, day.day, clock[0], clock[1], tzinfo=tz)
 
     # Bare clock time: the next time it occurs (today if still ahead, else tomorrow).
     clock = _parse_clock(s)

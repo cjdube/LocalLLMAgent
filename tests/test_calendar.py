@@ -104,3 +104,68 @@ def test_events_in_range_surfaces_source_id(fake_events):
     assert [e["source_id"] for e in result["events"]] == [
         "claude-time:2026-07-10:0800", None,
     ]
+
+
+# --- get_events_by_date: the day it looked at comes back with the events -------
+#
+# The model narrated its own guess of the day ("Tuesday, August 19th" for a
+# Wednesday) alongside a correct-looking empty result. Returning the resolved
+# date makes a mis-aimed lookup visible in the reply instead of self-consistent.
+
+@pytest.fixture
+def pinned_today(monkeypatch):
+    """Freeze 'now' at Friday 2026-08-14 in a fixed zone, so weekday resolution
+    is deterministic rather than inheriting the host's clock and timezone."""
+    monkeypatch.setenv("TIMEZONE", "America/New_York")
+
+    class _FrozenDatetime(cal.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 8, 14, 12, 0, tzinfo=tz)
+
+    monkeypatch.setattr(cal, "datetime", _FrozenDatetime)
+
+
+def test_weekday_phrase_resolves_and_is_echoed_back(fake_events, pinned_today):
+    result = cal.get_events_by_date("next tuesday", "next tuesday")
+
+    # The reported bug: the model said August 19th, a Wednesday.
+    assert result["resolved_start"] == "2026-08-18"
+    assert result["resolved_end"] == "2026-08-18"
+    assert result["range"] == "Tuesday, August 18, 2026"
+
+
+def test_range_spanning_days_names_both_ends(fake_events, pinned_today):
+    result = cal.get_events_by_date("next monday", "next friday")
+    assert result["range"] == "Monday, August 17, 2026 through Friday, August 21, 2026"
+
+
+def test_events_are_still_returned_alongside_the_resolved_date(fake_events, pinned_today):
+    fake_events["events"] = _FakeEvents(existing_items=[
+        {"id": "e1", "summary": "AI Tinkerers Manchester",
+         "start": {"dateTime": "2026-08-18T17:30:00-04:00"},
+         "end": {"dateTime": "2026-08-18T19:45:00-04:00"}},
+    ])
+
+    result = cal.get_events_by_date("next tuesday", "next tuesday")
+
+    assert result["event_count"] == 1
+    assert result["events"][0]["summary"] == "AI Tinkerers Manchester"
+
+
+def test_backwards_range_is_an_error_not_an_empty_day(fake_events, pinned_today):
+    # Seen live building "the week of next Monday": start next Monday (the 17th),
+    # end the nearest Sunday (the 16th). An empty result there reads as a free week.
+    result = cal.get_events_by_date("next monday", "sunday")
+
+    assert "runs backwards" in result["error"]
+    assert "events" not in result
+
+
+def test_unresolvable_date_returns_an_error_not_a_crash(fake_events, pinned_today):
+    # resolve_date() passes an unrecognised phrase through untouched; that must
+    # degrade to an error the model can relay, not a ValueError that 500s the turn.
+    result = cal.get_events_by_date("sometime next week", "sometime next week")
+
+    assert "sometime next week" in result["error"]
+    assert "events" not in result

@@ -158,7 +158,7 @@ in — nothing new inherits it automatically.
 | `evaluate_against.py` | Evaluate a target (a URL or inline text) against the user's **own** standards (`evaluate_against`) — same fixed pipeline as `evaluate_app`, but the rubric is a wiki "lens" page he curates, loaded at call time. Adding a lens is writing a page, not a code change. See [docs/lenses.md](docs/lenses.md) |
 | `github_starred.py` | List starred GitHub repos, optionally filtered to those pushed to since a given timestamp, with a `recent_changes` summary (release notes or recent commit subjects) per matched repo; `fetch_readme` returns a repo's raw README (best-effort, feeds the `/starred` blurbs); `fetch_latest_release` returns a repo's latest published release (best-effort, feeds the `/starred` release-awareness column); `compare_versions` normalizes two tag strings to a numeric core and reports whether an installed version is behind a release (feeds the `/starred` "Installed" column) |
 | `strava.py` | Strava activities via the Strava API (own OAuth app), for a given date. Run `--authorize` once to mint a refresh token |
-| `calendar.py` | Google Calendar read/write — `get_upcoming_events`, `get_events_by_date` (any past or future range, including the words `'today'`/`'yesterday'`, resolved in Python so the model never guesses a date), `log_calendar_event` (idempotent via `source_id`), and `recolor_event` (takes a category name from `CATEGORY_COLORS`, not a raw colorId). `get_events_in_range` backs the date tools and the colorizer but isn't itself a registered tool |
+| `calendar.py` | Google Calendar read/write — `get_upcoming_events`, `get_events_by_date` (any past or future range, including relative phrases like `'tomorrow'` or `'next tuesday'`, resolved in Python so the model never guesses a date, and echoed back in the result so the reply names the day actually looked up), `log_calendar_event` (idempotent via `source_id`), and `recolor_event` (takes a category name from `CATEGORY_COLORS`, not a raw colorId). `get_events_in_range` backs the date tools and the colorizer but isn't itself a registered tool |
 | `email.py` | Send email via Gmail API (plain text or HTML) |
 | `learnings_file.py` | Write a daily learnings review to a Markdown file in the Obsidian vault (`LEARNINGS_DIR`), one file per day, and read one back (`read_entry`, used by `daily_synthesis` to pick up the AI-chat log — it looks one subdirectory down too, since ObsidianWikiAgent files ingested files out of `raw/`) |
 | `wiki.py` | Read-only search of the learnings wiki (`WIKI_VAULT_PATH`) so Wren can answer "what did I decide about X" — `read_wiki_index`, `list_wiki_pages`, `read_wiki_page` over the concept pages built by ObsidianWikiAgent, plus `page_summaries` (every page's one-line summary) and `list_project_pages` (the pages marked `project: true`, with the checkout each describes), both used by `daily_synthesis` — not model-facing tools. Reads the vault's `wiki/` dir only; `raw/` is a write-only drop (`LEARNINGS_DIR`) that ObsidianWikiAgent files and summarizes. Requires `WIKI_VAULT_PATH` to exist |
@@ -281,12 +281,17 @@ they stay unit-testable and runnable standalone.
   schemas it won't use. Which tools sit in which group, and how a group loads,
   is in [docs/tool-loading.md](docs/tool-loading.md). Three chat-only details
   worth knowing here:
-  - **Dates are resolved in Python, never by the model.** `get_events_by_date`
-    takes the words `'today'`/`'yesterday'`, `fetch_starred_repos` takes a
-    `days_ago` integer, and `set_reminder` takes a time phrase verbatim ("in 2
-    hours", "tomorrow 9am") — each resolved by `agent/dates.py`, because a small
-    local model guesses dates badly. Likewise `recolor_event` takes a category
-    *name* from `CATEGORY_COLORS`, not a raw colorId.
+  - **Dates are resolved in Python, never by the model.** Every day-taking tool
+    is passed the user's phrase verbatim — `'today'`/`'tomorrow'`/`'yesterday'`,
+    a weekday phrase like `'next tuesday'`, or a bare `'MM-DD'` — and
+    `agent/dates.py` resolves it; `fetch_starred_repos` takes a `days_ago`
+    integer and `set_reminder` a time phrase ("in 2 hours", "tuesday 3pm").
+    Weekday arithmetic is included because the model got it wrong in the obvious
+    way: asked on a Friday for "next Tuesday" it answered with the following
+    Wednesday. `get_events_by_date` also returns the date it looked up, so the
+    reply states the tool's day rather than the model's guess. Likewise
+    `recolor_event` takes a category *name* from `CATEGORY_COLORS`, not a raw
+    colorId. See [docs/model-constraints.md](docs/model-constraints.md).
   - **Three kinds of durable state, deliberately separate.** *Memory* is facts
     ([docs/memory.md](docs/memory.md)) — two tiers, where only pinned facts enter
     every system prompt. *Skills* are procedures (`skills/*.md`), with a capped
