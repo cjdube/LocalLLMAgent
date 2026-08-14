@@ -46,7 +46,7 @@ _NAME = prefs.user_name()
 
 load_env()
 
-DEFAULT_WIKI_VAULT = str(Path.home() / "Documents" / "llm-wiki-learnings")
+DEFAULT_WIKI_VAULT = str(Path.home() / "Vaults" / "llm-wiki-learnings")
 
 # A "lens" is an ordinary wiki page that opts in as one of the user's standards
 # rubrics by declaring `lens: true` in its YAML frontmatter — the thing

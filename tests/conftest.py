@@ -53,7 +53,7 @@ and `WREN_EXTERNAL_TASK_ROOTS` (it reaches into whatever sibling repos that
 names). Neither writes anything; both make an assertion depend on the machine.
 
 The learnings tasks write reviews to `LEARNINGS_DIR` — the user's Obsidian vault
-under ~/Documents. Tests stub the writer per-test, but redirect LEARNINGS_DIR to
+under ~/Vaults. Tests stub the writer per-test, but redirect LEARNINGS_DIR to
 tmp_path suite-wide as the backstop, so a missed stub lands a fixture file in a
 throwaway dir, never in the real vault.
 
@@ -235,7 +235,7 @@ def _isolate_learnings_dir(tmp_path, monkeypatch):
     # learnings_file._learnings_dir() reads this env at call time.
     monkeypatch.setenv("LEARNINGS_DIR", str(tmp_path))
     # daily_synthesis archives its nudges outside the ingest queue, in its own
-    # vault dir — a second real path under ~/Documents, so it gets the same
+    # vault dir — a second real path under ~/Vaults, so it gets the same
     # backstop (daily_synthesis._synthesis_dir() also reads it at call time).
     monkeypatch.setenv("SYNTHESIS_DIR", str(tmp_path))
 

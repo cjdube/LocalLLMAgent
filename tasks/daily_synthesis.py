@@ -60,7 +60,7 @@ from tasks._learnings_common import (
 # Where the nudge archive lands: a vault folder ObsidianWikiAgent does not walk
 # (it ingests raw/ only), so Obsidian can still browse the history without the
 # ingest agent treating a question as a source. See the module docstring.
-DEFAULT_SYNTHESIS_DIR = str(Path.home() / "Documents" / "llm-wiki-learnings" / "nudges")
+DEFAULT_SYNTHESIS_DIR = str(Path.home() / "Vaults" / "llm-wiki-learnings" / "nudges")
 
 # How many pre-matched pairs of each kind the model judges, and how many nudges it
 # may emit. Kept small on purpose: the candidate list is context the small model

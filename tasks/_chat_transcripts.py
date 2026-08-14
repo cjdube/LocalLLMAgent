@@ -27,7 +27,7 @@ from pathlib import Path
 # Module-level so tests can redirect it away from the real session store.
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
-DEFAULT_GEMINI_DIR = str(Path.home() / "Documents" / "llm-wiki-learnings" / "gemini_inbox")
+DEFAULT_GEMINI_DIR = str(Path.home() / "Vaults" / "llm-wiki-learnings" / "gemini_inbox")
 
 # Bound the per-session text handed to the small local model. ~12k chars keeps a
 # long session well inside the context window while preserving the goal (head)

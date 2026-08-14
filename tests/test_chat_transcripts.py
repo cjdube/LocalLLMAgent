@@ -88,10 +88,10 @@ def test_fetch_gemini_chats_empty_when_folder_absent():
 def test_gemini_dir_expands_a_tilde_path(monkeypatch):
     # .env.example documents this var with a ~ prefix. Unexpanded, the literal
     # "~/..." dir never exists and every dropped chat is silently skipped.
-    monkeypatch.setenv("WREN_GEMINI_CHATS_DIR", "~/Documents/llm-wiki-learnings/gemini_inbox")
+    monkeypatch.setenv("WREN_GEMINI_CHATS_DIR", "~/Vaults/llm-wiki-learnings/gemini_inbox")
     resolved = ct.gemini_dir()
     assert "~" not in str(resolved)
-    assert resolved == Path.home() / "Documents" / "llm-wiki-learnings" / "gemini_inbox"
+    assert resolved == Path.home() / "Vaults" / "llm-wiki-learnings" / "gemini_inbox"
 
 
 def test_fetch_session_activity_keeps_every_timestamped_event():
