@@ -91,12 +91,19 @@ TOOL_SCHEMA = {
 
 def _compact(markdown: str) -> str:
     """Shrink fetched markdown to positioning copy the model can use: drop
-    images, keep link text without targets, collapse whitespace, bound length."""
+    images, keep link text without targets, collapse whitespace.
+
+    Shrinking only — the caller bounds the result. This used to cap at
+    `_CONTENT_CHARS` itself, which silently outranked every caller's own bound:
+    `evaluate_against` asks for 8000 chars of lens and got 6000, cutting the
+    tail off the one input its docstring promises will arrive whole. A cap two
+    modules away from the call site is invisible at the call site, so there
+    isn't one here any more."""
     text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", markdown)      # images add nothing
     text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)       # [text](url) -> text
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
-    return text[:_CONTENT_CHARS]
+    return text
 
 
 def evaluate_app(url: str = "", **_) -> dict:
@@ -107,7 +114,7 @@ def evaluate_app(url: str = "", **_) -> dict:
         if "error" in page:
             return {"error": f"evaluate_app could not fetch the page: {page['error']}"}
 
-        content = _compact(page["markdown"])
+        content = _compact(page["markdown"])[:_CONTENT_CHARS]
         if not content:
             return {"error": f"no usable content on {url} after compaction"}
 

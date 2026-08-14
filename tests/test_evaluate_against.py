@@ -15,8 +15,9 @@ def stubbed_pipeline(monkeypatch):
     monkeypatch.setattr(eg, "read_wiki_page",
                         lambda name: {"content": "# Product Principles\n\nShip small. Own the outcome."})
     monkeypatch.setattr(eg, "fetch_webpage",
-                        lambda url: {"url": url, "title": "Quorum",
-                                     "markdown": "# Quorum\n\nA [product](https://q.com) page."})
+                        lambda url, **k: seen.setdefault("fetch", []).append(k) or
+                                         {"url": url, "title": "Quorum",
+                                          "markdown": "# Quorum\n\nA [product](https://q.com) page."})
     monkeypatch.setattr(eg, "complete_text",
                         lambda **k: seen["prompts"].append(k) or "## Where It Aligns\nShips small.")
     return seen
@@ -41,7 +42,7 @@ def test_url_target_returns_evaluation(stubbed_pipeline):
 def test_text_target_skips_fetch(stubbed_pipeline, monkeypatch):
     # A URL fetch here would be a bug: text input must not touch the network.
     monkeypatch.setattr(eg, "fetch_webpage",
-                        lambda url: (_ for _ in ()).throw(AssertionError("must not fetch")))
+                        lambda url, **k: (_ for _ in ()).throw(AssertionError("must not fetch")))
     out = eg.evaluate_against("product-principles", target_text="our pitch is fast and cheap")
     assert out["lens"] == "product-principles"
     assert "our pitch is fast and cheap" in stubbed_pipeline["prompts"][0]["user_prompt"]
@@ -72,7 +73,7 @@ def test_empty_lens_is_an_error(stubbed_pipeline, monkeypatch):
 
 
 def test_fetch_error_propagates(stubbed_pipeline, monkeypatch):
-    monkeypatch.setattr(eg, "fetch_webpage", lambda url: {"error": "HTTP 402: out of credits"})
+    monkeypatch.setattr(eg, "fetch_webpage", lambda url, **k: {"error": "HTTP 402: out of credits"})
     out = eg.evaluate_against("product-principles", target_url="https://quorum.example")
     assert "HTTP 402" in out["error"]
     assert stubbed_pipeline["prompts"] == []
@@ -108,6 +109,56 @@ def test_judging_does_not_spend_the_budget_on_thinking(stubbed_pipeline):
     eg.evaluate_against("product-principles", target_text="some target")
 
     assert stubbed_pipeline["prompts"][0]["think"] is False
+
+
+def test_the_output_contract_demands_a_verdict_before_the_headings(stubbed_pipeline):
+    # The three headings answer "what did you find?" and never "so what?" — asked
+    # whether an article was AI slop, the template returned findings and left the
+    # judgement to the reader. The verdict is a fixed three-label menu so the
+    # model answers rather than restating the question.
+    eg.evaluate_against("product-principles", target_text="some target")
+
+    system = stubbed_pipeline["prompts"][0]["system_prompt"]
+    assert "**Verdict:**" in system
+    for label in ("Meets the standards", "Mixed", "Falls short"):
+        assert label in system
+    assert system.index("Verdict") < system.index("## Where It Aligns")
+
+
+# --------------------------------------------------------------------------- #
+# input bounds — each must bind here, not somewhere upstream
+# --------------------------------------------------------------------------- #
+
+def test_the_lens_reaches_the_model_whole_up_to_its_own_bound(stubbed_pipeline, monkeypatch):
+    # The regression this pins: _compact used to cap at evaluate_app's 6000, which
+    # outranked _LENS_CHARS and cut the tail off every lens longer than that —
+    # dropping standards the target was supposed to be judged against, silently.
+    # engineering-manager-expectations (8334 chars) was losing its tail on every run.
+    monkeypatch.setattr(eg, "read_wiki_page",
+                        lambda name: {"content": "S" * (eg._LENS_CHARS - 1) + "TAIL"})
+
+    eg.evaluate_against("long-lens", target_text="some target")
+
+    assert "TAIL" not in stubbed_pipeline["prompts"][0]["user_prompt"]  # bound still applies
+    assert "S" * (eg._LENS_CHARS - 1) in stubbed_pipeline["prompts"][0]["user_prompt"]
+
+
+def test_a_long_target_is_bounded_by_target_chars_not_by_compaction(stubbed_pipeline):
+    eg.evaluate_against("product-principles", target_text="t" * (eg._TARGET_CHARS + 500))
+
+    prompt = stubbed_pipeline["prompts"][0]["user_prompt"]
+    assert "t" * eg._TARGET_CHARS in prompt
+    assert "t" * (eg._TARGET_CHARS + 1) not in prompt
+
+
+def test_the_fetcher_is_asked_for_more_than_its_own_default(stubbed_pipeline):
+    # web_fetch caps at 8000 by default to protect the agent loop's tool-result
+    # budget. This call has no conversation behind it, so that cap isn't ours —
+    # left at the default it would cut the page before our own bound ever applied.
+    eg.evaluate_against("product-principles", target_url="https://quorum.example")
+
+    assert stubbed_pipeline["fetch"][0]["max_chars"] == eg._FETCH_CHARS
+    assert eg._FETCH_CHARS > eg._TARGET_CHARS  # compaction shrinks; leave it headroom
 
 
 # --------------------------------------------------------------------------- #

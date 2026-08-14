@@ -62,6 +62,28 @@ def test_markdown_truncated_at_cap(monkeypatch):
     assert out["truncated"] is True
 
 
+def test_max_chars_overrides_the_default_cap(monkeypatch):
+    # evaluate_against feeds a one-shot call with the whole window to itself, so
+    # MAX_CHARS (which defends the agent loop's tool-result budget) isn't its cap.
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-k")
+    monkeypatch.setattr(web_fetch, "MAX_CHARS", 10)
+    monkeypatch.setattr(web_fetch.requests, "post", _post_stub(_ok_payload(markdown="x" * 50)))
+
+    out = web_fetch.fetch_webpage("https://example.com", max_chars=40)
+
+    assert out["markdown"] == "x" * 40
+    assert out["truncated"] is True
+
+
+def test_max_chars_absent_or_junk_falls_back_to_the_default_cap(monkeypatch):
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-k")
+    monkeypatch.setattr(web_fetch, "MAX_CHARS", 10)
+    monkeypatch.setattr(web_fetch.requests, "post", _post_stub(_ok_payload(markdown="x" * 50)))
+
+    for junk in (None, 0, -5):
+        assert web_fetch.fetch_webpage("https://example.com", max_chars=junk)["markdown"] == "x" * 10
+
+
 # --------------------------------------------------------------------------- #
 # validation + degrade contracts
 # --------------------------------------------------------------------------- #

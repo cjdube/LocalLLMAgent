@@ -44,10 +44,30 @@ _NAME = prefs.user_name()
 # system prompt and the model's own analysis. The lens (the user's standards) must
 # arrive whole — truncating it mid-list would silently drop standards the target
 # should be judged against — so it gets a generous budget; a full standards page
-# is still only ~2K tokens, negligible against num_ctx. The target is trimmed
-# harder since it's the disposable input.
-_LENS_CHARS = 8000
-_TARGET_CHARS = 5000
+# is still only ~2K tokens, negligible against num_ctx.
+#
+# These are generous because this call is not the chat: complete_text sends two
+# messages with no conversation behind them, so the whole OLLAMA_NUM_CTX (32768
+# tokens) is ours. Lens + target + system prompt at these bounds is ~6.5K tokens,
+# a fifth of the window.
+#
+# The target used to be 5000, which cut a typical Medium article to roughly its
+# first half — and the half it dropped was the end, where two of the ai-slop
+# lens's own patterns live ("summary-recap endings", "fake-profound kickers").
+# The model duly reported an ending it could not see. A cap smaller than the
+# documents a lens is written to judge doesn't bound cost, it invents findings.
+#
+# _LENS_CHARS is 12000 rather than the 8000 the docs used to name because 8000
+# was not headroom: engineering-manager-expectations compacts to 8281 and was
+# still losing its tail once the hidden 6000 cap was gone. A bound the longest
+# real lens already exceeds is a bug waiting for the next paragraph.
+_LENS_CHARS = 12000
+_TARGET_CHARS = 16000
+
+# What we ask the fetcher for, before compaction. Higher than _TARGET_CHARS
+# because compaction strips images and link targets — markdown from a real page
+# loses 20-30% — so fetching exactly _TARGET_CHARS would land us under it.
+_FETCH_CHARS = 20000
 
 # The "Nothing significant" escape hatch is load-bearing, not politeness: a fixed
 # three-heading template with a bullet quota compels the model to fill every
@@ -56,6 +76,12 @@ _TARGET_CHARS = 5000
 # one of them advising a change that would have made the draft worse. A lens page
 # can't fix this from its own text; the output contract has to permit an empty
 # section. See CLAUDE.md on parse-and-degrade honesty.
+#
+# The verdict line exists because the three headings answer "what did you find?"
+# and never "so what?" — asked "is this article AI slop?", the template returned
+# a findings list and left the yes/no to the reader. A fixed three-label menu
+# rather than a free sentence: the label is the answer, and the model can't
+# retreat into a paragraph that restates the question.
 EVAL_SYSTEM_PROMPT = f"""You are {_NAME}'s rigorous product and engineering reviewer. \
 You'll get two things: (1) {_NAME}'s own standards — their product/engineering philosophy — \
 and (2) a target to evaluate (a web page or a piece of text). Judge the target ONLY \
@@ -69,7 +95,15 @@ computed facts about the target. Report the ones that found something, and never
 one or add a finding of the same kind — if it says a check found none, there is nothing of \
 that kind to report.
 
-Write the evaluation using EXACTLY these three markdown headings, with 2-4 concise \
+Open with ONE verdict line, before the headings, in exactly this form:
+
+**Verdict:** <Meets the standards|Mixed|Falls short> — one sentence giving the main reason.
+
+Pick the label that fits the target as a whole. "Mixed" is for one that genuinely \
+splits, not a way to avoid deciding. The verdict judges the target against the lens \
+and nothing else.
+
+Then write the evaluation using EXACTLY these three markdown headings, with 2-4 concise \
 bullet points under each. If a section genuinely has nothing to report, write \
 "Nothing significant" under it — never invent a point to fill a section:
 
@@ -146,7 +180,7 @@ def evaluate_against(lens_page: str = "", target_url: str = "",
         target_url = (target_url or "").strip()
         target_text = (target_text or "").strip()
         if target_url:
-            page = fetch_webpage(target_url)
+            page = fetch_webpage(target_url, max_chars=_FETCH_CHARS)
             if "error" in page:
                 return {"error": f"could not fetch the target: {page['error']}"}
             content = _compact(page.get("markdown", ""))[:_TARGET_CHARS]

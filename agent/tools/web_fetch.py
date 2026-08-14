@@ -67,8 +67,17 @@ def _first(value):
     return value or ""
 
 
-def fetch_webpage(url: str = "", api_key: str = None, **_) -> dict:
-    """Callable entrypoint used by the agent loop's tool dispatcher."""
+def fetch_webpage(url: str = "", api_key: str = None, max_chars: int = None, **_) -> dict:
+    """Callable entrypoint used by the agent loop's tool dispatcher.
+
+    `max_chars` lets an in-process caller with its own budget override MAX_CHARS
+    — `evaluate_against` feeds the page to a dedicated one-shot call with no
+    conversation sharing the window, so the loop's tool-result cap doesn't apply
+    to it. Deliberately NOT in TOOL_SCHEMA: MAX_CHARS defends the agent loop's
+    context budget, and that isn't the model's to raise. loop.py trims every
+    tool result at MAX_TOOL_RESULT_CHARS regardless, so a hallucinated value
+    can't reach the conversation anyway.
+    """
     api_key = resolve_key("FIRECRAWL_API_KEY", api_key)
     if not api_key:
         return missing_key_error("FIRECRAWL_API_KEY")
@@ -111,9 +120,10 @@ def fetch_webpage(url: str = "", api_key: str = None, **_) -> dict:
     if not markdown:
         return {"error": f"no readable content extracted from {url}"}
 
-    truncated = len(markdown) > MAX_CHARS
+    cap = max_chars if max_chars and max_chars > 0 else MAX_CHARS
+    truncated = len(markdown) > cap
     if truncated:
-        markdown = markdown[:MAX_CHARS]
+        markdown = markdown[:cap]
     out = {
         "url": url,
         "title": _first((data.get("metadata") or {}).get("title")),

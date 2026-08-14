@@ -30,11 +30,29 @@ def test_compact_strips_images_and_link_targets():
     assert "the docs" in out
 
 
-def test_compact_collapses_whitespace_and_bounds_length(monkeypatch):
-    monkeypatch.setattr(ea, "_CONTENT_CHARS", 20)
+def test_compact_collapses_whitespace(monkeypatch):
     out = ea._compact("a  b\t c\n\n\n\n\nd" + "x" * 100)
     assert "\n\n\n" not in out and "  " not in out
-    assert len(out) <= 20
+
+
+def test_compact_does_not_bound_length_itself(monkeypatch):
+    # Bounding belongs to the caller. When _compact capped internally it
+    # outranked evaluate_against's larger bound two modules away, silently
+    # cutting the lens it promises to pass whole.
+    monkeypatch.setattr(ea, "_CONTENT_CHARS", 20)
+
+    assert len(ea._compact("x" * 100)) == 100
+
+
+def test_the_pipeline_bounds_the_page_at_content_chars(stubbed_pipeline, monkeypatch):
+    monkeypatch.setattr(ea, "_CONTENT_CHARS", 20)
+    monkeypatch.setattr(ea, "fetch_webpage",
+                        lambda url, **k: {"url": url, "title": "T", "markdown": "x" * 100})
+
+    ea.evaluate_app("https://quorum.example")
+
+    assert "x" * 20 in stubbed_pipeline["prompts"][0]["user_prompt"]
+    assert "x" * 21 not in stubbed_pipeline["prompts"][0]["user_prompt"]
 
 
 # --------------------------------------------------------------------------- #

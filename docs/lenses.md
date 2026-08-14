@@ -95,13 +95,83 @@ pipeline, not a freeform agent task (small-local-model constraint, see
 1. Load the lens page from the vault. Missing or empty → `{"error": ...}`.
 2. Resolve the target: fetch a URL via `fetch_webpage` (Firecrawl), or take
    inline text.
-3. Compact both deterministically and bound them — the lens at **8000** chars,
-   the target at **5000**. The asymmetry is deliberate: truncating the lens
-   mid-list would silently drop standards the target should be judged against,
-   so it gets the generous budget; the target is the disposable input.
-4. One model call against a fixed three-heading template — **Where It Aligns /
-   Where It Falls Short / What I'd Change**, 2–4 bullets each, each point
-   naming the standard it turns on. No JSON to parse, nothing to break.
+3. Compact both deterministically and bound them — the lens at **12000** chars,
+   the target at **16000**, fetched at **20000** so compaction has headroom.
+   Truncating the lens mid-list would silently drop standards the target should
+   be judged against, so it must arrive whole.
+4. One model call against a fixed template — a **Verdict** line, then three
+   headings, **Where It Aligns / Where It Falls Short / What I'd Change**, 2–4
+   bullets each, each point naming the standard it turns on. No JSON to parse,
+   nothing to break.
+
+### The bounds, and the three that used to stack
+
+Those numbers are generous because this call is **not** the chat. `complete_text`
+sends two messages with no conversation behind them, so the whole
+`OLLAMA_NUM_CTX` (32768 tokens) belongs to this one call. Lens + target + system
+prompt at the current bounds is roughly 7K tokens — a fifth of the window.
+
+They read as one bound each now. They did not before. A page passed through
+**three** caps on its way to the model, two of them invisible at the call site:
+
+| Order | Cap | Where |
+|---|---|---|
+| 1 | 8000 | `web_fetch.MAX_CHARS` — sized for the *agent loop's* tool-result budget |
+| 2 | 6000 | `evaluate_app._compact`, imported here for its regex work |
+| 3 | 5000 | `_TARGET_CHARS`, the only one this module declared |
+
+Two consequences, both silent:
+
+- **`_LENS_CHARS = 8000` never ran.** `_compact`'s 6000 bound the lens first, so
+  the "the lens must arrive whole" promise in the code was false for any lens
+  over 6000 chars. `engineering-manager-expectations` compacts to 8281 and had
+  been losing its tail on every run since it was written.
+- **A target was cut to roughly the first half of an article** — and the half it
+  lost was the *end*, where two of `ai-slop`'s own patterns live
+  ("summary-recap endings", "fake-profound kickers"). Asked whether a Medium
+  article was slop, the model reported a summary-recap ending it could not see,
+  hedged as *"the structure suggests a buildup toward…"*. A cap smaller than the
+  documents a lens is written to judge doesn't bound cost; it manufactures
+  findings.
+
+The fixes, in the order they matter:
+
+- `_compact` **shrinks and does not bound**. Every cap is now visible at its own
+  call site; `evaluate_app` slices at `_CONTENT_CHARS` itself.
+- `fetch_webpage` takes an in-process `max_chars`, deliberately **not** in its
+  `TOOL_SCHEMA` — `MAX_CHARS` defends the agent loop's context, which isn't the
+  model's to raise, and `loop.py` trims every tool result regardless.
+- `_LENS_CHARS` is **12000**, not 8000. 8000 wasn't headroom over a real 8281-char
+  lens, it was the next silent truncation.
+
+Measured after, on the same article at n=3: it fetches whole (15694 chars,
+untruncated), 11323 reach the model, and all 3 runs name and quote the article's
+actual closing section instead of inferring one.
+
+### The verdict line
+
+The three headings answer *what did you find?* and never *so what?*. Asked
+outright whether an article was AI slop, the template returned a findings list
+and left the yes/no to the reader — the question the user actually asked went
+unanswered, in a response shaped exactly like an answer.
+
+The fix is one line ahead of the headings:
+
+```
+**Verdict:** <Meets the standards|Mixed|Falls short> — one sentence giving the main reason.
+```
+
+A fixed three-label menu rather than a free sentence, for the same reason the
+headings are fixed: the label *is* the answer, and the model can't retreat into
+a paragraph that restates the question. The verdict judges the target against
+the lens and nothing else — notably not who or what wrote it, which the
+`ai-slop` lens forbids from its own page.
+
+Measured at n=3 per case on `ai-slop`: a slop-saturated draft returned **Falls
+short** 3 of 3, a clean draft **Meets the standards** 3 of 3, and the
+`product-principles` lens on a real landing page returned **Mixed** — so the
+middle label is doing real work rather than absorbing every case. The
+"Nothing significant" escape hatch below still fired on both poles.
 
 ### The deterministic pre-pass
 
@@ -185,7 +255,8 @@ chat twice, that's a lens.
   "Scope discipline", "What 'done' means", and "Red flags (call these out)" —
   the last is worth copying, since naming failure modes gives the model
   something concrete to match against.
-- **Keep it under ~8000 characters** of compacted text, or the tail is cut.
+- **Keep it under ~12000 characters** of compacted text, or the tail is cut.
+  The longest lens today (`engineering-manager-expectations`) is 8281.
 - **If a check is a count or an exact match, put it in the pre-pass, not in the prose.**
   This is the lesson the two frontmatter keys came out of, and it's worth reaching for
   before tuning wording. The model saturates at roughly a dozen findings and then
