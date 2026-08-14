@@ -609,6 +609,9 @@ TOOL_SERVICES = {
     "games": ("Games", ["list_games"]),
     # Local checkouts under PROJECTS_DIR, not a hosted service — same as games.
     "projects": ("Projects", ["list_projects", "read_project"]),
+    # A vault directory (SYNTHESIS_DIR), not a hosted service. Written by
+    # daily_synthesis, read back by list_nudges.
+    "nudges": ("Synthesis Nudges", ["list_nudges"]),
     "background": ("Background Tasks", ["run_in_background", "list_background_jobs", "get_job_result"]),
     "opportunities": ("Opportunity Scout", ["list_opportunities", "update_opportunity",
                                             "watch_company", "unwatch_company",
@@ -627,7 +630,10 @@ ROUTINE_USES = {
     "daily_youtube_learnings": ["youtube", "gmail", "ntfy"],
     # Cross-source: yesterday's browsing + Likes matched against the wiki and the
     # opportunity watchlist; gmail = notify's email fallback when the push fails.
-    "daily_synthesis": ["chrome", "youtube", "wiki", "opportunities", "gmail", "ntfy"],
+    # "nudges" both ways: it writes the dated archive and reads it back to drop
+    # a connection it already made.
+    "daily_synthesis": ["chrome", "youtube", "wiki", "opportunities", "nudges",
+                        "gmail", "ntfy"],
     "ai_chat_learnings": ["gmail", "ntfy"],  # source is local chat files; gmail = persist_or_email fallback
     "opportunity_digest": ["opportunities", "gmail", "ntfy"],
     "starred_blurbs": ["github", "ntfy"],

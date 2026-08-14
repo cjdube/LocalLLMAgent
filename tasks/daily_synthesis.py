@@ -20,7 +20,10 @@ Two kinds of candidate go into that list:
   actually chewing on, and no single-source pass can see it.
 
 The live output is an optional push; a dated copy is archived to SYNTHESIS_DIR so
-suggestions survive it. That directory is deliberately NOT the vault's raw/
+suggestions survive it. That archive is read back two ways: by agent/tools/nudges.py
+(so chat can answer "what have you suggested lately", which it could not before), and
+by this task itself, to drop a connection it already nudged — see drop_repeats.
+That directory is deliberately NOT the vault's raw/
 (LEARNINGS_DIR): raw/ is ObsidianWikiAgent's ingest queue, and these files are
 questions addressed to the user, not sources. Ingesting them produced dated orphan
 wiki pages that restated "is this worth adding?" as "the current focus involves
@@ -31,7 +34,6 @@ Usage:
     python -m tasks.daily_synthesis
 """
 
-import os
 import re
 import sys
 from collections import Counter
@@ -44,6 +46,7 @@ from agent import prefs
 from agent.tools.chrome_history import fetch_chrome_history
 from agent.tools.learnings_file import read_entry
 from agent.tools.notify import notify
+from agent.tools.nudges import _synthesis_dir, list_nudges
 from agent.tools.opportunities import get_watchlist, list_opportunities
 from agent.tools.projects import load_registry
 from agent.tools.wiki import list_project_pages, page_summaries
@@ -57,10 +60,20 @@ from tasks._learnings_common import (
 )
 
 
-# Where the nudge archive lands: a vault folder ObsidianWikiAgent does not walk
-# (it ingests raw/ only), so Obsidian can still browse the history without the
-# ingest agent treating a question as a source. See the module docstring.
-DEFAULT_SYNTHESIS_DIR = str(Path.home() / "Vaults" / "llm-wiki-learnings" / "nudges")
+# Where the nudge archive lands (a vault folder ObsidianWikiAgent does not walk —
+# see the module docstring) is resolved by agent/tools/nudges.py, which also reads
+# it back. One definition for the writer and the reader.
+
+# How far back drop_repeats looks for an already-made connection. Every repeat in
+# the real archive is inside a week — "Ollama runners → your 'omlx' notes" on
+# 2026-08-03 and again on 08-04, `lm-studio` on 07-24 and 07-25, "Claude Code came
+# at you twice" on 07-30 and 08-03 — so a week catches all of them. It is
+# deliberately not longer: because the rule keys on the anchor (see drop_repeats),
+# a wider window also suppresses genuinely new connections to a page he happens to
+# be active around, and the archive has one of those at 11 days ('ai-slop' on 07-26
+# for a repo, then on 08-06 for a video making a different point). Seven days keeps
+# that and drops the noise. This is the lever if the balance feels wrong.
+RECENT_NUDGE_DAYS = 7
 
 # How many pre-matched pairs of each kind the model judges, and how many nudges it
 # may emit. Kept small on purpose: the candidate list is context the small model
@@ -178,11 +191,6 @@ Output rules:
 - At most {MAX_NUDGES} lines. Fewer is better. Quality over quantity.
 - If NONE of the candidates is a genuine, useful connection, output exactly: NONE
 - Output only the lines (or NONE) — no preamble, no headings, no explanation."""
-
-
-def _synthesis_dir() -> Path:
-    """Read at call time, like learnings_file._learnings_dir()."""
-    return Path(os.getenv("SYNTHESIS_DIR", DEFAULT_SYNTHESIS_DIR)).expanduser()
 
 
 # The AI-chat log's section headers ("**Learned**") and the two empty-section
@@ -534,6 +542,57 @@ def cross_channel_pairs(signals: list) -> list:
     return _one_per_side(_ranked(pairs))[:MAX_CROSS_CANDIDATES]
 
 
+def drop_repeats(pairs: list, recent_nudges: list) -> list:
+    """Candidates whose connection was already nudged recently, removed.
+
+    An anchor pair is a repeat when a past nudge NAMES THE SAME ANCHOR — its
+    label's tokens all appear in the line. Deliberately not "shares the overlap
+    terms": the archived nudge is model-written prose, and the matcher's overlap
+    is an artifact of tokenizing, so the two vocabularies routinely disagree. A
+    dry run caught exactly that — the `screenwatch-kit` pair matched on
+    {capture, logs}, while the nudge it was repeating said "the
+    `daily_synthesis.log` setup fits your `screenwatch-kit` workflow", sharing
+    neither term. The anchor's name is the one part the model is told to name and
+    reliably does.
+
+    An anchor with no usable tokens (nothing over _MIN_TOKEN_LEN) falls back to
+    the overlap, because an empty token set is a subset of everything and would
+    otherwise suppress the entire shortlist. Echoes have no anchor at all, so
+    they keep the overlap rule — safe because _MIN_ECHO_OVERLAP already demands
+    two shared terms, and on real data {claude, code} is what "Claude Code came
+    at you twice" repeats on.
+
+    The cost, stated plainly: a genuinely NEW connection to a page nudged three
+    days ago is suppressed with the stale one. RECENT_NUDGE_DAYS is the lever —
+    see its comment for why the window is as short as it is."""
+    seen = [_tokenize(text) for text in recent_nudges]
+    kept = []
+    for pair in pairs:
+        terms = set(pair["overlap"])
+        if pair["kind"] == "anchor":
+            label = _tokenize(pair["anchor"]["label"].replace("-", " "))
+            terms = label or terms
+        if any(terms <= nudge for nudge in seen):
+            continue
+        kept.append(pair)
+    return kept
+
+
+def recent_nudges(days: int, logger) -> list:
+    """The nudge lines pushed in the last `days` days, or [] if the archive can't
+    be read. A missing or unreadable SYNTHESIS_DIR costs the repeat filter, never
+    the run — the same per-source guard every other input here gets."""
+    try:
+        result = list_nudges(days=days)
+    except Exception as e:
+        logger.warning(f"nudge archive unavailable, not suppressing repeats: {e}")
+        return []
+    if "error" in result:
+        logger.warning(f"nudge archive unavailable, not suppressing repeats: {result['error']}")
+        return []
+    return [row["text"] for row in result["nudges"]]
+
+
 def render_candidates(pairs: list) -> str:
     """The candidate shortlist as the model's user prompt. The CONNECTION/ECHO label
     matches the two kinds the system prompt describes."""
@@ -592,6 +651,24 @@ def main() -> int:
             # case. Log the run-complete boundary (the dashboard reads status
             # from the log) and stop before warming the model.
             logger.info("No overlaps; nothing to synthesize")
+            logger.info("Daily synthesis run complete")
+            return 0
+
+        # Drop connections already made in the last fortnight — see drop_repeats.
+        # Done before the model call, so a suppressed pair costs nothing and the
+        # model's three slots go to what's actually new.
+        matched = len(candidates)
+        candidates = drop_repeats(candidates, recent_nudges(RECENT_NUDGE_DAYS, logger))
+        if len(candidates) < matched:
+            logger.info(f"{matched - len(candidates)} candidate(s) dropped as repeats "
+                        f"of the last {RECENT_NUDGE_DAYS} days")
+        if not candidates:
+            # Distinct from the no-overlap case above: the day DID line up with his
+            # world, we just said so already. Saying which is what keeps a quiet
+            # morning readable in the log (CLAUDE.md: a run that produces less has
+            # to say why).
+            logger.info(f"All {matched} candidate(s) were repeats of the last "
+                        f"{RECENT_NUDGE_DAYS} days; nothing to synthesize")
             logger.info("Daily synthesis run complete")
             return 0
 

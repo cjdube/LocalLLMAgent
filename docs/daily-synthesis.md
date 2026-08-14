@@ -48,7 +48,11 @@ model told to "find connections across everything" manufactures them):
    - **ECHO** (`cross_channel_pairs`, cap `MAX_CROSS_CANDIDATES` = 3) — a signal
      against a signal from a *different* channel: the same theme reaching him twice
      independently in one day, which no single-source pass can see.
-4. **Judge (one bounded model pass)** — the shortlist goes to the model, which
+4. **Drop repeats** (`drop_repeats`, `RECENT_NUDGE_DAYS` = 7) — a candidate whose
+   anchor was already named in a nudge in the last week is removed *before* the
+   model call, so the suppressed pair costs nothing and the model's three slots go
+   to what's actually new. See [Not saying it twice](#not-saying-it-twice).
+5. **Judge (one bounded model pass)** — the shortlist goes to the model, which
    keeps only the genuine, non-obvious, actionable connections and writes one
    nudge line each, at most `MAX_NUDGES` (3). A reply of `NONE`, or no bullet
    lines, yields nothing. The rendered shortlist is logged alongside the model's
@@ -58,12 +62,88 @@ model told to "find connections across everything" manufactures them):
    retry (`MAX_SYNTHESIS_ATTEMPTS`), and warns even when the retry succeeds so
    the rate stays visible in the 8am rollup. See
    [model-constraints.md](model-constraints.md).
-5. **Push + archive** — if any nudges survive, one `notify()` with
+6. **Push + archive** — if any nudges survive, one `notify()` with
    `email_fallback=True` (a one-shot alert nothing retries), **and** a durable
    copy written as `Daily-Synthesis-<date>.md` to `SYNTHESIS_DIR` (default
    `<vault>/nudges`) via `persist_or_email`. The push is the live channel; the
    file is the record the user scrolls back through later. No overlap, or nothing
    genuine, means **no push and no file** — silence is the common case.
+
+Each of the three quiet endings logs its own line — no overlap, all candidates
+were repeats, nothing genuine — because silence is this task's usual outcome and
+a single shared message would make a broken morning read like a quiet one.
+
+## Reading them back
+
+The push is a one-shot alert and the archive was, for its first three weeks, write-
+only: `agent/tools/wiki.py` is scoped to the vault's `wiki/` dir, so Wren could
+read the user's entire notes wiki and none of her own suggestions. Asked to list
+them in chat, she had nothing to call.
+
+`agent/tools/nudges.py` closes that. `list_nudges(days=14)` returns the archive's
+bullets as flat, newest-first `{date, text}` rows; the date comes from the
+filename, never from anything the model parses. It sits in the deferred `nudges`
+tool group (`agent/toolset.py`), pre-loaded on cues like *nudge*, *suggest*,
+*recommend*, *notice*. The module also owns `SYNTHESIS_DIR` — the writer imports
+`_synthesis_dir` from it — so the reader and the writer can't drift onto
+different paths.
+
+Its description carries the same anti-fabrication wording as `list_games`: a
+"what did you suggest?" tool is a catalogue question, the shape where a small
+model answers plausibly from its own head instead of calling anything, and an
+invented suggestion is indistinguishable from a real one. It also states that an
+empty result is normal — most days produce no nudge — so silence doesn't get
+reported back as a fault. Both sentences are pinned by tests.
+
+**The answer is rendered in Python, not written by the model.** Alongside the
+rows, `list_nudges` returns `summary`: the finished reply, one `- **date** —
+text` line per nudge (or the wording for an empty window). The description tells
+the model to send that back unchanged. This was measured on the real 16-row
+archive: told to write the rows out itself, the model answered with *"The daily
+synthesis note on 'screenwatcher' fits your automation interests"* — a
+suggestion that was never sent — on 1 of 3 runs. Transcribing a long list is the
+copy-the-content failure [model-constraints.md](model-constraints.md) describes,
+and the anti-fabrication sentence doesn't survive it. Relaying the rendered block
+instead: 6 of 6 runs reproduced all 16 rows verbatim (one curly apostrophe
+normalized to a straight one).
+
+Verified against the live model, 3 runs each of "what have you been suggesting to
+me lately?", "list the nudges from the last two weeks", and an out-of-window "what
+did you suggest back in March?": 9 of 9 called the tool, the `nudges` group
+pre-loaded every time, and the March ask declined ("my nudge history only goes
+back 90 days") rather than inventing one.
+
+## Not saying it twice
+
+`drop_repeats` removes a candidate whose **anchor** was named in a nudge from the
+last `RECENT_NUDGE_DAYS` (7) days. It keys on the anchor, not on the shared terms
+that made the pair, and that distinction was earned: the first cut required the
+past nudge to contain the pair's `overlap`, and a dry run against real data showed
+it letting a repeat straight through. The matcher had paired `screenwatch-kit` on
+`{capture, logs}`, while the nudge it was repeating read *"the
+`daily_synthesis.log` setup fits your `screenwatch-kit` workflow"* — sharing
+neither term. The archived line is model-written prose; the overlap is an artifact
+of tokenizing. The anchor's name is the one part the model is told to name and
+reliably does. (An anchor with no token over `_MIN_TOKEN_LEN` falls back to the
+overlap — an empty set is a subset of everything and would suppress the whole
+shortlist. Echoes have no anchor, so they keep the overlap rule, which is safe
+because `_MIN_ECHO_OVERLAP` already demands two shared terms.)
+
+Seven days rather than a fortnight, because keying on the anchor cuts both ways.
+Every repeat in the real archive is inside a week — `omlx` on 08-03 and 08-04,
+`lm-studio` on 07-24 and 07-25, "Claude Code came at you twice" on 07-30 and
+08-03 — while the archive's one *legitimate* return to a page is at 11 days
+(`ai-slop` on 07-26 for a repo, then 08-06 for a video making a different point).
+A week catches the noise and keeps that. `RECENT_NUDGE_DAYS` is the lever.
+
+Measured on the 2026-08-13 run replayed against the real archive: 5 candidates
+matched, 2 were repeats, and the model spent its pass on the remaining 3 — where
+before it re-pushed the `screenwatch-kit` line almost verbatim.
+
+Re-running the task by hand on a day it already ran will suppress everything: its
+own archive file for that day is inside the window. That is correct behaviour, not
+a fault — on the launchd schedule the day's file doesn't exist yet when the run
+matches.
 
 ## Why the archive is not in `raw/`
 
@@ -122,7 +202,8 @@ real data did, not in anticipation:
 
 - `MAX_ANCHOR_CANDIDATES` / `MAX_CROSS_CANDIDATES` / `MAX_NUDGES` /
   `MAX_AI_CHAT_BULLETS` / `MAX_ANCHOR_SUMMARY_CHARS` / `_MIN_TOKEN_LEN` /
-  `_STOPWORDS`, plus the filters above, in `tasks/daily_synthesis.py`.
+  `_STOPWORDS` / `RECENT_NUDGE_DAYS`, plus the filters above, in
+  `tasks/daily_synthesis.py`.
 
 ## Known weakness: Chrome page paths
 

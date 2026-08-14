@@ -8,6 +8,7 @@ push. TIMEZONE is pinned so the prior-day window is deterministic, not the
 host's zone (CLAUDE.md: UTC→local day windows)."""
 
 import logging
+from datetime import timedelta
 
 import pytest
 
@@ -426,6 +427,82 @@ def test_parse_nudges_none_yields_nothing():
 
 
 # --------------------------------------------------------------------------- #
+# drop_repeats
+# --------------------------------------------------------------------------- #
+
+def _anchor_pair(overlap, label, signal="something he did"):
+    return {"kind": "anchor", "signal": {"text": signal, "kind": "browsed"},
+            "anchor": {"label": label}, "score": 1.0, "overlap": overlap}
+
+
+def test_drop_repeats_suppresses_the_same_anchor():
+    # The real one, from the archive: 2026-08-03 nudged the omlx page off an
+    # Ollama-runners chat, and 08-04 matched the same pair again.
+    pair = _anchor_pair(["ollama"], "omlx", signal="Ollama runners and MLX")
+    already = ["Your discussion of Ollama runners relates to your `omlx` notes; "
+               "should I link them?"]
+
+    assert ds.drop_repeats([pair], already) == []
+
+
+def test_drop_repeats_ignores_the_overlap_terms_the_nudge_never_used():
+    # Why the rule keys on the anchor, caught by a dry run against real data: the
+    # matcher paired screenwatch-kit on {capture, logs}, and the nudge it was
+    # repeating said "the `daily_synthesis.log` setup fits your `screenwatch-kit`
+    # workflow" — sharing neither term. Requiring the overlap let the repeat through.
+    pair = _anchor_pair(["capture", "logs"], "screenwatch-kit",
+                        signal="logs/daily_synthesis.log will now capture output")
+    already = ["The `daily_synthesis.log` setup fits your `screenwatch-kit` "
+               "workflow; want to integrate them?"]
+
+    assert ds.drop_repeats([pair], already) == []
+
+
+def test_drop_repeats_keeps_a_different_anchor():
+    pair = _anchor_pair(["duckdb"], "duckdb-analytics", signal="DuckDB deep dive")
+    already = ["Your discussion of Ollama runners relates to your `omlx` notes."]
+
+    assert ds.drop_repeats([pair], already) == [pair]
+
+
+def test_drop_repeats_does_not_suppress_on_a_shared_word_alone():
+    # A past nudge that merely says "Claude" must not kill every later Claude
+    # candidate — the anchor is what scopes a repeat.
+    pair = _anchor_pair(["claude"], "prompt-caching")
+    already = ["Anthropic's context engineering updates may impact your Claude "
+               "artifacts; want a summary?"]
+
+    assert ds.drop_repeats([pair], already) == [pair]
+
+
+def test_an_anchor_with_no_usable_tokens_falls_back_to_the_overlap():
+    # An empty token set is a subset of everything, so without the fallback a
+    # short-named anchor would suppress the whole shortlist.
+    pair = _anchor_pair(["duckdb"], "n8n")
+    already = ["Something about DuckDB entirely unrelated to that anchor."]
+
+    assert ds.drop_repeats([pair], already) == []
+    assert ds.drop_repeats([_anchor_pair(["kafka"], "n8n")], already) == [
+        _anchor_pair(["kafka"], "n8n")]
+
+
+def test_drop_repeats_matches_an_echo_on_its_shared_terms():
+    # Echoes have no anchor, so the overlap is the whole identity — safe because
+    # _MIN_ECHO_OVERLAP already demands two shared terms.
+    pair = {"kind": "cross", "signal": {"text": "a", "kind": "browsed"},
+            "other": {"text": "b", "kind": "watched"}, "score": 1.0,
+            "overlap": ["claude", "code"]}
+    already = ["Claude Code came at you twice yesterday — reading and video; worth a note?"]
+
+    assert ds.drop_repeats([pair], already) == []
+
+
+def test_drop_repeats_with_no_history_keeps_everything():
+    pair = _anchor_pair(["duckdb"], "duckdb-analytics")
+    assert ds.drop_repeats([pair], []) == [pair]
+
+
+# --------------------------------------------------------------------------- #
 # main() branches
 # --------------------------------------------------------------------------- #
 
@@ -484,6 +561,63 @@ def test_no_overlap_pushes_nothing_and_skips_model(stub_sources, tmp_path, monke
     assert stub_sources["model"] == 0        # never warmed/queried the model
     assert stub_sources["pushes"] == []
     assert list(tmp_path.glob("Daily-Synthesis-*.md")) == []  # nothing to archive
+
+
+def _duckdb_day(monkeypatch):
+    """The scenario the push tests use: a Liked video that matches a wiki page."""
+    monkeypatch.setattr(ds, "fetch_liked_videos",
+                        lambda *a, **k: {"videos": [{"title": "DuckDB deep dive", "channel": "X"}]})
+    monkeypatch.setattr(ds, "page_summaries",
+                        lambda: {"pages": [{"name": "duckdb-analytics", "summary": ""}]})
+
+
+def test_a_connection_already_nudged_is_not_pushed_again(stub_sources, tmp_path,
+                                                         monkeypatch, caplog):
+    # Yesterday's archive already made this exact connection. The run must stop
+    # before the model — and say which kind of quiet morning it was, since "no
+    # overlap" and "nothing new" look identical from the outside.
+    _, _, day = ds.prior_day()
+    (tmp_path / f"Daily-Synthesis-{day:%Y-%m-%d}.md").write_text(
+        "## Synthesis Suggestions\n\n"
+        "- You dug into DuckDB — it fits your 'duckdb-analytics' note; want a summary?\n"
+    )
+    _duckdb_day(monkeypatch)
+
+    with caplog.at_level(logging.INFO):
+        assert ds.main() == 0
+
+    assert stub_sources["model"] == 0        # never warmed/queried the model
+    assert stub_sources["pushes"] == []
+    assert "were repeats of the last" in caplog.text
+
+
+def test_an_unreadable_nudge_archive_costs_the_filter_not_the_run(stub_sources,
+                                                                  monkeypatch, caplog):
+    # Degrade, don't crash: losing the repeat filter must never lose the nudge.
+    def _boom(**k):
+        raise OSError("vault unmounted")
+    monkeypatch.setattr(ds, "list_nudges", _boom)
+    _duckdb_day(monkeypatch)
+
+    with caplog.at_level(logging.WARNING):
+        assert ds.main() == 0
+
+    assert len(stub_sources["pushes"]) == 1
+    assert "not suppressing repeats" in caplog.text
+
+
+def test_a_nudge_outside_the_window_does_not_suppress(stub_sources, tmp_path, monkeypatch):
+    # The filter only looks back RECENT_NUDGE_DAYS; an old connection is fair to
+    # make again.
+    _, _, day = ds.prior_day()
+    stale = day - timedelta(days=ds.RECENT_NUDGE_DAYS + 5)
+    (tmp_path / f"Daily-Synthesis-{stale:%Y-%m-%d}.md").write_text(
+        "- You dug into DuckDB — it fits your 'duckdb-analytics' note; want a summary?\n"
+    )
+    _duckdb_day(monkeypatch)
+
+    assert ds.main() == 0
+    assert len(stub_sources["pushes"]) == 1
 
 
 def test_echo_across_channels_reaches_the_model(stub_sources, tmp_path, monkeypatch):

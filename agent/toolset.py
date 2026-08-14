@@ -69,6 +69,7 @@ from agent.tools.memory import (
     recategorize,
     remember,
 )
+from agent.tools.nudges import TOOL_SCHEMA as NUDGES_SCHEMA, list_nudges
 from agent.tools.opportunities import (
     OPPORTUNITY_TOOL_SCHEMAS,
     list_opportunities,
@@ -153,6 +154,7 @@ TOOLS = [
     EVALUATE_AGAINST_SCHEMA,
     GAMES_SCHEMA,
     *PROJECT_TOOL_SCHEMAS,
+    NUDGES_SCHEMA,
 ]
 
 DISPATCH = {
@@ -214,6 +216,8 @@ DISPATCH = {
     # Read-only: scans the local checkouts and reads the cached registry.
     "list_projects": list_projects,
     "read_project": read_project,
+    # Read-only: reads the dated nudge archive daily_synthesis wrote. Writes nothing.
+    "list_nudges": list_nudges,
 }
 
 WRITE_TOOLS = frozenset({
@@ -311,6 +315,7 @@ TOOL_GROUP_NAMES = {
     "brief": ["send_morning_brief", "send_email"],
     "games": ["list_games"],
     "projects": ["list_projects", "read_project"],
+    "nudges": ["list_nudges"],
 }
 
 # One-line "when to load it" blurb per group, rendered into the chat prompt so
@@ -331,6 +336,10 @@ _GROUP_BLURBS = {
                 "and how recently he touched it. Load this for any ask about his "
                 "projects, repos, or what he is working on; the projects that exist "
                 "are only the ones the tool lists, never ones you know of.",
+    "nudges": "The suggestions the daily synthesis has pushed to him — 'you looked "
+              "at X, it fits your Y note'. Load this for any ask about what you have "
+              "suggested, recommended or noticed; the ones that were sent are only "
+              "the ones the tool returns, never ones you recall.",
 }
 
 # Case-insensitive word-boundary cues that pre-load a group before the model
@@ -354,6 +363,11 @@ GROUP_KEYWORDS = {
     # "repo" and "built" are the other ways in; "project" covers the direct ask.
     "projects": ["project", "repo", "repos", "codebase", "built", "building",
                  "working on", "stale"],
+    # Prefix cues, so "suggest" covers suggested/suggestion and "notice" covers
+    # noticed. "suggest"/"recommend" will occasionally load this group for an
+    # unrelated ask ("suggest a restaurant") — one extra schema, and the tool's
+    # own description keeps it from being called for anything but the archive.
+    "nudges": ["nudge", "synthesis", "suggest", "recommend", "connection", "notice"],
 }
 
 # The meta-tool. Not in TOOLS/DISPATCH — its callable is bound per session in
