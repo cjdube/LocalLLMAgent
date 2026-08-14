@@ -71,6 +71,19 @@ MAX_ANCHOR_CANDIDATES = 5
 MAX_CROSS_CANDIDATES = 3
 MAX_NUDGES = 3
 
+# Thinking stays ON for the judgment call (CLAUDE.md: this call has to reason past
+# what the prompt contains, unlike a template-filler), and the price is that its
+# tokens share num_predict — so a run that loops in scratchpad returns EMPTY
+# content rather than a truncated answer, and the day's already-matched candidates
+# are thrown away. Measured at 3 of 29 runs (2026-08-02, -08-12, -08-14), and not
+# a function of prompt size: the smallest of the three had 15 signals, the largest
+# 46. It's nondeterministic — 2026-08-14 produced nothing, then produced nudges on
+# the very next call with the identical prompt — so asking again fixes it where
+# turning thinking off would only trade this failure for worse judgment. One retry
+# takes a ~10% loss rate to ~1%; a second isn't worth another 35s of the single
+# Ollama slot at 5:45am.
+MAX_SYNTHESIS_ATTEMPTS = 2
+
 # A wiki page's summary as shown to the model. One line in the vault, so this rarely
 # binds; it's here so one long summary can't dominate the shortlist's size.
 MAX_ANCHOR_SUMMARY_CHARS = 200
@@ -589,9 +602,19 @@ def main() -> int:
 
         backend = resolve_backend("daily_synthesis")
         warm_model(logger=logger, backend=backend)
-        raw = complete_text(system_prompt=SYNTHESIS_SYSTEM_PROMPT,
-                            user_prompt=prompt, logger=logger, backend=backend)
-        logger.info(f"Model output:\n{raw}")
+        raw = ""
+        for attempt in range(1, MAX_SYNTHESIS_ATTEMPTS + 1):
+            raw = complete_text(system_prompt=SYNTHESIS_SYSTEM_PROMPT,
+                                user_prompt=prompt, logger=logger, backend=backend)
+            logger.info(f"Model output:\n{raw}")
+            if (raw or "").strip():
+                break
+            if attempt < MAX_SYNTHESIS_ATTEMPTS:
+                logger.warning(
+                    f"model returned EMPTY content on attempt {attempt}/"
+                    f"{MAX_SYNTHESIS_ATTEMPTS} for {len(candidates)} candidate(s) "
+                    "— asking again"
+                )
 
         nudges = parse_nudges(raw)
         if not nudges:
@@ -605,9 +628,10 @@ def main() -> int:
             # These WARNINGs reach the 8am log_inspector; the INFO does not.
             if not (raw or "").strip():
                 logger.warning(
-                    f"model returned EMPTY content for {len(candidates)} candidate(s) "
-                    "— thinking is ON for this call, so the budget may have gone to "
-                    "scratchpad; nothing pushed"
+                    f"model returned EMPTY content on all {MAX_SYNTHESIS_ATTEMPTS} "
+                    f"attempt(s) for {len(candidates)} candidate(s) — thinking is ON "
+                    "for this call, so the budget may have gone to scratchpad; "
+                    "nothing pushed"
                 )
             elif "NONE" not in raw:
                 logger.warning(

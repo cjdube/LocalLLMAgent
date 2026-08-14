@@ -53,7 +53,11 @@ model told to "find connections across everything" manufactures them):
    nudge line each, at most `MAX_NUDGES` (3). A reply of `NONE`, or no bullet
    lines, yields nothing. The rendered shortlist is logged alongside the model's
    reply: a thin nudge is either a bad candidate or bad judgment, and the output
-   alone can't say which.
+   alone can't say which. Thinking is on for this call, so an **empty** reply
+   means the budget went to scratchpad rather than the answer; that gets one
+   retry (`MAX_SYNTHESIS_ATTEMPTS`), and warns even when the retry succeeds so
+   the rate stays visible in the 8am rollup. See
+   [model-constraints.md](model-constraints.md).
 5. **Push + archive** — if any nudges survive, one `notify()` with
    `email_fallback=True` (a one-shot alert nothing retries), **and** a durable
    copy written as `Daily-Synthesis-<date>.md` to `SYNTHESIS_DIR` (default

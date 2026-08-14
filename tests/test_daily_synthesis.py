@@ -543,6 +543,43 @@ def test_empty_model_reply_warns_rather_than_reading_as_a_quiet_day(
     assert "1 candidate(s)" in caplog.text
 
 
+def test_an_empty_reply_is_asked_again_and_the_retry_is_what_ships(
+        stub_sources, one_candidate, monkeypatch, caplog):
+    # The measured failure: thinking spends num_predict on scratchpad and the
+    # content comes back empty, discarding candidates that already matched. It's
+    # nondeterministic, so the same prompt asked twice gets an answer — without the
+    # retry, 3 of 29 real runs pushed nothing on a day that had something to say.
+    replies = iter(["", "- a real connection"])
+    monkeypatch.setattr(ds, "complete_text", lambda **k: next(replies))
+
+    with caplog.at_level(logging.WARNING):
+        assert ds.main() == 0
+    assert len(stub_sources["pushes"]) == 1
+    assert "a real connection" in stub_sources["pushes"][0]["message"]
+    # The recovered attempt is still worth a WARNING: it reached the log_inspector
+    # rollup, which is the only way a creeping failure rate gets noticed at all.
+    assert "attempt 1/2" in caplog.text
+
+
+def test_the_model_is_asked_exactly_twice_before_giving_up(
+        stub_sources, one_candidate, monkeypatch, caplog):
+    # Bounds the retry against the single Ollama slot: this runs at 5:45am and
+    # every extra attempt is ~35s that chat and the other jobs queue behind.
+    calls = []
+
+    def _empty(**k):
+        calls.append(k)
+        return ""
+
+    monkeypatch.setattr(ds, "complete_text", _empty)
+
+    with caplog.at_level(logging.WARNING):
+        assert ds.main() == 0
+    assert len(calls) == ds.MAX_SYNTHESIS_ATTEMPTS == 2
+    assert stub_sources["pushes"] == []
+    assert "on all 2 attempt(s)" in caplog.text
+
+
 def test_unparsable_model_reply_warns_with_the_counts(
         stub_sources, one_candidate, monkeypatch, caplog):
     # Non-empty, no "- " bullets, and no NONE: the model ignored the output format.

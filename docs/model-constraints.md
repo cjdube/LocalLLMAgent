@@ -37,6 +37,17 @@ symptom points at parsing; the cause is budget.
 prompt already contains — `evaluate_app`, `daily_synthesis`. Measure even
 there.
 
+**What "measure even there" turned up.** `daily_synthesis` lost its output to
+this in **3 of its first 29 runs** (2026-08-02, -08-12, -08-14) — each time
+discarding candidates that had already matched. It isn't prompt size: the
+smallest of the three carried 15 signals, the largest 46. It is
+nondeterministic — 2026-08-14 returned nothing, then returned nudges on the
+next call with an identical prompt — so the fix there is
+`MAX_SYNTHESIS_ATTEMPTS = 2`, not `think=False`, which would trade an occasional
+empty answer for a permanently worse one. The retry warns even when it
+succeeds; a silent self-healing retry would hide the failure rate, which is the
+thing the section below exists to prevent.
+
 **"Analysis" is not the test.** This is the part that gets rationalized away.
 `evaluate_against` writes a judgement, which sounds like reasoning — but it
 judges a target against standards that are *both already in the prompt*. That's
