@@ -85,11 +85,24 @@ def em_dash_sentences(text: str, limit: int) -> list[str]:
     return hits
 
 
+def _fold(text: str) -> str:
+    """Lowercase, and fold the typographic apostrophes and quotes a real web page
+    uses onto the ASCII ones a lens is typed with.
+
+    Without this the check is exact-substring, so a lens phrase containing an
+    apostrophe ("it's worth noting") never matches a fetched page, which renders
+    it as "it’s worth noting" (U+2019). It would find nothing, report "none",
+    and look exactly like a clean draft — the silent half of a silent failure.
+    No existing phrase had an apostrophe, so nothing had exercised it."""
+    return (text or "").lower().replace("’", "'").replace("‘", "'") \
+                              .replace("“", '"').replace("”", '"')
+
+
 def banned_phrases_found(text: str, phrases: list[str]) -> list[str]:
     """Which of `phrases` appear in `text`, case-insensitively, deduped and in
     the order they were declared."""
-    low = (text or "").lower()
-    return [p for p in phrases if p.lower() in low]
+    low = _fold(text)
+    return [p for p in phrases if _fold(p) in low]
 
 
 def render_checks_block(text: str, config: dict) -> str:

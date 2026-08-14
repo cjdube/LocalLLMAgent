@@ -111,6 +111,25 @@ def test_absent_phrases_are_not_reported():
     assert pc.banned_phrases_found("clean prose", ["paradigm shift"]) == []
 
 
+def test_a_curly_apostrophe_in_the_target_still_matches_an_ascii_phrase():
+    # A lens is typed with ASCII apostrophes; a fetched page renders them as
+    # U+2019. Exact substring matching missed every apostrophe phrase, reported
+    # "none", and looked identical to a clean draft.
+    text = "It’s worth noting that the reality is simple."
+    assert pc.banned_phrases_found(text, ["it's worth noting"]) == ["it's worth noting"]
+
+
+def test_a_curly_apostrophe_in_the_lens_matches_an_ascii_target():
+    # The mirror case — the lens page is edited in something that smart-quotes.
+    text = "it's worth noting the build time"
+    assert pc.banned_phrases_found(text, ["it’s worth noting"]) == ["it’s worth noting"]
+
+
+def test_curly_double_quotes_fold_too():
+    assert pc.banned_phrases_found("he called it “best in class” today",
+                                   ['"best in class"']) == ['"best in class"']
+
+
 # --------------------------------------------------------------------------- #
 # render_checks_block — what the model actually receives
 # --------------------------------------------------------------------------- #

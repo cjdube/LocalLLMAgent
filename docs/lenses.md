@@ -233,6 +233,13 @@ the system prompt tells the model to report them without re-deriving or contradi
 The checks run on the **compacted, truncated** target, so a reported finding can never quote
 text the model can't see.
 
+Matching folds typographic apostrophes and quotes onto their ASCII forms. A lens is typed
+with `'`; a fetched page renders it as `’` (U+2019). Exact substring matching missed every
+apostrophe phrase, found nothing, reported **"none"**, and looked identical to a clean
+draft — and "none" is the line the model is told it cannot contradict, so the failure was
+doubly silent. No phrase had an apostrophe until `ai-slop`'s empty-phrase list moved into
+the frontmatter, so nothing had ever exercised it.
+
 Two details are load-bearing, both measured:
 
 - **A passing check says "none" out loud** rather than staying silent. Silence is what let
@@ -301,6 +308,15 @@ chat twice, that's a lens.
   3 runs each. Moving them to the top of the page got them to 3 of 3 and 2–3 of 3, but at the
   cost of a fabricated finding. Computing them in Python got both to 3 of 3 with no
   fabrication, and shortened the lens.
+- **The prose list doesn't just get missed — it gets *recited*.** `ai-slop`'s "Usually empty
+  phrases" list stayed in prose longest, and on a short draft it worked fine: 5 of 5 phrases
+  caught, 3 of 3 runs. The failure only appears on a long, dense target where the model is
+  saturated. On a real 11400-char article containing **none** of the twelve listed phrases,
+  3 of 3 runs asserted one as a finding, quoted, under **Where It Falls Short** — reading
+  them off the lens rather than the target. Moving the list to `banned_phrases` took that to
+  0 of 7; what remains is the odd *"and similar phrases"* aside in **What I'd Change**,
+  anchored to a phrase the article really contains. Measure a prose rule on a saturated
+  target, not a short one — a short draft will tell you it's fine.
 - **Every rule you add destabilises the ones already there.** This is the counterweight to
   the point above, and it bit repeatedly while authoring `ai-slop`. Adding a doc-type
   exemption to the over-correct section knocked the exact-phrase check from 3 of 3 down to 1
