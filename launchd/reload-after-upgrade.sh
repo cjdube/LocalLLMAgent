@@ -18,24 +18,42 @@
 #
 #   ./launchd/reload-after-upgrade.sh           # heal whatever is stale
 #   ./launchd/reload-after-upgrade.sh --check   # report only; exit 1 if stale
+#   ./launchd/reload-after-upgrade.sh --quiet   # say nothing unless it acts
 #
 # Safe to run any time: it reloads only what is actually stale, and skips jobs
 # that are mid-run rather than killing work in progress. install.sh also clears
 # this as a side effect of reloading everything — this script exists because it
 # tells you whether you needed it, and won't interrupt a running job to do it.
+#
+# local.wren.selfheal runs this hourly with --quiet. That job deliberately does
+# NOT go through .venv/bin/python like every other plist: the interpreter is the
+# thing that gets invalidated, so a Python healer would be killed by the exact
+# failure it exists to repair. /bin/bash is Apple-signed and survives.
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DOMAIN="gui/$(id -u)"
 AGENTS="$HOME/Library/LaunchAgents"
 SERVER_LABEL="local.wren.wren"
 
 CHECK_ONLY=0
-if [ "${1:-}" = "--check" ]; then
-    CHECK_ONLY=1
-elif [ $# -gt 0 ]; then
-    echo "usage: $(basename "$0") [--check]" >&2
-    exit 2
-fi
+QUIET=0
+case "${1:-}" in
+    --check) CHECK_ONLY=1 ;;
+    --quiet) QUIET=1 ;;
+    "")      ;;
+    *)       echo "usage: $(basename "$0") [--check|--quiet]" >&2; exit 2 ;;
+esac
+
+# A repair is a real event — an upgrade silently broke the schedule and this put
+# it back. Push it, because the alternative is finding out from whatever job
+# didn't run. Never fail the repair just because the push didn't go out.
+push() {
+    [ -x "$ROOT/.venv/bin/python" ] || return 0
+    (cd "$ROOT" && "$ROOT/.venv/bin/python" -m agent.tools.notify \
+        --message "$1" --title "Wren: agents reloaded after an upgrade") \
+        >/dev/null 2>&1 || true
+}
 
 # launchd reports the cached-signature mismatch as "needs LWCR update" (launch
 # weak code requirement). That is the authoritative signal — an exit status of
@@ -78,40 +96,61 @@ if server_is_stale || needs_reload "$SERVER_LABEL"; then
 fi
 
 if [ ${#stale[@]} -eq 0 ] && [ "$server_stale" -eq 0 ]; then
-    echo "nothing stale — every agent matches the current interpreter"
+    # Silent on the healthy path, like tasks/reminder_sweep.py: this runs hourly,
+    # so a line per run would bury the handful that matter under thousands.
+    [ "$QUIET" -eq 1 ] || echo "nothing stale — every agent matches the current interpreter"
     exit 0
 fi
 
-for label in "${stale[@]}"; do
-    echo "stale: $label"
-done
-[ "$server_stale" -eq 1 ] && echo "stale: $SERVER_LABEL (running on a deleted interpreter)"
+# Timestamped because this log accumulates a handful of rare events over months;
+# "reloaded morningbrief" is only useful next to the upgrade that caused it.
+log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*"; }
+
+# Every array expansion below is length-guarded. /bin/bash on macOS is 3.2, where
+# "${arr[@]}" on an *empty* array under `set -u` aborts with "unbound variable" —
+# which would have crashed exactly when only the server was stale, instead of
+# restarting it.
+if [ ${#stale[@]} -gt 0 ]; then
+    for label in "${stale[@]}"; do
+        log "stale: $label"
+    done
+fi
+[ "$server_stale" -eq 1 ] && log "stale: $SERVER_LABEL (running on a deleted interpreter)"
 
 if [ "$CHECK_ONLY" -eq 1 ]; then
     exit 1
 fi
 
 skipped=0
-for label in "${stale[@]}"; do
-    # A scheduled job caught mid-run is doing real work — the wiki ingest can
-    # hold the single Ollama slot for the better part of an hour. Its next run
-    # is already broken; one more missed run costs less than a killed one.
-    if is_running "$label"; then
-        echo "  skipped $label — mid-run, rerun this once it finishes"
-        skipped=1
-        continue
-    fi
-    reload "$label"
-    echo "  reloaded $label"
-done
+healed=""
+if [ ${#stale[@]} -gt 0 ]; then
+    for label in "${stale[@]}"; do
+        # A scheduled job caught mid-run is doing real work — the wiki ingest can
+        # hold the single Ollama slot for the better part of an hour. Its next run
+        # is already broken; one more missed run costs less than a killed one.
+        if is_running "$label"; then
+            log "  skipped $label — mid-run, rerun this once it finishes"
+            skipped=1
+            continue
+        fi
+        reload "$label"
+        healed="$healed ${label#local.wren.}"
+        log "  reloaded $label"
+    done
+fi
 
 if [ "$server_stale" -eq 1 ]; then
     reload "$SERVER_LABEL"
-    echo "  restarted $SERVER_LABEL"
+    healed="$healed ${SERVER_LABEL#local.wren.}"
+    log "  restarted $SERVER_LABEL"
+fi
+
+if [ -n "$healed" ]; then
+    push "Reloaded after an interpreter change:$healed"
 fi
 
 if [ "$skipped" -eq 1 ]; then
-    echo "some agents were mid-run and still need a reload"
+    log "some agents were mid-run and still need a reload"
     exit 1
 fi
-echo "done"
+log "done"

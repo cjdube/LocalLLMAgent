@@ -10,6 +10,7 @@ import os
 import plistlib
 import subprocess
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from chat import insights
 
@@ -990,3 +991,31 @@ def test_run_stats_under_the_cap_reports_total_equal_to_count(tmp_path, monkeypa
     _stub_tasks(monkeypatch, _task("brief", log))
     task = insights.run_stats(days=365, limit=30, now=STATS_NOW)["tasks"][0]
     assert task["count"] == task["total"] == 3
+
+
+# --------------------------------------------------------------------------- #
+# Committed plists must survive _task_from_plist
+# --------------------------------------------------------------------------- #
+
+def test_every_committed_plist_is_parseable():
+    """A plist launchd accepts but plistlib rejects costs the job its dashboard
+    row, silently — _discover_tasks_uncached logs a warning and drops it.
+
+    The live trap is a doubled hyphen inside an XML comment: illegal XML that
+    both launchd and plutil tolerate. It has cost two files so far — an external
+    repo's plist, and local.wren.selfheal.plist on the day it was written. This
+    reads the repo's own launchd/ rather than a fixture, because the bug is only
+    ever in a real committed file.
+    """
+    root = Path(insights.__file__).resolve().parent.parent
+    plists = sorted(root.glob("launchd/**/*.plist"))
+    assert plists, "no plists found — wrong root?"
+
+    unparseable = []
+    for path in plists:
+        try:
+            with path.open("rb") as fh:
+                plistlib.load(fh)
+        except Exception as e:
+            unparseable.append(f"{path.relative_to(root)}: {e}")
+    assert not unparseable, "unparseable plist(s): " + "; ".join(unparseable)

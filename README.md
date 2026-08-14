@@ -580,6 +580,15 @@ emptied the dashboard graphs and `/map` while the rest of the page worked).
 The script reloads only what's stale, skips jobs that are mid-run, and takes
 `--check` to report without changing anything.
 
+`local.wren.selfheal` runs it hourly so you don't have to remember. It stays
+silent unless it actually repairs something, in which case it pushes and writes
+a line to `logs/selfheal.launchd.log` — an empty log is the healthy state.
+Hourly rather than once before the first job, because an upgrade lands whenever
+you run `brew` and the jobs it breaks run all day. **That plist runs `/bin/bash`,
+not `.venv/bin/python` like every other one** — the interpreter is the thing
+being invalidated, so a Python healer would be killed by the fault it exists to
+repair. Keep it that way.
+
 The plists in `launchd/` carry `__WREN_ROOT__` and `__HOME__` placeholders
 rather than absolute paths, so they're checkout-independent — `install.sh`
 substitutes both and copies the result into `~/Library/LaunchAgents/`. Don't

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.wren.selfheal</string>
+
+    <!-- NOT __WREN_ROOT__/.venv/bin/python, unlike every other plist here.
+         This job repairs the case where launchd refuses to exec that
+         interpreter after a brew upgrade replaced it; running the repair
+         through the broken interpreter would kill the healer with the exact
+         fault it exists to fix. /bin/bash is Apple-signed and is not
+         replaced by Homebrew, so this job still starts when nothing else
+         will. Keep it that way. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__WREN_ROOT__/launchd/reload-after-upgrade.sh</string>
+        <string>--quiet</string>
+    </array>
+
+    <!-- Hourly, not daily-before-the-first-job: an upgrade lands whenever the
+         user runs brew (the one that started this was 07:41), and the jobs it
+         breaks run all day — 5pm colorizer, 8pm starred, 9pm Sunday digest.
+         A daily check would leave a whole day of them dead and silent. The
+         check is a launchctl query per agent, so it costs nothing to repeat. -->
+    <key>StartInterval</key>
+    <integer>3600</integer>
+
+    <!-- The quiet flag above writes nothing unless it actually repairs
+         something, so this file stays a list of real incidents rather than 24
+         lines a day of "nothing stale" (same reasoning as reminder_sweep).
+         Note: no doubled hyphen may appear inside an XML comment. launchd
+         accepts it; chat/insights.py cannot parse it and drops the job from
+         the dashboard. That is how this very file was caught. -->
+    <key>StandardOutPath</key>
+    <string>__WREN_ROOT__/logs/selfheal.launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>__WREN_ROOT__/logs/selfheal.launchd.log</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>
