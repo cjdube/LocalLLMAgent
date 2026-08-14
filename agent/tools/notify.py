@@ -22,6 +22,7 @@ from urllib.parse import urlsplit
 
 import requests
 
+from agent.tools import push_log
 from agent.tools._http import http_error, load_env, print_result
 
 # ntfy headers must be ASCII (title/message travel as HTTP headers/body); the
@@ -114,6 +115,22 @@ def notify(
         if email_fallback:
             result["email_fallback"] = _fallback_email(body, title, result["error"])
         return result
+
+    # Delivered — keep a copy so Wren can answer "what did you send me?" in chat
+    # (agent/tools/push_log.py). Only the success path is logged: reminder_sweep
+    # retries a failed push every 60s, so logging attempts would have written
+    # tens of thousands of rows during the four-day July 2026 outage.
+    #
+    # `body`, not `message`: the log should say what actually reached the phone.
+    #
+    # Never allowed to raise. A push that landed must report {"ok": True} even if
+    # the bookkeeping behind it failed, or a full disk would turn a delivered
+    # alert into a reported failure — the exact inversion notify()'s
+    # never-raise contract exists to prevent.
+    try:
+        push_log.record(body, title, priority)
+    except Exception as e:
+        print(f"warning: push delivered but not logged: {e}", file=sys.stderr)
 
     return {"ok": True}
 

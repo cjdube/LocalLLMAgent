@@ -6,6 +6,7 @@ import requests
 
 from agent.tools import email as email_mod
 from agent.tools import notify as notify_mod
+from agent.tools import push_log
 from agent.tools.notify import notify, ntfy_health
 
 
@@ -262,3 +263,57 @@ def test_health_down_when_unreachable_never_raises(monkeypatch):
 
     assert result["state"] == "down"
     assert "ntfy unreachable" in result["error"] and "refused" in result["error"]
+
+
+# --------------------------------------------------------------------------- #
+# The delivered-push log (agent/tools/push_log.py). _STORE_PATH is redirected to
+# tmp_path suite-wide by conftest, so these write nowhere real.
+# --------------------------------------------------------------------------- #
+
+def test_a_delivered_push_is_logged(monkeypatch):
+    monkeypatch.setenv("NTFY_URL", "http://box.ts.net:2586/wren-alerts")
+    _capture_post(monkeypatch)
+
+    notify("Call the dentist", title="Reminder", priority="high")
+
+    rows = push_log.list_notifications()["notifications"]
+    assert len(rows) == 1
+    assert rows[0]["message"] == "Call the dentist"
+    assert rows[0]["title"] == "Reminder"
+
+
+def test_the_log_records_what_was_sent_not_what_was_asked(monkeypatch):
+    # notify() truncates at _MAX_MESSAGE_CHARS; the log must say what actually
+    # reached the phone, or reading it back over-reports the message.
+    monkeypatch.setenv("NTFY_URL", "http://box.ts.net:2586/wren-alerts")
+    _capture_post(monkeypatch)
+
+    notify("x" * (notify_mod._MAX_MESSAGE_CHARS + 50))
+
+    logged = push_log.list_notifications()["notifications"][0]["message"]
+    assert len(logged) == notify_mod._MAX_MESSAGE_CHARS
+
+
+def test_a_failed_push_is_not_logged(monkeypatch):
+    # reminder_sweep retries a failed push every 60s, so logging attempts would
+    # have written tens of thousands of rows during the four-day July 2026 outage.
+    monkeypatch.setenv("NTFY_URL", "http://box.ts.net:2586/wren-alerts")
+    _capture_post(monkeypatch, raises=requests.exceptions.ConnectionError("refused"))
+
+    notify("never landed")
+
+    assert push_log.list_notifications()["notifications"] == []
+
+
+def test_a_push_that_lands_reports_ok_even_if_logging_fails(monkeypatch):
+    # The inversion this guards against: a full disk turning a DELIVERED alert
+    # into a reported failure, which the never-raise contract exists to prevent.
+    monkeypatch.setenv("NTFY_URL", "http://box.ts.net:2586/wren-alerts")
+    _capture_post(monkeypatch)
+
+    def boom(*a, **k):
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(push_log, "record", boom)
+
+    assert notify("landed anyway") == {"ok": True}

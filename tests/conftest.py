@@ -121,6 +121,7 @@ from agent.tools import memory as _memory
 from agent.tools import notify as _notify
 from agent.tools import opportunities as _opportunities
 from agent.tools import projects as _projects_tool
+from agent.tools import push_log as _push_log
 from agent.tools import reminders as _reminders
 from chat import insights as _insights
 from tasks import _chat_transcripts as _chat_transcripts
@@ -287,6 +288,13 @@ def _isolate_remaining_config_stores(tmp_path, monkeypatch):
     monkeypatch.setattr(_memory, "_STORE_PATH", tmp_path / "wren_memory.json")
     monkeypatch.setattr(_background, "_STORE_PATH", tmp_path / "bg_jobs.json")
     monkeypatch.setattr(_reminders, "_STORE_PATH", tmp_path / "reminders.json")
+    # The delivered-push log. This redirect is load-bearing, not a backstop:
+    # _block_ntfy_egress below stubs requests.post with a response whose
+    # raise_for_status() passes, so notify() reaches its SUCCESS branch in every
+    # test that pushes — and that branch calls push_log.record(). Without this,
+    # the suite writes fixture notifications into the production log, and Wren
+    # then reports them in chat as things she sent.
+    monkeypatch.setattr(_push_log, "_STORE_PATH", tmp_path / "push_log.json")
     monkeypatch.setattr(_morning_brief, "STARRED_STATE_PATH",
                         tmp_path / "github_starred_state.json")
     # The /starred view's cached blurbs. server.py reads this path off the

@@ -169,12 +169,13 @@ in — nothing new inherits it automatically.
 | `youtube.py` | List videos Liked on the authorized YouTube channel in a date range (`fetch_liked_videos`) — title, channel, and description per video, via the YouTube Data API v3 and the shared Google OAuth token. Feeds `daily_youtube_learnings` and `daily_synthesis`, and is a chat tool in the `activity` group alongside `chrome_history.py` and `strava.py` |
 | `memory.py` | Persistent long-term memory in two tiers — `remember` (archival, search-only) and `pin` (active, injected into every system prompt), plus `recall`, `recategorize`, `archive`, `forget`. Stored in `config/wren_memory.json`; the writes are confirmation-gated. See [docs/memory.md](docs/memory.md) |
 | `skills.py` | Procedural memory (chat-only) — reusable how-to procedures composing the other tools: `list_skills`, `read_skill`, `write_skill` (create/overwrite), `delete_skill`. One Markdown file per skill under `skills/` (override with `WREN_SKILLS_DIR`); a capped title+one-line index is injected into the chat prompt so Wren knows what procedures exist, reading a body on demand. Writes are confirmation-gated |
-| `reminders.py` | Scheduled reminders — `set_reminder` (parses the time in Python via `dates.resolve_reminder_time`, not the model), `list_reminders`, `cancel_reminder`. Stored in `config/reminders.json`; the `reminder_sweep` task fires each due one as an `ntfy` phone push, then clears it. Set/cancel are confirmation-gated |
+| `reminders.py` | Scheduled reminders — `set_reminder` (parses the time in Python via `dates.resolve_reminder_time`, not the model), `list_reminders`, `cancel_reminder`. Stored in `config/reminders.json`; the `reminder_sweep` task fires each due one as an `ntfy` phone push, then clears it — `push_log.py` keeps the record of what was sent. Set/cancel are confirmation-gated |
 | `schedule.py` | Read-only view of Wren's *own* launchd-scheduled tasks (`list_scheduled_tasks`) — the same schedule/next-run/last-status data the dashboard shows, so chat can answer "what do you run?" / "what's next?". Reuses the `chat.insights` dashboard data layer; distinct from the user's Google Tasks and reminders |
 | `background.py` | Background tasks — `run_in_background`, `list_background_jobs`, `get_job_result`. Jobs live in `config/bg_jobs.json`; the `bg_worker` task runs them. Posture is "read/draft freely, tap-to-approve consequential actions". Also owns the HMAC-signed approval tokens. See [docs/background.md](docs/background.md) |
 | `opportunities.py` | Opportunity signal store for the fractional-work scout — `list_opportunities`, `update_opportunity` (mark interested/dismissed), `watch_company`/`unwatch_company`. The `opportunity_digest` task fills it; full lifecycle in [docs/opportunity-scout.md](docs/opportunity-scout.md) |
 | `research.py` | Company research — a fixed pipeline, not a freeform agent task: bounded Tavily searches summarized into a fixed-template brief. `research_opportunity` enriches a scout item; `research_company` researches any company by name and returns the brief directly. Read-only; web snippets are untrusted display text. See [docs/opportunity-scout.md](docs/opportunity-scout.md) |
-| `notify.py` | Phone push via the self-hosted ntfy server (`notify`) — the failure-alert channel every scheduled task reports through, with tap-to-approve action buttons for background jobs and an opt-in `email_fallback` for one-shot alerts. `ntfy_health` probes the server (reachability, not token validity) for the dashboard's push pill. Not a model-facing tool |
+| `notify.py` | Phone push via the self-hosted ntfy server (`notify`) — the failure-alert channel every scheduled task reports through, with tap-to-approve action buttons for background jobs and an opt-in `email_fallback` for one-shot alerts. Every delivered push is logged to `push_log.py` for later recall. `ntfy_health` probes the server (reachability, not token validity) for the dashboard's push pill. Not a model-facing tool |
+| `push_log.py` | The record of notifications Wren has actually sent (`list_notifications`) — `notify` logs every *delivered* push to `config/push_log.json`, and chat reads it back. This is the only way to see a notification that already fired: `list_reminders` shows pending reminders only, and a fired reminder is deleted. Covers reminders, task-failure alerts, synthesis nudges and approval prompts. Read-only; 30 days of history |
 | `prose_checks.py` | Deterministic pre-pass checks for evaluation lenses — em dashes per sentence, exact banned phrases — computed in Python and handed to `evaluate_against`'s model call as fact rather than asked of it. Not a model-facing tool; see [docs/lenses.md](docs/lenses.md) |
 | `google_auth.py` | Shared OAuth helper — one cached token for Calendar, Gmail, Tasks, and YouTube (read-only) scopes |
 
@@ -233,6 +234,12 @@ mini behind Tailscale keeps alerts private and off the public internet;
 `auth-default-access: deny-all` plus a publish token means nobody else can
 inject fake notifications. Set `NTFY_URL` and `NTFY_TOKEN` in `config/.env`
 (see Setup).
+
+Every push that *is* delivered — alerts, fired reminders, synthesis nudges,
+approval prompts — is logged to `config/push_log.json`, so you can ask Wren in
+chat what she sent you (`list_notifications`, 30 days of history). Failed pushes
+are deliberately not logged: `reminder_sweep`'s 60s retry would fill the log
+during an outage. There is no page for this — it's a chat answer.
 
 The dashboard header carries a live `ntfy up` / `ntfy down` pill so you can tell
 the channel is alive without waiting for the 8am log inspector's check. It

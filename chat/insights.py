@@ -599,7 +599,10 @@ TOOL_SERVICES = {
     "firecrawl": ("Firecrawl", ["fetch_webpage", "evaluate_app", "evaluate_against"]),
     "github": ("GitHub", ["fetch_starred_repos"]),
     "youtube": ("YouTube", ["fetch_liked_videos"]),
-    "ntfy": ("ntfy Push", []),  # routine failure-alert channel; no chat tool
+    # The routine failure-alert channel. list_notifications reads the log
+    # notify() writes on every delivered push, so the map draws chat's one edge
+    # into a service that was previously write-only.
+    "ntfy": ("ntfy Push", ["list_notifications"]),
     "brief": ("Morning Brief", ["send_morning_brief"]),
     "memory": ("Memory", ["remember", "pin", "recall", "recategorize", "archive", "forget"]),
     "wiki": ("Obsidian Wiki", ["read_wiki_index", "list_wiki_pages", "read_wiki_page"]),

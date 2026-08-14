@@ -77,6 +77,7 @@ from agent.tools.opportunities import (
     update_opportunity,
     watch_company,
 )
+from agent.tools.push_log import TOOL_SCHEMA as PUSH_LOG_SCHEMA, list_notifications
 from agent.tools.research import RESEARCH_TOOL_SCHEMAS, research_company, research_opportunity
 from agent.tools.schedule import LIST_SCHEDULED_TASKS_TOOL_SCHEMA, list_scheduled_tasks
 from agent.tools.reminders import (
@@ -141,6 +142,7 @@ TOOLS = [
     SET_REMINDER_TOOL_SCHEMA,
     LIST_REMINDERS_TOOL_SCHEMA,
     CANCEL_REMINDER_TOOL_SCHEMA,
+    PUSH_LOG_SCHEMA,
     LIST_SCHEDULED_TASKS_TOOL_SCHEMA,
     RUN_IN_BACKGROUND_TOOL_SCHEMA,
     LIST_BG_JOBS_TOOL_SCHEMA,
@@ -194,6 +196,10 @@ DISPATCH = {
     "set_reminder": set_reminder,
     "list_reminders": list_reminders,
     "cancel_reminder": cancel_reminder,
+    # Read-only: reads the log notify() writes on every delivered push. The
+    # counterpart to list_reminders, which only ever sees PENDING reminders —
+    # this is the only way to see one that already fired.
+    "list_notifications": list_notifications,
     "list_scheduled_tasks": list_scheduled_tasks,
     "run_in_background": run_in_background,
     "list_background_jobs": list_background_jobs,
@@ -294,6 +300,11 @@ CORE_TOOL_NAMES = [
     "search_web",
     "remember", "pin", "recall", "recategorize", "archive", "forget",
     "set_reminder", "list_reminders", "cancel_reminder",
+    # Core rather than a deferred group, unlike list_nudges: "did you ping me
+    # about X?" arrives in wording no keyword list reliably catches, a missed
+    # pre-load is silent, and the failure mode of the miss is a fabricated
+    # notification rather than a shrug.
+    "list_notifications",
     "list_scheduled_tasks",
     "list_skills", "read_skill",
 ]
