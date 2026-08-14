@@ -606,8 +606,12 @@ mostly useful if the Python process fails to start at all).
 2. Create the venv (needs Python 3.10+):
    ```bash
    python3.12 -m venv .venv
-   .venv/bin/pip install -r requirements.txt
+   .venv/bin/pip install -r requirements.lock
    ```
+   Install from `requirements.lock`, not `requirements.txt` — the lock is the
+   full dependency closure at exact versions. `requirements.txt` declares only
+   what we import directly and says why each is held; bumping anything means
+   editing it and regenerating the lock (steps in the lock's header).
 3. Copy `config/.env.example` to `config/.env` and fill in:
    - `OPENWEATHERMAP_API_KEY` — [openweathermap.org](https://openweathermap.org/api)
    - `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `STRAVA_REFRESH_TOKEN` — create a
@@ -725,6 +729,8 @@ mostly useful if the Python process fails to start at all).
 
 Dev-only dependencies live in `requirements-dev.txt` (currently just `pytest`);
 install them into the venv with `.venv/bin/pip install -r requirements-dev.txt`.
+They're deliberately left unpinned and out of `requirements.lock` — pytest
+breaking costs an afternoon, a scheduled job breaking costs a day of data.
 Run the suite from the repo root:
 
 ```bash

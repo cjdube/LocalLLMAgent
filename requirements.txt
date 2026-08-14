@@ -1,6 +1,12 @@
-# Pinned to exact versions so a from-scratch rebuild is reproducible and a
-# silent breaking upgrade (especially of the Google client libs) can't slip in.
-# To bump: change a pin, reinstall, run the tests + a manual smoke, then commit.
+# What we import directly, and why each version is held. This file states
+# intent; it is NOT what you install from — `pip install -r requirements.lock`
+# is, because these pins leave everything *underneath* them free to float. A
+# rebuild on 2026-08-14 moved google-api-core, google-auth and cryptography by a
+# minor version each without a word, which is precisely what the pins here were
+# supposed to prevent and could not reach far enough to.
+#
+# To bump: change a pin here, regenerate requirements.lock (steps in its header),
+# reinstall, run the tests + a real Google/Ollama smoke call, then commit both.
 requests==2.34.2
 python-dotenv==1.2.2
 google-api-python-client==2.198.0
