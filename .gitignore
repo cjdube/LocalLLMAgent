@@ -44,6 +44,12 @@ logs/*.tar.gz
 # committed: they're a working scratchpad about the repo, not part of it, and a
 # finding worth keeping belongs in the code or in the doc it's about.
 docs/reviews/
+# Raw model bake-off runs (evals/). The harness is committed because a model
+# swap recurs; its output is not. Each file is hours of Ollama time against
+# whichever models happened to be on this machine, and the numbers go stale the
+# moment a model or a prompt changes — a stale committed table would be read as
+# current. The conclusion of a run belongs in docs/model-eval.md.
+evals/results/
 .DS_Store
 .claude/
 scratchpad

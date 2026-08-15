@@ -124,6 +124,7 @@ from agent.tools import projects as _projects_tool
 from agent.tools import push_log as _push_log
 from agent.tools import reminders as _reminders
 from chat import insights as _insights
+from evals import run_eval as _run_eval
 from tasks import _chat_transcripts as _chat_transcripts
 from tasks import _common
 from tasks import ai_chat_learnings as _ai_chat_learnings
@@ -420,3 +421,16 @@ def _isolate_projects_dir(tmp_path, monkeypatch):
     env on every call, so the env var is enough; test_projects.py points it at
     its own fixture tree per-test."""
     monkeypatch.setenv("PROJECTS_DIR", str(tmp_path / "projects_dir"))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_eval_results(tmp_path, monkeypatch):
+    """Send the model bake-off's output to tmp_path.
+
+    evals/results/ holds real measured runs that took hours of Ollama time, and
+    evals.score defaults to reading the NEWEST file there. A test writing a
+    two-record fixture would silently become the run `score` reports on. Same
+    rule as every store above: the redirect is the backstop, not the per-test
+    monkeypatching."""
+    results = tmp_path / "eval_results"
+    monkeypatch.setattr(_run_eval, "RESULTS_DIR", results)

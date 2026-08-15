@@ -41,7 +41,10 @@ model name is just `OLLAMA_MODEL` in `config/.env`. Swap models with
 swap: the **chat server** relies on Ollama's tool-calling protocol (`tools` /
 `tool_calls`), so a model with weak tool-calling support may not drive it
 reliably — the scheduled tasks only need plain text completion (or, for
-`strava_download`, no model at all).
+`strava_download`, no model at all). `evals/` answers "is this candidate model
+better?" by replaying Wren's own prompts and tool schemas against each one and
+scoring what comes back; run it before a swap, not a leaderboard. See
+[docs/model-eval.md](docs/model-eval.md).
 
 **Wren shares that Ollama with other projects, and it serves one request at a
 time.** A long background job therefore starves chat silently — the queued
