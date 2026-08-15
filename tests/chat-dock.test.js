@@ -112,6 +112,26 @@ describe("sending a turn", () => {
     expect(sendBtn().textContent).toBe("Send");
     expect(sendBtn().classList.contains("stop")).toBe(false);
   });
+
+  // The model ends some turns with no text at all (measured 2026-08-15: 5 of 11
+  // runs on one eval case). A blank wren bubble reads as a rendering bug and
+  // hides that the turn is over, so the dock names what happened.
+  test("says so instead of drawing an empty bubble when the reply has no text", async () => {
+    resolvesWith({ type: "final", text: "" });
+    submit("what's due soon?");
+    await settle();
+    expect(dots()).toHaveLength(0);
+    expect(lastMessage()).toContain("empty reply");
+    expect(messages().querySelectorAll(".msg.wren")).toHaveLength(1);  // the greeting only
+    expect(input().disabled).toBe(false);
+  });
+
+  test("treats a whitespace-only reply as empty", async () => {
+    resolvesWith({ type: "final", text: "  \n " });
+    submit("hello");
+    await settle();
+    expect(lastMessage()).toContain("empty reply");
+  });
 });
 
 describe("a turn that fails", () => {

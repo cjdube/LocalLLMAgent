@@ -104,7 +104,14 @@
   let pendingEscalateBtn = null;
 
   function renderFinal(result) {
-    const div = addMessage("wren", result.text);
+    // The model sometimes ends a turn with no text at all (measured 2026-08-15:
+    // 5 of 11 runs on one eval case). Rendered as a wren bubble that's just
+    // blank, it reads as a rendering bug and hides that the turn is over — so
+    // say what happened instead. The escalate button below still attaches,
+    // which is the useful next move.
+    const div = result.text && result.text.trim()
+      ? addMessage("wren", result.text)
+      : addMessage("system", "Wren returned an empty reply.");
     if (result.escalated) {
       // An off-device reply — badge it so a long thread never blurs which
       // answers came from the frontier model.

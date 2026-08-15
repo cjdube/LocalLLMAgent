@@ -404,6 +404,80 @@ def test_no_promise_warning_on_an_ordinary_conversational_reply(
     assert "promised an action" not in caplog.text
 
 
+def test_chat_warns_when_the_final_reply_is_empty_and_no_tool_ran(
+        auth_client, monkeypatch, caplog):
+    """Measured 2026-08-15: the model returns content of length 0 with
+    done_reason `stop`, so nothing in agent/loop.py flags it and the turn logs
+    as ordinary. The user sees an empty bubble; the log has to say why."""
+    monkeypatch.setattr(srv, "advance", _final_reply(""))
+
+    with caplog.at_level(logging.WARNING, logger=srv.logger.name):
+        resp = auth_client.post("/chat", json={"message": "what's due soon?"})
+    assert resp.status_code == 200
+    assert "returned an EMPTY final reply and ran no tool" in caplog.text
+
+
+def test_empty_final_warning_names_the_tools_the_turn_ran(
+        auth_client, monkeypatch, caplog):
+    """"Fetched the answer then said nothing about it" is a different bug from
+    "said nothing at all", so the warning has to distinguish them."""
+    def fake_advance(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
+                     should_cancel=None, **_):
+        messages.append({"role": "assistant", "content": "", "tool_calls": [
+            {"function": {"name": "get_tasks_due_soon", "arguments": {}}},
+        ]})
+        messages.append({"role": "tool", "content": '{"tasks": []}'})
+        return {"type": "final", "text": ""}
+
+    monkeypatch.setattr(srv, "advance", fake_advance)
+
+    with caplog.at_level(logging.WARNING, logger=srv.logger.name):
+        resp = auth_client.post("/chat", json={"message": "what's due soon?"})
+    assert resp.status_code == 200
+    assert "returned an EMPTY final reply after running 1 tool(s)" in caplog.text
+    assert "get_tasks_due_soon" in caplog.text
+
+
+def test_empty_final_warning_fires_on_a_whitespace_only_reply(
+        auth_client, monkeypatch, caplog):
+    monkeypatch.setattr(srv, "advance", _final_reply("  \n "))
+
+    with caplog.at_level(logging.WARNING, logger=srv.logger.name):
+        resp = auth_client.post("/chat", json={"message": "hi"})
+    assert resp.status_code == 200
+    assert "returned an EMPTY final reply" in caplog.text
+
+
+def test_no_empty_final_warning_on_an_ordinary_reply(
+        auth_client, monkeypatch, caplog):
+    monkeypatch.setattr(srv, "advance", _final_reply("Nothing is due soon."))
+
+    with caplog.at_level(logging.WARNING, logger=srv.logger.name):
+        resp = auth_client.post("/chat", json={"message": "what's due soon?"})
+    assert resp.status_code == 200
+    assert "EMPTY final reply" not in caplog.text
+
+
+def test_empty_final_is_still_returned_to_the_client_not_retried(
+        auth_client, monkeypatch):
+    """The warning is a signal, not a recovery: the turn ends as it was, with
+    one advance() call, exactly like the promise-without-acting check."""
+    calls = []
+
+    def fake_advance(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
+                     should_cancel=None, **_):
+        calls.append(1)
+        return {"type": "final", "text": ""}
+
+    monkeypatch.setattr(srv, "advance", fake_advance)
+
+    resp = auth_client.post("/chat", json={"message": "what's due soon?"})
+    assert resp.status_code == 200
+    assert resp.get_json()["type"] == "final"
+    assert resp.get_json()["text"] == ""
+    assert len(calls) == 1
+
+
 @pytest.mark.parametrize("text", [
     "I'll add Evening Volleyball to your calendar.",
     "I'm going to send that email now.",

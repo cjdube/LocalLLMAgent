@@ -429,6 +429,52 @@ def _warn_if_promised_without_acting(stage: str, text: str, history: list, check
     )
 
 
+def _warn_if_final_is_empty(stage: str, text: str, history: list, checkpoint: int) -> None:
+    """Log when a turn ends with an empty (or whitespace-only) final reply.
+
+    The model simply returns content of length 0 and stops. Measured 2026-08-15
+    by the evals/ harness: qwen3.6:27b-mlx did this on 5 of 11 runs of the
+    `tasks_due_soon` case — it called the tool correctly, got the result, then
+    said nothing about it — and gemma4:26b-mlx on 2 of 3 daily_synthesis runs.
+    done_reason was `stop` and eval_count only ~65-103 tokens, so agent/loop.py's
+    num_predict cut-off warning never fires: nothing was truncated, the model
+    just produced nothing. The user sees an empty bubble and the log records an
+    ordinary turn, which is the silence CLAUDE.md says is worse than a failure.
+
+    Whether the turn ran a tool separates two different bugs, so say which:
+    no tool means the model answered nothing at all; a tool ran means it fetched
+    the answer and then failed to report it (the user's request was served, the
+    reply wasn't). The eval token count isn't on the returned message, but the
+    `ollama_chat ... eval_tokens=N` INFO line for this same turn sits directly
+    above this one in the log.
+
+    As with _warn_if_promised_without_acting we deliberately don't auto-retry:
+    the honest signal is that the model produced nothing, not that the turn
+    needs another lap."""
+    if text and text.strip():
+        return
+    turn = history[checkpoint:]
+    ran = [m for m in turn if m.get("role") == "tool"]
+    if ran:
+        # Tool result messages carry no name (agent/loop.py appends role+content
+        # only), so read the names off the assistant tool_calls that produced them.
+        names = [c["function"]["name"] for m in turn if m.get("role") == "assistant"
+                 for c in (m.get("tool_calls") or [])]
+        logger.warning(
+            "chat %s returned an EMPTY final reply after running %d tool(s) (%s) — "
+            "the model got the tool result and then said nothing about it; see the "
+            "ollama_chat line above for this turn's eval_tokens",
+            stage, len(ran), ", ".join(names) or "unknown",
+        )
+    else:
+        logger.warning(
+            "chat %s returned an EMPTY final reply and ran no tool — the model "
+            "produced nothing at all; see the ollama_chat line above for this "
+            "turn's eval_tokens",
+            stage,
+        )
+
+
 def _run_turn(sid: str, history: list, checkpoint: int, cancel: threading.Event,
               stage: str = "turn", backend: str | None = None):
     """Advance the session's conversation and shape the HTTP response — the
@@ -483,6 +529,7 @@ def _run_turn(sid: str, history: list, checkpoint: int, cancel: threading.Event,
     resp = _call_response(result)
     if result["type"] == "final":
         _warn_if_promised_without_acting(stage, result.get("text", ""), history, checkpoint)
+        _warn_if_final_is_empty(stage, result.get("text", ""), history, checkpoint)
         if backend:
             # An escalated turn continued through a confirmation: badge its final.
             resp["escalated"] = True
