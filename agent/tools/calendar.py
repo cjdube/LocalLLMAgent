@@ -152,7 +152,18 @@ def get_upcoming_events(hours_ahead: int = 24) -> dict:
 
 def get_events_in_range(time_min: str, time_max: str) -> dict:
     """List events between two ISO 8601 datetimes (inclusive), with colorId —
-    used by tasks/daily_chrome_learnings.py to categorize the prior day's events."""
+    used by tasks/daily_chrome_learnings.py to categorize the prior day's events.
+
+    Does NOT page: no maxResults, no pageToken loop, so Google's default page
+    size of 250 is a silent ceiling — a wider range returns exactly 250 events
+    and reports that as the total. Measured 2026-08-16, Jan 1 to Aug 16 returns
+    exactly 250, so the real calendar is already sitting on it at ~7.5 months of
+    history. Deferred deliberately, not missed: the callers that matter are all
+    narrow (the colorizer does yesterday, the learnings task a day), and
+    get_upcoming_events looks forward where the calendar is sparse. The exposure
+    is a multi-month *past* range through get_events_by_date. Add the pageToken
+    loop here when that question starts mattering — the chat-side caps above
+    already bound what reaches the model, so nothing else has to change."""
     calendar_id = os.getenv("GOOGLE_CALENDAR_ID", "primary")
 
     try:
