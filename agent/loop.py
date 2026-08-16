@@ -41,6 +41,20 @@ MAX_TOOL_ITERATIONS = 10
 # result, small enough that a few of them still fit a 16k window.
 MAX_TOOL_RESULT_CHARS = int(os.getenv("OLLAMA_MAX_TOOL_RESULT_CHARS", "8000"))
 
+# Per-tool overrides of that cap. The default is sized for a feed nobody bounds
+# — a search dumping listings until it runs out. A tool that returns ONE curated
+# document of known size is a different case, and the flat cap actively misled:
+# 7 of the vault's 390 wiki pages exceed 8000 chars, so read_wiki_page handed
+# back 42-95% of a page and Wren answered "SVPG isn't in your wiki" about a page
+# with a section on SVPG in the part that was cut. A wiki page is bounded by
+# what ObsidianWikiAgent wrote, so it gets room for the whole thing.
+#
+# Keep any entry here in step with the tool's own internal budget (wiki.py's
+# MAX_PAGE_CHARS): the tool trims first, deliberately, keeping the [[link]]
+# footer and naming what it dropped. This cap is only the backstop, and if it
+# ever fires it undoes that careful trim by cutting the footer off again.
+TOOL_RESULT_CHAR_CAPS = {"read_wiki_page": 16000}
+
 
 class TurnCancelled(Exception):
     """Raised inside advance()/_ollama_chat when the caller's should_cancel()
@@ -415,13 +429,14 @@ def _execute_tool_call(
         except Exception as e:
             result = {"error": f"tool '{fn_name}' raised: {e}"}
     content = json.dumps(result)
-    if len(content) > MAX_TOOL_RESULT_CHARS:
-        dropped = len(content) - MAX_TOOL_RESULT_CHARS
-        content = content[:MAX_TOOL_RESULT_CHARS] + f"... [truncated {dropped} chars to fit the context window]"
+    cap = TOOL_RESULT_CHAR_CAPS.get(fn_name, MAX_TOOL_RESULT_CHARS)
+    if len(content) > cap:
+        dropped = len(content) - cap
+        content = content[:cap] + f"... [truncated {dropped} chars to fit the context window]"
         if logger:
             logger.warning(
                 "tool_call %s result trimmed: %d chars over the %d cap",
-                fn_name, dropped, MAX_TOOL_RESULT_CHARS,
+                fn_name, dropped, cap,
             )
     if logger:
         logger.info(f"tool_call {fn_name}({_redact_args(fn_args)}) -> {content}")

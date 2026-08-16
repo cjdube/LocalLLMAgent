@@ -426,6 +426,37 @@ def test_oversized_tool_result_is_truncated(monkeypatch):
     assert len(content) < 5000
 
 
+def test_a_tool_with_its_own_cap_gets_the_bigger_budget(monkeypatch):
+    """The flat cap is sized for an unbounded feed. A tool returning one curated
+    document of known size gets more room — read_wiki_page was handing back 42%
+    of the vault's biggest page, and Wren reported the missing 58% as absent."""
+    monkeypatch.setattr(loop, "MAX_TOOL_RESULT_CHARS", 100)
+    monkeypatch.setattr(loop, "TOOL_RESULT_CHAR_CAPS", {"read_wiki_page": 5000})
+    messages = []
+    dispatch = {"read_wiki_page": lambda **_: {"content": "x" * 2000},
+                "search_web": lambda **_: {"blob": "x" * 2000}}
+
+    loop._execute_tool_call(
+        {"function": {"name": "read_wiki_page", "arguments": {}}}, dispatch, messages, logger=None)
+    assert "truncated" not in messages[-1]["content"]
+
+    # Everything else still gets the flat cap.
+    loop._execute_tool_call(
+        {"function": {"name": "search_web", "arguments": {}}}, dispatch, messages, logger=None)
+    assert "truncated" in messages[-1]["content"]
+
+
+def test_the_real_wiki_page_cap_leaves_room_for_json_escaping(monkeypatch):
+    """wiki.MAX_PAGE_CHARS counts page chars; the loop cap counts JSON-escaped
+    chars. If the gap between them ever closes, the blind backstop cuts off the
+    [[link]] footer _fit_page trims the body specifically to protect."""
+    from agent.tools import wiki
+
+    page = ("line of text\n" * 2000)[: wiki.MAX_PAGE_CHARS]  # worst case: all newlines
+    fitted = wiki._fit_page(page)
+    assert len(_json.dumps({"content": fitted})) < loop.TOOL_RESULT_CHAR_CAPS["read_wiki_page"]
+
+
 # --------------------------------------------------------------------------- #
 # Cloud (Gemini) backend + backend selection. The adapter must return the SAME
 # canonical message shape as the Ollama path so advance()/_execute_tool_call and

@@ -76,6 +76,19 @@ MAX_INDEX_CHARS = 600
 MAX_SEARCH_RESULTS = 20
 MAX_SEARCH_CHARS = 4000
 
+# read_wiki_page's own budget, in page chars — under the 16000-char backstop
+# agent/loop.py gives this tool (TOOL_RESULT_CHAR_CAPS), because that backstop
+# counts the JSON-escaped result and markdown's newlines roughly double on the
+# way through. The gap is the escaping headroom; widen both together or the
+# blind backstop cuts the [[link]] footer _fit_page went out of its way to keep.
+# 14000 covers every page in the vault but one (agentos, at ~18KB).
+MAX_PAGE_CHARS = 14000
+
+# Room _fit_page sets aside for its "here's what I cut" notice. The boilerplate
+# is ~330 chars; the rest covers the dropped section names (10 on the largest
+# page in the vault).
+_NOTICE_RESERVE = 700
+
 # Frontmatter lives at the very top; read only a bounded head to classify a page
 # without pulling whole bodies for all of them every turn.
 _HEAD_CHARS = 2048
@@ -110,6 +123,15 @@ _SUMMARY_RE = re.compile(r"^\*\*Summary\*\*:\s*(.+?)\s*$", re.IGNORECASE | re.MU
 # Query terms for search_wiki. Splitting on non-alphanumerics folds punctuation
 # and the slug hyphens in page names into the same shape.
 _TERM_RE = re.compile(r"[a-z0-9]+")
+
+# The two parts of a page _fit_page treats as special, and its section names.
+# `**Sources**:` is ObsidianWikiAgent's ingest provenance — 16 filenames and
+# ~500 chars on the big pages, of no use to a reader. `## Related pages` is the
+# [[link]] graph and is always the LAST section, so a blind tail cut takes the
+# page's navigation first, every time.
+_SOURCES_LINE_RE = re.compile(r"^\*\*Sources\*\*:.*$\n?", re.MULTILINE)
+_RELATED_RE = re.compile(r"^## Related pages\b.*", re.MULTILINE | re.DOTALL)
+_H2_RE = re.compile(r"^## (.+?)\s*$", re.MULTILINE)
 
 
 def _vault() -> Path:
@@ -157,7 +179,7 @@ def _list_wiki_pages(vault: Path) -> dict:
     return {"pages": pages}
 
 
-def _read_wiki_page(vault: Path, name: str) -> dict:
+def _read_wiki_page(vault: Path, name: str, section: str | None = None) -> dict:
     filename = name if name.endswith(".md") else f"{name}.md"
     try:
         path = _safe_child(vault / "wiki", filename)
@@ -165,7 +187,21 @@ def _read_wiki_page(vault: Path, name: str) -> dict:
         return {"error": str(e)}
     if not path.is_file():
         return {"error": f"wiki page '{name}' not found"}
-    return {"content": path.read_text(encoding="utf-8")}
+
+    text = path.read_text(encoding="utf-8")
+    if section is None or not section.strip():
+        return {"content": _fit_page(text)}
+
+    sections = _split_sections(_SOURCES_LINE_RE.sub("", text, count=1))
+    if not sections:
+        return {"error": f"wiki page '{name}' has no sections — read it without a section argument"}
+    hit = _match_section(sections, section)
+    if hit is None:
+        # Name what exists rather than just saying no, so the retry is informed.
+        return {"error": f"no section like '{section}' in wiki page '{name}'",
+                "sections": [heading for heading, _ in sections]}
+    heading, body = hit
+    return {"page": name, "section": heading, "content": _fit_page(body)}
 
 
 def _lens_meta(head: str) -> dict | None:
@@ -244,6 +280,98 @@ def _page_summaries(vault: Path) -> list:
     return rows
 
 
+def _split_sections(text: str) -> list[tuple[str, str]]:
+    """(heading, section text including its heading) for each H2, in page order.
+    Empty when the page has no H2s at all — which is why sections are a fallback
+    for the pages that overflow, not the way every page is read: local-llm-agent.md
+    is 9.8KB of prose with no headings to ask for."""
+    heads = [(m.group(1).strip(), m.start()) for m in _H2_RE.finditer(text)]
+    return [
+        (name, text[start: heads[i + 1][1] if i + 1 < len(heads) else len(text)].rstrip())
+        for i, (name, start) in enumerate(heads)
+    ]
+
+
+def _match_section(sections: list, wanted: str) -> tuple[str, str] | None:
+    """The section whose heading best matches `wanted`; None if nothing is close.
+
+    Deliberately forgiving. The model is re-typing a heading it read in a trim
+    notice — "Product Theory and SVPG Alignment" is meaningful English, not an
+    opaque id, but it's still 33 characters to reproduce, and an exact-match
+    lookup would turn a dropped '&' into a dead end. Tries exact, then either
+    direction of substring, then best word overlap."""
+    want = wanted.strip().lower()
+    for heading, body in sections:
+        if heading.lower() == want:
+            return heading, body
+
+    # Longest match wins, not first: "Overview" is a substring of half the
+    # phrasings a model might type, and page order would hand it back ahead of
+    # the specific section actually asked for.
+    hits = [(h, b) for h, b in sections if want in h.lower() or h.lower() in want]
+    if hits:
+        return max(hits, key=lambda hb: len(hb[0]))
+
+    # Last resort. Words shorter than 4 chars are excluded because headings here
+    # are English phrases: one shared "and" would otherwise be a match.
+    terms = {t for t in _TERM_RE.findall(want) if len(t) >= 4}
+    best, best_score = None, 0
+    for heading, body in sections:
+        score = len(terms & {t for t in _TERM_RE.findall(heading.lower()) if len(t) >= 4})
+        if score > best_score:
+            best, best_score = (heading, body), score
+    return best
+
+
+def _fit_page(text: str, budget: int = MAX_PAGE_CHARS) -> str:
+    """A page trimmed to `budget` chars, cutting the part that matters least and
+    saying what it cut.
+
+    Blind truncation on a wiki page is worse than it looks. The `## Related
+    pages` [[link]] block is always last, so a tail cut takes the page's
+    navigation before it takes any prose; this keeps that block and cuts the
+    body above it instead. It drops the `**Sources**:` line first — provenance
+    for the ingest, never an answer to a question.
+
+    The notice matters as much as the trim. Handed a silently cut page, the
+    model treats what it got as the whole page: asked how AgentOS relates to
+    SVPG, Wren read a truncated agentos.md and reported that SVPG was "not
+    explicitly in the wiki" — from a page with a section on it, in the 58% she
+    never saw. So the notice names the dropped sections and tells her not to
+    make that claim. Reserve is generous because the names vary in length; a
+    slight overshoot is harmless against loop.py's larger backstop."""
+    text = _SOURCES_LINE_RE.sub("", text, count=1)
+    if len(text) <= budget:
+        return text
+
+    related = _RELATED_RE.search(text)
+    tail = related.group(0).strip() if related else ""
+    body = text[: related.start()] if related else text
+
+    kept = body[: max(0, budget - len(tail) - _NOTICE_RESERVE)]
+
+    # A section counts as unread unless it ENDS inside the kept text. Testing
+    # whether its heading survived isn't enough: the cut usually lands mid-section,
+    # leaving the heading visible and most of its content gone — which would
+    # report the section as read and reintroduce the false negative this notice
+    # exists to prevent.
+    heads = [(m.group(1), m.start()) for m in _H2_RE.finditer(body)]
+    ends = [heads[i + 1][1] if i + 1 < len(heads) else len(body) for i in range(len(heads))]
+    dropped = [name for (name, _), end in zip(heads, ends) if end > len(kept)]
+
+    notice = (
+        f"\n\n[Only the first {len(kept)} of {len(body)} characters of this page "
+        "are shown; the rest did not fit."
+        + (f" Not shown in full: {', '.join(dropped)}. Call read_wiki_page again "
+           "with the section argument set to one of those headings to read it in "
+           "full." if dropped else "")
+        + (" The link list below is complete." if tail else "")
+        + " Do NOT say this page or the wiki lacks something — you have not read "
+        "all of it.]\n\n"
+    )
+    return kept + notice + tail
+
+
 def _search_pages(vault: Path, query: str) -> list:
     """Pages whose name or summary matches `query`, as {name, summary} rows,
     best match first.
@@ -310,11 +438,11 @@ def search_wiki(query: str) -> dict:
     return result
 
 
-def read_wiki_page(name: str) -> dict:
+def read_wiki_page(name: str, section: str | None = None) -> dict:
     if not name or not name.strip():
         return {"error": "name must not be empty"}
     vault, err = _require_vault()
-    return err or _read_wiki_page(vault, name.strip())
+    return err or _read_wiki_page(vault, name.strip(), section)
 
 
 def page_summaries() -> dict:
@@ -434,12 +562,23 @@ READ_WIKI_PAGE_SCHEMA = {
         "name": "read_wiki_page",
         "description": (
             f"Read one concept page from {_NAME}'s learnings wiki, by a name search_wiki "
-            "returned. Cite the page name in your answer."
+            "returned. Cite the page name in your answer. A few pages are too long to "
+            "return whole; those come back with a note naming the sections that were "
+            "cut. When the answer you need is in one of those, call this again with "
+            "that heading as `section` to read that part in full."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "name": {"type": "string", "description": "Page name, e.g. 'speakers-bureau' (with or without .md)."},
+                "section": {
+                    "type": "string",
+                    "description": (
+                        "Optional. A section heading from the page, e.g. 'Product Theory "
+                        "and SVPG Alignment'. Returns just that section. Use only a "
+                        "heading the page itself named; omit to read the page."
+                    ),
+                },
             },
             "required": ["name"],
         },
@@ -461,6 +600,7 @@ def main() -> int:
     p_search.add_argument("query")
     p_page = sub.add_parser("read-page")
     p_page.add_argument("name")
+    p_page.add_argument("--section", default=None)
     args = parser.parse_args()
 
     if args.cmd == "read-index":
@@ -470,7 +610,7 @@ def main() -> int:
     elif args.cmd == "search":
         result = search_wiki(args.query)
     else:
-        result = read_wiki_page(args.name)
+        result = read_wiki_page(args.name, args.section)
 
     return print_result(result)
 

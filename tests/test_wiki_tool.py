@@ -162,6 +162,189 @@ def test_search_schema_denies_the_model_its_own_answer(tmp_path, monkeypatch):
     assert "no matches" in description  # says what to do when it finds nothing
 
 
+# --- oversized pages ---------------------------------------------------------
+# 7 of the vault's 390 pages are over the old flat 8000-char tool-result cap, and
+# they're the central ones. A blind cut takes the tail, and the tail is where the
+# [[link]] block lives.
+
+def _long_page(sections, body_chars=6000):
+    parts = ["---\ntags: []\n---\n\n# Big Page\n",
+             "**Summary**: A big page.",
+             "**Sources**: " + ", ".join(f"Source-{i}.md" for i in range(16)),
+             "**Last updated**: 2026-08-16\n"]
+    for name in sections:
+        parts.append(f"## {name}\n\n" + ("filler text. " * (body_chars // 13)))
+    parts.append("## Related pages\n\n- [[alpha]]\n- [[beta]]\n- [[gamma]]")
+    return "\n".join(parts)
+
+
+def test_fit_page_keeps_the_link_block_a_blind_cut_would_take(tmp_path, monkeypatch):
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    (tmp_path / "wiki" / "agentos.md").write_text(
+        _long_page(["Overview", "Deployment", "Failure Modes"]))
+
+    content = wiki.read_wiki_page("agentos")["content"]
+    assert len(content) <= wiki.MAX_PAGE_CHARS
+    # The whole link footer survives — it's the wiki's navigation.
+    assert "## Related pages" in content
+    for link in ("[[alpha]]", "[[beta]]", "[[gamma]]"):
+        assert link in content
+
+
+def test_fit_page_names_the_sections_it_dropped(tmp_path, monkeypatch):
+    # Asked how AgentOS relates to SVPG, Wren read a silently cut agentos.md and
+    # answered that SVPG was "not explicitly in the wiki" — from the 58% of a
+    # page she never saw. The notice exists to make that answer impossible.
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    (tmp_path / "wiki" / "agentos.md").write_text(
+        _long_page(["Overview", "Deployment", "Product Theory and SVPG Alignment"]))
+
+    content = wiki.read_wiki_page("agentos")["content"]
+    # Named as unread even though the cut left its heading visible — testing the
+    # heading alone would call a mostly-missing section "read".
+    assert "Product Theory and SVPG Alignment" in content
+    assert "Not shown in full" in content
+    assert "Do NOT say this page or the wiki lacks something" in content
+
+
+def test_the_sources_line_is_dropped_from_every_page(tmp_path, monkeypatch):
+    # Ingest provenance — 16 filenames, ~500 chars on the big pages, and never
+    # the answer to a question. Dropped whether or not the page needs trimming.
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    (tmp_path / "wiki" / "small.md").write_text(
+        "# Small\n\n**Summary**: Tiny.\n**Sources**: A.md, B.md\n\nBody text.")
+
+    content = wiki.read_wiki_page("small")["content"]
+    assert "**Sources**" not in content
+    assert "**Summary**: Tiny." in content and "Body text." in content
+
+
+def test_a_page_that_fits_is_returned_whole(tmp_path, monkeypatch):
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+
+    content = wiki.read_wiki_page("speakers-bureau")["content"]
+    assert content == "Speakers Bureau page"  # no notice, no trim
+    assert "not shown" not in content
+
+
+def test_fit_page_handles_a_long_page_with_no_headings(tmp_path, monkeypatch):
+    # local-llm-agent.md is 9.8KB with zero H2s, which is why section-based
+    # reading was rejected: there are no sections to name or fetch.
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    (tmp_path / "wiki" / "flat.md").write_text("# Flat\n\n" + ("prose. " * 4000))
+
+    content = wiki.read_wiki_page("flat")["content"]
+    assert len(content) <= wiki.MAX_PAGE_CHARS
+    assert "characters of this page are shown" in content
+
+
+def test_fit_page_survives_a_page_with_no_link_block(tmp_path, monkeypatch):
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    (tmp_path / "wiki" / "orphaned.md").write_text(
+        "# Orphan\n\n## Only Section\n\n" + ("prose. " * 4000))
+
+    content = wiki.read_wiki_page("orphaned")["content"]
+    assert len(content) <= wiki.MAX_PAGE_CHARS
+    assert "## Related pages" not in content  # nothing invented
+
+
+# --- reading one section -----------------------------------------------------
+# The escape hatch for the pages that still don't fit whole. The trim notice
+# names the sections it cut; this is how Wren goes and reads one.
+
+def test_a_named_section_comes_back_whole(tmp_path, monkeypatch):
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    (tmp_path / "wiki" / "agentos.md").write_text(
+        _long_page(["Overview", "Deployment", "Product Theory and SVPG Alignment"]))
+
+    result = wiki.read_wiki_page("agentos", "Product Theory and SVPG Alignment")
+    assert result["section"] == "Product Theory and SVPG Alignment"
+    assert result["content"].startswith("## Product Theory and SVPG Alignment")
+    assert "characters of this page are shown" not in result["content"]  # whole
+    assert "## Overview" not in result["content"]  # just the one section
+
+
+def test_section_matching_forgives_a_reworded_heading(tmp_path, monkeypatch):
+    # The model is retyping a 33-char heading it read in a notice. An exact-match
+    # lookup would turn a dropped word into a dead end.
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    (tmp_path / "wiki" / "agentos.md").write_text(
+        _long_page(["Overview", "Product Theory and SVPG Alignment"]))
+
+    for asked in ("product theory and svpg alignment", "SVPG Alignment", "svpg"):
+        assert wiki.read_wiki_page("agentos", asked)["section"] == \
+            "Product Theory and SVPG Alignment"
+
+
+def test_the_more_specific_heading_wins_over_a_shorter_one(tmp_path, monkeypatch):
+    # "Overview" is a substring of half the phrasings a model might type, and it
+    # comes first on the page — page order would hand it back every time.
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    (tmp_path / "wiki" / "agentos.md").write_text(
+        _long_page(["Overview", "Deployment Overview and Rollout"]))
+
+    result = wiki.read_wiki_page("agentos", "Deployment Overview and Rollout")
+    assert result["section"] == "Deployment Overview and Rollout"
+
+
+def test_one_shared_stopword_is_not_a_match(tmp_path, monkeypatch):
+    # Headings here are English phrases; a shared "and" must not pass for one.
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    (tmp_path / "wiki" / "agentos.md").write_text(
+        _long_page(["Configuration and Preference Management"]))
+
+    assert "error" in wiki.read_wiki_page("agentos", "Revenue and Pricing")
+
+
+def test_an_unmatched_section_names_what_the_page_does_have(tmp_path, monkeypatch):
+    # Same rule as the catalogue tools: say what exists, don't just say no.
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    (tmp_path / "wiki" / "agentos.md").write_text(_long_page(["Overview", "Deployment"]))
+
+    result = wiki.read_wiki_page("agentos", "quarterly revenue")
+    assert "error" in result
+    assert result["sections"] == ["Overview", "Deployment", "Related pages"]
+
+
+def test_a_section_ask_on_a_page_with_no_headings_says_so(tmp_path, monkeypatch):
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    (tmp_path / "wiki" / "flat.md").write_text("# Flat\n\nJust prose, no headings.")
+
+    result = wiki.read_wiki_page("flat", "Overview")
+    assert "error" in result and "no sections" in result["error"]
+
+
+def test_an_empty_section_argument_reads_the_whole_page(tmp_path, monkeypatch):
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+
+    assert wiki.read_wiki_page("speakers-bureau", "")["content"] == "Speakers Bureau page"
+    assert wiki.read_wiki_page("speakers-bureau", None)["content"] == "Speakers Bureau page"
+
+
+def test_the_trim_notice_points_at_the_section_argument(tmp_path, monkeypatch):
+    # Without this the model is told what it missed and given no way to get it.
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    (tmp_path / "wiki" / "agentos.md").write_text(
+        _long_page(["Overview", "Deployment", "Product Theory and SVPG Alignment"]))
+
+    content = wiki.read_wiki_page("agentos")["content"]
+    assert "section argument" in content
+
+
 def test_missing_page(tmp_path, monkeypatch):
     monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
     _build_vault(tmp_path)
