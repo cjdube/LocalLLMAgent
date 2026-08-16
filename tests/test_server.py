@@ -961,8 +961,8 @@ def test_make_load_tools_extends_live_list_and_persists(monkeypatch):
     result = load(group="wiki")
     after = {t["function"]["name"] for t in tools}
     # The live list grew in place with the wiki group's tools...
-    assert "read_wiki_index" in after and "read_wiki_index" not in before
-    assert "read_wiki_index" in result["now_available"]
+    assert "search_wiki" in after and "search_wiki" not in before
+    assert "search_wiki" in result["now_available"]
     # ...and the group is recorded on the session for later turns / continuation.
     assert srv.loaded_groups[SID] == {"wiki"}
     # Idempotent: loading again adds nothing new.

@@ -605,7 +605,7 @@ TOOL_SERVICES = {
     "ntfy": ("ntfy Push", ["list_notifications"]),
     "brief": ("Morning Brief", ["send_morning_brief"]),
     "memory": ("Memory", ["remember", "pin", "recall", "recategorize", "archive", "forget"]),
-    "wiki": ("Obsidian Wiki", ["read_wiki_index", "list_wiki_pages", "read_wiki_page"]),
+    "wiki": ("Obsidian Wiki", ["search_wiki", "read_wiki_page"]),
     "skills": ("Skills", ["list_skills", "read_skill", "write_skill", "delete_skill"]),
     "reminders": ("Reminders", ["set_reminder", "list_reminders", "cancel_reminder"]),
     "scheduler": ("launchd Scheduler", ["list_scheduled_tasks"]),

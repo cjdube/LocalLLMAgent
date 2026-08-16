@@ -96,7 +96,7 @@ def test_tools_for_returns_core_only_for_no_groups():
 
 def test_tools_for_appends_group_and_dedupes():
     names = _names(toolset.tools_for({"wiki"}))
-    assert "read_wiki_index" in names
+    assert "search_wiki" in names
     assert names[: len(toolset.CORE_TOOLS)] == _names(toolset.CORE_TOOLS)  # core stays first
     assert len(names) == len(set(names))  # no dup even if a group re-listed a core tool
 
@@ -112,6 +112,20 @@ def test_groups_for_message_matches_on_word_boundaries():
     assert "activity" not in toolset.groups_for_message("what's on my watchlist")
     # No cues -> no groups (a plain weather ask stays core-only).
     assert toolset.groups_for_message("what's the temperature outside") == set()
+
+
+def test_asking_about_your_own_notes_loads_the_wiki():
+    # Both of these reached the live server without loading the wiki group, so
+    # Wren searched her memory store and reported nothing written down about
+    # topics that have wiki pages. Saying "wiki" out loud was the only way in.
+    assert "wiki" in toolset.groups_for_message("what have I written down about pricing?")
+    assert "wiki" in toolset.groups_for_message("what do my notes say about GroceryGuru?")
+    assert "wiki" in toolset.groups_for_message("what did I write down about lenses")
+    assert "wiki" in toolset.groups_for_message("what have I read about agent memory")
+    # "learning" as a cue missed the commonest phrasing of all; "learn" catches
+    # learn/learned/learning/learnings.
+    assert "wiki" in toolset.groups_for_message("what have I learned about RAG?")
+    assert "wiki" in toolset.groups_for_message("what have I been learning about?")
 
 
 def test_render_toolgroups_index_lists_every_group():

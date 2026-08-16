@@ -33,7 +33,8 @@ def test_missing_vault_errors(tmp_path, monkeypatch):
     monkeypatch.setenv("WIKI_VAULT_PATH", str(missing))
 
     for result in (wiki.read_wiki_index(), wiki.list_wiki_pages(),
-                   wiki.read_wiki_page("x"), wiki.page_summaries()):
+                   wiki.read_wiki_page("x"), wiki.page_summaries(),
+                   wiki.search_wiki("x")):
         assert "error" in result and "not found" in result["error"]
     assert not missing.exists()  # errored instead of creating a stray vault
 
@@ -48,6 +49,117 @@ def test_page_summaries_extracts_the_summary_line(tmp_path, monkeypatch):
     assert pages["lm-studio"] == "A local LLM execution platform."
     # A page without one still appears — daily_synthesis falls back to the name.
     assert pages["speakers-bureau"] == ""
+
+
+# --- search ------------------------------------------------------------------
+# The entry point. It replaced read_wiki_index and list_wiki_pages, both of which
+# outgrew the 8000-char tool-result cap and handed the model a silent prefix.
+
+def _add_page(root, name, summary):
+    (root / "wiki" / f"{name}.md").write_text(
+        f"# {name}\n\n**Summary**: {summary}\n\nBody.")
+
+
+def test_search_matches_a_summary_the_filename_never_mentions(tmp_path, monkeypatch):
+    # The whole reason search beats a filename list: the page for "how he prices
+    # engagements" is named for the role, not for pricing.
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    _add_page(tmp_path, "fractional-product-leadership",
+              "How he scopes and prices retainer engagements.")
+
+    names = [m["name"] for m in wiki.search_wiki("pricing retainer")["matches"]]
+    assert names == ["fractional-product-leadership"]
+
+
+def test_search_matches_inside_a_slug(tmp_path, monkeypatch):
+    # Page names are hyphenated slugs, so a bare term has to match inside one.
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    _add_page(tmp_path, "local-ai-compute-infrastructure", "Running models on the mini.")
+
+    names = [m["name"] for m in wiki.search_wiki("compute")["matches"]]
+    assert names == ["local-ai-compute-infrastructure"]
+
+
+def test_search_ranks_a_name_hit_above_a_summary_hit(tmp_path, monkeypatch):
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    _add_page(tmp_path, "duckdb-analytics", "A columnar engine.")
+    _add_page(tmp_path, "grocery-lists", "Built on duckdb for the analytics.")
+
+    names = [m["name"] for m in wiki.search_wiki("duckdb")["matches"]]
+    assert names == ["duckdb-analytics", "grocery-lists"]
+
+
+def test_search_returns_summaries_with_the_names(tmp_path, monkeypatch):
+    # read_wiki_page needs a name; the model needs the summary to pick which one.
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    _add_page(tmp_path, "lm-studio", "A local LLM execution platform.")
+
+    assert wiki.search_wiki("lm-studio")["matches"] == [
+        {"name": "lm-studio", "summary": "A local LLM execution platform."}]
+
+
+def test_search_with_no_match_returns_empty_not_everything(tmp_path, monkeypatch):
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    _add_page(tmp_path, "lm-studio", "A local LLM execution platform.")
+
+    result = wiki.search_wiki("sourdough")
+    assert result == {"matches": []}  # and no "truncated" key
+
+
+def test_search_result_stays_under_the_tool_result_cap(tmp_path, monkeypatch):
+    # The failure being fixed: a result the loop trims to a prefix the model
+    # can't tell is a prefix. A broad query against a big vault must not do that.
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    for i in range(200):
+        _add_page(tmp_path, f"project-note-{i:03d}", "A project page. " * 12)
+
+    result = wiki.search_wiki("project")
+    assert len(result["matches"]) <= wiki.MAX_SEARCH_RESULTS
+    assert len(str(result)) < 8000  # OLLAMA_MAX_TOOL_RESULT_CHARS
+    # Dropped matches are reported, not silent — the model can narrow instead of
+    # assuming it saw the whole vault.
+    assert "200" in result["truncated"]
+
+
+def test_search_reports_nothing_truncated_when_everything_fits(tmp_path, monkeypatch):
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    _add_page(tmp_path, "lm-studio", "A local LLM execution platform.")
+
+    assert "truncated" not in wiki.search_wiki("local")
+
+
+def test_search_degrades_on_a_missing_vault(tmp_path, monkeypatch):
+    missing = tmp_path / "gone"
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(missing))
+
+    result = wiki.search_wiki("anything")
+    assert "error" in result and "not found" in result["error"]
+    assert not missing.exists()
+
+
+def test_search_rejects_an_empty_query(tmp_path, monkeypatch):
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+
+    assert "error" in wiki.search_wiki("   ")
+    # Punctuation with no usable term is a no-match, not an error.
+    assert wiki.search_wiki("???") == {"matches": []}
+
+
+def test_search_schema_denies_the_model_its_own_answer(tmp_path, monkeypatch):
+    # CLAUDE.md's catalogue-tool rule: a "what exists?" description must say the
+    # list is not in the model's head, or pretraining invents plausible pages.
+    description = wiki.SEARCH_WIKI_SCHEMA["function"]["description"].lower()
+    assert "you do not know" in description
+    assert "only the pages this tool returns exist" in description
+    assert "no matches" in description  # says what to do when it finds nothing
 
 
 def test_missing_page(tmp_path, monkeypatch):

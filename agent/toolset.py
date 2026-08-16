@@ -101,9 +101,8 @@ from agent.tools.web_fetch import TOOL_SCHEMA as WEB_FETCH_SCHEMA, fetch_webpage
 from agent.tools.web_search import TOOL_SCHEMA as WEB_SEARCH_SCHEMA, search_web
 from agent.tools.wiki import (
     WIKI_TOOL_SCHEMAS,
-    list_wiki_pages,
-    read_wiki_index,
     read_wiki_page,
+    search_wiki,
 )
 from agent.tools.youtube import TOOL_SCHEMA as YOUTUBE_SCHEMA, fetch_liked_videos
 from tasks.morning_brief import SEND_BRIEF_TOOL_SCHEMA, brief_dispatch
@@ -186,8 +185,7 @@ DISPATCH = {
     "recategorize": recategorize,
     "archive": archive,
     "forget": forget,
-    "read_wiki_index": read_wiki_index,
-    "list_wiki_pages": list_wiki_pages,
+    "search_wiki": search_wiki,
     "read_wiki_page": read_wiki_page,
     "list_skills": list_skills,
     "read_skill": read_skill,
@@ -318,7 +316,7 @@ TOOL_GROUP_NAMES = {
         "unwatch_company", "send_opportunity_digest",
         "research_opportunity", "research_company",
     ],
-    "wiki": ["read_wiki_index", "list_wiki_pages", "read_wiki_page"],
+    "wiki": ["search_wiki", "read_wiki_page"],
     "background": ["run_in_background", "list_background_jobs", "get_job_result"],
     "web": ["fetch_webpage", "evaluate_app", "evaluate_against", "fetch_starred_repos"],
     "activity": ["fetch_strava", "fetch_chrome_history", "fetch_liked_videos"],
@@ -358,7 +356,14 @@ _GROUP_BLURBS = {
 GROUP_KEYWORDS = {
     "opportunities": ["job", "jobs", "role", "opportunit", "hiring", "watchlist",
                       "watch", "fractional", "research", "compan"],
-    "wiki": ["wiki", "learning", "weekly review", "working on"],
+    # Cues match as prefixes after a word boundary, so "learn" is deliberate:
+    # "learning" missed "what have I learned about X", the most natural way to
+    # ask. The note-taking cues matter more than they look — without them the
+    # only way in was to say "wiki" out loud, and asked "what do my notes say
+    # about X" Wren searched her memory store, found nothing, and answered that
+    # she had nothing written down about a topic with a wiki page on it.
+    "wiki": ["wiki", "learn", "weekly review", "working on",
+             "notes", "wrote", "written", "write down", "read about"],
     "background": ["background", "kick off", "hand off", "handoff"],
     "web": ["webpage", "web page", "fetch", "url", "evaluate", "starred", "github"],
     # "liked"/"video" rather than "like"/"watch": \blike matches "likely", and

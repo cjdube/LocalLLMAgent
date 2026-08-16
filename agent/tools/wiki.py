@@ -2,9 +2,18 @@
 Wren can answer "what did I decide about X" from their own notes.
 
 The vault at WIKI_VAULT_PATH is built and maintained by the sibling
-ObsidianWikiAgent project. These tools let the agent loop navigate it the way
-ObsidianWikiAgent's own query CLI does: read the index, open the relevant
-page(s), answer.
+ObsidianWikiAgent project. These tools let the agent loop navigate it: search
+for the topic, open the page(s) that come back, answer.
+
+Searching is the entry point because listing isn't one. The two listing tools
+that used to be the entry point — read_wiki_index (the whole of wiki/index.md)
+and list_wiki_pages (390 filenames) — are 62KB and 9.7KB against the 8000-char
+OLLAMA_MAX_TOOL_RESULT_CHARS cap in agent/loop.py, so both were cut to a prefix
+the model had no way to know was a prefix. Five of the index's six sections were
+never visible at all, and Wren answered "no such page" about pages that exist.
+Both are unregistered now; search_wiki returns rows, so its size scales with the
+answer instead of the vault. ObsidianWikiAgent hit the same wall on its write
+side and replaced read_index with list_index_sections for the same reason.
 
 Vault layout (see ObsidianWikiAgent):
     <vault>/wiki/index.md   -- table of contents the model reads first
@@ -26,9 +35,10 @@ configured vault; the internal helpers take vault_path explicitly so pointing at
 another vault later is a config change, not a rewrite.
 
 Usage:
-    python -m agent.tools.wiki read-index
-    python -m agent.tools.wiki list-pages
+    python -m agent.tools.wiki search "product leadership"
     python -m agent.tools.wiki read-page speakers-bureau
+    python -m agent.tools.wiki read-index    # human-only; too big for the model
+    python -m agent.tools.wiki list-pages    # human-only; same reason
 """
 
 import argparse
@@ -56,6 +66,15 @@ DEFAULT_WIKI_VAULT = str(Path.home() / "Vaults" / "llm-wiki-learnings")
 # index): the chat prompt already crowds num_ctx.
 MAX_INDEX_LENSES = 8
 MAX_INDEX_CHARS = 600
+
+# search_wiki's own caps. Both exist so a broad query ("project") can't hand back
+# most of a 390-page vault and get trimmed by the 8000-char tool-result cap — the
+# exact failure that made read_wiki_index useless. Summaries run ~150-200 chars,
+# so the row cap usually binds first; the char budget covers the long tail. A
+# summary can't exceed _HEAD_CHARS, so the last row can overshoot the budget by
+# at most that much and the worst case still lands under 8000.
+MAX_SEARCH_RESULTS = 20
+MAX_SEARCH_CHARS = 4000
 
 # Frontmatter lives at the very top; read only a bounded head to classify a page
 # without pulling whole bodies for all of them every turn.
@@ -87,6 +106,10 @@ _PATH_RE = re.compile(r"^[ \t]*path:[ \t]*(.*?)[ \t]*$", re.IGNORECASE | re.MULT
 # title — all 203 pages had one when this was added. It's the cheapest description
 # of what a page is *about*, as opposed to what it's called.
 _SUMMARY_RE = re.compile(r"^\*\*Summary\*\*:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
+
+# Query terms for search_wiki. Splitting on non-alphanumerics folds punctuation
+# and the slug hyphens in page names into the same shape.
+_TERM_RE = re.compile(r"[a-z0-9]+")
 
 
 def _vault() -> Path:
@@ -221,16 +244,70 @@ def _page_summaries(vault: Path) -> list:
     return rows
 
 
+def _search_pages(vault: Path, query: str) -> list:
+    """Pages whose name or summary matches `query`, as {name, summary} rows,
+    best match first.
+
+    Terms are matched as substrings, not as whole words: page names are slugs
+    ('fractional-product-leadership'), so a term has to be able to match inside
+    one. A name hit scores double a summary hit — the page named for a topic is
+    more often the topic's page than one that merely mentions it. Ties break on
+    the name so the ordering is stable run to run."""
+    terms = _TERM_RE.findall(query.lower())
+    if not terms:
+        return []
+    scored = []
+    for row in _page_summaries(vault):
+        name, summary = row["name"].lower(), row["summary"].lower()
+        score = sum(2 for t in terms if t in name) + sum(1 for t in terms if t in summary)
+        if score:
+            scored.append((-score, row["name"], row))
+    scored.sort()
+    return [row for _, _, row in scored]
+
+
 # --- model-facing tools (no vault argument; read the configured vault) ---
 
 def read_wiki_index() -> dict:
+    """The raw index.md. Not a registered tool — it's 62KB against an 8000-char
+    tool-result cap (see the module docstring). Kept for the CLI, where a human
+    reading the whole index is the point."""
     vault, err = _require_vault()
     return err or _read_index(vault)
 
 
 def list_wiki_pages() -> dict:
+    """Every concept-page filename. Not a registered tool either — 390 names is
+    9.7KB, over the same cap. It exists for chat/insights.py, which counts and
+    lists pages for the dashboard and has no such budget."""
     vault, err = _require_vault()
     return err or _list_wiki_pages(vault)
+
+
+def search_wiki(query: str) -> dict:
+    """Wiki pages matching `query`, as {name, summary} rows the model can pick a
+    read_wiki_page target from. Capped (see MAX_SEARCH_RESULTS); when the cap
+    bites, `truncated` says so in the result rather than dropping matches
+    silently, so the model can narrow instead of assuming it saw everything."""
+    if not query or not query.strip():
+        return {"error": "query must not be empty"}
+    vault, err = _require_vault()
+    if err:
+        return err
+    matches = _search_pages(vault, query.strip())
+    kept, total = [], 0
+    for row in matches[:MAX_SEARCH_RESULTS]:
+        kept.append(row)
+        total += len(row["name"]) + len(row["summary"])
+        if total > MAX_SEARCH_CHARS:
+            break
+    result = {"matches": kept}
+    if len(kept) < len(matches):
+        result["truncated"] = (
+            f"showing the {len(kept)} best of {len(matches)} matching pages — "
+            "use a narrower query to see the rest"
+        )
+    return result
 
 
 def read_wiki_page(name: str) -> dict:
@@ -315,25 +392,39 @@ def render_lenses_index(logger=None) -> str:
     )
 
 
-READ_WIKI_INDEX_SCHEMA = {
+# Wording follows the catalogue-tool rule in CLAUDE.md: a "what exists?" tool has
+# to state outright that the answer is not in the model's head, or pretraining
+# supplies a plausible page name and the model skips the call. The wiki is the
+# worst case for that — its topics (agents, RAG, product management) are exactly
+# what a model can invent confident-sounding page names about.
+SEARCH_WIKI_SCHEMA = {
     "type": "function",
     "function": {
-        "name": "read_wiki_index",
+        "name": "search_wiki",
         "description": (
-            f"Read the table of contents (index.md) of {_NAME}'s personal learnings "
-            "wiki — the concept pages built from their weekly reviews. Start here to "
-            "see what topics exist before reading a page."
+            f"Search {_NAME}'s personal learnings wiki by topic and get back each "
+            "matching page name with its one-line summary. This is the ONLY way to "
+            "find out what is in the wiki: it holds hundreds of pages written from "
+            f"{_NAME}'s own notes and reviews, and you do not know what any of them "
+            "are. Only the pages this tool returns exist. Never name, describe, or "
+            "read a wiki page that did not come back from a search. Call this first, "
+            "then call read_wiki_page on the page you want. If it returns no matches, "
+            "say the wiki has nothing on that topic — do not guess a page name and do "
+            "not answer from your own knowledge as if it came from the wiki."
         ),
-        "parameters": {"type": "object", "properties": {}},
-    },
-}
-
-LIST_WIKI_PAGES_SCHEMA = {
-    "type": "function",
-    "function": {
-        "name": "list_wiki_pages",
-        "description": f"List the concept-page filenames in {_NAME}'s learnings wiki (excludes index.md and log.md).",
-        "parameters": {"type": "object", "properties": {}},
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Topic words, matched against page names and summaries, e.g. "
+                        "'fractional product leadership'. Prefer two or three words."
+                    ),
+                },
+            },
+            "required": ["query"],
+        },
     },
 }
 
@@ -341,7 +432,10 @@ READ_WIKI_PAGE_SCHEMA = {
     "type": "function",
     "function": {
         "name": "read_wiki_page",
-        "description": f"Read one concept page from {_NAME}'s learnings wiki. Cite the page name in your answer.",
+        "description": (
+            f"Read one concept page from {_NAME}'s learnings wiki, by a name search_wiki "
+            "returned. Cite the page name in your answer."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -353,8 +447,7 @@ READ_WIKI_PAGE_SCHEMA = {
 }
 
 WIKI_TOOL_SCHEMAS = [
-    READ_WIKI_INDEX_SCHEMA,
-    LIST_WIKI_PAGES_SCHEMA,
+    SEARCH_WIKI_SCHEMA,
     READ_WIKI_PAGE_SCHEMA,
 ]
 
@@ -364,6 +457,8 @@ def main() -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("read-index")
     sub.add_parser("list-pages")
+    p_search = sub.add_parser("search")
+    p_search.add_argument("query")
     p_page = sub.add_parser("read-page")
     p_page.add_argument("name")
     args = parser.parse_args()
@@ -372,6 +467,8 @@ def main() -> int:
         result = read_wiki_index()
     elif args.cmd == "list-pages":
         result = list_wiki_pages()
+    elif args.cmd == "search":
+        result = search_wiki(args.query)
     else:
         result = read_wiki_page(args.name)
 

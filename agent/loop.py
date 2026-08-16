@@ -28,7 +28,7 @@ load_dotenv(_ROOT / "config" / ".env")
 
 # Bounds the number of model round-trips in one agent turn. 6 was enough for
 # the original single-fetch tools, but navigating the learnings wiki
-# (read_wiki_index -> a few read_wiki_page calls -> answer) legitimately chains
+# (search_wiki -> a few read_wiki_page calls -> answer) legitimately chains
 # more reads, so allow more headroom before giving up.
 MAX_TOOL_ITERATIONS = 10
 
