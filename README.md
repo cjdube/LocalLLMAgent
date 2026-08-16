@@ -56,6 +56,12 @@ clears only on a runner kill. How to tell the two apart, and what has already
 been ruled out as a cause, is in
 [docs/ollama-serving.md](docs/ollama-serving.md).
 
+**The small model's context window is the source of most of Wren's numbers.**
+Context caps, prompt budgets, iteration limits and per-tool row/char budgets are
+catalogued in [docs/limits.md](docs/limits.md) — where each one lives (`.env` vs
+a module constant), how its value was arrived at, what Wren does when one is hit,
+and how to raise one without silently truncating the system prompt.
+
 **The backend is swappable too.** All model calls route through one seam
 (`agent/loop.py:_llm_chat`), which defaults to local Ollama but can be pointed at
 a cloud model (Gemini) via `WREN_LLM_BACKEND` — globally, or per-task with
