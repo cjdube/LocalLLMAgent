@@ -152,22 +152,30 @@ def _gemini_chat(
 
     model = model or os.getenv("WREN_GEMINI_MODEL", GEMINI_DEFAULT_MODEL)
     max_out = int(os.getenv("WREN_GEMINI_MAX_OUTPUT_TOKENS", "8192"))
-    # Gemini 2.5 models are *thinking* models, and thinking tokens count against
+    # Gemini models are *thinking* models, and thinking tokens count against
     # max_output_tokens. Left unbounded, the model can spend nearly the whole
     # budget on invisible reasoning and get cut off mid-answer (observed: a
-    # weekly-learnings draft truncated to 162 visible tokens). Default the budget
-    # to 0 (thinking off) — the scheduled tasks that use Gemini fill in a
-    # template and don't need chain-of-thought. Note: 0 is valid for
-    # gemini-2.5-flash (the default model); gemini-2.5-pro can't disable thinking,
-    # so pin a positive WREN_GEMINI_THINKING_BUDGET if you switch to pro.
+    # weekly-learnings draft truncated to 162 visible tokens). max_out above is
+    # what actually protects the visible answer — see below.
+    #
+    # The budget below is a HINT on the 3.x models, not a cap. Measured
+    # 2026-08-16: gemini-3.7-flash spent 268-313 thinking tokens with the budget
+    # set to 0, and both 3.6 and 3.7 overran a budget of 128 (109-397). So do not
+    # read a low budget as "thinking off" — treat it as a nudge and size max_out
+    # for the answer you need. At max_output_tokens=200 thinking ate 194 of them
+    # and returned 3 characters with finish_reason=MAX_TOKENS; at the 8192
+    # default there is ample headroom.
     thinking_budget = int(os.getenv("WREN_GEMINI_THINKING_BUDGET", "0"))
     # `think` is deliberately NOT honoured here. The seam's think=False means
-    # "don't spend the answer's budget on scratchpad", which on this backend is
-    # already the default above — and forcing 0 would override the per-model
-    # escape hatch the env var exists to provide. Not every model accepts 0:
-    # gemini-2.5-pro rejects it, and so does gemini-3.6-flash (400
-    # INVALID_ARGUMENT; -1 for dynamic, or any positive budget, is accepted).
-    # Tune WREN_GEMINI_THINKING_BUDGET per model instead.
+    # "don't spend the answer's budget on scratchpad", which this backend already
+    # aims at via the budget above — and forcing 0 would override the per-model
+    # escape hatch the env var exists to provide. 0 is also not portable: it is
+    # the code default and works on gemini-2.5-flash and gemini-3.7-flash, but
+    # gemini-2.5-pro and gemini-3.6-flash both reject it with a bare 400
+    # INVALID_ARGUMENT (-1 for dynamic, or any positive budget, is accepted
+    # everywhere). config/.env pins 128, which is portable across all of them.
+    # Tune WREN_GEMINI_THINKING_BUDGET per model instead, and verify with one
+    # real call after any WREN_GEMINI_MODEL change.
     _ = think
     system, contents = _gemini_contents(messages)
 
