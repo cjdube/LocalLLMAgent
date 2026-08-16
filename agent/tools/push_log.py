@@ -122,7 +122,7 @@ def _human_ts(ts: str) -> str:
         return ts
 
 
-def _render(rows: list, days: int) -> str:
+def _render(rows: list, days: int, total: int = None) -> str:
     """The rows as a finished answer the model relays instead of composing.
 
     Same reasoning as nudges._render: asked to write a list out itself, the small
@@ -136,8 +136,16 @@ def _render(rows: list, days: int) -> str:
     for row in rows:
         title = f"**{row['title']}** — " if row["title"] else ""
         lines.append(f"- {row['when']} — {title}{row['message']}")
-    return (f"{len(rows)} notification(s) from the last {days} days, newest first:\n"
-            + "\n".join(lines))
+    # `total` is the count BEFORE the limit slice. Counting len(rows) here was a
+    # flat falsehood, not an omission: the header said "20 notification(s) from
+    # the last 30 days" when 41 were sent, and this block is what the model is
+    # told to relay verbatim — so it repeated the wrong number word for word.
+    if total is None or total == len(rows):
+        header = f"{len(rows)} notification(s) from the last {days} days, newest first:"
+    else:
+        header = (f"The {len(rows)} most recent of {total} notification(s) from the "
+                  f"last {days} days — ask for a higher limit to see the rest:")
+    return header + "\n" + "\n".join(lines)
 
 
 def _clamp(value, default: int, low: int, high: int) -> int:
@@ -176,8 +184,13 @@ def list_notifications(days: int = DEFAULT_DAYS, limit: int = DEFAULT_LIMIT) -> 
 
     # Newest first: the last thing she sent is what's usually being asked about.
     rows.sort(key=lambda r: r["ts"], reverse=True)
+    total = len(rows)
     rows = rows[:limit]
-    return {"notifications": rows, "days": days, "summary": _render(rows, days)}
+    # summary leads: it's the block the model relays, so it's the one thing that
+    # must survive if anything downstream ever trims this result. The raw rows
+    # it was rendered from are the redundant half of the payload.
+    return {"summary": _render(rows, days, total), "total": total,
+            "shown": len(rows), "days": days, "notifications": rows}
 
 
 TOOL_SCHEMA = {

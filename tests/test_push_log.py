@@ -182,3 +182,43 @@ def test_a_missing_store_is_nothing_sent_not_an_error():
 
     assert result["notifications"] == []
     assert "error" not in result
+
+
+# --- the relayed summary must not state the shown count as the real one ------
+# _render counted the rows AFTER the limit slice, so the header said "20
+# notification(s) from the last 30 days" when 41 were sent. Not an omission: the
+# model is told to relay this block verbatim, so it repeated the wrong number.
+
+def test_a_limited_call_reports_the_true_total_in_the_summary(seed):
+    for i in range(10):
+        seed(1, f"push number {i}")
+
+    result = push_log.list_notifications(days=7, limit=3)
+
+    assert result["total"] == 10          # everything in the window
+    assert result["shown"] == 3
+    header = result["summary"].splitlines()[0]
+    assert "of 10 notification(s)" in header
+    assert not header.startswith("3 notification(s)")
+
+
+def test_an_unlimited_call_states_a_plain_count(seed):
+    for i in range(4):
+        seed(1, f"push number {i}")
+
+    header = push_log.list_notifications(days=7)["summary"].splitlines()[0]
+    assert header.startswith("4 notification(s)")
+    assert "most recent of" not in header
+
+
+def test_the_summary_leads_so_a_trim_cannot_take_it(seed):
+    seed(1, "one"), seed(1, "two")
+
+    keys = list(push_log.list_notifications(days=7))
+    assert keys.index("summary") < keys.index("notifications")
+
+
+def test_an_empty_window_is_unchanged():
+    result = push_log.list_notifications(days=7)
+    assert result["total"] == 0
+    assert "Nothing was pushed" in result["summary"]

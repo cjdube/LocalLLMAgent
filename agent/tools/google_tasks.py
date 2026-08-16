@@ -190,6 +190,20 @@ def _resolve_tasklist_id(list_name: str = None) -> str:
     raise ValueError(f"no task list named {list_name!r} — use get_tasks to see existing list names")
 
 
+# Page size for the tasks().list walk, and a hard ceiling on how much of a
+# tasklist we'll walk. The ceiling exists so an unexpectedly huge account can't
+# spin the loop; it is far above any real personal task list, and unlike the old
+# unpaged read it bounds the FETCH, never the reported count.
+_PAGE_SIZE = 100
+_MAX_FETCH = 1000
+
+# And the budget that actually bounds the reply. max_results defaults to 100,
+# and a task row carries a title plus free-text `notes` — 100 of them is ~13000
+# chars against the loop's 8000. Fourth tool in this pass to need this: a row
+# cap bounds how many rows come back, never how big they are.
+_MAX_CHAT_TASK_CHARS = 5500
+
+
 def _list_tasks(show_completed: bool = False, due_max: str = None, max_results: int = 100) -> dict:
     """Raw wrapper around tasks().list() shared by get_tasks() and
     get_tasks_due_soon(), aggregated across _read_tasklists(). No dueMin is
@@ -204,29 +218,56 @@ def _list_tasks(show_completed: bool = False, due_max: str = None, max_results: 
 
         tasks = []
         for tl in tasklists:
-            kwargs = {"tasklist": tl["id"], "showCompleted": show_completed, "maxResults": max_results}
-            if due_max:
-                kwargs["dueMax"] = due_max
-            result = service.tasks().list(**kwargs).execute()
-            tasks.extend(
-                {
-                    "id": t.get("id"),
-                    "title": t.get("title", "(no title)"),
-                    "notes": t.get("notes", ""),
-                    "due": t.get("due"),
-                    "status": t.get("status"),
-                    "tasklist_id": tl["id"],
-                    "list": tl["title"],
-                }
-                for t in result.get("items", [])
-            )
+            # Paginated, like _all_tasklists above it — which already was, and
+            # this wasn't. maxResults is a PAGE size, not a total, so a list
+            # holding more than it returned exactly that many and task_count
+            # reported the page as the whole list. Fetch everything (bounded by
+            # _MAX_FETCH so a runaway account can't spin), count it honestly,
+            # and let the caller's max_results bound only what's handed back.
+            page_token = None
+            while len(tasks) < _MAX_FETCH:
+                kwargs = {"tasklist": tl["id"], "showCompleted": show_completed,
+                          "maxResults": _PAGE_SIZE, "pageToken": page_token}
+                if due_max:
+                    kwargs["dueMax"] = due_max
+                result = service.tasks().list(**kwargs).execute()
+                tasks.extend(
+                    {
+                        "id": t.get("id"),
+                        "title": t.get("title", "(no title)"),
+                        "notes": t.get("notes", ""),
+                        "due": t.get("due"),
+                        "status": t.get("status"),
+                        "tasklist_id": tl["id"],
+                        "list": tl["title"],
+                    }
+                    for t in result.get("items", [])
+                )
+                page_token = result.get("nextPageToken")
+                if not page_token:
+                    break
     except Exception as e:
         return {"error": str(e)}
 
     # The Tasks API has no reliable due-date ordering param (unlike Calendar's
     # orderBy), so sort client-side; undated tasks sink to the bottom.
     tasks.sort(key=lambda t: t["due"] or "9999-12-31T23:59:59Z")
-    return {"task_count": len(tasks), "tasks": tasks}
+    shown, used = [], 0
+    for task in tasks[:max_results]:
+        used += len(str(task))
+        if used > _MAX_CHAT_TASK_CHARS and shown:
+            break
+        shown.append(task)
+    out = {"task_count": len(tasks), "tasks_shown": len(shown)}
+    if len(shown) < len(tasks):
+        # Sorted by due date, so what's dropped is the far future and the
+        # undated tail — which reads like having nothing else on.
+        out["partial"] = (
+            f"Showing the {len(shown)} soonest of {len(tasks)} tasks. "
+            "Do not say these are all of them."
+        )
+    out["tasks"] = shown
+    return out
 
 
 def get_tasks(max_results: int = 100) -> dict:

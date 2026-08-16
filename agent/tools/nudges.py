@@ -50,6 +50,17 @@ DEFAULT_DAYS = 14
 MIN_DAYS = 1
 MAX_DAYS = 90
 
+# How many rows the chat path returns. At the 90-day ceiling the archive ran 36
+# rows and 8938 chars — over the loop's 8000 cap — because every nudge appears
+# twice, raw and inside `summary`. daily_synthesis passes max_rows=None.
+MAX_CHAT_ROWS = 25
+
+# The budget that actually bounds it. 25 rows assumed short nudges; real ones
+# run long enough that 25 reached 9480 chars. Each row is also paid for TWICE —
+# once raw in `nudges`, once rendered into `summary` — so the accounting below
+# doubles it. Fifth tool in this pass to need a char budget beside its row cap.
+MAX_CHAT_CHARS = 5000
+
 # The filename daily_synthesis writes: `Daily-Synthesis-<YYYY-MM-DD>.md`. The
 # date comes from here rather than from anything inside the file — Python owns
 # date math (CLAUDE.md), and the writer already resolved the local calendar day.
@@ -84,7 +95,7 @@ def _parse_file(path: Path) -> list[str]:
             if line.strip().startswith("- ") and line.strip()[2:].strip()]
 
 
-def _render(rows: list, days: int) -> str:
+def _render(rows: list, days: int, total: int = None) -> str:
     """The rows as a finished answer the model relays instead of composing.
 
     Measured against the live model on the real 16-row archive, not precautionary.
@@ -100,11 +111,17 @@ def _render(rows: list, days: int) -> str:
         return (f"Nothing was suggested in the last {days} days. That is normal — "
                 "most days produce no nudge at all.")
     lines = [f"- **{row['date']}** — {row['text']}" for row in rows]
-    return (f"{len(rows)} suggestion(s) from the last {days} days:\n"
-            + "\n".join(lines))
+    # `total` is the count before the max_rows slice; len(rows) alone would
+    # state the shown count as the real one (see push_log._render).
+    if total is None or total == len(rows):
+        header = f"{len(rows)} suggestion(s) from the last {days} days:"
+    else:
+        header = (f"The {len(rows)} most recent of {total} suggestion(s) from the "
+                  f"last {days} days — ask about a shorter window to see them grouped:")
+    return header + "\n" + "\n".join(lines)
 
 
-def list_nudges(days: int = DEFAULT_DAYS) -> dict:
+def list_nudges(days: int = DEFAULT_DAYS, max_rows: int | None = MAX_CHAT_ROWS) -> dict:
     """The nudges pushed in the last `days` days, newest first, as flat
     {date, text} rows, plus `summary` — the same rows already formatted (see
     _render), which is what the model is told to reply with.
@@ -112,6 +129,14 @@ def list_nudges(days: int = DEFAULT_DAYS) -> dict:
     Flat rather than grouped by day because both callers want it that way:
     _render walks it once, and daily_synthesis only needs the text to compare
     against. `days` is clamped to MIN_DAYS..MAX_DAYS.
+
+    `max_rows` is Python-only, absent from TOOL_SCHEMA, and defaults to capped.
+    The payload carries every nudge twice — once raw, once inside `summary` — so
+    at the 90-day ceiling the model can ask for, it reached 8938 chars against
+    the loop's 8000 cap. `summary` was the LAST key, so the trim ate the end of
+    the one block that exists to stop the model inventing nudges it never sent.
+    tasks/daily_synthesis.py passes max_rows=None: it reads `nudges` to suppress
+    repeats and needs every row, and never goes near a context window.
 
     A day with no file (nothing genuine to say — the common case) simply isn't
     in the result. A missing directory is an error dict."""
@@ -140,7 +165,20 @@ def list_nudges(days: int = DEFAULT_DAYS) -> dict:
 
     # Newest first: the last thing she said is what's usually being asked about.
     rows.sort(key=lambda r: r["date"], reverse=True)
-    return {"nudges": rows, "days": days, "summary": _render(rows, days)}
+    total = len(rows)
+    if max_rows is not None:
+        kept, used = [], 0
+        for row in rows[:max_rows]:
+            used += len(str(row)) * 2  # raw row + its rendered copy in `summary`
+            if used > MAX_CHAT_CHARS and kept:
+                break
+            kept.append(row)
+        rows = kept
+    # summary leads, for the same reason it does in push_log: it's what the
+    # model relays, so it's what has to survive a trim. The raw rows are the
+    # redundant half.
+    return {"summary": _render(rows, days, total), "total": total,
+            "shown": len(rows), "days": days, "nudges": rows}
 
 
 TOOL_SCHEMA = {

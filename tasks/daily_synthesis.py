@@ -584,7 +584,7 @@ def recent_nudges(days: int, logger) -> list:
     be read. A missing or unreadable SYNTHESIS_DIR costs the repeat filter, never
     the run — the same per-source guard every other input here gets."""
     try:
-        result = list_nudges(days=days)
+        result = list_nudges(days=days, max_rows=None)  # suppression needs every row
     except Exception as e:
         logger.warning(f"nudge archive unavailable, not suppressing repeats: {e}")
         return []

@@ -183,3 +183,56 @@ def test_tool_description_says_silence_is_normal():
     # Without this the model reads an empty result as a fault and says something
     # is broken; no nudges on a given day is the common case.
     assert "normal" in nudges_mod.TOOL_SCHEMA["function"]["description"]
+
+
+# --- the relayed summary must not state the shown count as the real one ------
+# The payload carries every nudge twice (raw, and inside `summary`), so at the
+# 90-day ceiling the model can ask for it hit 8938 chars against the loop's 8000
+# cap — and `summary` was the LAST key, so the trim ate the end of the one block
+# that exists to stop the model inventing nudges it never sent.
+
+def test_a_capped_window_reports_the_true_total_not_the_shown_count(archive):
+    for i in range(nudges_mod.MAX_CHAT_ROWS + 10):
+        archive(i, f"nudge number {i}")
+
+    result = nudges_mod.list_nudges(days=nudges_mod.MAX_DAYS)
+
+    assert result["total"] == nudges_mod.MAX_CHAT_ROWS + 10   # everything there
+    assert result["shown"] == nudges_mod.MAX_CHAT_ROWS
+    header = result["summary"].splitlines()[0]
+    assert f"of {nudges_mod.MAX_CHAT_ROWS + 10} suggestion(s)" in header
+
+
+def test_an_uncapped_window_states_a_plain_count(archive):
+    archive(1, "one"), archive(2, "two")
+
+    header = nudges_mod.list_nudges()["summary"].splitlines()[0]
+    assert header.startswith("2 suggestion(s)")
+    assert "most recent of" not in header
+
+
+def test_the_summary_leads_so_a_trim_cannot_take_it(archive):
+    archive(1, "one")
+    keys = list(nudges_mod.list_nudges())
+    assert keys.index("summary") < keys.index("nudges")
+
+
+def test_the_capped_result_fits_the_tool_result_cap(archive):
+    import json
+
+    from agent.loop import MAX_TOOL_RESULT_CHARS
+    for i in range(nudges_mod.MAX_DAYS):
+        archive(i, "a fairly wordy synthesis suggestion about something " * 3)
+
+    result = nudges_mod.list_nudges(days=nudges_mod.MAX_DAYS)
+    assert len(json.dumps(result)) < MAX_TOOL_RESULT_CHARS
+
+
+def test_daily_synthesis_opts_out_and_gets_every_row(archive):
+    # It reads `nudges` to suppress repeats; a capped list would let an old
+    # nudge be re-sent.
+    for i in range(nudges_mod.MAX_CHAT_ROWS + 10):
+        archive(i, f"nudge number {i}")
+
+    result = nudges_mod.list_nudges(days=nudges_mod.MAX_DAYS, max_rows=None)
+    assert len(result["nudges"]) == nudges_mod.MAX_CHAT_ROWS + 10
