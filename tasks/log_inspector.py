@@ -67,7 +67,16 @@ STALL_HOURS = 1
 # Benign lines that would otherwise drown the signal. Everything else at
 # WARNING or above is reported — see _classify for why this is a denylist.
 NOISE = (
-    "result trimmed:",                          # the tool-result cap working as designed
+    # "result trimmed:" was here, described as "the cap working as designed".
+    # It wasn't. A trimmed result reads to the model as a complete one, so the
+    # cap firing is silent data loss: read_wiki_index shed 52232 chars a day for
+    # weeks, and Wren answered "SVPG isn't in your wiki" from a page whose SVPG
+    # section had been cut. This line was the only signal, and it was suppressed
+    # by definition. Same mistake, same fix, as "push failed, will retry" below.
+    #
+    # Suppression made sense while five tools trimmed routinely. Now every tool
+    # bounds its own result (agent/tools/*, loop.TOOL_RESULT_CHAR_CAPS), so a
+    # trim means one outgrew its budget — rare, and exactly worth a push.
     "login throttled",                          # the rate limiter working as designed
     "bg_resolve: rejected invalid or expired",  # expected: a stale ntfy button was tapped
     # "push failed, will retry" was here, on the theory that reminder_sweep's

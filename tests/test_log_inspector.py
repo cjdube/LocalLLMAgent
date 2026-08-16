@@ -108,13 +108,24 @@ def test_warm_model_failure_is_critical_despite_warning_level():
 
 
 @pytest.mark.parametrize("msg", [
-    "tool_call get_events_by_date result trimmed: 4654 chars over the 8000 cap",
     "login throttled for 127.0.0.1, retry after 29s",
     "bg_resolve: rejected invalid or expired token",
 ])
 def test_noise_is_never_reported(msg):
     _write_log("wren.log", _line(NOW - timedelta(hours=1), "WARNING", msg))
     assert log_inspector._scan_lines(NOW) == []
+
+
+def test_a_trimmed_tool_result_is_not_noise():
+    """It was suppressed as "the cap working as designed". It isn't: a trimmed
+    result reads to the model as a complete one, so the cap firing is silent
+    data loss — read_wiki_index shed 52232 chars a day for weeks behind this
+    line, and this line was the only signal. Same shape as the push-failure
+    regression below."""
+    _write_log("wren.log",
+               _line(NOW - timedelta(hours=1), "WARNING",
+                     "tool_call get_events_by_date result trimmed: 4654 chars over the 8000 cap"))
+    assert log_inspector._scan_lines(NOW) != []
 
 
 def test_repeated_push_failures_are_not_noise():
