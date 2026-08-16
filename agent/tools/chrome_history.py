@@ -83,6 +83,18 @@ def _chrome_ts_to_datetime(chrome_ts: int) -> datetime:
 # slugs whose tail carries no extra signal.
 _MAX_PATH_CHARS = 120
 
+# How many sites the chat path returns. Sites come back most-visited first, so
+# the cap drops the long tail of one-off visits rather than the day's substance.
+# One day of real browsing is ~90 sites and 8897 chars, over the loop's cap.
+MAX_CHAT_SITES = 60
+
+# And the budget that actually holds. A site row carries a title and up to
+# pages_per_domain paths, so 60 of them ran 8916 chars — still over the cap the
+# count was supposed to keep it under. Third time this pattern bit in one pass
+# (see calendar.MAX_CHAT_EVENT_CHARS, opportunities._LIST_CHARS): a count cap
+# bounds the number of rows, never their size.
+MAX_CHAT_SITE_CHARS = 6000
+
 
 def _extract_domain(url: str) -> str:
     """The host, without port or userinfo. Uses .hostname rather than .netloc:
@@ -183,12 +195,22 @@ def _filter_and_group(rows: list, pages_per_domain: int = 1) -> list:
 
 
 def fetch_chrome_history(start: str = None, end: str = None, days_ago: int = None,
-                         pages_per_domain: int = 1) -> dict:
+                         pages_per_domain: int = 1,
+                         max_sites: int | None = MAX_CHAT_SITES) -> dict:
     """Callable entrypoint used by the agent loop's tool dispatcher.
 
     `pages_per_domain` is a Python-only argument, deliberately absent from
     TOOL_SCHEMA: the model never sees it and chat's result shape is unchanged.
     tasks/daily_chrome_learnings.py passes it to get each domain's top paths.
+
+    `max_sites` is Python-only for the same reason, and defaults to capped
+    rather than whole: a single day of browsing is 8897 chars, over the loop's
+    8000-char tool-result cap, and the cut took `total_meaningful_visits` with
+    it — the count is the LAST key, so the model got a short list and nothing
+    saying it was short. The two batch callers (tasks/daily_chrome_learnings.py,
+    tasks/daily_synthesis.py) pass max_sites=None: they summarize the whole day
+    and have no context window to protect. Capped is the default so a new caller
+    is safe by accident rather than broken by it.
 
     Day boundaries are interpreted in the system's local timezone, not UTC, so
     "June 22" means local June 22 rather than a window shifted by the UTC
@@ -224,7 +246,28 @@ def fetch_chrome_history(start: str = None, end: str = None, days_ago: int = Non
         return {"error": f"sqlite error: {e}"}
 
     sites = _filter_and_group(rows, pages_per_domain=pages_per_domain)
-    return {"range": f"{start_date} to {end_date}", "sites": sites, "total_meaningful_visits": len(sites)}
+    if max_sites is None:
+        shown = sites
+    else:
+        shown, used = [], 0
+        for site in sites[:max_sites]:
+            used += len(str(site))
+            if used > MAX_CHAT_SITE_CHARS and shown:
+                break
+            shown.append(site)
+    # total_meaningful_visits leads now. It used to be the last key, so the one
+    # value that could have told the model its list was short was the first
+    # thing a trim removed.
+    out = {"range": f"{start_date} to {end_date}",
+           "total_meaningful_visits": len(sites),
+           "sites_shown": len(shown)}
+    if len(shown) < len(sites):
+        out["partial"] = (
+            f"Only the {len(shown)} most-visited of {len(sites)} sites are listed. "
+            "Do not describe this as everything he browsed."
+        )
+    out["sites"] = shown
+    return out
 
 
 def main() -> int:

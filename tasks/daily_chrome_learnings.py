@@ -83,7 +83,8 @@ def main() -> int:
         logger.info(f"Day: {day}")
 
         chrome_result = fetch_chrome_history(start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"),
-                                             pages_per_domain=MAX_PAGES_PER_SITE)
+                                             pages_per_domain=MAX_PAGES_PER_SITE,
+                                             max_sites=None)  # summarizes the whole day; no context window to protect
         logger.info(f"fetch_chrome_history -> {chrome_result}")
         chrome_sites = compact_sites(chrome_result.get("sites", []))
         logger.info(f"compacted chrome_sites to {len(chrome_sites)} of "

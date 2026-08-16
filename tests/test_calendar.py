@@ -169,3 +169,72 @@ def test_unresolvable_date_returns_an_error_not_a_crash(fake_events, pinned_toda
 
     assert "sometime next week" in result["error"]
     assert "events" not in result
+
+
+# --- get_events_by_date is bounded ------------------------------------------
+# Uncapped, a 7-week ask returned 181 events and 39KB against the loop's
+# 8000-char cap: the model saw a fifth of the calendar and described it as the
+# calendar. get_events_in_range stays whole — the colorizer needs every event.
+
+def _busy(n, summary_len=40):
+    """n events in the Google API's own shape — nested start/end, which is what
+    _FakeEvents hands back and get_events_in_range unpacks."""
+    return [{"id": f"evt-{i:04d}", "summary": "M" * summary_len,
+             "start": {"dateTime": f"2026-08-{(i % 28) + 1:02d}T09:00:00-04:00"},
+             "end": {"dateTime": f"2026-08-{(i % 28) + 1:02d}T10:00:00-04:00"},
+             "colorId": "4", "status": "confirmed"}
+            for i in range(n)]
+
+
+def test_a_long_range_is_capped_and_says_so(fake_events, pinned_today):
+    fake_events["events"] = _FakeEvents(existing_items=_busy(200))
+
+    result = cal.get_events_by_date("2026-08-01", "2026-08-28")
+
+    assert result["event_count"] == 200            # the true total survives
+    assert result["events_shown"] < 200
+    assert len(result["events"]) == result["events_shown"]
+    # The far end of the range is what's missing, and that reads like free time.
+    assert "do not describe it as free" in result["partial"].lower()
+
+
+def test_the_capped_result_fits_the_tool_result_cap(fake_events, pinned_today):
+    import json
+
+    from agent.loop import MAX_TOOL_RESULT_CHARS
+    # Long titles are what broke a count-only cap: the same 50 events ran 7827
+    # chars on one range and 8849 on another.
+    fake_events["events"] = _FakeEvents(existing_items=_busy(200, summary_len=90))
+
+    result = cal.get_events_by_date("2026-08-01", "2026-08-28")
+    assert len(json.dumps(result)) < MAX_TOOL_RESULT_CHARS
+
+
+def test_chat_events_drop_the_fields_only_the_tasks_use(fake_events, pinned_today):
+    fake_events["events"] = _FakeEvents(existing_items=_busy(3))
+
+    event = cal.get_events_by_date("2026-08-01", "2026-08-28")["events"][0]
+
+    assert set(event) == {"id", "summary", "start", "end"}
+    # id stays: recolor_event takes one.
+    assert event["id"] == "evt-0000"
+
+
+def test_a_short_range_comes_back_whole_with_no_partial_note(fake_events, pinned_today):
+    fake_events["events"] = _FakeEvents(existing_items=_busy(3))
+
+    result = cal.get_events_by_date("2026-08-01", "2026-08-28")
+
+    assert result["event_count"] == 3 and result["events_shown"] == 3
+    assert "partial" not in result
+
+
+def test_get_events_in_range_is_left_uncapped_for_the_tasks(fake_events):
+    # calendar_colorizer and daily_chrome_learnings need every event and every
+    # field; only the chat wrapper has a context window to protect.
+    fake_events["events"] = _FakeEvents(existing_items=_busy(200))
+
+    result = cal.get_events_in_range("2026-08-01T00:00:00", "2026-08-28T23:59:59")
+
+    assert result["event_count"] == 200 and len(result["events"]) == 200
+    assert "colorId" in result["events"][0] and "source_id" in result["events"][0]

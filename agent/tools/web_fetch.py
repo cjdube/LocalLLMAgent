@@ -124,13 +124,20 @@ def fetch_webpage(url: str = "", api_key: str = None, max_chars: int = None, **_
     truncated = len(markdown) > cap
     if truncated:
         markdown = markdown[:cap]
+    # `truncated` goes BEFORE the markdown it describes. It used to be appended
+    # last, and MAX_CHARS is the same 8000 as the loop's cap, so the wrapper put
+    # every truncated fetch ~520 chars over and the loop cut the tail — meaning
+    # the flag announcing the cut was the one thing the cut removed. 16 times in
+    # the logs. The loop now gives this tool room for its own cap plus the
+    # wrapper (loop.TOOL_RESULT_CHAR_CAPS), so neither should fire; the ordering
+    # is what makes that safe rather than lucky.
     out = {
         "url": url,
         "title": _first((data.get("metadata") or {}).get("title")),
-        "markdown": markdown,
     }
     if truncated:
         out["truncated"] = True
+    out["markdown"] = markdown
     return out
 
 

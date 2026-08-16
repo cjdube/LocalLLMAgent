@@ -65,6 +65,26 @@ LOG_TOOL_SCHEMA = {
     },
 }
 
+# get_events_by_date's own budget. Only the chat path is capped;
+# get_events_in_range stays whole for tasks/calendar_colorizer.py and
+# tasks/daily_chrome_learnings.py, which need every event and have no context
+# window to protect. Measured on the real calendar: ~3.2 events a day, so the
+# old uncapped result blew the 8000-char tool-result cap at about ten days —
+# a 7-week ask returned 181 events and 39KB, of which the model saw a fifth and
+# reported as the whole calendar. 50 covers a fortnight whole.
+MAX_CHAT_EVENTS = 50
+
+# ...and a char budget beside it, because a count cap alone doesn't bound the
+# result: event titles vary enough that the same 50 events ran 7827 chars over
+# one range and 8849 over another. The count cap is the cheap guard; this is the
+# one that actually holds. Same belt-and-braces pair as wiki.search_wiki.
+MAX_CHAT_EVENT_CHARS = 6000
+
+# Carried by get_events_in_range for the colorizer and the learnings task. Chat
+# needs none of them, and at ~90 chars an event they were most of the overflow.
+# `id` stays: recolor_event takes one.
+_TASK_ONLY_EVENT_FIELDS = ("colorId", "status", "source_id")
+
 # Single source of truth for category -> (colorId, color name), defined in
 # config/preferences.json. Also used by tasks/calendar_colorizer.py to build
 # its classification prompt.
@@ -211,12 +231,35 @@ def get_events_by_date(start: str, end: str) -> dict:
     result = get_events_in_range(start_dt.isoformat(), end_dt.isoformat())
     if "error" in result:
         return result
-    return {
+
+    events = result["events"]
+    shown, total = [], 0
+    for e in events[:MAX_CHAT_EVENTS]:
+        lean = {k: v for k, v in e.items() if k not in _TASK_ONLY_EVENT_FIELDS}
+        total += len(str(lean))
+        if total > MAX_CHAT_EVENT_CHARS and shown:
+            break
+        shown.append(lean)
+    out = {
         "resolved_start": start_dt.date().isoformat(),
         "resolved_end": end_dt.date().isoformat(),
         "range": _human_range(start_dt.date(), end_dt.date()),
-        **result,
+        # The true total, ahead of the list: if anything downstream still trims,
+        # the count is what has to survive.
+        "event_count": result["event_count"],
+        "events_shown": len(shown),
     }
+    if len(shown) < len(events):
+        # Events come back ordered by start time, so what's missing is the far
+        # end of the range — which reads exactly like a free fortnight.
+        out["partial"] = (
+            f"Only the first {len(shown)} of {result['event_count']} events fit; "
+            f"the last one shown starts {shown[-1]['start']}. The rest of the range "
+            "was NOT checked — do not describe it as free. Ask about a narrower "
+            "range to see the rest."
+        )
+    out["events"] = shown
+    return out
 
 
 def _human_range(start: date, end: date) -> str:

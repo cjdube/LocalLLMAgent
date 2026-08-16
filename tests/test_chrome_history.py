@@ -166,3 +166,72 @@ def test_pages_per_domain_is_not_exposed_to_the_model():
     # Python-only knob: the schema must not offer it, or the model may set it and
     # blow the tool-result cap in chat.
     assert "pages_per_domain" not in ch.TOOL_SCHEMA["function"]["parameters"]["properties"]
+
+
+# --- the chat path is bounded, the batch callers are not ---------------------
+# One day of real browsing is 8897 chars against the loop's 8000-char cap, and
+# total_meaningful_visits used to be the LAST key — so the trim took the count
+# that was the only sign the list was short.
+
+def _stub_sites(monkeypatch, n, title_len=60):
+    monkeypatch.setattr(ch, "_query_history", lambda start, end: [])
+    monkeypatch.setattr(
+        ch, "_filter_and_group",
+        lambda rows, pages_per_domain=1: [
+            {"domain": f"site-{i:03d}.example.com", "title": "T" * title_len,
+             "visit_count": n - i, "pages": [f"/path-{i}"]}
+            for i in range(n)
+        ],
+    )
+
+
+def test_chat_calls_are_capped_and_say_they_are_partial(monkeypatch):
+    monkeypatch.setenv("TIMEZONE", "America/New_York")
+    _stub_sites(monkeypatch, 200)
+
+    result = ch.fetch_chrome_history(days_ago=1)
+
+    assert result["total_meaningful_visits"] == 200      # the true total
+    assert result["sites_shown"] < 200
+    assert len(result["sites"]) == result["sites_shown"]
+    assert "not describe this as everything" in result["partial"].lower()
+
+
+def test_the_capped_result_fits_the_tool_result_cap(monkeypatch):
+    import json
+
+    from agent.loop import MAX_TOOL_RESULT_CHARS
+    monkeypatch.setenv("TIMEZONE", "America/New_York")
+    # Long titles: 60 sites was under the count cap and still 8916 chars.
+    _stub_sites(monkeypatch, 200, title_len=200)
+
+    result = ch.fetch_chrome_history(days_ago=1)
+    assert len(json.dumps(result)) < MAX_TOOL_RESULT_CHARS
+
+
+def test_the_count_leads_so_a_trim_cannot_take_it(monkeypatch):
+    monkeypatch.setenv("TIMEZONE", "America/New_York")
+    _stub_sites(monkeypatch, 200)
+
+    keys = list(ch.fetch_chrome_history(days_ago=1))
+    assert keys.index("total_meaningful_visits") < keys.index("sites")
+    assert keys.index("partial") < keys.index("sites")
+
+
+def test_batch_callers_opt_out_and_get_everything(monkeypatch):
+    # daily_chrome_learnings and daily_synthesis summarize the whole day.
+    monkeypatch.setenv("TIMEZONE", "America/New_York")
+    _stub_sites(monkeypatch, 200)
+
+    result = ch.fetch_chrome_history(days_ago=1, max_sites=None)
+
+    assert len(result["sites"]) == 200
+    assert "partial" not in result
+
+
+def test_a_short_day_is_not_marked_partial(monkeypatch):
+    monkeypatch.setenv("TIMEZONE", "America/New_York")
+    _stub_sites(monkeypatch, 5)
+
+    result = ch.fetch_chrome_history(days_ago=1)
+    assert result["sites_shown"] == 5 and "partial" not in result

@@ -221,3 +221,44 @@ def test_prune_drops_old_digested_keeps_interested():
     }
     opp._prune(data)
     assert [i["id"] for i in data["items"]] == ["c", "d", "e"]
+
+
+# --------------------------------------------------------------------------- #
+# the listing is bounded by chars, not just by row count
+# --------------------------------------------------------------------------- #
+
+def test_a_long_angle_cannot_push_the_listing_over_the_cap():
+    """_LIST_LIMIT alone had the real store at 7673 of the loop's 8000 chars —
+    95%, and one long `angle` from trimming. A row cap bounds how many rows come
+    back, never how big they are."""
+    import json
+
+    from agent.loop import MAX_TOOL_RESULT_CHARS
+    opp.insert_new_items([
+        _candidate(f"hn:{n}", "hiring", angle="why this fits " * 60,
+                   title="Head of Product, Platform Infrastructure " * 4)
+        for n in range(opp._LIST_LIMIT + 5)
+    ])
+
+    listed = opp.list_opportunities()
+
+    assert len(json.dumps(listed)) < MAX_TOOL_RESULT_CHARS
+    assert len(listed["opportunities"]) < opp._LIST_LIMIT  # chars bit before rows
+
+
+def test_the_listing_reports_the_true_total_and_that_it_is_partial():
+    opp.insert_new_items([_candidate(f"hn:{n}", "hiring") for n in range(opp._LIST_LIMIT + 5)])
+
+    listed = opp.list_opportunities()
+
+    assert listed["count"] == opp._LIST_LIMIT + 5          # everything in the store
+    assert listed["shown"] == len(listed["opportunities"])
+    assert "do not say these are all of them" in listed["partial"].lower()
+    keys = list(listed)
+    assert keys.index("count") < keys.index("opportunities")
+
+
+def test_a_small_store_is_not_marked_partial():
+    opp.insert_new_items([_candidate()])
+    listed = opp.list_opportunities()
+    assert listed["count"] == 1 and "partial" not in listed

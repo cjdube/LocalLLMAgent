@@ -53,6 +53,7 @@ _SETTABLE_STATUSES = ("interested", "dismissed")
 # closed, which stays as a badged reminder of an outreach already in flight.
 _PRUNE_AFTER_S = 30 * 24 * 3600
 _LIST_LIMIT = 20
+_LIST_CHARS = 5500
 
 
 LIST_OPPORTUNITIES_TOOL_SCHEMA = {
@@ -187,17 +188,28 @@ def list_opportunities(status: str = None, signal: str = None) -> dict:
     if signal:
         items = [i for i in items if i["signal"] == signal]
     newest_first = sorted(items, key=lambda i: i["first_seen"], reverse=True)
-    return {
-        "count": len(items),
-        # Capped: this listing lands in the model's context window.
-        "opportunities": [
-            {"id": i["id"], "signal": i["signal"], "status": i["status"],
-             "company": i["company"], "title": i.get("title") or "",
-             "score": i.get("score"), "angle": i.get("angle") or "",
-             "url": i.get("url") or "", "first_seen": i["first_seen"]}
-            for i in newest_first[:_LIST_LIMIT]
-        ],
-    }
+    # Capped: this listing lands in the model's context window. _LIST_LIMIT alone
+    # had it at 7673 chars of the loop's 8000 — 95%, and one long `angle` from
+    # breaking. The char budget is what actually bounds it; the count cap is the
+    # cheap guard beside it.
+    shown, total = [], 0
+    for i in newest_first[:_LIST_LIMIT]:
+        row = {"id": i["id"], "signal": i["signal"], "status": i["status"],
+               "company": i["company"], "title": i.get("title") or "",
+               "score": i.get("score"), "angle": i.get("angle") or "",
+               "url": i.get("url") or "", "first_seen": i["first_seen"]}
+        total += len(str(row))
+        if total > _LIST_CHARS and shown:
+            break
+        shown.append(row)
+    out = {"count": len(items), "shown": len(shown)}
+    if len(shown) < len(items):
+        out["partial"] = (
+            f"Showing the {len(shown)} newest of {len(items)} — filter by status or "
+            "signal to see others. Do not say these are all of them."
+        )
+    out["opportunities"] = shown
+    return out
 
 
 def update_opportunity(opportunity_id: str, status: str) -> dict:

@@ -126,3 +126,27 @@ def test_empty_markdown_is_an_error(monkeypatch):
     monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-k")
     monkeypatch.setattr(web_fetch.requests, "post", _post_stub(_ok_payload(markdown="  ")))
     assert "error" in web_fetch.fetch_webpage("https://example.com")
+
+
+def test_the_truncated_flag_comes_before_the_markdown_it_describes(monkeypatch):
+    """It used to be appended last. MAX_CHARS is the same 8000 as the loop's own
+    cap, so the wrapper put every truncated fetch ~520 chars over and the loop
+    cut the tail — deleting the one key that said the content was cut. 16 times
+    in the logs."""
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-k")
+    monkeypatch.setattr(web_fetch, "MAX_CHARS", 10)
+    monkeypatch.setattr(web_fetch.requests, "post", _post_stub(_ok_payload(markdown="x" * 50)))
+
+    keys = list(web_fetch.fetch_webpage("https://example.com"))
+    assert keys.index("truncated") < keys.index("markdown")
+
+
+def test_a_full_page_plus_its_wrapper_fits_the_tools_own_cap():
+    """The loop gives fetch_webpage room for MAX_CHARS plus the wrapper around
+    it, so the tool's deliberate cut is never re-cut by the blind one."""
+    import json
+
+    from agent.loop import TOOL_RESULT_CHAR_CAPS
+    biggest = {"url": "https://example.com/" + "u" * 200, "title": "T" * 300,
+               "truncated": True, "markdown": "x" * web_fetch.MAX_CHARS}
+    assert len(json.dumps(biggest)) < TOOL_RESULT_CHAR_CAPS["fetch_webpage"]

@@ -53,7 +53,15 @@ MAX_TOOL_RESULT_CHARS = int(os.getenv("OLLAMA_MAX_TOOL_RESULT_CHARS", "8000"))
 # MAX_PAGE_CHARS): the tool trims first, deliberately, keeping the [[link]]
 # footer and naming what it dropped. This cap is only the backstop, and if it
 # ever fires it undoes that careful trim by cutting the footer off again.
-TOOL_RESULT_CHAR_CAPS = {"read_wiki_page": 16000}
+TOOL_RESULT_CHAR_CAPS = {
+    "read_wiki_page": 16000,
+    # Not extra room for content — fetch_webpage already caps its own markdown
+    # at WEB_FETCH_MAX_CHARS (8000, the same number). This is room for the
+    # wrapper around it. Without it every truncated fetch landed ~520 over and
+    # the loop trimmed the tail of a result the tool had already trimmed on
+    # purpose.
+    "fetch_webpage": 9500,
+}
 
 
 class TurnCancelled(Exception):
