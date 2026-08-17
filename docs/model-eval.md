@@ -130,6 +130,28 @@ One finding that outlived the comparison: an empty final chat reply is logged
 and loop.py only warns at the `num_predict` cap. The user sees silence and the
 log shows a normal turn.
 
+### qwen3.8:27B — deferred, not rejected (2026-08-16)
+
+Started and **aborted after 12 of 78 runs**. `qwen3.8:27B` is a Q4_K_M **GGUF**
+build; the other three arms are **MLX**. It ran 30-142s per case against
+gemma4:26b-mlx's 3.5s median.
+
+Don't read that as a verdict on the model. The gap decomposes into two costs,
+only one of which belongs to qwen3.8:
+
+- its family is already slow on MLX — `qwen3.6:27b-mlx` measured 15.7s median,
+  4.5x gemma4:26b, which is the thinking-token cost
+- the GGUF packaging adds roughly another 4-6x on top of that on Apple silicon
+
+Comparing one GGUF arm against three MLX arms measures the packaging, not the
+model, so the run was stopped rather than published. It passed all 12 completed
+cases on correctness (right tool, right arguments, used the result) — one rep,
+weak evidence, but nothing suggesting it is worse.
+
+**Re-run it when an MLX build ships.** One command, no code changes:
+`--models qwen3.8:27b-mlx gemma4:26b-mlx`, then merge or compare against the
+existing raw file.
+
 ## Adding a case
 
 Chat cases go in `evals/cases_chat.py`: a prompt, the expected tool (or `None`),
