@@ -258,6 +258,23 @@ Listed for completeness, so they don't get confused with the ones above.
 | `agent/tools/background.py` | `_TOKEN_MAX_AGE_S` 3600, `_LIST_LIMIT` 20 | Approval-token expiry. |
 | `chat/insights.py` | `_MEMORY_TEXT_MAX` 300, `_WIKI_PAGES_MAX` 150 | Dashboard rendering only. |
 | HTTP timeouts | `web_fetch` 60s, `research` 15s, `opportunity_digest` 15s, `notify` 10s, `projects` git 10s, `games` probe 0.3s | Policy: **every HTTP call has an explicit timeout.** |
+| `launchd/local.wren.selfheal.plist` | `StartInterval` 3600 | How long a Homebrew Python upgrade can sit unrepaired. See below. |
+
+### The self-healer's one-hour window
+
+`reload-after-upgrade.sh` fingerprints the venv interpreter and reloads every
+agent that execs it as soon as that fingerprint changes — so an upgrade is
+normally repaired before any job has to fail. But the check only runs when
+`local.wren.selfheal` fires, and that is hourly.
+
+**The residual limit: a job whose scheduled fire time falls inside the gap
+between the upgrade and the next self-heal pass still dies at launch.** It gets
+caught by the older per-job `needs LWCR update` check on the following pass and
+re-run immediately, so the cost is a delay of up to an hour — not a lost run,
+and not the week that the same failure cost `opportunity_digest` on 2026-08-16.
+
+Do not close this by shortening the interval. The window is already small, the
+recovery is automatic, and the check costs a `launchctl` query per agent.
 
 ---
 

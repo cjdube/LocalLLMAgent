@@ -635,8 +635,24 @@ that never ran looks exactly like a job with nothing to do. The chat server has
 its own version of this: it keeps serving from the deleted path, and any module
 imported lazily afterwards raises `ModuleNotFoundError` (on 2026-08-13 that
 emptied the dashboard graphs and `/map` while the rest of the page worked).
-The script reloads only what's stale, skips jobs that are mid-run, and takes
-`--check` to report without changing anything.
+The script skips jobs that are mid-run, and takes `--check` to report without
+changing anything.
+
+It decides what's stale two ways. It records the interpreter's identity in
+`config/.interpreter_id`, and when that changes it reloads **every** agent that
+execs it — before any of them has to fail to prove it. It also still reloads
+any individual job launchd has flagged, and because a flagged job has by
+definition already missed its window, that job is re-run once immediately.
+Agents that don't use the venv interpreter (`colima`, `weighanchor`,
+`selfheal`) are left alone; bouncing `colima` would take the ntfy push server
+down with it.
+
+That second, per-job check used to be the only one, and on its own it always
+arrived too late: launchd sets the flag only *after* a job has tried to exec and
+failed, so a job that hadn't fired since the upgrade looked healthy and stayed
+broken until its next run — and that run was the one that died. The 2026-08-13
+07:41 upgrade cost each daily job a day and cost the two Sunday jobs
+(`starred_blurbs`, `opportunity_digest`) a full week.
 
 `local.wren.selfheal` runs it hourly so you don't have to remember. It stays
 silent unless it actually repairs something, in which case it pushes and writes
