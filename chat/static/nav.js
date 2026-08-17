@@ -15,6 +15,8 @@
     { href: "/opportunities", label: "opportunities" },
     { href: "/starred", label: "starred" },
     { href: "/games", label: "games" },
+    { href: "/wiki", label: "wiki" },
+    { href: "/wiki/lint", label: "lint" },
     { href: "/map", label: "map" },
   ];
 

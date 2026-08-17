@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wren Wiki Lint</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="alternate icon" type="image/png" href="/static/favicon-32.png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="stylesheet" href="/static/nav.css">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    color: #1f2328;
+    background: #f4f4f5;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    background: #ffffff;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  header img.logo { height: 38px; width: 38px; border-radius: 9px; display: block; }
+  header h1 { font-size: 17px; margin: 0; }
+  header .sub { font-size: 13px; color: #9ca3af; }
+  header .spacer { flex: 1; }
+
+  main { max-width: 1000px; margin: 0 auto; padding: 20px 18px 40px; }
+
+  .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+  .toolbar input {
+    flex: 1; min-width: 180px; padding: 8px 11px; font-size: 13px;
+    border: 1px solid #e5e7eb; border-radius: 9px; background: #fff; color: #1f2328;
+  }
+  .toolbar button {
+    padding: 8px 13px; font-size: 13px; font-weight: 600; cursor: pointer;
+    border: 1px solid #e5e7eb; border-radius: 9px; background: #fff; color: #374151;
+  }
+  .toolbar button:hover { background: #fafafa; }
+  .toolbar button#lintFix { border-color: #fde68a; background: #fffbeb; color: #92400e; }
+  .toolbar button:disabled { opacity: 0.5; cursor: default; }
+
+  #lintSummary { font-size: 13px; color: #6b7280; margin-bottom: 14px; }
+  #lintFixLog { font-size: 13px; color: #92400e; background: #fffbeb; border: 1px solid #fde68a;
+                border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; }
+  #lintFixLog:empty { display: none; }
+  #lintFixLog ul { margin: 6px 0 0; padding-left: 20px; }
+  #lintFixLog p { margin: 0; }
+
+  .lint-section { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; margin-bottom: 10px; overflow: hidden; }
+  .lint-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    width: 100%; padding: 12px 14px; font: inherit; font-weight: 600; font-size: 13px;
+    text-align: left; cursor: pointer; border: 0; background: none; color: #1f2328;
+  }
+  .lint-head:hover { background: #fafafa; }
+  .lint-section.is-clean .lint-head { color: #9ca3af; font-weight: 500; }
+  .lint-count { font-size: 12px; font-weight: 600; color: #b91c1c; background: #fef2f2;
+                border-radius: 999px; padding: 2px 9px; white-space: nowrap; }
+  .lint-section.is-clean .lint-count { color: #6b7280; background: #f3f4f6; font-weight: 400; }
+
+  .lint-items { list-style: none; margin: 0; padding: 0 14px 6px; }
+  .lint-item { padding: 9px 0; border-top: 1px solid #f1f2f4; font-size: 13px; line-height: 1.55; }
+  .lint-page { font-family: ui-monospace, Menlo, monospace; font-size: 12px; font-weight: 600;
+               color: #1f2328; background: #f3f4f6; border-radius: 6px; padding: 1px 6px; margin-right: 7px; }
+  .lint-text { color: #374151; }
+  .lint-actions { margin-left: 8px; white-space: nowrap; }
+  .lint-actions button, .lint-actions a {
+    font: inherit; font-size: 12px; color: #2563eb; background: none; border: 0;
+    padding: 0 5px; cursor: pointer; text-decoration: none;
+  }
+  .lint-peek {
+    margin: 8px 0 2px; padding: 11px 13px; max-height: 340px; overflow: auto;
+    background: #fafafa; border: 1px solid #eef0f2; border-radius: 9px;
+    font-family: ui-monospace, Menlo, monospace; font-size: 12px; line-height: 1.5;
+    white-space: pre-wrap; overflow-wrap: anywhere; color: #374151;
+  }
+  .lint-error { color: #b91c1c; font-size: 13px; padding: 14px 16px; background: #fff;
+                border: 1px solid #e5e7eb; border-radius: 12px; }
+
+  @media (max-width: 700px) {
+    .lint-actions { display: block; margin: 4px 0 0 0; }
+    .lint-actions button, .lint-actions a { padding: 0 10px 0 0; }
+  }
+</style>
+</head>
+<body>
+  <header>
+    <img class="logo" src="/static/favicon.svg" alt="Wren">
+    <h1>Wren</h1>
+    <span class="sub">wiki lint</span>
+    <span class="spacer"></span>
+    <nav id="wren-nav" class="wren-nav"></nav>
+  </header>
+
+  <main>
+    <div class="toolbar">
+      <input id="lintFilter" type="search" placeholder="Filter findings…" autocomplete="off">
+      <button id="lintRecheck" type="button">Re-check</button>
+      <button id="lintFix" type="button" hidden>Apply safe fixes</button>
+    </div>
+    <div id="lintSummary">Checking…</div>
+    <div id="lintFixLog"></div>
+    <div id="lintSections"></div>
+  </main>
+
+<script src="/static/nav.js"></script>
+<script src="/static/wiki-lint.js"></script>
+</body>
+</html>

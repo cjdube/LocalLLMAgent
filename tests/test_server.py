@@ -72,6 +72,7 @@ _AUTH_EXEMPT = {
 _LOGIN_PAGE_ENDPOINTS = {
     "index", "dashboard", "games_page", "logs_page", "map_page",
     "memories_page", "opportunities_page", "starred_page",
+    "wiki_page", "wiki_lint_page",
 }
 # A game's bundle is a browser navigation too, but redirects to "/" instead of
 # rendering the form inline (routes_games.py avoids importing LOGIN_PAGE, which
@@ -84,7 +85,7 @@ _REDIRECT_ENDPOINTS = {"games.game_asset"}
 _URL_ARGS = {
     "task_key": "morning_brief", "run_id": "someid", "item_id": "abc",
     "watch_id": "abc", "game_id": "weigh-anchor", "asset": "index.html",
-    "endpoint": "decide", "filename": "favicon.svg",
+    "endpoint": "decide", "filename": "favicon.svg", "name": "some-page",
 }
 
 

@@ -518,6 +518,42 @@ think with the same local model chat uses (so game turns and chat turns queue
 behind each other) and which is *cooperative* at two seats by design. Adding a
 game is a registry entry plus a plist. See [docs/games.md](docs/games.md).
 
+### Wiki graph
+
+`http://127.0.0.1:8420/wiki` (same auth as the dashboard) draws the learnings
+vault as a link graph on a canvas — pages as nodes, `[[links]]` as edges, sized by
+how connected each page is and coloured by kind (concept, daily log, lens,
+project). Pan, zoom, and tap a page to dim everything but its neighbours and read
+its summary, its links, and its full text. Filters hide the ~100 dated daily logs
+by default, which is the difference between a map and a hairball; `orphans only`
+finds pages nothing links to.
+
+`/wiki?page=<slug>` opens on a page, which is how each finding on `/wiki/lint`
+links here. Backed by `GET /api/wiki/graph` in `chat/routes_wiki.py` over
+`chat/wikigraph.py`; `index.md` is deliberately not a node.
+See [docs/wiki-graph.md](docs/wiki-graph.md).
+
+### Wiki lint
+
+`http://127.0.0.1:8420/wiki/lint` (same auth as the dashboard) is the learnings
+vault's structural audit, on demand. The checks themselves belong to the sibling
+ObsidianWikiAgent repo and also run on a schedule (Sundays 10:00) — this view
+runs the same pass now and renders it as collapsible sections instead of a
+400 KB launchd log. **Checks that pass still appear**, reading `0 — clean`, so a
+quiet week is visibly a quiet week rather than an empty report. Each finding
+links to the page it names: **peek** reads it inline, **graph** opens it in
+`/wiki`.
+
+**Apply safe fixes** is the only thing in Wren that writes to the vault. It
+strips self-links and de-links dead `index.md` entries — never a judgment call —
+behind a confirm, and logs what it wrote. The button stays hidden when there is
+nothing mechanical to fix.
+
+Backed by `GET /api/wiki/lint`, `POST /api/wiki/lint/fix` and
+`GET /api/wiki/page/<name>` in `chat/routes_wiki.py`, over `chat/wikilint.py`.
+The multi-minute model pass is deliberately not offered here.
+See [docs/wiki-lint.md](docs/wiki-lint.md).
+
 ### System map
 
 `http://127.0.0.1:8420/map` is an explorable radial visualization of the whole

@@ -124,6 +124,7 @@ from agent.tools import projects as _projects_tool
 from agent.tools import push_log as _push_log
 from agent.tools import reminders as _reminders
 from chat import insights as _insights
+from chat import wikilint as _wikilint
 from evals import run_eval as _run_eval
 from tasks import _chat_transcripts as _chat_transcripts
 from tasks import _common
@@ -421,6 +422,35 @@ def _isolate_projects_dir(tmp_path, monkeypatch):
     env on every call, so the env var is enough; test_projects.py points it at
     its own fixture tree per-test."""
     monkeypatch.setenv("PROJECTS_DIR", str(tmp_path / "projects_dir"))
+
+
+@pytest.fixture(autouse=True)
+def _block_wiki_lint_subprocess(monkeypatch):
+    """Stop any test from shelling out to the sibling lint repo.
+
+    chat/wikilint.py runs ObsidianWikiAgent's wiki_lint.py as a subprocess, and
+    `run_lint(fix=True)` makes that subprocess WRITE to the vault — the only
+    write path Wren has into the user's notes. WIKI_VAULT_PATH is redirected
+    above, so the writes would land in tmp_path; this is the second lock on the
+    same door, because that redirect is an env var the child process inherits
+    and a child is exactly what escapes monkeypatch teardown (see the daemon
+    thread incident at the top of this file).
+
+    It also keeps the suite honest in the ordinary case: without it, every test
+    touching /wiki/lint would spawn a real interpreter from a sibling checkout,
+    so the result would depend on whether that checkout exists on this machine.
+    tests/test_wikilint.py patches subprocess.run itself to exercise the parsing.
+    """
+    def _no_subprocess(fix: bool = False):
+        raise AssertionError(
+            "chat.wikilint.run_lint was called in a test without a stub — it "
+            "spawns the sibling lint repo, and fix=True writes to a vault."
+        )
+
+    monkeypatch.setattr(_wikilint, "run_lint", _no_subprocess)
+    # The cache is module state and survives between tests: a real payload
+    # cached by one test would be served to the next without run_lint firing.
+    _wikilint._LINT_CACHE.clear()
 
 
 @pytest.fixture(autouse=True)

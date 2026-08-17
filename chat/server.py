@@ -60,6 +60,7 @@ from chat.routes_games import games_bp
 from chat.routes_logs import logs_bp
 from chat.routes_opportunities import opportunities_bp
 from chat.routes_starred import starred_bp
+from chat.routes_wiki import wiki_bp
 from tasks._common import setup_logger
 from tasks.morning_brief import brief_dispatch
 from tasks.opportunity_digest import digest_dispatch
@@ -182,15 +183,17 @@ app.config["SESSION_COOKIE_SECURE"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
 # The read-only dashboard/scheduler API, the opportunities triage API, the games
-# surface, the log viewer and the starred-repo API live in their own blueprint
-# modules (see chat/routes_dashboard.py, chat/routes_opportunities.py,
-# chat/routes_games.py, chat/routes_logs.py, chat/routes_starred.py); the
-# conversation engine and auth stay here.
+# surface, the log viewer, the starred-repo API and the wiki lint/graph API live
+# in their own blueprint modules (see chat/routes_dashboard.py,
+# chat/routes_opportunities.py, chat/routes_games.py, chat/routes_logs.py,
+# chat/routes_starred.py, chat/routes_wiki.py); the conversation engine and auth
+# stay here.
 app.register_blueprint(dashboard_bp)
 app.register_blueprint(opportunities_bp)
 app.register_blueprint(games_bp)
 app.register_blueprint(logs_bp)
 app.register_blueprint(starred_bp)
+app.register_blueprint(wiki_bp)
 
 @app.after_request
 def _security_headers(resp):
@@ -833,6 +836,22 @@ def logs_page():
     if not _authenticated():
         return LOGIN_PAGE.format(error="")
     return send_from_directory(STATIC_DIR, "logs.html")
+
+
+@app.route("/wiki", methods=["GET"])
+def wiki_page():
+    if not _authenticated():
+        return LOGIN_PAGE.format(error="")
+    return send_from_directory(STATIC_DIR, "wiki.html")
+
+
+@app.route("/wiki/lint", methods=["GET"])
+def wiki_lint_page():
+    # The page lives here with the other views; the lint and page-read JSON API
+    # is the wiki blueprint's (chat/routes_wiki.py).
+    if not _authenticated():
+        return LOGIN_PAGE.format(error="")
+    return send_from_directory(STATIC_DIR, "wiki-lint.html")
 
 
 @app.route("/games", methods=["GET"])
