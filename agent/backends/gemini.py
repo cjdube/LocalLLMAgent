@@ -42,9 +42,12 @@ def _gemini_contents(messages: list[dict]):
     the emitting assistant turn) with its call name to build the matching
     functionResponse.
 
-    The canonical `tool` message carries no call id (see _execute_tool_call), so
-    pairing is positional — hence the per-turn reset below rather than a global
-    FIFO queue."""
+    A canonical `tool` message names the call it answers in `tool_name` (see
+    _execute_tool_call), which is used directly when present. It still carries
+    no call *id*, so a message without `tool_name` — built before that field
+    existed, or replayed from another backend by the escalation path — falls
+    back to positional pairing, hence the per-turn reset below rather than a
+    global FIFO queue."""
     from google.genai import types
 
     system_parts: list[str] = []
@@ -94,7 +97,10 @@ def _gemini_contents(messages: list[dict]):
             if parts:
                 contents.append(types.Content(role="model", parts=parts))
         elif role == "tool":
-            name = pending_names.pop(0) if pending_names else "tool"
+            # Still pop, even when tool_name is present, so the positional queue
+            # stays aligned for any later result that lacks one.
+            positional = pending_names.pop(0) if pending_names else "tool"
+            name = m.get("tool_name") or positional
             contents.append(types.Content(role="user", parts=[
                 types.Part.from_function_response(name=name, response=_coerce_response(m.get("content")))]))
     system = "\n\n".join(system_parts) if system_parts else None

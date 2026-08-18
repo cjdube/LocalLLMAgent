@@ -69,7 +69,8 @@ def test_log_event_with_source_id_stamps_the_extended_property(fake_events):
     result = cal.log_calendar_event("Run", "2026-07-10T08:00:00", "2026-07-10T09:00:00",
                                     source_id="strava-42", color_id="4")
 
-    assert result == {"event_id": "new-event", "html_link": "https://cal/new-event"}
+    assert result["event_id"] == "new-event"
+    assert result["html_link"] == "https://cal/new-event"
     body = events.inserted[0]
     # The property queried by the dedupe lookup must be the one stamped here —
     # this pairing IS the idempotency guarantee.
@@ -238,3 +239,37 @@ def test_get_events_in_range_is_left_uncapped_for_the_tasks(fake_events):
 
     assert result["event_count"] == 200 and len(result["events"]) == 200
     assert "colorId" in result["events"][0] and "source_id" in result["events"][0]
+
+
+# --- the human "when" echoed back to the model --------------------------------
+# A write result of two opaque ids gave the model no evidence its event existed,
+# so it re-issued the write and drew a second confirmation card. Same convention
+# as _human_due in google_tasks.py: the tool states the time it used.
+
+def test_log_event_echoes_back_what_it_wrote(fake_events, monkeypatch):
+    monkeypatch.setenv("TIMEZONE", "America/New_York")
+
+    result = cal.log_calendar_event("do yardwork", "2026-08-19T10:00:00",
+                                    "2026-08-19T11:00:00")
+
+    assert result["created"] is True
+    assert result["summary"] == "do yardwork"
+    assert result["when"] == "Wednesday, August 19, 2026, 10:00 AM to 11:00 AM"
+
+
+def test_when_spells_out_both_days_for_an_overnight_event(fake_events, monkeypatch):
+    monkeypatch.setenv("TIMEZONE", "America/New_York")
+
+    result = cal.log_calendar_event("red-eye", "2026-08-19T22:00:00",
+                                    "2026-08-20T06:00:00")
+
+    assert result["when"] == ("Wednesday, August 19, 2026, 10:00 PM to "
+                              "Thursday, August 20, 2026, 6:00 AM")
+
+
+def test_an_unparseable_time_degrades_instead_of_failing_the_write(fake_events):
+    # "when" is a display string; a write that Google accepted must not fail on it.
+    result = cal.log_calendar_event("odd", "whenever", "later")
+
+    assert result["created"] is True
+    assert result["when"] == "whenever to later"

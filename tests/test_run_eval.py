@@ -9,6 +9,7 @@ import logging
 
 import pytest
 
+from agent.toolset import WRITE_TOOLS
 from evals import run_eval
 from evals.cases_chat import CASES as CHAT_CASES
 from evals.cases_tasks import CASES as TASK_CASES
@@ -463,3 +464,34 @@ def test_upcoming_event_case_rejects_the_wrong_day():
     assert _day(1).strftime("%A").lower() in forbidden
     # ...and never the correct day's own name.
     assert _day(2).strftime("%A").lower() not in forbidden
+
+
+# --- the continuation turn, which nothing measured before 2026-08-18 ----------
+
+def test_score_chat_flags_a_repeated_confirmation():
+    case = {"expect_tool": "log_calendar_event"}
+    calls = [{"name": "log_calendar_event", "arguments": {}}]
+
+    clean = run_eval.score_chat(case, calls, "Done.", reconfirmed=False)
+    repeat = run_eval.score_chat(case, calls, "Done.", reconfirmed=True)
+
+    assert clean["no_repeat_confirm_ok"] is True
+    assert repeat["no_repeat_confirm_ok"] is False
+
+
+def test_score_chat_leaves_the_repeat_check_unasked_for_normal_cases():
+    """None, not False — a case that stops at the first card never tested it."""
+    case = {"expect_tool": "fetch_weather"}
+    score = run_eval.score_chat(case, [{"name": "fetch_weather", "arguments": {}}], "78F")
+
+    assert score["no_repeat_confirm_ok"] is None
+
+
+def test_the_confirm_cases_cover_both_decisions():
+    """One approve and one decline: the two halves of the loop had different
+    causes (an unlabelled result, and a decline shaped like a failure)."""
+    confirm_cases = [c for c in CHAT_CASES if c.get("confirm")]
+
+    assert {c["confirm"] for c in confirm_cases} == {"approve", "decline"}
+    # Pointless unless the tool actually pauses.
+    assert all(c["expect_tool"] in WRITE_TOOLS for c in confirm_cases)

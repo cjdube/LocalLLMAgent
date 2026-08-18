@@ -669,6 +669,27 @@ def test_gemini_pairing_survives_a_dropped_batched_call(monkeypatch):
     assert responses[1].response == {"reminders": []}
 
 
+def test_gemini_prefers_the_tool_name_on_the_result(monkeypatch):
+    # _execute_tool_call now stamps tool_name; the positional fallback above
+    # stays for messages built before it, or replayed from another backend by
+    # the escalation path. Here the name is authoritative even though the
+    # positional queue would have picked the other call.
+    captured = _patch_gemini(monkeypatch, [[_FakeChunk(parts=[_FakePart(text="ok")])]])
+    messages = [
+        {"role": "user", "content": "send it and check the weather"},
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"function": {"name": "send_email", "arguments": {"subject": "hi"}}},
+            {"function": {"name": "fetch_weather", "arguments": {"city": "Boston"}}}]},
+        {"role": "tool", "tool_name": "fetch_weather", "content": '{"temp": 70}'},
+    ]
+
+    loop._gemini_chat(messages, tools=[])
+
+    responses = [p.function_response for c in captured["calls"][0]["contents"]
+                 for p in c.parts if getattr(p, "function_response", None)]
+    assert [r.name for r in responses] == ["fetch_weather"]
+
+
 def test_gemini_should_cancel_interrupts(monkeypatch):
     stream = [_FakeChunk(parts=[_FakePart(text="partial")]), _FakeChunk(parts=[])]
     _patch_gemini(monkeypatch, [stream])
@@ -782,3 +803,258 @@ def test_advance_resends_mutated_tools_list_next_iteration(monkeypatch):
     assert result == {"type": "final", "text": "done"}
     assert calls_tools_seen[0] == ["grow"]                 # first call: pre-load list
     assert calls_tools_seen[1] == ["grow", "late_tool"]    # second call: expanded
+
+
+# --------------------------------------------------------------------------- #
+# The repeated-confirmation guard.
+#
+# 2026-08-18: "add a calendar event" produced a confirmation card, created the
+# event, then produced three more cards for the same write — declining each one
+# only fed the next. MAX_TOOL_ITERATIONS bounds the loop INSIDE one advance()
+# call, but a gated call returns out of advance(), so the counter reset on every
+# continuation and the pause/resolve chain had no bound at all.
+# --------------------------------------------------------------------------- #
+
+GATED = frozenset({"log_calendar_event"})
+EVENT_ARGS = {"summary": "do yardwork", "start": "2026-08-19T10:00:00",
+              "end": "2026-08-19T11:00:00"}
+
+
+def _gated_tools():
+    return [{"type": "function",
+             "function": {"name": "log_calendar_event", "parameters": {}}}]
+
+
+def _gated_call(args):
+    return {"function": {"name": "log_calendar_event", "arguments": args}}
+
+
+def _assistant(args):
+    return {"role": "assistant", "content": "",
+            "tool_calls": [_gated_call(args)]}
+
+
+def _script(monkeypatch, replies):
+    """Drive advance() with a fixed sequence of assistant messages; the last one
+    repeats if the loop asks for more."""
+    step = {"n": 0}
+
+    def fake_post(url, json=None, timeout=None, stream=None):
+        msg = replies[min(step["n"], len(replies) - 1)]
+        step["n"] += 1
+        return _FakeResponse([{"message": msg, "done": True}])
+
+    monkeypatch.setattr(loop.requests, "post", fake_post)
+    return step
+
+
+def _counting_dispatch():
+    calls = []
+
+    def log_calendar_event(**kwargs):
+        calls.append(kwargs)
+        return {"created": True, "when": "Wednesday, August 19, 2026, 10:00 AM to 11:00 AM"}
+
+    return {"log_calendar_event": log_calendar_event}, calls
+
+
+def test_a_confirmed_write_re_emitted_verbatim_is_not_offered_again(monkeypatch, caplog):
+    """The reported bug: tap Confirm, the event is created, and the very next
+    model turn asks you to confirm the identical write."""
+    dispatch, executed = _counting_dispatch()
+    _script(monkeypatch, [_assistant(EVENT_ARGS), _assistant(EVENT_ARGS),
+                          {"role": "assistant", "content": "Done — 10 AM Wednesday."}])
+    logger = logging.getLogger("test_loop.repeat_confirm")
+
+    messages = [{"role": "user", "content": "put yardwork on for 10"}]
+    paused = loop.advance(messages, _gated_tools(), dispatch, confirm_before=GATED)
+    assert paused["type"] == "confirm"
+    loop.resolve(messages, paused["call"], True, dispatch)
+
+    with caplog.at_level(logging.WARNING, logger=logger.name):
+        result = loop.advance(messages, _gated_tools(), dispatch,
+                              confirm_before=GATED, logger=logger)
+
+    assert result == {"type": "final", "text": "Done — 10 AM Wednesday."}
+    assert len(executed) == 1  # the repeat was suppressed, not run a second time
+    assert "suppressed a repeat confirmation" in caplog.text
+    assert "already approved" in caplog.text
+
+
+def test_a_declined_write_re_emitted_verbatim_is_not_offered_again(monkeypatch, caplog):
+    """The other half of the loop: declining used to look like a tool failure,
+    so the model retried and drew a fresh card."""
+    dispatch, executed = _counting_dispatch()
+    _script(monkeypatch, [_assistant(EVENT_ARGS), _assistant(EVENT_ARGS),
+                          {"role": "assistant", "content": "Cancelled."}])
+    logger = logging.getLogger("test_loop.repeat_decline")
+
+    messages = [{"role": "user", "content": "put yardwork on for 10"}]
+    paused = loop.advance(messages, _gated_tools(), dispatch, confirm_before=GATED)
+    loop.resolve(messages, paused["call"], False, dispatch)
+
+    with caplog.at_level(logging.WARNING, logger=logger.name):
+        result = loop.advance(messages, _gated_tools(), dispatch,
+                              confirm_before=GATED, logger=logger)
+
+    assert result == {"type": "final", "text": "Cancelled."}
+    assert executed == []  # a declined action stays undone
+    assert "already declined" in caplog.text
+
+
+def test_key_order_alone_does_not_defeat_the_repeat_guard(monkeypatch):
+    dispatch, executed = _counting_dispatch()
+    reordered = {"end": EVENT_ARGS["end"], "start": EVENT_ARGS["start"],
+                 "summary": EVENT_ARGS["summary"]}
+    _script(monkeypatch, [_assistant(EVENT_ARGS), _assistant(reordered),
+                          {"role": "assistant", "content": "Done."}])
+
+    messages = [{"role": "user", "content": "yardwork"}]
+    paused = loop.advance(messages, _gated_tools(), dispatch, confirm_before=GATED)
+    loop.resolve(messages, paused["call"], True, dispatch)
+    result = loop.advance(messages, _gated_tools(), dispatch, confirm_before=GATED)
+
+    assert result["type"] == "final"
+    assert len(executed) == 1
+
+
+def test_a_corrected_write_still_gets_its_own_confirmation(monkeypatch):
+    """The guard must not swallow a genuine second intent — a model fixing its
+    own wrong time is a different action and still needs the user's tap."""
+    dispatch, _ = _counting_dispatch()
+    corrected = {**EVENT_ARGS, "start": "2026-08-19T14:00:00"}
+    _script(monkeypatch, [_assistant(EVENT_ARGS), _assistant(corrected)])
+
+    messages = [{"role": "user", "content": "yardwork"}]
+    paused = loop.advance(messages, _gated_tools(), dispatch, confirm_before=GATED)
+    loop.resolve(messages, paused["call"], True, dispatch)
+    second = loop.advance(messages, _gated_tools(), dispatch, confirm_before=GATED)
+
+    assert second["type"] == "confirm"
+    assert second["call"]["function"]["arguments"]["start"] == "2026-08-19T14:00:00"
+
+
+def test_a_new_user_message_starts_the_guard_over(monkeypatch):
+    """The guard is scoped to the current user-turn: asking for the same event
+    again later is a new request, not a repeat."""
+    dispatch, _ = _counting_dispatch()
+    _script(monkeypatch, [_assistant(EVENT_ARGS)])
+
+    messages = [{"role": "user", "content": "yardwork"}]
+    paused = loop.advance(messages, _gated_tools(), dispatch, confirm_before=GATED)
+    loop.resolve(messages, paused["call"], True, dispatch)
+
+    messages.append({"role": "user", "content": "actually add it again"})
+    again = loop.advance(messages, _gated_tools(), dispatch, confirm_before=GATED)
+
+    assert again["type"] == "confirm"
+
+
+def test_the_pause_cap_bounds_a_chain_of_differing_writes(monkeypatch, caplog):
+    """Exact-match dedupe alone would not stop a model that varied the end time
+    by a minute, so the number of confirmations one turn may ask for is capped."""
+    dispatch, executed = _counting_dispatch()
+    varied = [{**EVENT_ARGS, "end": f"2026-08-19T11:0{i}:00"} for i in range(5)]
+    _script(monkeypatch, [_assistant(v) for v in varied]
+                         + [{"role": "assistant", "content": "Stopping."}])
+    logger = logging.getLogger("test_loop.pause_cap")
+
+    messages = [{"role": "user", "content": "yardwork"}]
+    pauses = 0
+    with caplog.at_level(logging.WARNING, logger=logger.name):
+        while True:
+            result = loop.advance(messages, _gated_tools(), dispatch,
+                                  confirm_before=GATED, logger=logger)
+            if result["type"] != "confirm":
+                break
+            pauses += 1
+            assert pauses <= loop.MAX_GATED_PAUSES_PER_TURN  # never runs away
+            loop.resolve(messages, result["call"], True, dispatch)
+
+    assert pauses == loop.MAX_GATED_PAUSES_PER_TURN
+    assert result == {"type": "final", "text": "Stopping."}
+    assert len(executed) == loop.MAX_GATED_PAUSES_PER_TURN
+    assert "which is the limit" in caplog.text or "cap 3" in caplog.text
+
+
+def test_a_decline_is_not_shaped_like_a_tool_failure(monkeypatch):
+    """{"error": ...} is what a crashed tool returns, and retrying a failure is
+    correct model behaviour — which is why a decline used to draw a new card."""
+    messages = []
+    loop.resolve(messages, _gated_call(EVENT_ARGS), False, {})
+
+    result = _json.loads(messages[0]["content"])
+    assert "error" not in result
+    assert result["declined"] is True
+    assert messages[0]["tool_name"] == "log_calendar_event"
+
+
+def test_an_executed_tool_result_names_the_call_it_answers(monkeypatch):
+    """Without tool_name the model sees an unlabelled blob after its own
+    tool_call and can't tell the call ran."""
+    messages = []
+    loop._execute_tool_call(_gated_call(EVENT_ARGS), {"log_calendar_event": lambda **k: {"ok": True}},
+                            messages, None)
+
+    assert messages[0]["tool_name"] == "log_calendar_event"
+    assert messages[0]["role"] == "tool"
+
+
+def test_suppressed_calls_are_not_offered_as_ungated_execution(monkeypatch):
+    """A suppressed repeat must stay unexecuted — the whole point is that the
+    user's single tap authorised exactly one write."""
+    dispatch, executed = _counting_dispatch()
+    _script(monkeypatch, [_assistant(EVENT_ARGS), _assistant(EVENT_ARGS),
+                          {"role": "assistant", "content": "Done."}])
+
+    messages = [{"role": "user", "content": "yardwork"}]
+    paused = loop.advance(messages, _gated_tools(), dispatch, confirm_before=GATED)
+    loop.resolve(messages, paused["call"], True, dispatch)
+    loop.advance(messages, _gated_tools(), dispatch, confirm_before=GATED)
+
+    suppressed = [m for m in messages
+                  if m.get("role") == "tool" and '"not_run": true' in m["content"]]
+    assert len(suppressed) == 1
+    assert len(executed) == 1
+
+
+def test_a_third_emission_inherits_the_suppressed_calls_story(monkeypatch):
+    """A model that ignores the first suppression and emits the call a third
+    time reads back the not_run result. It must inherit the ORIGINAL outcome —
+    telling it the write "succeeded" when it was suppressed would be a lie, and
+    telling it "declined" after an approval would be worse."""
+    dispatch, executed = _counting_dispatch()
+    # Two more identical emissions after the confirmed one, then a final.
+    _script(monkeypatch, [_assistant(EVENT_ARGS), _assistant(EVENT_ARGS),
+                          _assistant(EVENT_ARGS),
+                          {"role": "assistant", "content": "Done."}])
+
+    messages = [{"role": "user", "content": "yardwork"}]
+    paused = loop.advance(messages, _gated_tools(), dispatch, confirm_before=GATED)
+    loop.resolve(messages, paused["call"], True, dispatch)
+    result = loop.advance(messages, _gated_tools(), dispatch, confirm_before=GATED)
+
+    assert result["type"] == "final"
+    assert len(executed) == 1  # still exactly the one write the user authorised
+    suppressed = [_json.loads(m["content"]) for m in messages
+                  if m.get("role") == "tool" and '"not_run"' in m["content"]]
+    assert len(suppressed) == 2
+    assert all(s["already"] == "approved" for s in suppressed)
+
+
+def test_a_suppressed_call_past_the_cap_is_labelled_capped(monkeypatch):
+    dispatch, _ = _counting_dispatch()
+    varied = [{**EVENT_ARGS, "end": f"2026-08-19T11:0{i}:00"} for i in range(4)]
+    _script(monkeypatch, [_assistant(v) for v in varied]
+                         + [{"role": "assistant", "content": "Stopping."}])
+
+    messages = [{"role": "user", "content": "yardwork"}]
+    while True:
+        result = loop.advance(messages, _gated_tools(), dispatch, confirm_before=GATED)
+        if result["type"] != "confirm":
+            break
+        loop.resolve(messages, result["call"], True, dispatch)
+
+    capped = [_json.loads(m["content"]) for m in messages
+              if m.get("role") == "tool" and '"not_run"' in m["content"]]
+    assert capped and capped[0]["already"] == "capped"

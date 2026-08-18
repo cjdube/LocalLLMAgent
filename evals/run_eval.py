@@ -11,7 +11,9 @@ would be measuring settings Wren doesn't run under.
 Nothing here touches production state:
 
   * tool dispatch is stubbed, so no Google/Strava/mail/web call is ever made
-  * confirmation-gated tools stop inside advance() and execute nothing
+  * confirmation-gated tools stop inside advance(); a case with "confirm" set
+    answers that pause and continues the turn, but through the same stubbed
+    dispatch, so an "approved" write still reaches nothing real
   * results go to evals/results/, never to config/ or logs/
   * the per-case logger has propagate=False, so nothing reaches logs/wren.log
 
@@ -31,7 +33,7 @@ from pathlib import Path
 
 import requests
 
-from agent.loop import OllamaUnavailable, advance, complete_text, warm_model
+from agent.loop import OllamaUnavailable, advance, complete_text, resolve, warm_model
 from agent.toolset import DISPATCH, TOOL_GROUPS, WRITE_TOOLS, groups_for_message, tools_for
 from evals.cases_chat import CASES as CHAT_CASES, DEFAULT_TOOL_RESULT
 from evals.cases_tasks import CASES as TASK_CASES
@@ -160,9 +162,14 @@ def tool_calls_made(messages: list[dict]) -> list[dict]:
 # Scoring
 # --------------------------------------------------------------------------- #
 
-def score_chat(case: dict, calls: list[dict], final: str) -> dict:
+def score_chat(case: dict, calls: list[dict], final: str,
+               reconfirmed: bool | None = None) -> dict:
     """Score one chat run. Every check is None when the case doesn't ask for it,
-    so the aggregate can tell "failed" from "not applicable"."""
+    so the aggregate can tell "failed" from "not applicable".
+
+    `reconfirmed` is set only for a "confirm" case: True means the continuation
+    turn asked for the SAME write to be confirmed again, which is the 2026-08-18
+    bug and a fail regardless of how good the rest of the answer looks."""
     expect = case.get("expect_tool", "MISSING")
     accepted = case.get("expect_any_of") or ([expect] if expect else [])
     names = [c["name"] for c in calls]
@@ -206,6 +213,7 @@ def score_chat(case: dict, calls: list[dict], final: str) -> dict:
         score["fabricated"] = hits
     else:
         score["no_fabrication_ok"] = None
+    score["no_repeat_confirm_ok"] = None if reconfirmed is None else not reconfirmed
     return score
 
 
@@ -251,6 +259,18 @@ def run_chat_case(case: dict, model: str, rep: int, system_prompt: str,
     try:
         result = advance(messages, tools, dispatch, model=model, logger=log,
                          confirm_before=WRITE_TOOLS, timeout=timeout)
+        # Most cases stop at the first confirmation — that IS production for a
+        # gated tool, and nothing executes. A case with "confirm" set answers it
+        # and runs the CONTINUATION turn, which is where the repeated-card bug
+        # lived and which nothing measured until 2026-08-18.
+        if case.get("confirm") and result["type"] == "confirm":
+            approved = case["confirm"] == "approve"
+            record["confirmed_call"] = result["call"]["function"]["name"]
+            record["confirm_decision"] = case["confirm"]
+            resolve(messages, result["call"], approved, dispatch, logger=log)
+            result = advance(messages, tools, dispatch, model=model, logger=log,
+                             confirm_before=WRITE_TOOLS, timeout=timeout)
+            record["reconfirmed"] = result["type"] == "confirm"
         record["outcome"] = result["type"]
         final = result.get("text", "") if result["type"] == "final" else ""
     except OllamaUnavailable as e:
@@ -266,7 +286,7 @@ def run_chat_case(case: dict, model: str, rep: int, system_prompt: str,
     calls = tool_calls_made(messages)
     record["calls"] = calls
     record["final"] = final
-    record["score"] = score_chat(case, calls, final)
+    record["score"] = score_chat(case, calls, final, record.get("reconfirmed"))
     record["prompt_tokens"], record["eval_tokens"] = cap.tokens()
     record["loop_warnings"] = cap.warnings()
     return record

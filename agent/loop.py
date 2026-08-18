@@ -16,6 +16,8 @@ from typing import Callable, Optional
 import requests
 from dotenv import load_dotenv
 
+from agent import prefs
+
 # The Gemini backend lives behind the _llm_chat seam in its own module; import
 # its entry point and default-model constant here. The module's google.genai
 # imports are function-local, so this import never pulls the cloud SDK on the
@@ -31,6 +33,19 @@ load_dotenv(_ROOT / "config" / ".env")
 # (search_wiki -> a few read_wiki_page calls -> answer) legitimately chains
 # more reads, so allow more headroom before giving up.
 MAX_TOOL_ITERATIONS = 10
+
+# How many confirmation-gated calls one user-turn may pause on before advance()
+# stops offering them. MAX_TOOL_ITERATIONS bounds the auto-execute loop INSIDE a
+# single advance() call, but a gated call returns out of advance() entirely — so
+# the counter resets on every continuation and the pause/resolve chain had no
+# bound at all. Observed 2026-08-18: one "add a calendar event" request produced
+# a confirmation card, created the event, then produced three more cards for the
+# same write; declining each one only fed the next. Only a fresh user message
+# broke it (chat/server.py declines the pending call on a new message).
+#
+# 3 is well clear of legitimate use — the model emits one call at a time, and a
+# genuine multi-write request ("add the event and email me about it") needs two.
+MAX_GATED_PAUSES_PER_TURN = 3
 
 # Cap the size of a single tool result before it's appended to the conversation.
 # One oversized result (e.g. a web search dumping page after page of listings)
@@ -455,7 +470,100 @@ def _execute_tool_call(
             )
     if logger:
         logger.info(f"tool_call {fn_name}({_redact_args(fn_args)}) -> {content}")
-    messages.append({"role": "tool", "content": content})
+    # tool_name is what ties this result back to the call it answers. Without it
+    # the model sees an unlabelled blob after its own tool_call and can't tell
+    # the call was ever executed — one of the three reasons it re-issued a
+    # confirmation-gated write instead of reporting it (see
+    # MAX_GATED_PAUSES_PER_TURN). Ollama passes it into the chat template; the
+    # Gemini backend prefers it over positional pairing.
+    messages.append({"role": "tool", "tool_name": fn_name, "content": content})
+
+
+def _call_key(call: dict) -> tuple[str, str]:
+    """(name, canonical args) identifying a tool call. Args are dumped with
+    sorted keys so a re-emission that merely reorders them still matches."""
+    fn = call["function"]
+    args = fn.get("arguments")
+    try:
+        canonical = json.dumps(args, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        canonical = str(args)
+    return fn["name"], canonical
+
+
+def _answered_gated_calls(messages: list[dict], confirm_before: frozenset) -> dict:
+    """{_call_key(call): "approved"|"declined"|"capped"} for every confirm-gated
+    call in the CURRENT user-turn that already has a tool result — one the user
+    has answered either way, or one this guard already suppressed.
+
+    Read out of `messages` rather than tracked as caller state, so the chat
+    server and tasks/bg_worker.py both get the guard without passing anything
+    new through their pause/resolve chains.
+
+    Results are paired with calls positionally and the pending list is RESET per
+    assistant turn, exactly as _gemini_contents does and for the same reason:
+    advance() drops any batched calls after a confirm-gated one, so a turn can
+    emit two calls and yield one result, and a global queue would then pop the
+    wrong name for every later result. Resetting confines the mismatch to the
+    turn where the drop happened.
+    """
+    start = 0
+    for i in range(len(messages) - 1, -1, -1):
+        if messages[i].get("role") == "user":
+            start = i
+            break
+
+    answered: dict = {}
+    pending: list[dict] = []
+    for m in messages[start:]:
+        role = m.get("role")
+        if role == "assistant":
+            pending = list(m.get("tool_calls") or [])
+        elif role == "tool":
+            if not pending:
+                continue
+            call = pending.pop(0)
+            name = call["function"]["name"]
+            if name not in confirm_before:
+                continue
+            try:
+                result = json.loads(m.get("content") or "")
+            except (ValueError, TypeError):
+                result = None
+            if not isinstance(result, dict):
+                result = {}
+            if result.get("not_run"):
+                # A call this guard already suppressed. It carries the outcome of
+                # the call it duplicated, so a THIRD copy is told the same story
+                # as the second rather than being told it succeeded.
+                outcome = result.get("already", "approved")
+            elif result.get("declined"):
+                outcome = "declined"
+            else:
+                outcome = "approved"
+            answered[_call_key(call)] = outcome
+    return answered
+
+
+def _repeat_call_note(name: str, outcome: str) -> str:
+    """What to hand the model in place of a second confirmation for a write it
+    already got an answer on."""
+    who = prefs.user_name()
+    if outcome == "capped":
+        return (f"You already called {name} with these exact arguments in this "
+                "conversation turn, and it was not run then either. Do not call "
+                f"it again. Answer {who} in words.")
+    if outcome == "declined":
+        return (f"You already asked {who} to confirm {name} with these exact "
+                f"arguments in this conversation turn, and {who} declined it. It "
+                "was NOT run, and it has not been run again now. Do not call it "
+                f"again. Tell {who} it is cancelled and ask what they would like "
+                "changed.")
+    return (f"You already called {name} with these exact arguments in this "
+            f"conversation turn, {who} confirmed it, and it succeeded. It has "
+            "NOT been run a second time, so nothing is duplicated. Do not call "
+            f"it again. Tell {who} in words that it is done, using the details "
+            "from the earlier result.")
 
 
 def advance(
@@ -496,6 +604,14 @@ def advance(
     after it in the same batch are picked up on the next advance() once
     resolved, consistent with how this model calls tools one at a time in
     practice.)
+
+    Two guards bound that pause/resolve chain, which is otherwise unbounded
+    because each gated call returns out of advance() and resets the
+    MAX_TOOL_ITERATIONS counter: a gated call identical to one already answered
+    in this user-turn is never re-offered, and no turn offers more than
+    MAX_GATED_PAUSES_PER_TURN of them. A suppressed call is NOT executed — the
+    model gets a tool result telling it to answer in words, and the suppression
+    is logged at WARNING.
     """
     for _ in range(MAX_TOOL_ITERATIONS):
         if should_cancel is not None and should_cancel():
@@ -528,8 +644,47 @@ def advance(
             )
 
         for call in tool_calls:
-            if call["function"]["name"] in confirm_before:
-                return {"type": "confirm", "call": call}
+            name = call["function"]["name"]
+            if name in confirm_before:
+                # Never offer the same write twice, and never offer more than a
+                # handful in one turn. Both paths leave the call UNEXECUTED and
+                # hand the model a result explaining why, so it answers in words
+                # instead of pausing again. See MAX_GATED_PAUSES_PER_TURN.
+                answered = _answered_gated_calls(messages, confirm_before)
+                outcome = answered.get(_call_key(call))
+                if outcome is not None:
+                    if logger:
+                        logger.warning(
+                            "advance() suppressed a repeat confirmation: %s was "
+                            "already %s with identical arguments in this turn; "
+                            "not re-offering it", name, outcome,
+                        )
+                    note = _repeat_call_note(name, outcome)
+                    already = outcome
+                elif len(answered) >= MAX_GATED_PAUSES_PER_TURN:
+                    if logger:
+                        logger.warning(
+                            "advance() suppressed %s: this turn has already "
+                            "asked for %d confirmations (cap %d)",
+                            name, len(answered), MAX_GATED_PAUSES_PER_TURN,
+                        )
+                    note = (
+                        f"You have already asked {prefs.user_name()} to confirm "
+                        f"{len(answered)} actions in this one turn, which is the "
+                        f"limit. {name} was NOT run. Stop calling tools and "
+                        "answer in words, summarizing what was and was not done."
+                    )
+                    already = "capped"
+                else:
+                    return {"type": "confirm", "call": call}
+                # "already" is what a THIRD copy of this call reads back, so it
+                # inherits this call's story rather than being told it succeeded.
+                messages.append({
+                    "role": "tool", "tool_name": name,
+                    "content": json.dumps({"not_run": True, "already": already,
+                                           "note": note}),
+                })
+                continue
             _execute_tool_call(call, dispatch, messages, logger)
 
     raise RuntimeError(f"agent loop exceeded MAX_TOOL_ITERATIONS={MAX_TOOL_ITERATIONS} without a final answer")
@@ -548,11 +703,24 @@ def resolve(
     if approved:
         _execute_tool_call(call, dispatch, messages, logger)
     else:
+        name = call["function"]["name"]
         if logger:
-            logger.info(f"tool_call {call['function']['name']} declined by user")
-        messages.append(
-            {"role": "tool", "content": json.dumps({"error": "user declined this action"})}
-        )
+            logger.info(f"tool_call {name} declined by user")
+        # Deliberately NOT an {"error": ...} shape. That is what
+        # _execute_tool_call returns when a tool genuinely crashes, and retrying
+        # a failure is correct model behaviour — so a decline read as a
+        # transient error and the model re-issued the same gated write, drawing
+        # a fresh confirmation card out of the next advance(). A decline is a
+        # decision, not a failure. _answered_gated_calls keys off "declined".
+        messages.append({
+            "role": "tool", "tool_name": name,
+            "content": json.dumps({
+                "declined": True,
+                "note": f"{prefs.user_name()} declined this action, so it was "
+                        "not performed. Do not try it again — say it is "
+                        "cancelled and ask what they would like changed.",
+            }),
+        })
 
 
 def complete_text(

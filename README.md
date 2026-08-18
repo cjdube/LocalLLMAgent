@@ -328,7 +328,10 @@ they stay unit-testable and runnable standalone.
   what Wren wants to do and waits for a tap to confirm or cancel — enforced in
   code (`advance()`'s `confirm_before` set in `agent/loop.py`), not just
   requested in the prompt, so it doesn't depend on the small local model
-  reliably remembering to ask.
+  reliably remembering to ask. **Answering a card ends it:** a write identical
+  to one already confirmed or cancelled in the same turn is never offered a
+  second time, and no turn offers more than `MAX_GATED_PAUSES_PER_TURN` (3) of
+  them. A suppressed call is not executed, and it's logged at WARNING.
 - **Session memory:** in-memory only, per browser session (a signed cookie
   carries a session id; conversation history lives in a server-side dict
   keyed by it). Fresh conversation on first visit or after tapping "New

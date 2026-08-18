@@ -283,6 +283,25 @@ def _human_range(start: date, end: date) -> str:
     return f"{start.strftime(fmt)} through {end.strftime(fmt)}"
 
 
+def _human_when(start: str, end: str) -> str:
+    """'Wednesday, August 19, 2026, 10:00 AM to 11:00 AM' for the ISO pair that
+    was actually written, echoed back so the model's reply quotes the tool
+    rather than restating the time from its own memory — and so it can see the
+    write landed at all. Same role as _human_due in google_tasks.py.
+
+    Falls back to 'start to end' for anything Google accepted but datetime
+    can't parse; this is a display string, and a write must never fail on it."""
+    try:
+        s = datetime.fromisoformat(start)
+        e = datetime.fromisoformat(end)
+    except (ValueError, TypeError):
+        return f"{start} to {end}"
+    day = s.strftime("%A, %B %-d, %Y")
+    if e.date() != s.date():
+        return f"{day}, {s.strftime('%-I:%M %p')} to {e.strftime('%A, %B %-d, %Y')}, {e.strftime('%-I:%M %p')}"
+    return f"{day}, {s.strftime('%-I:%M %p')} to {e.strftime('%-I:%M %p')}"
+
+
 def log_calendar_event(
     summary: str,
     start: str,
@@ -330,7 +349,18 @@ def log_calendar_event(
     except Exception as e:
         return {"error": str(e)}
 
-    return {"event_id": created.get("id"), "html_link": created.get("htmlLink")}
+    # Echo the summary and the human time back: without them the result was
+    # just two opaque ids, so the model had no evidence its event existed and
+    # re-issued the write, drawing a second confirmation card (see
+    # loop.MAX_GATED_PAUSES_PER_TURN). Additive — the task callers only test for
+    # an "error" key.
+    return {
+        "created": True,
+        "summary": summary,
+        "when": _human_when(start, end),
+        "event_id": created.get("id"),
+        "html_link": created.get("htmlLink"),
+    }
 
 
 def set_event_color(event_id: str, color_id: str) -> dict:

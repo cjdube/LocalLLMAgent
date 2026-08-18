@@ -303,6 +303,42 @@ CASES = [
         "expect_any_of": ["remember", "pin"],
         "arg_checks": {"text": _nonempty},
     },
+    # ---- what happens AFTER the confirmation ------------------------------- #
+    # Every case above stops at the first confirmation card, which is where the
+    # harness used to stop too — so the continuation turn was never measured.
+    # On 2026-08-18 that turn re-issued the same calendar write and drew a
+    # second card; declining it drew a third. These two cases answer the pause
+    # (through the same stubbed dispatch) and score the turn that follows.
+    {
+        "id": "confirm_then_stop",
+        "prompt": "Put yardwork on my calendar for 10am tomorrow, for an hour.",
+        "expect_tool": "log_calendar_event",
+        "confirm": "approve",
+        "arg_checks": {"summary": _nonempty, "start": _nonempty},
+        "tool_results": {
+            "log_calendar_event": {
+                "created": True, "summary": "yardwork",
+                # The shape log_calendar_event now echoes back, so the reply has
+                # a time to quote instead of restating its own guess.
+                "when": f"{_long(_day(1))}, 10:00 AM to 11:00 AM",
+                "event_id": "evt-1", "html_link": "https://cal/evt-1",
+            },
+        },
+        # The reply must report the write, not promise it again.
+        "final_must_contain": ["10"],
+    },
+    {
+        "id": "decline_then_stop",
+        # A decline used to be handed back as {"error": ...} — the same shape a
+        # crashed tool returns — so the model retried and drew a fresh card.
+        "prompt": "Put yardwork on my calendar for 10am tomorrow, for an hour.",
+        "expect_tool": "log_calendar_event",
+        "confirm": "decline",
+        # Claims of success only. Kept narrow on purpose: a bare "added it"
+        # also matches the CORRECT reply "I haven't added it".
+        "final_must_not_contain": ["i've added", "i have added", "i've scheduled",
+                                   "it's on your calendar"],
+    },
     # ---- no tool should be called ------------------------------------------ #
     {
         "id": "no_tool_greeting",

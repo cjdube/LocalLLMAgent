@@ -24,6 +24,7 @@ CHAT_CHECKS = [
     ("final_ok", "answer used the result"),
     ("no_fabrication_ok", "nothing fabricated"),
     ("no_tool_expected_ok", "no tool when none needed"),
+    ("no_repeat_confirm_ok", "no repeated confirmation"),
 ]
 
 TASK_CHECKS = [
