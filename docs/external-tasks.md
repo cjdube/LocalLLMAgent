@@ -20,8 +20,8 @@ every dashboard poll.
 ## Why federate instead of merging the repos
 
 The only external root today is
-[ObsidianWikiAgent](https://github.com/cjdube/ObsidianWikiAgent) (private),
-which runs three jobs against the `llm-wiki-learnings` vault:
+[ObsidianWikiAgent](https://github.com/cjdube/ObsidianWikiAgent), which runs
+three jobs against the `llm-wiki-learnings` vault:
 
 | Job | Schedule | What it does |
 | --- | --- | --- |

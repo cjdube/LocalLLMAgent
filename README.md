@@ -14,8 +14,7 @@ ways:
 
 **What this is.** A personal, single-user system published as a reference, not
 a product. It assumes a specific setup — a Mac mini, Ollama, launchd, and
-Tailscale — and no support or compatibility is promised. A couple of
-referenced sibling repos are private; those links are marked.
+Tailscale — and no support or compatibility is promised.
 
 **Make it yours.** Personal preferences — whose agent this is, calendar
 categories and colors, which job titles the opportunity scout flags, default
