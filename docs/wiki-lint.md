@@ -1,8 +1,8 @@
 # /wiki/lint — reviewing the learnings wiki audit
 
 The learnings vault is audited by `wiki_lint.py` in the sibling
-[ObsidianWikiAgent](https://github.com/cjdube/ObsidianWikiAgent) repo: nine
-structural checks over every page, plus an opt-in model pass. It runs on a
+[ObsidianWikiAgent](https://github.com/cjdube/ObsidianWikiAgent) (private)
+repo: nine structural checks over every page, plus an opt-in model pass. It runs on a
 schedule (Sundays 10:00) and prints a prose report to a launchd log.
 
 That report was effectively unreadable. It lives in a 400 KB append-only file on

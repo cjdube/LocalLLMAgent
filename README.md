@@ -12,6 +12,11 @@ ways:
   talk to Wren directly and have her take action on request, from anywhere,
   over Tailscale. See "Wren — ad hoc chat" below.
 
+**What this is.** A personal, single-user system published as a reference, not
+a product. It assumes a specific setup — a Mac mini, Ollama, launchd, and
+Tailscale — and no support or compatibility is promised. A couple of
+referenced sibling repos are private; those links are marked.
+
 **Make it yours.** Personal preferences — whose agent this is, calendar
 categories and colors, which job titles the opportunity scout flags, default
 location — live in `config/preferences.json`, not in Python. Copy
@@ -901,3 +906,7 @@ recipient is pinned, and what to hold onto when adding a write tool — is in
 - `config/.env`, `config/google_credentials.json`, `config/google_token.json`,
   `config/github_starred_state.json`, and `logs/*.log` are gitignored — they
   contain secrets/tokens and machine-specific state.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

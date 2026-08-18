@@ -63,7 +63,7 @@ DEFAULT_MAX_CHARS = 6000
 # 13:40-15:35 rather than 13:41-15:31.
 _ROUND_MINUTES = 5
 
-# Session blocks are Craig's own build time; the fallback keeps a cloner whose
+# Session blocks are the user's own build time; the fallback keeps a cloner whose
 # preferences.json renames the category from breaking (see docs/preferences.md).
 _COLOR_ID = prefs.category_color_by_role("work", "1")
 
