@@ -14,7 +14,19 @@ because those are the ones that cost weeks of silent breakage:
 
 The rest are the common asks, plus three that need no tool at all (a model that
 reaches for one anyway is as broken as one that won't).
+
+Every date in a fixture is computed RELATIVE TO TODAY, never written out. The
+chat system prompt bakes in the real current date, so an absolute fixture date
+stops meaning what the case was written to mean and the scoring quietly
+inverts: `calendar_upcoming` pinned an event to 2026-08-17, and three days
+later the model that correctly answered "that was yesterday, nothing is coming
+up" scored zero while the model that called it "tomorrow" scored full marks.
+`tests/test_run_eval.py` fails if an absolute date reappears here.
 """
+
+from datetime import date, datetime, timedelta
+
+from agent.dates import resolve_date
 
 # Returned for any tool the case doesn't name explicitly. Shaped like a real
 # tool result (a dict) so the model sees what it normally would.
@@ -30,6 +42,52 @@ def _nonempty(v):
     return bool(str(v or "").strip())
 
 
+# --------------------------------------------------------------------------- #
+# Relative fixture dates
+#
+# Resolved once at import. A run that crosses midnight would carry the starting
+# day's fixtures, which is harmless at the ~2h per model this takes — but it is
+# the reason not to start one at 23:00.
+# --------------------------------------------------------------------------- #
+
+def _day(offset: int) -> date:
+    """The local date `offset` days from today. Negative is the past."""
+    return datetime.now().date() + timedelta(days=offset)
+
+
+def _at(offset: int, clock: str) -> str:
+    """A fixture timestamp, e.g. _at(-1, "08:00:00") -> '2026-08-17T08:00:00'."""
+    return f"{_day(offset).isoformat()}T{clock}"
+
+
+def _long(d: date) -> str:
+    """'Tuesday, August 18, 2026' — the shape the calendar tool returns."""
+    return d.strftime("%A, %B %-d, %Y")
+
+
+def _day_markers(d: date) -> list[str]:
+    """The two ways a reply names a day: 'wednesday' and 'august 19'."""
+    return [d.strftime("%A").lower(), d.strftime("%B %-d").lower()]
+
+
+def _wrong_days(correct: date, *wrong: date) -> list[str]:
+    """Markers a correct reply must never contain, given the right day.
+
+    Drops any marker that is a substring of the correct day's own markers —
+    the scorer matches substrings, so forbidding 'august 2' would fail a reply
+    that correctly said 'August 20'."""
+    right = _day_markers(correct)
+    return [m for w in wrong for m in _day_markers(w)
+            if not any(m in r for r in right)]
+
+
+# The day the tool would actually resolve "next tuesday" to, via production's
+# own resolver — so the fixture can never disagree with what Wren would return.
+_NEXT_TUESDAY = date.fromisoformat(resolve_date("next tuesday"))
+# The event `calendar_upcoming` puts on the calendar. Two days out, so a reply
+# that says "today" or "tomorrow" is wrong in a way the markers can catch.
+_UPCOMING = _day(2)
+
 CASES = [
     # ---- the recorded failures ------------------------------------------- #
     {
@@ -42,15 +100,18 @@ CASES = [
         "arg_checks": {"start": _has("tuesday"), "end": _has("tuesday")},
         "tool_results": {
             "get_events_by_date": {
-                "range": "Tuesday, August 18, 2026",
-                "resolved_start": "2026-08-18",
-                "resolved_end": "2026-08-18",
-                "events": [{"summary": "Dentist", "start": "2026-08-18T14:00:00"}],
+                "range": _long(_NEXT_TUESDAY),
+                "resolved_start": _NEXT_TUESDAY.isoformat(),
+                "resolved_end": _NEXT_TUESDAY.isoformat(),
+                "events": [{"summary": "Dentist",
+                            "start": f"{_NEXT_TUESDAY.isoformat()}T14:00:00"}],
             },
         },
         "final_must_contain": ["dentist"],
-        # It must quote the date the TOOL returned, not one it worked out.
-        "final_must_not_contain": ["august 19", "wednesday"],
+        # It must quote the date the TOOL returned, not one it worked out —
+        # the original bug answered the Tuesday question with the Wednesday.
+        "final_must_not_contain": _wrong_days(_NEXT_TUESDAY,
+                                              _NEXT_TUESDAY + timedelta(days=1)),
     },
     {
         "id": "games_vague",
@@ -81,7 +142,7 @@ CASES = [
         "tool_results": {
             "fetch_strava": {"activities": [{
                 "name": "Evening Volleyball", "type": "Workout",
-                "start_date_local": "2026-08-14T18:38:00", "elapsed_time": 9300,
+                "start_date_local": _at(-1, "18:38:00"), "elapsed_time": 9300,
             }]},
         },
     },
@@ -106,9 +167,9 @@ CASES = [
         "tool_results": {
             "list_projects": {"projects": [
                 {"name": "LocalLLMAgent", "summary": "Wren, a local-first agent.",
-                 "last_commit": "2026-08-15"},
+                 "last_commit": _day(-1).isoformat()},
                 {"name": "ObsidianWikiAgent", "summary": "Turns notes into wiki pages.",
-                 "last_commit": "2026-08-11"},
+                 "last_commit": _day(-5).isoformat()},
             ]},
         },
         "final_must_contain": ["localllmagent"],
@@ -119,7 +180,7 @@ CASES = [
         "expect_tool": "list_nudges",
         "tool_results": {
             "list_nudges": {"nudges": [
-                {"date": "2026-08-14", "text": "You read about MLX quantization "
+                {"date": _day(-2).isoformat(), "text": "You read about MLX quantization "
                  "and your Ollama note covers the same ground."},
             ]},
         },
@@ -131,11 +192,14 @@ CASES = [
         "expect_tool": "list_notifications",
         "tool_results": {
             "list_notifications": {"notifications": [
-                {"sent_at": "2026-08-14T08:00:00", "title": "Morning brief",
+                {"sent_at": _at(-1, "08:00:00"), "title": "Morning brief",
                  "message": "Sent."},
             ]},
         },
         "final_must_contain": ["morning brief"],
+        # The push IS yesterday's, so the answer is yes. A denial means the
+        # model read the timestamp and mis-placed it against today's date.
+        "final_must_not_contain": ["didn't", "nothing"],
     },
     # ---- everyday reads ---------------------------------------------------- #
     {
@@ -155,8 +219,8 @@ CASES = [
         "arg_checks": {"start": _has("tomorrow")},
         "tool_results": {
             "get_events_by_date": {
-                "range": "Sunday, August 16, 2026", "resolved_start": "2026-08-16",
-                "resolved_end": "2026-08-16", "events": [],
+                "range": _long(_day(1)), "resolved_start": _day(1).isoformat(),
+                "resolved_end": _day(1).isoformat(), "events": [],
             },
         },
     },
@@ -166,13 +230,17 @@ CASES = [
         "expect_any_of": ["get_upcoming_events", "get_events_by_date"],
         "tool_results": {
             "get_upcoming_events": {"events": [
-                {"summary": "Team sync", "start": "2026-08-17T10:00:00"},
+                {"summary": "Team sync", "start": _at(2, "10:00:00")},
             ]},
             "get_events_by_date": {"range": "next week", "events": [
-                {"summary": "Team sync", "start": "2026-08-17T10:00:00"},
+                {"summary": "Team sync", "start": _at(2, "10:00:00")},
             ]},
         },
         "final_must_contain": ["team sync"],
+        # Naming the event is not enough — it has to land on the right day.
+        # gemma4:12b-mlx called this same event "today" and "tomorrow" in 2 of
+        # 3 runs while scoring 3/3 on the name alone (2026-08-18).
+        "final_must_not_contain": ["yesterday"] + _wrong_days(_UPCOMING, _day(0), _day(1)),
     },
     {
         "id": "tasks_due_soon",
@@ -180,10 +248,10 @@ CASES = [
         "expect_any_of": ["get_tasks_due_soon", "get_tasks"],
         "tool_results": {
             "get_tasks_due_soon": {"tasks": [
-                {"title": "Renew car registration", "due": "2026-08-18"},
+                {"title": "Renew car registration", "due": _day(1).isoformat()},
             ]},
             "get_tasks": {"tasks": [
-                {"title": "Renew car registration", "due": "2026-08-18"},
+                {"title": "Renew car registration", "due": _day(1).isoformat()},
             ]},
         },
         "final_must_contain": ["registration"],
@@ -195,7 +263,7 @@ CASES = [
         "tool_results": {
             "fetch_strava": {"activities": [
                 {"name": "Morning Run", "type": "Run", "distance_mi": 4.2,
-                 "start_date_local": "2026-08-12T07:10:00"},
+                 "start_date_local": _at(-4, "07:10:00")},
             ]},
         },
         "final_must_contain": ["4.2"],

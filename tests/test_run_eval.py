@@ -418,3 +418,48 @@ def test_a_perfect_answer_scores_as_a_pass(case):
     assert score["complete"] is not False, (
         f"{case['id']}: a perfect answer parsed to {score['result_count']} "
         f"result(s), not {score['expect_count']} — the case is miswired")
+
+
+# --------------------------------------------------------------------------- #
+# Fixture dates
+# --------------------------------------------------------------------------- #
+
+def test_chat_cases_hardcode_no_dates():
+    """Fixture dates must be derived from today, never written out.
+
+    The chat system prompt bakes in the real current date, so an absolute
+    fixture date stops meaning what the case meant when it was written — and
+    the scoring inverts rather than failing. `calendar_upcoming` pinned an
+    event to 2026-08-17; by 2026-08-18 the model that correctly said "that was
+    yesterday" scored 0/3 and the model that called it "tomorrow" scored 3/3,
+    because the check only looked for the event's name."""
+    import re
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parent.parent / "evals" / "cases_chat.py"
+    # Only the case list. The helpers above it document their output format
+    # ("'Tuesday, August 18, 2026'"), which is an example, not a fixture.
+    text = src.read_text().split("CASES = [", 1)[1]
+
+    iso = re.findall(r'"(\d{4}-\d{2}-\d{2}[^"]*)"', text)
+    assert not iso, f"absolute date literal(s) in cases_chat.py: {iso}"
+
+    months = re.findall(
+        r'"[^"]*(January|February|March|April|May|June|July|August|September|'
+        r'October|November|December) \d{1,2}[^"]*"', text)
+    assert not months, f"written-out date(s) in cases_chat.py: {months}"
+
+
+def test_upcoming_event_case_rejects_the_wrong_day():
+    """The guard that the rot removed: naming the event is not enough, the
+    reply has to put it on the right day."""
+    case = next(c for c in CHAT_CASES if c["id"] == "calendar_upcoming")
+    forbidden = case["final_must_not_contain"]
+
+    assert "yesterday" in forbidden
+    # Today's and tomorrow's weekday names are the two misdatings observed.
+    from evals.cases_chat import _day
+    assert _day(0).strftime("%A").lower() in forbidden
+    assert _day(1).strftime("%A").lower() in forbidden
+    # ...and never the correct day's own name.
+    assert _day(2).strftime("%A").lower() not in forbidden

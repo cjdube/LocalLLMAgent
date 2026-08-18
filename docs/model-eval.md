@@ -152,6 +152,75 @@ weak evidence, but nothing suggesting it is worse.
 `--models qwen3.8:27b-mlx gemma4:26b-mlx`, then merge or compare against the
 existing raw file.
 
+## Run of 2026-08-18 — gemma4:26b-mlx vs gemma4:12b-mlx
+
+156 runs, 3 reps, plus a 10-run re-measure of the date cases. Asked whether a
+**smaller** model could take over the everyday work and leave 26b for the few
+calls that judge — 12b is 7.7GB against 17GB, and freeing that is what would
+make headroom for `OLLAMA_NUM_PARALLEL=2`
+([ollama-serving.md](ollama-serving.md)).
+
+**Outcome: 12b held everything the harness can measure.** No switch has been
+made — the harness does not cover multi-turn chat, and nothing here judges
+whether a *synthesis* is any good, only that one came back.
+
+| | right tool | args right | non-empty task answer | median chat | slowest chat | median task |
+|---|---|---|---|---|---|---|
+| gemma4:26b-mlx | 100% (48/48) | 100% (21/21) | 95% (20/21) | 5.9s | 119.1s | 14.6s |
+| gemma4:12b-mlx | 100% (48/48) | 100% (21/21) | 100% (21/21) | 6.6s | 27.9s | 4.5s |
+
+**Tool calling still saturates — now two sizes lower.** The 2026-08-15 run
+found no separation between 26B, 27B and 31B and suggested that was a ceiling
+effect. It reaches down to 12B: right tool and right arguments on every run of
+every case, including the three lifted from recorded incidents.
+
+- **12b is 3.2x faster on the scheduled tasks** (4.5s vs 14.6s median). Chat
+  medians are a wash — 26b is marginally quicker — but the **worst case is 4x
+  better**, 27.9s against 119.1s. For a phone waiting on a reply the tail is
+  what is felt, not the median.
+- **12b did not reproduce 26b's `daily_synthesis` weakness**: 3 of 3 non-empty
+  where 26b was 2 of 3, its one failure a `num_predict` cut-off with thinking
+  on. Read this narrowly. `expect_count` is None for that case, so what was
+  measured is that *something* came back.
+- **One soft wobble on 12b, uncaught by any check.** Handed an event two days
+  out it three times framed it as "in the next 24 hours" while stating the
+  right date. 26b never did. Nothing scores an unprompted framing claim.
+
+### The stale fixture that inverted the result
+
+The first pass of this run said 26b failed `calendar_upcoming` 0 of 3 and
+`notifications_sent` 0 of 3, and that 12b passed both. That was **the harness,
+not the models.**
+
+Both cases pinned a date: an event on `2026-08-17`, a push on `2026-08-14`.
+Correct on 2026-08-15, when they were written. Three days later the "upcoming"
+event was yesterday's and the "yesterday" push was four days old. The chat
+system prompt bakes in the real current date, so the model saw the conflict —
+and the scorer only checked that the reply contained `"team sync"`.
+
+So the case rewarded the failure. 26b said "nothing is coming up", which was
+right, and scored 0. 12b named the event and scored 3/3 while calling it
+"today" in one run and "**tomorrow**, August 18" in another — the weekday
+fabrication [model-constraints.md](model-constraints.md) exists to prevent,
+scored as a pass.
+
+**A rotted fixture does not fail. It inverts, quietly, in favour of whichever
+model ignores dates.** Fixed by deriving every fixture date from today, adding
+a wrong-day guard to `calendar_upcoming`, and a `pytest` check that fails if a
+written-out date reappears. Re-measured at 5 reps: both models 5/5 on
+`calendar_upcoming` and `calendar_weekday`, both naming August 20 correctly.
+26b's one remaining loss is a degenerate reply — it answered the notifications
+question with the fixture's own message field, `"Sent."`
+
+### If the switch is made
+
+It needs code that does not exist: `OLLAMA_MODEL` is a single global
+(`agent/loop.py:175`). A per-task model would be `resolve_model(task_key)`
+reading `WREN_<TASK>_MODEL`, symmetric to `resolve_backend`
+(`agent/loop.py:339`), with the ~11 `complete_text()` call sites passing
+`model=`. Measure the swap cost first: two resident models at `num_ctx=32768`
+is roughly 12GB + 27GB of 48GB, with swap already in use.
+
 ## Adding a case
 
 Chat cases go in `evals/cases_chat.py`: a prompt, the expected tool (or `None`),
@@ -176,8 +245,12 @@ the build:
 - every `golden` answer must parse to `expect_count` results (a parser was
   handed the *compacted* leads instead of the raw ones, dropping the id it keys
   on, so a flawless 10-of-10 answer scored as a parse failure)
+- **no chat case may write a date out.** Every fixture date is derived from
+  today (`_day`, `_at`, `_long` in `cases_chat.py`); `calendar_weekday` gets its
+  day from production's own `resolve_date("next tuesday")`. An absolute date
+  doesn't fail when it rots — it *inverts*, see 2026-08-18 below
 
-Both run in `pytest`, in under a second.
+All three run in `pytest`, in under a second.
 
 ## Safety
 
