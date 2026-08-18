@@ -141,7 +141,14 @@ def with_identity(system_prompt: str) -> str:
     # is present in the next conversation's system prompt.
     from agent.tools.memory import render_memory_block
 
-    parts = [p for p in (WREN_CORE, USER_CONTEXT, render_memory_block(), system_prompt) if p]
+    # The model has no way to know its own serving name — that's a runtime
+    # config value (OLLAMA_MODEL etc.), not something in its weights. Without
+    # this line, asking "what model are you" gets a guess from pretraining
+    # instead of the answer. Computed at call time (not import) so it tracks
+    # a config change without a restart.
+    model_line = f"The model you are running as right now is: {active_model_label()}."
+
+    parts = [p for p in (WREN_CORE, USER_CONTEXT, model_line, render_memory_block(), system_prompt) if p]
     return "\n\n---\n\n".join(parts)
 
 
