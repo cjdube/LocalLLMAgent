@@ -29,10 +29,16 @@ _NAME = prefs.user_name()
 SCRAPE_URL = "https://api.firecrawl.dev/v2/scrape"
 _TIMEOUT_S = 60  # a scrape renders the page server-side; slower than a plain GET
 
-# Cap on the returned markdown, chars (~4 chars/token). Defaults to the same
-# 8000 as OLLAMA_MAX_TOOL_RESULT_CHARS so this tool decides its own cut instead
-# of the agent loop truncating the JSON mid-escape.
-MAX_CHARS = int(os.getenv("WEB_FETCH_MAX_CHARS", "8000"))
+# Cap on the returned markdown, chars (~4 chars/token). This tool decides its
+# own cut rather than letting the agent loop truncate the JSON mid-escape, so
+# it sits below fetch_webpage's loop.TOOL_RESULT_CHAR_CAPS entry (16000) with
+# room for the wrapper — the same 14000/16000 pairing read_wiki_page uses, and
+# for the same reason: one document the user asked for is not an unbounded feed.
+#
+# It was 8000, copied from OLLAMA_MAX_TOOL_RESULT_CHARS back when that was the
+# only budget. Everything else moved off that number and this didn't, so 7 of
+# the 12 fetches in the logs came back cut at 8000 — most real articles, halved.
+MAX_CHARS = int(os.getenv("WEB_FETCH_MAX_CHARS", "14000"))
 
 TOOL_SCHEMA = {
     "type": "function",
@@ -125,12 +131,12 @@ def fetch_webpage(url: str = "", api_key: str = None, max_chars: int = None, **_
     if truncated:
         markdown = markdown[:cap]
     # `truncated` goes BEFORE the markdown it describes. It used to be appended
-    # last, and MAX_CHARS is the same 8000 as the loop's cap, so the wrapper put
-    # every truncated fetch ~520 chars over and the loop cut the tail — meaning
-    # the flag announcing the cut was the one thing the cut removed. 16 times in
-    # the logs. The loop now gives this tool room for its own cap plus the
-    # wrapper (loop.TOOL_RESULT_CHAR_CAPS), so neither should fire; the ordering
-    # is what makes that safe rather than lucky.
+    # last, and MAX_CHARS was then the same 8000 as the loop's cap, so the
+    # wrapper put every truncated fetch ~520 chars over and the loop cut the
+    # tail — meaning the flag announcing the cut was the one thing the cut
+    # removed. 16 times in the logs. The loop now gives this tool room for its
+    # own cap plus the wrapper (loop.TOOL_RESULT_CHAR_CAPS), so neither should
+    # fire; the ordering is what makes that safe rather than lucky.
     out = {
         "url": url,
         "title": _first((data.get("metadata") or {}).get("title")),

@@ -70,12 +70,13 @@ MAX_TOOL_RESULT_CHARS = int(os.getenv("OLLAMA_MAX_TOOL_RESULT_CHARS", "8000"))
 # ever fires it undoes that careful trim by cutting the footer off again.
 TOOL_RESULT_CHAR_CAPS = {
     "read_wiki_page": 16000,
-    # Not extra room for content — fetch_webpage already caps its own markdown
-    # at WEB_FETCH_MAX_CHARS (8000, the same number). This is room for the
-    # wrapper around it. Without it every truncated fetch landed ~520 over and
-    # the loop trimmed the tail of a result the tool had already trimmed on
-    # purpose.
-    "fetch_webpage": 9500,
+    # Same shape as read_wiki_page — one document the user asked for, not an
+    # unbounded feed — so it gets the same 14000/16000 pairing: fetch_webpage
+    # caps its own markdown at WEB_FETCH_MAX_CHARS (14000) and this leaves room
+    # for the wrapper around it. Keep the gap: when the two numbers were equal,
+    # every truncated fetch landed ~520 over and the loop trimmed the tail of a
+    # result the tool had already trimmed on purpose.
+    "fetch_webpage": 16000,
     # These two bounded their result COUNT but not its size — a row cap never
     # bounds a payload — so the flat cap was the only thing holding them, and it
     # fired on ordinary use: a 5-result news search and a plain 20-row week of
