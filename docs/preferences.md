@@ -67,6 +67,8 @@ breaks nothing. Recognized values, each expected on exactly one category:
 |---|---|
 | `calendar_hours_ahead` | How far ahead the brief's Calendar section looks, in hours (default 48) |
 
+The brief's Scores section is configured separately, under [`sports`](#sports).
+
 Only the Calendar section moves with this; the Tasks Due Soon window is a
 separate, fixed 48 hours in `get_tasks_due_soon`. A missing, zero, or
 non-numeric value falls back to 48.
@@ -77,6 +79,42 @@ time and renders each one's day label ("tomorrow", "Saturday, Aug 15") in
 Python, so the model is *told* what is today's rather than deriving it from
 ISO timestamps. Nine live replays across five event shapes kept every later
 event labelled as later.
+
+### `sports`
+
+Teams whose previous-day final scores appear in the morning brief's Scores
+section, and which `fetch_scores` answers about in chat.
+
+```json
+"sports": {
+  "teams": [
+    {"league": "mlb", "id": "2", "name": "Red Sox"},
+    {"league": "nba", "id": "2", "name": "Celtics"},
+    {"league": "nfl", "id": "17", "name": "Patriots"}
+  ]
+}
+```
+
+| Key | Purpose |
+|---|---|
+| `league` | One of `mlb`, `nba`, `nfl` — the keys of `LEAGUE_PATHS` in `agent/tools/sports.py` |
+| `id` | ESPN's team id, matched against `team.id` in the scoreboard response |
+| `name` | The label shown in the brief, so shorten it if you like ("Red Sox" reads better than "Boston Red Sox" next to an opponent) |
+
+Find an id rather than guessing it:
+
+```bash
+.venv/bin/python -m agent.tools.sports --find-team "Red Sox" --league mlb
+```
+
+An empty `teams` list (or no `sports` key) turns the section off — that is
+silence, not an error. An entry missing `league` or `id` is skipped and costs
+only that team; an unknown `league` is skipped the same way. One league's fetch
+failing still returns the other leagues' games, and names the failure in the
+brief so "we couldn't tell" never looks like "nobody played".
+
+One request goes out per *league*, not per team, so following more teams in a
+league you already follow is free.
 
 ### `learnings`
 

@@ -37,6 +37,7 @@ from agent.tools.calendar import get_upcoming_events
 from agent.tools.email import send_email
 from agent.tools.github_starred import fetch_starred_repos
 from agent.tools.google_tasks import get_tasks_due_soon
+from agent.tools.sports import fetch_scores
 from agent.tools.weather import fetch_weather
 from tasks._common import notify_failure, setup_logger, today_str
 from tasks._urls import safe_url
@@ -198,6 +199,52 @@ def _tasks_html(tasks: list, error: str = None, today: date = None) -> str:
     return "<ul>" + "".join(items) + "</ul>"
 
 
+def _score_line(game: dict) -> str:
+    """One game as HTML. Everything here is a fact with a fixed layout, so it is
+    assembled in Python — the model is never shown a score to restate."""
+    team = html.escape(game.get("team", "?"))
+    opponent = html.escape(game.get("opponent", "?"))
+    prefix = f"Game {game['game_number']}: " if game.get("games_that_day", 1) > 1 else ""
+    at = "vs" if game.get("home_away") == "home" else "at"
+
+    team_score, opponent_score = game.get("team_score"), game.get("opponent_score")
+    if game.get("final") and team_score is not None and opponent_score is not None:
+        verb = {"W": "beat", "L": "lost to", "T": "tied"}.get(game.get("result"), "played")
+        body = (
+            f"<strong>{team} {team_score}, {opponent} {opponent_score}</strong> — "
+            f"{team} {verb} {opponent}"
+        )
+    else:
+        # Postponed, suspended, or still in progress. Rendering the status text
+        # rather than a blank score keeps "we don't have a result" distinct from
+        # a real one — inventing a score here would be the worst failure.
+        status = html.escape(game.get("status") or "no result")
+        body = f"{team} {at} {opponent} — {status}"
+
+    url = safe_url(game.get("url", ""))
+    suffix = f' <a href="{html.escape(url)}">box score</a>' if url else ""
+    return f"<li>{html.escape(prefix)}{body}{suffix}</li>"
+
+
+def _scores_html(games: list, errors: dict = None) -> str:
+    """The Scores section body, or "" when there is nothing to say.
+
+    An empty string means render_brief_html drops the section entirely: the NFL
+    is dark about six months a year, so "no games" is the normal state rather
+    than the exception, and a permanent empty section reads like a bug. A fetch
+    error is not silence, though — it gets a line, because "we couldn't tell"
+    and "nobody played" must not look the same."""
+    if not games and not errors:
+        return ""
+    items = [_score_line(g) for g in games]
+    items += [
+        f'<li class="empty">{html.escape(league.upper())} scores unavailable: '
+        f"{html.escape(message)}</li>"
+        for league, message in sorted((errors or {}).items())
+    ]
+    return "<ul>" + "".join(items) + "</ul>"
+
+
 def _weather_html(weather: dict) -> str:
     if "error" in weather:
         return f'<span class="empty">Weather unavailable: {html.escape(weather["error"])}</span>'
@@ -256,12 +303,19 @@ def render_brief_html(
     starred_intro: str,
     starred_error: str = None,
     tasks_error: str = None,
+    scores: list = None,
+    scores_errors: dict = None,
 ) -> str:
     date_str = datetime.now().strftime("%A, %B %-d")
+    # Scores sit with Tasks (what happened) rather than Calendar (what's coming),
+    # and are the one section that disappears when it has nothing — see
+    # _scores_html for why.
+    scores_body = _scores_html(scores or [], scores_errors)
     sections = (
         _section("☀️", "Today at a Glance", html.escape(glance_text) or "No summary available.")
         + _section("\U0001F4C5", "Calendar", _events_html(events))
         + _section("✅", "Tasks Due Soon", _tasks_html(tasks, tasks_error))
+        + (_section("\U0001F3C6", "Scores", scores_body) if scores_body else "")
         + _section("\U0001F324️", "Weather", _weather_html(weather))
         + _section("⭐", "Starred Repos", _starred_repos_html(starred_repos, starred_intro, starred_error))
     )
@@ -290,7 +344,8 @@ SEND_BRIEF_TOOL_SCHEMA = {
         "name": "send_morning_brief",
         "description": (
             f"Build and send {_NAME}'s morning brief email right now (weather, "
-            "calendar, tasks due soon, starred repo updates) in the same HTML "
+            "calendar, tasks due soon, yesterday's scores, starred repo updates) "
+            "in the same HTML "
             f"layout as the scheduled one. Use whenever {_NAME} asks to send or "
             "resend the morning brief — do NOT compose it yourself with "
             "send_email."
@@ -322,6 +377,15 @@ def build_and_send_brief(logger: Optional[logging.Logger] = None) -> dict:
             logger.info(f"get_tasks_due_soon -> {tasks_result}")
         tasks_error = tasks_result.get("error")
         tasks = [] if tasks_error else tasks_result.get("tasks", [])
+
+        # Yesterday's finals for the teams in config/preferences.json. No model
+        # call: scores are facts with a fixed layout, so Python owns them end to
+        # end and the glance prompt below is never shown them to restate.
+        scores_result = fetch_scores(day="yesterday")
+        if logger:
+            logger.info(f"fetch_scores -> {scores_result}")
+        scores = scores_result.get("games", [])
+        scores_errors = scores_result.get("errors")
 
         brief_backend = resolve_backend("morning_brief")
         # daily_synthesis runs 15 minutes earlier, but on a no-overlap day (its
@@ -381,6 +445,8 @@ def build_and_send_brief(logger: Optional[logging.Logger] = None) -> dict:
             starred_intro,
             starred_error,
             tasks_error,
+            scores,
+            scores_errors,
         )
         result = send_email(
             subject=f"Morning Brief - {today_str()}",

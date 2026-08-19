@@ -76,6 +76,32 @@ def test_brief_calendar_hours_rejects_unusable_values(monkeypatch):
         assert prefs.brief_calendar_hours() == 48, f"{bad!r} should have fallen back"
 
 
+# ---- sports.teams -----------------------------------------------------------
+
+def test_followed_teams_reads_shipped_file():
+    for team in prefs.followed_teams():
+        for field in ("league", "id", "name"):
+            assert team.get(field), f"team {team} missing {field}"
+
+
+def test_followed_teams_skips_malformed_entries(monkeypatch):
+    # A bad hand-edit must cost one team, not the whole Scores section.
+    monkeypatch.setattr(prefs, "PREFS", {"sports": {"teams": [
+        {"league": "mlb", "id": "2", "name": "Red Sox"},
+        {"league": "mlb", "name": "no id"},
+        {"id": "9", "name": "no league"},
+        "not a dict",
+    ]}})
+    assert [t["name"] for t in prefs.followed_teams()] == ["Red Sox"]
+
+
+def test_followed_teams_absent_or_unusable_is_empty(monkeypatch):
+    # Absent means the feature is off, not broken — no error anywhere downstream.
+    for value in ({}, {"sports": {}}, {"sports": {"teams": "nope"}}):
+        monkeypatch.setattr(prefs, "PREFS", value)
+        assert prefs.followed_teams() == []
+
+
 # ---- loader degradation -----------------------------------------------------
 
 def test_load_missing_file_returns_empty(tmp_path):

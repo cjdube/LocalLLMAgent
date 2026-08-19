@@ -82,5 +82,19 @@ def brief_calendar_hours(default: int = 48) -> int:
     return value if isinstance(value, int) and value > 0 else default
 
 
+def followed_teams() -> list:
+    """Sports teams whose previous-day scores appear in the morning brief.
+
+    Entries need a league and an ESPN team id; malformed ones are skipped the
+    way calendar_categories() skips its own, so a bad hand-edit costs one team
+    rather than the whole Scores section. An empty list means the feature is
+    simply off — nothing downstream treats it as an error."""
+    entries = section("sports").get("teams", [])
+    if not isinstance(entries, list):
+        return []
+    return [t for t in entries
+            if isinstance(t, dict) and t.get("league") and t.get("id")]
+
+
 def job_search() -> dict:
     return section("job_search")

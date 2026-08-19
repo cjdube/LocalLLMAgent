@@ -95,6 +95,7 @@ from agent.tools.skills import (
     read_skill,
     write_skill,
 )
+from agent.tools.sports import TOOL_SCHEMA as SPORTS_SCHEMA, fetch_scores
 from agent.tools.strava import TOOL_SCHEMA as STRAVA_SCHEMA, fetch_strava
 from agent.tools.weather import TOOL_SCHEMA as WEATHER_SCHEMA, fetch_weather
 from agent.tools.web_fetch import TOOL_SCHEMA as WEB_FETCH_SCHEMA, fetch_webpage
@@ -122,6 +123,7 @@ TOOLS = [
     YOUTUBE_SCHEMA,
     EMAIL_SCHEMA,
     STRAVA_SCHEMA,
+    SPORTS_SCHEMA,
     WEATHER_SCHEMA,
     WEB_SEARCH_SCHEMA,
     WEB_FETCH_SCHEMA,
@@ -169,6 +171,8 @@ DISPATCH = {
     # schema doesn't declare (to, html), pinning the recipient to BRIEF_TO_EMAIL.
     "send_email": send_email_tool,
     "fetch_strava": fetch_strava,
+    # Read-only: one public scoreboard GET per league the user follows.
+    "fetch_scores": fetch_scores,
     "fetch_weather": fetch_weather,
     "search_web": search_web,
     "fetch_webpage": fetch_webpage,
@@ -293,6 +297,10 @@ _BY_NAME = {t["function"]["name"]: t for t in TOOLS}
 # the model to read_skill; skill authoring (write/delete) is deferred below.
 CORE_TOOL_NAMES = [
     "fetch_weather",
+    # Core for the same reason as list_notifications below: "how'd Boston do?"
+    # arrives in wording no keyword pre-loader catches, and the cost of the miss
+    # is a score invented from pretraining, which reads exactly like a real one.
+    "fetch_scores",
     "get_upcoming_events", "get_events_by_date", "log_calendar_event", "recolor_event",
     "get_tasks", "get_tasks_due_soon", "create_task", "update_task_due_date", "complete_task",
     "search_web",

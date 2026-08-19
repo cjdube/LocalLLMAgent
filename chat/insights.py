@@ -595,6 +595,7 @@ TOOL_SERVICES = {
     "chrome": ("Chrome History", ["fetch_chrome_history"]),
     "strava": ("Strava", ["fetch_strava"]),
     "weather": ("OpenWeatherMap", ["fetch_weather"]),
+    "espn": ("ESPN Scoreboard", ["fetch_scores"]),
     "web_search": ("Tavily Search", ["search_web", "research_company"]),
     "firecrawl": ("Firecrawl", ["fetch_webpage", "evaluate_app", "evaluate_against"]),
     "github": ("GitHub", ["fetch_starred_repos"]),

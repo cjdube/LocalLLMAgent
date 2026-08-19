@@ -175,6 +175,81 @@ def test_tasks_html_omits_list_suffix_when_absent():
 
 
 # --------------------------------------------------------------------------- #
+# _scores_html
+# --------------------------------------------------------------------------- #
+
+def _game(**overrides):
+    game = {
+        "league": "mlb", "team": "Red Sox", "opponent": "Reds", "home_away": "home",
+        "team_score": 5, "opponent_score": 3, "result": "W", "status": "Final",
+        "final": True, "start_local": "2026-07-06T19:10:00-04:00",
+        "game_number": 1, "games_that_day": 1,
+        "url": "https://www.espn.com/mlb/game/_/gameId/1",
+    }
+    game.update(overrides)
+    return game
+
+
+def test_scores_html_empty_produces_no_section():
+    # The NFL is dark half the year, so "no games" is the normal state — an
+    # empty string is what tells render_brief_html to drop the section.
+    assert mb._scores_html([], None) == ""
+    assert mb._scores_html([], {}) == ""
+
+
+def test_scores_html_renders_a_final():
+    out = mb._scores_html([_game()], None)
+    assert "Red Sox 5, Reds 3" in out
+    assert "Red Sox beat Reds" in out
+
+
+def test_scores_html_labels_doubleheader_games():
+    games = [
+        _game(game_number=1, games_that_day=2, team_score=5, opponent_score=3, result="W"),
+        _game(game_number=2, games_that_day=2, team_score=4, opponent_score=8, result="L"),
+    ]
+    out = mb._scores_html(games, None)
+    assert "Game 1:" in out and "Game 2:" in out
+    assert "Red Sox lost to Reds" in out
+
+
+def test_scores_html_omits_game_number_for_a_single_game():
+    assert "Game 1" not in mb._scores_html([_game()], None)
+
+
+def test_scores_html_shows_status_instead_of_a_score_when_not_final():
+    out = mb._scores_html(
+        [_game(final=False, result=None, team_score=None,
+               opponent_score=None, status="Postponed")], None)
+    assert "Postponed" in out
+    assert "Red Sox 5" not in out
+
+
+def test_scores_html_surfaces_a_fetch_error():
+    # "We couldn't tell" must not look like "nobody played".
+    out = mb._scores_html([], {"nfl": "network error: timed out"})
+    assert "NFL scores unavailable" in out and "timed out" in out
+
+
+def test_scores_html_drops_a_dangerous_url():
+    out = mb._scores_html([_game(url="javascript:alert(1)")], None)
+    assert "javascript:" not in out
+    assert "box score" not in out
+    assert "Red Sox 5, Reds 3" in out  # the game still renders, just unlinked
+
+
+def test_scores_html_escapes_team_names():
+    out = mb._scores_html([_game(team="<script>x</script>")], None)
+    assert "<script>" not in out
+
+
+def test_render_brief_omits_scores_section_when_there_is_nothing():
+    args = ({"error": "n/a"}, [], [], "glance", [], "")
+    assert "Scores" not in mb.render_brief_html(*args)
+    assert "Scores" in mb.render_brief_html(*args, scores=[_game()])
+
+
+# --------------------------------------------------------------------------- #
 # starred-repo state: atomic write
 # --------------------------------------------------------------------------- #
 

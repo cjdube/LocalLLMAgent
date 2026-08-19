@@ -161,6 +161,51 @@ CASES = [
         "final_must_not_contain": ["wordle", "sudoku", "chess"],
     },
     {
+        "id": "sports_vague",
+        # A score is the other shape where pretraining hands over a plausible
+        # answer, and "how'd Boston do" names no tool, no league and no day —
+        # the wording a keyword pre-loader would miss and a model would fill in.
+        "prompt": "How'd Boston do last night?",
+        "expect_tool": "fetch_scores",
+        "tool_results": {
+            "fetch_scores": {"date": _day(-1).isoformat(), "games": [
+                {"league": "mlb", "team": "Red Sox", "opponent": "Diamondbacks",
+                 "home_away": "home", "team_score": 9, "opponent_score": 4,
+                 "result": "W", "status": "Final", "final": True,
+                 "start_local": _at(-1, "19:10:00"),
+                 "game_number": 1, "games_that_day": 1},
+            ]},
+        },
+        "final_must_contain": ["diamondbacks"],
+        # Invented opponents from a plausible-sounding AL East schedule. The
+        # failure is a reply shaped exactly like a real one, so the guard has to
+        # be on the names rather than on the shape.
+        "final_must_not_contain": ["yankees", "orioles", "blue jays", "rays"],
+    },
+    {
+        "id": "sports_doubleheader",
+        # Baseball's one structural oddity: two finals on one day. A model that
+        # reports only the first is wrong in a way nothing downstream catches.
+        "prompt": "Did the Red Sox win yesterday?",
+        "expect_tool": "fetch_scores",
+        "tool_results": {
+            "fetch_scores": {"date": _day(-1).isoformat(), "games": [
+                {"league": "mlb", "team": "Red Sox", "opponent": "Reds",
+                 "home_away": "home", "team_score": 5, "opponent_score": 3,
+                 "result": "W", "status": "Final", "final": True,
+                 "start_local": _at(-1, "13:35:00"),
+                 "game_number": 1, "games_that_day": 2},
+                {"league": "mlb", "team": "Red Sox", "opponent": "Reds",
+                 "home_away": "home", "team_score": 4, "opponent_score": 8,
+                 "result": "L", "status": "Final", "final": True,
+                 "start_local": _at(-1, "19:10:00"),
+                 "game_number": 2, "games_that_day": 2},
+            ]},
+        },
+        # Both results have to appear, or the second game went unreported.
+        "final_must_contain": ["reds", "5", "3", "4", "8"],
+    },
+    {
         "id": "projects_list",
         "prompt": "What projects have I been working on lately?",
         "expect_tool": "list_projects",

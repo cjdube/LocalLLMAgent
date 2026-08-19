@@ -24,6 +24,15 @@
     "_comment_calendar_hours_ahead": "How far ahead the brief's Calendar section looks, in hours. Omitted, zero, or non-numeric falls back to 48.",
     "calendar_hours_ahead": 48
   },
+  "sports": {
+    "_comment": "Teams whose previous-day final scores appear in the morning brief. Leave 'teams' empty to turn the section off. 'league' is one of mlb, nba, nfl. 'id' is ESPN's team id and 'name' is the label that appears in the brief, so shorten it if you like.",
+    "_comment_find": "Find a team's id with: .venv/bin/python -m agent.tools.sports --find-team \"Red Sox\" --league mlb",
+    "teams": [
+      {"league": "mlb", "id": "2", "name": "Red Sox"},
+      {"league": "nba", "id": "2", "name": "Celtics"},
+      {"league": "nfl", "id": "17", "name": "Patriots"}
+    ]
+  },
   "learnings": {
     "_comment": "What the daily learnings reviews ignore. Scoped to those tasks only — fetch_chrome_history and the calendar tools still return this data, so chat can answer questions about it.",
     "_comment_keywords": "Case-insensitive substrings. A calendar event whose summary matches is dropped; so is a browsed site whose title matches, and any single page path that matches.",
