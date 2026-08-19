@@ -39,6 +39,9 @@ launchd (per-task .plist, timed)
        -> logs everything to logs/<task_name>.log
 ```
 
+Where each module lives and why it is shaped that way:
+[docs/module-map.md](docs/module-map.md).
+
 **The model is swappable.** Nothing in this codebase is Gemma-specific — the
 model name is just `OLLAMA_MODEL` in `config/.env`. Swap models with
 `ollama pull <model>` + edit that one line. The one thing to verify after a
