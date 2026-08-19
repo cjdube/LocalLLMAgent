@@ -34,6 +34,18 @@ starred_bp = Blueprint("starred", __name__)
 # mutating GET, no seen-state store.
 RECENT_RELEASE_DAYS = 30
 
+# Read timeout for the live star fetch on this request path, deliberately far
+# below github_starred.LIST_TIMEOUT_S (15) — the value the scheduled tasks keep,
+# since nobody is waiting on those.
+#
+# The cached fallback below only triggers on an ERROR, so without this a GitHub
+# that is slow but succeeding is not a failure: the request just holds open for
+# up to 15s per page while a complete list sits on disk. A tight timeout turns
+# "slow" into the error the fallback already handles, which is the whole point
+# of having cached the list. 4s is well past a healthy call (~200-400ms) and
+# well inside what a phone will wait for.
+LIVE_FETCH_TIMEOUT_S = 4
+
 
 def _release_is_new(published_at: str) -> bool:
     """True if the release was published within RECENT_RELEASE_DAYS. Compares
@@ -55,8 +67,12 @@ def _repo_list() -> tuple[list, str | None, str | None]:
     `error` is set only when BOTH the live fetch and the cache fail, since a
     served-from-cache page isn't an error state; `fetched_at` is set only when
     the answer came from the cache, and is what the page shows as staleness.
+
+    "Live fetch failed" includes "live fetch was too slow" — see
+    LIVE_FETCH_TIMEOUT_S. A timeout comes back as an {"error": ...} like any
+    other request failure, so it takes the cache path with no extra branch.
     """
-    result = fetch_starred_repos()
+    result = fetch_starred_repos(timeout=LIVE_FETCH_TIMEOUT_S)
     if "error" not in result:
         return result.get("repos", []), None, None
 

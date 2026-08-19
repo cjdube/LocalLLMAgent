@@ -16,6 +16,7 @@ os.environ.setdefault("FLASK_SECRET_KEY", "test-secret")
 import pytest
 
 from agent.store import atomic_write_json
+from agent.tools import github_starred
 from chat import routes_starred as rs
 from chat import server as srv
 
@@ -31,7 +32,12 @@ def auth_client():
 
 
 def _live(repos):
-    return lambda: {"repos": repos}
+    # **kw, because the route passes its own timeout (LIVE_FETCH_TIMEOUT_S).
+    return lambda **kw: {"repos": repos}
+
+
+def _fails(error="rate limited"):
+    return lambda **kw: {"error": error}
 
 
 # --------------------------------------------------------------------------- #
@@ -118,7 +124,7 @@ def test_a_fresh_fetch_is_not_marked_stale(auth_client, monkeypatch):
 # --------------------------------------------------------------------------- #
 
 def test_a_failed_fetch_serves_the_cached_list_and_still_merges(auth_client, monkeypatch):
-    monkeypatch.setattr(rs, "fetch_starred_repos", lambda: {"error": "rate limited"})
+    monkeypatch.setattr(rs, "fetch_starred_repos", _fails())
     atomic_write_json(rs.starred_releases.REPOS_PATH, {
         "fetched_at": "2026-08-11T20:00:00+00:00",
         "repos": [{"full_name": "a/one", "description": "desc one", "language": "Rust"}],
@@ -140,7 +146,7 @@ def test_a_failed_fetch_serves_the_cached_list_and_still_merges(auth_client, mon
 def test_a_failed_fetch_with_no_cache_surfaces_the_error(auth_client, monkeypatch):
     # Nothing cached yet (first run, or a fresh checkout): the real error is more
     # useful than an empty page with no explanation.
-    monkeypatch.setattr(rs, "fetch_starred_repos", lambda: {"error": "rate limited"})
+    monkeypatch.setattr(rs, "fetch_starred_repos", _fails())
 
     body = auth_client.get("/api/starred").get_json()
     assert body["error"] == "rate limited"
@@ -148,10 +154,23 @@ def test_a_failed_fetch_with_no_cache_surfaces_the_error(auth_client, monkeypatc
     assert "stale" not in body
 
 
+def test_the_live_fetch_uses_the_tight_request_path_timeout(auth_client, monkeypatch):
+    # The fallback only triggers on an ERROR, so a GitHub that is slow but
+    # succeeding would otherwise hold the request open for the scheduled tasks'
+    # 15s while a complete list sits on disk. The tight timeout is what turns
+    # "slow" into the error the fallback already handles.
+    seen = {}
+    monkeypatch.setattr(rs, "fetch_starred_repos",
+                        lambda **kw: seen.update(kw) or {"repos": []})
+    auth_client.get("/api/starred")
+    assert seen["timeout"] == rs.LIVE_FETCH_TIMEOUT_S
+    assert rs.LIVE_FETCH_TIMEOUT_S < github_starred.LIST_TIMEOUT_S
+
+
 def test_an_empty_cached_list_counts_as_no_cache(auth_client, monkeypatch):
     # A store written with zero repos must not read as "the user stars nothing" —
     # that would show a blank page with no error and no way to tell why.
-    monkeypatch.setattr(rs, "fetch_starred_repos", lambda: {"error": "rate limited"})
+    monkeypatch.setattr(rs, "fetch_starred_repos", _fails())
     atomic_write_json(rs.starred_releases.REPOS_PATH,
                       {"fetched_at": "2026-08-11T20:00:00+00:00", "repos": []})
 

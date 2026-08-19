@@ -32,6 +32,12 @@ API_ROOT = "https://api.github.com"
 PER_PAGE = 100
 MAX_PAGES = 10  # safety bound: 1000 starred repos is far more than any personal account needs
 MAX_ENRICH = 15  # cap on repos we fetch changelogs for, to bound extra API calls per run
+# Read timeout for one page of the starred list. Generous, because the callers
+# that use the default are scheduled tasks nobody is waiting on. An interactive
+# caller passes its own, much tighter value — see chat/routes_starred.py, where
+# a slow GitHub should become the error that triggers the cached-list fallback
+# rather than a page that hangs.
+LIST_TIMEOUT_S = 15
 
 TOOL_SCHEMA = {
     "type": "function",
@@ -59,7 +65,7 @@ TOOL_SCHEMA = {
 }
 
 
-def _list_starred(api_key: str) -> list:
+def _list_starred(api_key: str, timeout: float = LIST_TIMEOUT_S) -> list:
     headers = {
         "Authorization": f"token {api_key}",
         "Accept": "application/vnd.github+json",
@@ -68,7 +74,7 @@ def _list_starred(api_key: str) -> list:
     url = STARRED_URL
     params = {"per_page": PER_PAGE}
     for _ in range(MAX_PAGES):
-        resp = requests.get(url, headers=headers, params=params, timeout=15)
+        resp = requests.get(url, headers=headers, params=params, timeout=timeout)
         resp.raise_for_status()
         repos.extend(resp.json())
         next_url = resp.links.get("next", {}).get("url")
@@ -276,7 +282,8 @@ def _parse(raw: list, since_dt: datetime = None) -> list:
     return repos
 
 
-def fetch_starred_repos(since: str = None, days_ago: int = None, api_key: str = None) -> dict:
+def fetch_starred_repos(since: str = None, days_ago: int = None, api_key: str = None,
+                        timeout: float = LIST_TIMEOUT_S) -> dict:
     """Callable entrypoint used by the agent loop's tool dispatcher.
 
     'days_ago' is the chat-facing knob — resolved to an absolute timestamp
@@ -284,7 +291,14 @@ def fetch_starred_repos(since: str = None, days_ago: int = None, api_key: str = 
     as agent/tools/calendar.py's get_events_by_date and strava.py's
     fetch_strava. 'since' (an exact ISO 8601 timestamp) stays available for
     direct Python callers like tasks/morning_brief.py, which compute it
-    themselves and don't go through the model at all."""
+    themselves and don't go through the model at all.
+
+    'timeout' bounds one page of the star list. It is a Python-caller knob, not
+    a model-facing one (it is absent from TOOL_SCHEMA): a request path serving a
+    page passes a tight value so a slow GitHub degrades to this function's
+    {"error": ...} and the caller's cached fallback, instead of holding the
+    request open. The enrichment calls below keep their own fixed timeouts —
+    they only run for a 'since' query, which no interactive caller makes."""
     api_key = resolve_key("GITHUB_TOKEN", api_key)
     if not api_key:
         return missing_key_error("GITHUB_TOKEN")
@@ -300,7 +314,7 @@ def fetch_starred_repos(since: str = None, days_ago: int = None, api_key: str = 
             return {"error": f"invalid 'since' timestamp: {e}"}
 
     try:
-        raw = _list_starred(api_key)
+        raw = _list_starred(api_key, timeout=timeout)
     except requests.exceptions.HTTPError as e:
         status = e.response.status_code if e.response is not None else "?"
         if status == 403 and e.response is not None and e.response.headers.get("X-RateLimit-Remaining") == "0":
