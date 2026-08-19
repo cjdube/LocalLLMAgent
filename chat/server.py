@@ -796,71 +796,42 @@ def chat_new():
     return jsonify({"ok": True})
 
 
-@app.route("/dashboard", methods=["GET"])
-def dashboard():
-    if not _authenticated():
-        return LOGIN_PAGE.format(error="")
-    return send_from_directory(STATIC_DIR, "dashboard.html")
+# The static view pages. Each one's JSON API lives in its own blueprint (see the
+# register_blueprint block above); only the HTML shells are here, because their
+# bodies are identical — authenticate, then hand back a file. Registered from a
+# table rather than as nine copies of the same four lines: the duplication is
+# what made this the one place the "new routes get a blueprint" rule kept
+# getting bent, and a tenth page should be a dict entry, not another handler.
+#
+# A page is NOT a 401: an unauthenticated browser navigation gets the login form
+# at 200, so the user sees a form instead of raw JSON. The APIs behind them do
+# answer 401 — that's the XHR path, where the front end handles the status.
+VIEW_PAGES = {
+    "/dashboard": "dashboard.html",
+    "/memories": "memories.html",
+    "/map": "map.html",
+    "/opportunities": "opportunities.html",
+    "/starred": "starred.html",
+    "/logs": "logs.html",
+    "/wiki": "wiki.html",
+    "/wiki/lint": "wiki-lint.html",
+    "/games": "games.html",
+}
 
 
-@app.route("/memories", methods=["GET"])
-def memories_page():
-    if not _authenticated():
-        return LOGIN_PAGE.format(error="")
-    return send_from_directory(STATIC_DIR, "memories.html")
+def _view_page(filename: str):
+    def view():
+        if not _authenticated():
+            return LOGIN_PAGE.format(error="")
+        return send_from_directory(STATIC_DIR, filename)
+    return view
 
 
-@app.route("/map", methods=["GET"])
-def map_page():
-    if not _authenticated():
-        return LOGIN_PAGE.format(error="")
-    return send_from_directory(STATIC_DIR, "map.html")
-
-
-@app.route("/opportunities", methods=["GET"])
-def opportunities_page():
-    if not _authenticated():
-        return LOGIN_PAGE.format(error="")
-    return send_from_directory(STATIC_DIR, "opportunities.html")
-
-
-@app.route("/starred", methods=["GET"])
-def starred_page():
-    if not _authenticated():
-        return LOGIN_PAGE.format(error="")
-    return send_from_directory(STATIC_DIR, "starred.html")
-
-
-@app.route("/logs", methods=["GET"])
-def logs_page():
-    if not _authenticated():
-        return LOGIN_PAGE.format(error="")
-    return send_from_directory(STATIC_DIR, "logs.html")
-
-
-@app.route("/wiki", methods=["GET"])
-def wiki_page():
-    if not _authenticated():
-        return LOGIN_PAGE.format(error="")
-    return send_from_directory(STATIC_DIR, "wiki.html")
-
-
-@app.route("/wiki/lint", methods=["GET"])
-def wiki_lint_page():
-    # The page lives here with the other views; the lint and page-read JSON API
-    # is the wiki blueprint's (chat/routes_wiki.py).
-    if not _authenticated():
-        return LOGIN_PAGE.format(error="")
-    return send_from_directory(STATIC_DIR, "wiki-lint.html")
-
-
-@app.route("/games", methods=["GET"])
-def games_page():
-    # The page lives here with the other views; the games JSON API, the hosted
-    # bundles and their model proxies are the games blueprint's (routes_games.py).
-    if not _authenticated():
-        return LOGIN_PAGE.format(error="")
-    return send_from_directory(STATIC_DIR, "games.html")
+for _rule, _filename in VIEW_PAGES.items():
+    # Endpoint names are derived, not written: nothing uses url_for, and Flask
+    # only needs them unique.
+    app.add_url_rule(_rule, f"page{_rule.replace('/', '_')}",
+                     _view_page(_filename), methods=["GET"])
 
 
 @app.route("/api/bg/resolve", methods=["POST"])

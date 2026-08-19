@@ -69,10 +69,12 @@ _AUTH_EXEMPT = {
 }
 # Page routes render the login form (200) rather than a JSON 401 — a browser
 # navigation showing raw JSON is worse than showing the form.
-_LOGIN_PAGE_ENDPOINTS = {
-    "index", "dashboard", "games_page", "logs_page", "map_page",
-    "memories_page", "opportunities_page", "starred_page",
-    "wiki_page", "wiki_lint_page",
+#
+# Derived from srv.VIEW_PAGES rather than hand-listed, so adding a page can't
+# quietly land outside this sweep: the route and the expectation come from the
+# same table. "index" ("/") is the login form itself and isn't in that table.
+_LOGIN_PAGE_ENDPOINTS = {"index"} | {
+    f"page{rule.replace('/', '_')}" for rule in srv.VIEW_PAGES
 }
 # A game's bundle is a browser navigation too, but redirects to "/" instead of
 # rendering the form inline (routes_games.py avoids importing LOGIN_PAGE, which
@@ -113,6 +115,18 @@ def test_every_route_enforces_auth(client, endpoint, method, url):
     else:
         assert resp.status_code == 401
         assert resp.get_json()["error"] == "not authenticated"
+
+
+def test_every_view_page_is_actually_registered_and_serves_its_file(auth_client):
+    """The pages are registered from a table in a loop, so a bug in the loop
+    would drop routes rather than raise. Pin that each one is reachable AND
+    hands back its own file — a loop that closed over the last filename would
+    serve nine copies of games.html and still 200."""
+    for rule, filename in srv.VIEW_PAGES.items():
+        resp = auth_client.get(rule)
+        assert resp.status_code == 200, rule
+        expected = (srv.STATIC_DIR / filename).read_bytes()
+        assert resp.get_data() == expected, rule
 
 
 def test_the_auth_sweep_actually_covers_the_app():
