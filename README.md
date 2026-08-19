@@ -308,6 +308,15 @@ they stay unit-testable and runnable standalone.
     reply states the tool's day rather than the model's guess. Likewise
     `recolor_event` takes a category *name* from `CATEGORY_COLORS`, not a raw
     colorId. See [docs/model-constraints.md](docs/model-constraints.md).
+  - **The model never round-trips an id.** Items sent for scoring or
+    classification are numbered `1..N` and mapped back in Python. Google event
+    ids and ATS lead ids used to go out verbatim; the model burned its whole
+    token budget transcribing them, and mis-copied them even when it finished.
+    See [docs/opaque-identifiers.md](docs/opaque-identifiers.md).
+  - **UTC in, local days out.** Every source stamps UTC; every question is about
+    a local calendar day. The two agree until after 8pm local, so getting this
+    wrong drops evening data only — silently. See
+    [docs/timezones.md](docs/timezones.md).
   - **Three kinds of durable state, deliberately separate.** *Memory* is facts
     ([docs/memory.md](docs/memory.md)) — two tiers, where only pinned facts enter
     every system prompt. *Skills* are procedures (`skills/*.md`), with a capped
