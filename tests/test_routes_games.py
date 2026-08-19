@@ -191,6 +191,26 @@ def test_proxy_to_unknown_game_is_404(auth_client, posted):
     assert posted == []
 
 
+def test_proxy_refuses_to_escape_the_ai_path(auth_client, posted):
+    # <path:endpoint> admits "/" and "..", and requests() normalizes the dot
+    # segments when it prepares the URL — so without this guard
+    # "../../internal/x" would proxy the POST to http://127.0.0.1:3002/internal/x,
+    # any path on the game's service rather than just its AI ones. A browser
+    # would normalize the path before sending; curl or a script would not.
+    for endpoint in ("../../internal/admin", "x/../../admin", "a/b", ".."):
+        resp = auth_client.post(f"/games/weigh-anchor/api/ai/{endpoint}", json={})
+        assert resp.status_code == 404, endpoint
+    # Nothing reached the game's service.
+    assert posted == []
+
+
+def test_proxy_still_forwards_any_flat_endpoint_name(auth_client, posted):
+    # The guard is a shape check, not an allowlist of names: the game's service
+    # owns its own routes, so a new one there must not need an edit here.
+    auth_client.post("/games/weigh-anchor/api/ai/some-new-endpoint", json={})
+    assert posted[0]["url"] == "http://127.0.0.1:3002/api/ai/some-new-endpoint"
+
+
 def test_game_routes_accept_bodies_larger_than_the_chat_cap(auth_client, posted):
     # A batched log flush runs well past the app-wide 256KB chat limit — one
     # state snapshot is ~14KB and a burst flushes several. A 413 here would be

@@ -50,6 +50,25 @@ WARMUP_TIMEOUT_S = 620
 # 2MB body limit, scoped to these routes so chat keeps the tighter cap.
 MAX_GAME_BODY_BYTES = 2 * 1024 * 1024
 
+def _is_proxyable(endpoint: str) -> bool:
+    """One flat path segment, so the proxied URL can only ever be
+    /api/ai/<endpoint> on the game's own service.
+
+    The route's <path:endpoint> converter admits "/" and "..", and requests()
+    normalizes the dot segments away when it prepares the URL — so an endpoint of
+    "../../internal/x" reaches the service as http://127.0.0.1:<port>/internal/x,
+    i.e. ANY path on it, not just its AI ones. Verified 2026-08-19: Werkzeug
+    routing passes the dots through untouched, and a non-browser client (curl,
+    a script) never normalizes them away first the way a browser would.
+
+    Deliberately a shape check and NOT an allowlist of endpoint names. The proxy
+    is dumb on purpose (see game_ai) — the game's service owns its own routes,
+    and naming them here would be a second place for them to drift, so a game
+    adding an endpoint would 404 until someone edited Wren. This bounds the URL
+    without knowing anything about what the game answers.
+    """
+    return bool(endpoint) and "/" not in endpoint and endpoint not in (".", "..")
+
 
 @games_bp.before_request
 def _allow_larger_game_bodies():
@@ -104,6 +123,11 @@ def game_ai(game_id: str, endpoint: str):
     game = _game(game_id)
     if game is None:
         return jsonify({"error": f"no game with id {game_id!r}"}), 404
+    if not _is_proxyable(endpoint):
+        # 404 rather than 400: from the caller's side, an endpoint this proxy
+        # won't forward is one that doesn't exist.
+        logger.warning(f"games: {game_id} rejected AI endpoint {endpoint!r}")
+        return jsonify({"error": f"invalid AI endpoint {endpoint!r}"}), 404
 
     timeout = WARMUP_TIMEOUT_S if endpoint == "warmup" else AI_TIMEOUT_S
     url = f"http://127.0.0.1:{game['api_port']}/api/ai/{endpoint}"
