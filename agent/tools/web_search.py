@@ -9,6 +9,7 @@ Key resolution order: --api-key arg > config/.env file > TAVILY_API_KEY env var
 """
 
 import argparse
+import json
 import sys
 
 import requests
@@ -81,22 +82,63 @@ def _search(query: str, topic: str, max_results: int, api_key: str, days: int = 
     return resp.json()
 
 
+# Size budgets. max_results bounds the result COUNT, never the size of one, so
+# a page of scrapings was unbounded — the shape that made the agent loop's blind
+# backstop fire on an ordinary 5-result news search. Every field Tavily fills is
+# remote text of arbitrary length (content, answer, even title and url), so a
+# per-field cut alone can't bound the payload; MAX_PAYLOAD_CHARS is what
+# actually holds it, and the per-field caps keep any one result from eating the
+# whole budget. MAX_CONTENT_CHARS stays well above research.py's _SNIPPET_CHARS
+# (400), so that caller sees no change.
+MAX_CONTENT_CHARS = 1200
+MAX_ANSWER_CHARS = 1500
+MAX_PAYLOAD_CHARS = 12000
+
+
+def _trim(text: str, cap: int) -> str:
+    text = text or ""
+    return text if len(text) <= cap else text[:cap] + " ... [trimmed]"
+
+
 def _parse(raw: dict) -> dict:
-    results = [
-        {
-            "title": r.get("title", ""),
-            "url": r.get("url", ""),
-            "content": r.get("content", ""),
-            # Kept so callers can see/sort by recency — Tavily returns this for
-            # news results; without it we can't tell fresh headlines from stale.
-            "published_date": r.get("published_date", ""),
-        }
-        for r in raw.get("results", [])
-    ]
-    out = {"results": results}
+    # `answer` leads: it's Tavily's direct reply to the query, the field the
+    # model actually answers from, so it's the one thing that must survive if
+    # anything downstream trims this result. It used to come last, and a 240-char
+    # overrun cut it off mid-sentence while five full page scrapings sat in front
+    # of it. Same reasoning as push_log's summary-first ordering.
+    out = {}
     answer = raw.get("answer")
     if answer:
-        out["answer"] = answer
+        out["answer"] = _trim(answer, MAX_ANSWER_CHARS)
+    out["results"] = []
+
+    # Take whole results until the budget is spent, rather than letting the
+    # backstop slice the JSON mid-string. A dropped result is reported, so the
+    # model knows the list is partial instead of reading it as everything there
+    # was — a trimmed result looks complete from the inside.
+    incoming = raw.get("results", [])
+    kept = []
+    for r in incoming:
+        kept.append({
+            "title": _trim(r.get("title", ""), 300),
+            "url": _trim(r.get("url", ""), 500),
+            "content": _trim(r.get("content", ""), MAX_CONTENT_CHARS),
+            # Kept so callers can see/sort by recency — Tavily returns this for
+            # news results; without it we can't tell fresh headlines from stale.
+            "published_date": _trim(r.get("published_date", ""), 100),
+        })
+        out["results"] = kept
+        if len(json.dumps(out)) > MAX_PAYLOAD_CHARS:
+            kept.pop()
+            out["results"] = kept
+            break
+
+    dropped = len(incoming) - len(kept)
+    if dropped:
+        out["results_omitted"] = (
+            f"{dropped} more result(s) were dropped to fit the context window. "
+            f"Showing the top {len(kept)} of {len(incoming)}."
+        )
     return out
 
 

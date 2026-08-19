@@ -191,14 +191,19 @@ CASES = [
         "prompt": "Did you push anything to my phone yesterday?",
         "expect_tool": "list_notifications",
         "tool_results": {
-            "list_notifications": {"notifications": [
-                {"sent_at": _at(-1, "08:00:00"), "title": "Morning brief",
-                 "message": "Sent."},
-            ]},
+            # The real shape: one finished `summary` block, no raw rows. The
+            # stamp is already written out for a human, so the model reads a
+            # weekday and time rather than doing date math on an ISO string.
+            "list_notifications": {
+                "summary": "1 notification(s) from the last 7 days, newest first:\n"
+                           f"- {_day(-1).strftime('%a %b %-d')}, 8:00 AM"
+                           " — **Morning brief** — Sent.",
+                "total": 1, "shown": 1, "days": 7,
+            },
         },
         "final_must_contain": ["morning brief"],
         # The push IS yesterday's, so the answer is yes. A denial means the
-        # model read the timestamp and mis-placed it against today's date.
+        # model mis-placed the stamp against today's date.
         "final_must_not_contain": ["didn't", "nothing"],
     },
     # ---- everyday reads ---------------------------------------------------- #

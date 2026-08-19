@@ -276,7 +276,7 @@ def test_a_delivered_push_is_logged(monkeypatch):
 
     notify("Call the dentist", title="Reminder", priority="high")
 
-    rows = push_log.list_notifications()["notifications"]
+    rows = push_log._load()["pushes"]
     assert len(rows) == 1
     assert rows[0]["message"] == "Call the dentist"
     assert rows[0]["title"] == "Reminder"
@@ -290,7 +290,7 @@ def test_the_log_records_what_was_sent_not_what_was_asked(monkeypatch):
 
     notify("x" * (notify_mod._MAX_MESSAGE_CHARS + 50))
 
-    logged = push_log.list_notifications()["notifications"][0]["message"]
+    logged = push_log._load()["pushes"][0]["message"]
     assert len(logged) == notify_mod._MAX_MESSAGE_CHARS
 
 
@@ -302,7 +302,7 @@ def test_a_failed_push_is_not_logged(monkeypatch):
 
     notify("never landed")
 
-    assert push_log.list_notifications()["notifications"] == []
+    assert push_log._load()["pushes"] == []
 
 
 def test_a_push_that_lands_reports_ok_even_if_logging_fails(monkeypatch):

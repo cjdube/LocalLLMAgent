@@ -76,6 +76,16 @@ TOOL_RESULT_CHAR_CAPS = {
     # the loop trimmed the tail of a result the tool had already trimmed on
     # purpose.
     "fetch_webpage": 9500,
+    # These two bounded their result COUNT but not its size — a row cap never
+    # bounds a payload — so the flat cap was the only thing holding them, and it
+    # fired on ordinary use: a 5-result news search and a plain 20-row week of
+    # notifications. Each now trims to its own MAX_PAYLOAD_CHARS (12000), drops
+    # whole rows rather than slicing one, and leads with the field that must
+    # survive (web_search's `answer`, push_log's `summary`). These are the
+    # backstops sitting just above those budgets, and a test in each tool's suite
+    # pins the worst case underneath the number here.
+    "search_web": 13000,
+    "list_notifications": 13000,
 }
 
 

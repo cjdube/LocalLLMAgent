@@ -7,6 +7,7 @@ calendar time (CLAUDE.md: UTC→local day windows) and the host's zone must not
 decide whether a row is in range.
 """
 
+import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -42,7 +43,7 @@ def seed():
 def test_records_a_push_and_reads_it_back():
     push_log.record("Call the dentist", title="Reminder", priority="high")
 
-    rows = push_log.list_notifications()["notifications"]
+    rows = push_log._load()["pushes"]
 
     assert len(rows) == 1
     assert rows[0]["message"] == "Call the dentist"
@@ -63,7 +64,9 @@ def test_stamps_the_row_in_the_local_zone():
 def test_a_title_is_optional():
     push_log.record("no title here")
 
-    assert push_log.list_notifications()["notifications"][0]["title"] is None
+    assert push_log._load()["pushes"][0]["title"] is None
+    # And the rendered line carries no empty bold marker where a title would be.
+    assert push_log.list_notifications()["summary"].endswith("— no title here")
 
 
 # --------------------------------------------------------------------------- #
@@ -75,18 +78,19 @@ def test_newest_first(seed):
     seed(1, "newest")
     seed(2, "middle")
 
-    messages = [r["message"] for r in push_log.list_notifications()["notifications"]]
+    summary = push_log.list_notifications()["summary"]
 
-    assert messages == ["newest", "middle", "oldest"]
+    assert summary.index("newest") < summary.index("middle") < summary.index("oldest")
 
 
 def test_rows_outside_the_window_are_left_out(seed):
     seed(1, "inside")
     seed(9, "outside")
 
-    messages = [r["message"] for r in push_log.list_notifications(days=3)["notifications"]]
+    result = push_log.list_notifications(days=3)
 
-    assert messages == ["inside"]
+    assert result["shown"] == 1
+    assert "inside" in result["summary"] and "outside" not in result["summary"]
 
 
 def test_days_is_clamped_to_the_stores_retention(seed):
@@ -102,17 +106,19 @@ def test_limit_takes_the_newest_rows(seed):
     seed(2, "middle")
     seed(1, "newest")
 
-    rows = push_log.list_notifications(limit=2)["notifications"]
+    result = push_log.list_notifications(limit=2)
 
-    assert [r["message"] for r in rows] == ["newest", "middle"]
+    assert result["shown"] == 2
+    assert result["summary"].index("newest") < result["summary"].index("middle")
+    assert "oldest" not in result["summary"]
 
 
 def test_limit_is_clamped():
     # A 0 must not silently mean "nothing sent" — that reads as a wrong answer.
     push_log.record("one")
 
-    assert len(push_log.list_notifications(limit=0)["notifications"]) == 1
-    assert len(push_log.list_notifications(limit=10_000)["notifications"]) == 1
+    assert push_log.list_notifications(limit=0)["shown"] == 1
+    assert push_log.list_notifications(limit=10_000)["shown"] == 1
 
 
 # --------------------------------------------------------------------------- #
@@ -170,9 +176,10 @@ def test_an_unstamped_row_is_dropped_rather_than_reported(seed):
     data["pushes"].append({"message": "no timestamp", "title": None})
     atomic_write_json(push_log._STORE_PATH, data)
 
-    messages = [r["message"] for r in push_log.list_notifications()["notifications"]]
+    result = push_log.list_notifications()
 
-    assert messages == ["good row"]
+    assert result["shown"] == 1
+    assert "good row" in result["summary"] and "no timestamp" not in result["summary"]
 
 
 def test_a_missing_store_is_nothing_sent_not_an_error():
@@ -180,7 +187,8 @@ def test_a_missing_store_is_nothing_sent_not_an_error():
     # legitimate state — it must not surface as a broken tool.
     result = push_log.list_notifications()
 
-    assert result["notifications"] == []
+    assert result["shown"] == 0
+    assert "Nothing was pushed" in result["summary"]
     assert "error" not in result
 
 
@@ -211,14 +219,65 @@ def test_an_unlimited_call_states_a_plain_count(seed):
     assert "most recent of" not in header
 
 
-def test_the_summary_leads_so_a_trim_cannot_take_it(seed):
+def test_the_rows_are_never_shipped_alongside_the_summary(seed):
+    # TOOL_SCHEMA tells the model to relay `summary` verbatim and never compose
+    # the list itself, so a second machine-readable copy has no reader. It was
+    # 4463 chars against summary's 3513 on a normal week — more than half the
+    # payload, for nothing — and the only field it added was the raw ISO stamp,
+    # the one form the model must never do date math on.
     seed(1, "one"), seed(1, "two")
 
-    keys = list(push_log.list_notifications(days=7))
-    assert keys.index("summary") < keys.index("notifications")
+    result = push_log.list_notifications(days=7)
+
+    assert set(result) == {"summary", "total", "shown", "days"}
+    assert "2026-" not in result["summary"]  # human stamps only, no ISO
 
 
 def test_an_empty_window_is_unchanged():
     result = push_log.list_notifications(days=7)
     assert result["total"] == 0
     assert "Nothing was pushed" in result["summary"]
+
+
+# --- bounding the payload ----------------------------------------------------
+# MAX_LIMIT caps the row COUNT, not the size, so a plain 20-row week overran the
+# agent loop's backstop — which then took a blind slice off the tail.
+
+def test_a_busy_week_now_fits_whole(seed):
+    # The real overrun: a plain 20-row week at the tool's own default limit.
+    for i in range(20):
+        seed(1, f"push number {i}: " + "detail " * 60)
+
+    result = push_log.list_notifications(days=7)
+
+    assert result["shown"] == 20
+    for i in range(20):
+        assert f"push number {i}" in result["summary"]
+
+
+def test_the_worst_case_stays_inside_the_loop_backstop(seed):
+    # The number in loop.TOOL_RESULT_CHAR_CAPS is only honest if the tool's own
+    # budget actually holds the worst case underneath it: MAX_LIMIT rows, each
+    # message the full length notify() will record (_MAX_MESSAGE_CHARS).
+    from agent import loop
+
+    for i in range(push_log.MAX_LIMIT):
+        seed(1, f"push {i} " + "d" * 500, title="A long-ish notification title")
+
+    result = push_log.list_notifications(days=7, limit=push_log.MAX_LIMIT)
+
+    assert len(json.dumps(result)) <= loop.TOOL_RESULT_CHAR_CAPS["list_notifications"]
+    # A reduced answer must read as reduced, not as everything there was.
+    assert result["total"] == push_log.MAX_LIMIT
+    assert result["shown"] < push_log.MAX_LIMIT
+    assert f"of {push_log.MAX_LIMIT} notification(s)" in result["summary"]
+
+
+def test_a_reduced_answer_keeps_the_newest_rows(seed):
+    for i in range(push_log.MAX_LIMIT):
+        seed(days_ago=1 + i / 100, message=f"push {i} " + "d" * 500)
+
+    summary = push_log.list_notifications(days=7, limit=push_log.MAX_LIMIT)["summary"]
+
+    assert "push 0" in summary          # newest survives
+    assert "push 99" not in summary     # oldest is what goes

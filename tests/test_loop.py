@@ -415,10 +415,12 @@ def test_oversized_tool_result_is_truncated(monkeypatch):
     """A tool result larger than the cap is trimmed before being appended, so a
     single huge result can't blow past the context window."""
     monkeypatch.setattr(loop, "MAX_TOOL_RESULT_CHARS", 100)
-    call = {"function": {"name": "search_web", "arguments": {}}}
+    # A tool with no TOOL_RESULT_CHAR_CAPS entry, so this exercises the flat
+    # default rather than an override.
+    call = {"function": {"name": "some_unbounded_tool", "arguments": {}}}
     messages = []
     loop._execute_tool_call(
-        call, {"search_web": lambda **_: {"blob": "x" * 5000}}, messages, logger=None
+        call, {"some_unbounded_tool": lambda **_: {"blob": "x" * 5000}}, messages, logger=None
     )
 
     content = messages[-1]["content"]

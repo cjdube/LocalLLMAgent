@@ -27,6 +27,7 @@ Usage:
 """
 
 import argparse
+import json
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -59,6 +60,11 @@ MAX_DAYS = 30
 # should read; a busy log_inspector night alone can push several alerts.
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
+
+# Char budget for the payload. A row cap doesn't bound size: MAX_LIMIT counts
+# rows, and each message runs to notify._MAX_MESSAGE_CHARS. Over budget the
+# answer carries fewer rows and _render's header says how many of how many.
+MAX_PAYLOAD_CHARS = 12000
 
 # Retention. reminder_sweep touches this store on every fire, forever, so it
 # prunes on write like agent/tools/background.py does: by age first, then a hard
@@ -156,9 +162,16 @@ def _clamp(value, default: int, low: int, high: int) -> int:
 
 
 def list_notifications(days: int = DEFAULT_DAYS, limit: int = DEFAULT_LIMIT) -> dict:
-    """The pushes delivered in the last `days` days, newest first, plus
-    `summary` — the same rows already formatted (see _render), which is what the
-    model is told to reply with.
+    """The pushes delivered in the last `days` days as `summary` — the rows
+    already formatted (see _render) — plus the counts behind it.
+
+    The rows themselves are deliberately NOT returned. TOOL_SCHEMA tells the
+    model to reply with `summary` verbatim and never to compose the list itself,
+    so a second copy has no reader: it doubled the payload (4463 chars against
+    summary's 3513 on a normal week, which is what pushed an ordinary call past
+    the agent loop's cap), and the only field it added over `summary` was the raw
+    ISO `ts` — the one form the model must never do date math on, when `summary`
+    already carries the same stamp written out for a human.
 
     `days` is clamped to MIN_DAYS..MAX_DAYS and `limit` to 1..MAX_LIMIT. An
     empty or absent store is "nothing sent", not an error: push is allowed to be
@@ -186,11 +199,26 @@ def list_notifications(days: int = DEFAULT_DAYS, limit: int = DEFAULT_LIMIT) -> 
     rows.sort(key=lambda r: r["ts"], reverse=True)
     total = len(rows)
     rows = rows[:limit]
-    # summary leads: it's the block the model relays, so it's the one thing that
-    # must survive if anything downstream ever trims this result. The raw rows
-    # it was rendered from are the redundant half of the payload.
-    return {"summary": _render(rows, days, total), "total": total,
-            "shown": len(rows), "days": days, "notifications": rows}
+    return _fit(rows, days, total)
+
+
+def _fit(rows: list, days: int, total: int) -> dict:
+    """The payload, carrying fewer rows until it fits MAX_PAYLOAD_CHARS.
+
+    `total` stays the count before any slice, so _render's own "N of M" header
+    states the real number — a reduced answer reads as reduced instead of
+    reading as everything there was."""
+    def build(rs: list) -> dict:
+        return {"summary": _render(rs, days, total), "total": total,
+                "shown": len(rs), "days": days}
+
+    out = build(rows)
+    # Oldest first: the last thing she sent is what's usually being asked about,
+    # so a shorter answer keeps the newest rows.
+    while len(json.dumps(out)) > MAX_PAYLOAD_CHARS and len(rows) > 1:
+        rows = rows[:-1]
+        out = build(rows)
+    return out
 
 
 TOOL_SCHEMA = {
