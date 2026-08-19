@@ -131,6 +131,7 @@ again by the loop, then contributes to a history that is trimmed by the server.
 | Constant | Value | Why this value |
 |---|---|---|
 | `MAX_TOOL_ITERATIONS` | 10 | Model round-trips in one turn. Was 6, which suited single-fetch tools; navigating the wiki (`search_wiki` → several `read_wiki_page` → answer) legitimately chains more. |
+| `MAX_GATED_PAUSES_PER_TURN` | 3 | Confirmation-gated writes one user-turn may pause on. `MAX_TOOL_ITERATIONS` bounds the loop *inside* one `advance()` call, but a gated call returns out of `advance()` entirely — so the counter reset on every continuation and the pause/resolve chain had no bound at all. A gated call identical to one already answered in the turn is also never re-offered. |
 | `MAX_TOOL_RESULT_CHARS` | 8000 (env) | See above. |
 | `TOOL_RESULT_CHAR_CAPS` | per-tool dict | Overrides for tools returning **one curated document of known size**, where the flat cap actively misleads. |
 
@@ -155,7 +156,7 @@ behind them:
 | Constant | Value | Why |
 |---|---|---|
 | `MAX_MESSAGE_CHARS` | 8000 | One user message. |
-| `MAX_HISTORY_CHARS` | 48000 (env) | History budget. Trimming drops **oldest whole user-turns**; system prompt and newest turn are always kept. |
+| `MAX_HISTORY_CHARS` | 16000 (env; 48000 live) | History budget. Trimming drops **oldest whole user-turns**; system prompt and newest turn are always kept. |
 | `CHAT_MODEL_TIMEOUT` | 120 (env) | See above. |
 | `MAX_CONTENT_LENGTH` | 256 KB | Flask request body, sized for a chat turn. |
 | `SESSION_IDLE_EVICT_S` | 86400 | In-memory session eviction. |
@@ -294,6 +295,7 @@ goal is uneven; here is the honest state.
 | `num_predict` reached | Compares `eval_tokens` to `num_predict` and logs a WARNING that the reply was cut off. Gemini's `MAX_TOKENS` finish reason mirrors it. |
 | Startup budget overflow | Logged **and pushed** to the phone at boot with both numbers and the fix. |
 | `MAX_TOOL_ITERATIONS` | Raises `RuntimeError`, naming the constant. Loud by design. |
+| `MAX_GATED_PAUSES_PER_TURN` | The call is **not executed**, and the model gets a tool result saying so and telling it to answer in words. Logged at WARNING naming the tool and whether it was capped or a repeat. The user sees a normal reply rather than a fourth confirmation card. |
 | EDGAR page cap | Logs that the per-state safety bound was hit, so a truncated poll isn't mistaken for a quiet week. |
 | `daily_synthesis` empty response | Retries once and warns **even on success**, so the failure rate stays measurable. |
 
