@@ -863,6 +863,13 @@ calls), where only the pure helpers and error mapping are exercised. After
 editing the always-on chat server, restart it (it runs under launchd) so the
 changes take effect.
 
+**Working from a second machine** (a laptop, over Tailscale) is SSH plus
+`tmux`, not a second checkout — Wren can't run anywhere but the Mac mini, so
+there's nothing to deploy and an edit is live when it's saved. Claude Code needs
+no special mode for this; a remote-SSH IDE is optional. Setup, and the one thing
+it doesn't solve (a reboot still needs a console login), are in
+[docs/remote-dev.md](docs/remote-dev.md).
+
 Note on privacy: `logs/*.log` records tool arguments and results — calendar
 contents, email bodies, browsing history — in cleartext (secrets in tool
 *arguments* are redacted, but results are not). The logs are gitignored;
