@@ -93,8 +93,8 @@ External tasks get "See runs" but not the "Run now" button, and
   11:54 — nearly three hours during which no other consumer could get a model
   call through. A button that starts that from a phone is a footgun.
 
-Use `launchctl start com.<prefix>.wikiagent.<vault>-ingest` when you want one
-on demand.
+Use `launchctl start local.wikiagent.<vault>-ingest` when you want one on
+demand.
 
 ## What the health rollup does and doesn't add
 

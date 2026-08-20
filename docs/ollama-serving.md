@@ -8,7 +8,7 @@ consumers:
 |---|---|
 | Wren chat | `chat/server.py`, interactive, someone waiting on a phone |
 | Wren's scheduled tasks | ~12 launchd jobs, staggered across the day |
-| `wiki_ingest.py` | ObsidianWikiAgent, launchd `com.<user>.wikiagent.learnings-ingest`, daily 9:00 AM |
+| `wiki_ingest.py` | ObsidianWikiAgent, launchd `local.wikiagent.learnings-ingest`, daily 9:00 AM |
 | WeighAnchor | game AI, `PROVIDER_DEFAULT=ollama`, node server on `:3002` |
 
 Ollama runs with **`OLLAMA_NUM_PARALLEL=1`** and `OLLAMA_MAX_QUEUE=512`: one
