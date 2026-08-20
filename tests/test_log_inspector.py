@@ -426,7 +426,7 @@ def test_a_lone_finding_is_quoted_rather_than_counted():
     """The 2026-08-07 push, which read "1 warnings: wren(1)" and nothing else.
     With one finding there are ~480 unused characters; spend them."""
     outcomes = {"failed": [], "stalled": [], "missing": []}
-    msg = "skipping unreadable plist com.craigdube.wikiagent.learnings-lint.plist"
+    msg = "skipping unreadable plist com.example.wikiagent.learnings-lint.plist"
     summary = log_inspector._rollup(
         outcomes, [_finding("wren", "warn", msg=msg, ts="2026-08-06 12:28:03,312")])
     assert summary.startswith("1 warning: wren(1)")
