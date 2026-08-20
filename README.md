@@ -641,6 +641,9 @@ launchctl start local.wren.<name>
 # reload after editing a .plist (boots out the old one, then bootstraps)
 ./launchd/install.sh launchd/local.wren.<name>.plist
 
+# restart the chat server after editing anything it imports
+./launchd/restart-server.sh
+
 # after any `brew upgrade` that touches python — see below
 ./launchd/reload-after-upgrade.sh
 ```
