@@ -131,7 +131,7 @@ again by the loop, then contributes to a history that is trimmed by the server.
 | Constant | Value | Why this value |
 |---|---|---|
 | `MAX_TOOL_ITERATIONS` | 10 | Model round-trips in one turn. Was 6, which suited single-fetch tools; navigating the wiki (`search_wiki` → several `read_wiki_page` → answer) legitimately chains more. |
-| `MAX_GATED_PAUSES_PER_TURN` | 3 | Confirmation-gated writes one user-turn may pause on. `MAX_TOOL_ITERATIONS` bounds the loop *inside* one `advance()` call, but a gated call returns out of `advance()` entirely — so the counter reset on every continuation and the pause/resolve chain had no bound at all. A gated call identical to one already answered in the turn is also never re-offered. |
+| `MAX_GATED_PAUSES_PER_TURN` | 3 | Confirmation-gated writes one user-turn may pause on. `MAX_TOOL_ITERATIONS` bounds the loop *inside* one `advance()` call, but a gated call returns out of `advance()` entirely — so the counter reset on every continuation and the pause/resolve chain had no bound at all. A gated call identical to one already answered in the turn is also never re-offered; `_answered_gated_calls` in the same module is what remembers them. |
 | `MAX_TOOL_RESULT_CHARS` | 8000 (env) | See above. |
 | `TOOL_RESULT_CHAR_CAPS` | per-tool dict | Overrides for tools returning **one curated document of known size**, where the flat cap actively misleads. |
 
@@ -150,6 +150,20 @@ behind them:
 > sit *above* the tool's internal budget. The tool trims first, deliberately,
 > keeping its footer and naming what it dropped. This cap is only a backstop —
 > if it fires, it undoes that careful trim.
+
+#### Why the gated-pause bound is code, not prompt wording
+
+One "add a calendar event" produced four confirmation cards, and *declining* fed
+the next one: a decline came back as `{"error": ...}`, the same shape a crashed
+tool returns, which a model correctly retries. Two rules follow.
+
+First, a tool result must carry `tool_name` and say what it wrote. Without that
+the model cannot tell its own call ran, so it calls again.
+
+Second, the bound belongs in `agent/loop.py`, not in the prompt. The
+model-level trigger never reproduced in 16 live runs after the prompt was
+reworded, so the wording is not evidence of a fix —
+`MAX_GATED_PAUSES_PER_TURN` and `_answered_gated_calls` are the guarantee.
 
 ### Layer B — the chat server (`chat/server.py`)
 
