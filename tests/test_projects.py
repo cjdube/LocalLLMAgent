@@ -73,6 +73,23 @@ def test_reads_readme_claude_md_and_doc_headings(root):
     assert row["doc_titles"] == ["The design of Alpha", "no-heading"]
 
 
+def test_agents_md_counts_as_agent_instructions(root):
+    # AgenticDevelopment carries AGENTS.md and no README, so before this it
+    # scanned as undocumented and got no anchor at all — a whole project the
+    # synthesis could never nudge about.
+    _repo(root, "Agentic", {"AGENTS.md": "Agentic's house rules."}, commit=False)
+
+    assert _by_name(projects.scan_projects())["Agentic"]["claude_md"] \
+        == "Agentic's house rules."
+
+
+def test_claude_md_wins_over_agents_md(root):
+    _repo(root, "Both", {"CLAUDE.md": "the Claude one",
+                         "AGENTS.md": "the generic one"}, commit=False)
+
+    assert _by_name(projects.scan_projects())["Both"]["claude_md"] == "the Claude one"
+
+
 def test_reports_git_freshness(root):
     _repo(root, "Alpha", {"README.md": "# Alpha"})
 

@@ -204,7 +204,7 @@ This is where most of the constants are. Nearly all follow the same shape.
 | `opportunities` | `_LIST_LIMIT` 20 | `_LIST_CHARS` 5500 | |
 | `push_log` | `DEFAULT_LIMIT` 20, `MAX_LIMIT` 100 | — | `MAX_DAYS` 30. |
 | `skills` index | `MAX_INDEX_SKILLS` 12 | `MAX_INDEX_CHARS` 800 | |
-| `projects` | `MAX_DOC_TITLES` 30 | `DOC_CHARS` 2000 | |
+| `projects` | `MAX_DOC_TITLES` 40 | `DOC_CHARS` 2000 | **The two are not a pair** — see below. `DOC_CHARS` bounds the README and agent-instructions *bodies*; nothing bounds the titles. |
 | `evaluate_app` | — | `_CONTENT_CHARS` 6000 | |
 | `evaluate_against` | — | `_LENS_CHARS` 12000, `_TARGET_CHARS` 16000, `_FETCH_CHARS` 20000 | Fetches 20000 because compaction loses 20-30%; fetching exactly 16000 would land under it. `_LENS_CHARS` is 12000, not the 8000 the docs once said. |
 | `research` | — | `_SNIPPET_CHARS` 400 | |
@@ -212,6 +212,38 @@ This is where most of the constants are. Nearly all follow the same shape.
 | `toolset` email preview | — | `BODY_PREVIEW_CHARS` 240 | |
 | `weather` | `MAX_DAYS` 5 | — | Not a model limit — it's the ceiling of OpenWeatherMap's free endpoint. |
 | `github_starred` | `MAX_PAGES` 10, `MAX_ENRICH` 15 | — | API-call bounds, not context bounds. |
+
+#### What `MAX_DOC_TITLES` actually guards
+
+Not the context window. `project_scan` distils **one project per model call**, so
+project count never drives prompt size, and the biggest real prompt today is
+LocalLLMAgent's at ~5100 chars against a 32768-token `num_ctx`. Nothing here is
+close to overflowing.
+
+What it guards is the **signal ratio inside that one prompt**. The model is asked
+what a project *is*, and the README is the part that answers; doc titles are
+supporting detail. A project with a 300-page `docs/` tree would contribute
+~10000 chars of titles against a README capped at 2000, and the answer would be
+distilled off a table of contents instead of off the pitch. The cap keeps the
+titles a minority of their own prompt.
+
+It does **not** bound the anchor `daily_synthesis` matches against. That anchor is
+name + summary + topics only (`MAX_TOPICS` 15, `MAX_SUMMARY_CHARS` 300); doc
+titles never reach it. They exist only to inform the distillation.
+
+Measured 2026-08-23 across the real `PROJECTS_DIR`: exactly one checkout has a
+`docs/` tree at all — LocalLLMAgent, 32 titles, 1018 chars total, longest title
+75 chars, ~32 chars average. So the cap is nowhere near binding on anything but
+this repo, which is also the only repo that has ever tripped it (at 21, and again
+at 32).
+
+**Known gap: the count cap has no char budget.** A title is a heading line copied
+whole (`_doc_titles`) with no per-title truncation, so 40 titles is 40 lines of
+unknown length, not a bounded number of characters — the exact shape this
+document's own preamble warns about. Real data makes it a remote risk (75 chars
+is the worst heading in the tree) and it has never fired, so it is recorded here
+rather than fixed. If it ever does fire, the fix is a per-title cap plus a total,
+matching the other rows in this table.
 
 ### Layer D — scheduled tasks
 

@@ -12,7 +12,8 @@ read off the disk, and CLAUDE.md's small-local-model rule is that Python owns
 structure. The model's only job (in tasks/project_scan.py) is distilling this
 into a blurb.
 
-Only three things are read out of each checkout: its README, its CLAUDE.md, and
+Only three things are read out of each checkout: its README, its agent
+instructions (CLAUDE.md, or AGENTS.md where that is the project's spelling), and
 the headings of docs/*.md. Nothing else — emphatically not config/.env,
 config/*.json, or any other file that happens to sit in a project directory.
 The registry is written to a store that a scheduled task refreshes and
@@ -60,9 +61,10 @@ PROJECTS_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "proj
 DOC_CHARS = 2000
 
 # docs/ headings are one line each; this bounds a project with a big docs tree.
-# Raised from 20 when this repo's own docs/ reached 21 and started truncating —
-# a title is one line, so headroom is cheap next to the 2000-char README.
-MAX_DOC_TITLES = 30
+# Raised from 20 when this repo's own docs/ reached 21 and started truncating,
+# then from 30 when it reached 32 — a title is one line, so headroom is cheap
+# next to the 2000-char README.
+MAX_DOC_TITLES = 40
 
 # Bound a hung git invocation so one wedged checkout can't stall the scan. Same
 # posture as tasks/starred_installed.py:_run_version_cmd — no shell, argv list.
@@ -72,7 +74,11 @@ GIT_TIMEOUT = 10
 # directory is off limits (see the module docstring); keep this list exhaustive
 # rather than reaching for a glob.
 _README_NAMES = ("README.md", "README.rst", "README.txt", "readme.md")
-_CLAUDE_NAME = "CLAUDE.md"
+# The agent-instruction file, whatever the project's tooling calls it. AGENTS.md
+# is the cross-tool spelling of the same thing; AgenticDevelopment has one and no
+# README, so it scanned as undocumented and got no anchor at all. First match
+# wins — a project carrying both is a Claude project first.
+_AGENT_DOC_NAMES = ("CLAUDE.md", "AGENTS.md")
 
 
 def _projects_dir() -> Path:
@@ -125,8 +131,9 @@ def _read_head(path: Path) -> str:
         return ""
 
 
-def _readme(path: Path) -> str:
-    for name in _README_NAMES:
+def _read_first(path: Path, names: tuple) -> str:
+    """The head of the first of `names` that exists in `path`, or "" if none do."""
+    for name in names:
         candidate = path / name
         if candidate.is_file():
             return _read_head(candidate)
@@ -175,8 +182,8 @@ def _content_hash(readme: str, claude_md: str, doc_titles: list) -> str:
 
 def _scan_one(path: Path) -> dict:
     """One checkout -> one row. Wrapped by scan_projects' per-directory guard."""
-    readme = _readme(path)
-    claude_md = _read_head(path / _CLAUDE_NAME)
+    readme = _read_first(path, _README_NAMES)
+    claude_md = _read_first(path, _AGENT_DOC_NAMES)
     doc_titles, docs_found = _doc_titles(path)
     return {
         "name": path.name,

@@ -41,7 +41,9 @@ note-taking and plenty to say to the repo that just moved to server-sent events.
 
 - git freshness — remote, branch, last commit day (`%cs`, never a sliced ISO
   stamp), commits in the last 30 days, and whether the tree is dirty
-- its README, its CLAUDE.md, and the first heading of each `docs/*.md`
+- its README, its agent instructions (`CLAUDE.md`, or `AGENTS.md` where that is
+  the project's spelling — first match wins), and the first heading of each
+  `docs/*.md`
 
 **Only those three documents are ever read.** Not `.env`, not `config/*.json`,
 not anything else that happens to sit in a project directory — the registry
@@ -79,18 +81,25 @@ Three degradations are reported rather than swallowed, because all three are
 otherwise invisible — the project still appears in the registry and simply stops
 matching anything:
 
-- a project with no README, CLAUDE.md or `docs/` is named in a WARNING (on the
-  real machine: `AgenticOS`, `AIChatScraper`, `my-agent-hq`, `SortOfCardGame` —
-  the fix is a README in that repo, not code here)
-- a project whose `docs/` tree outgrew `MAX_DOC_TITLES` (20) is named with the
+- a project with no README, CLAUDE.md/AGENTS.md or `docs/` is named in a WARNING
+  (on the real machine: `AgenticOS`, `AIChatScraper`, `my-agent-hq`,
+  `SortOfCardGame` — the fix is a README in that repo, not code here). The one
+  exception where code *was* the fix: `AgenticDevelopment` had `AGENTS.md` and
+  nothing else, so the read list grew that spelling rather than the repo growing
+  a duplicate README
+- a project whose `docs/` tree outgrew `MAX_DOC_TITLES` (40) is named with the
   pre-cap count, since `_doc_titles` drops the alphabetical tail. The blurb still
   reads normally; it just stops reflecting part of what the project documents.
-  LocalLLMAgent sat at exactly 20 when this was added
+  LocalLLMAgent sat at exactly 20 when this was added, and tripped the cap again
+  at 21 and at 32 — each time the WARNING is what said so
 - a distillation returning fewer than 4 topics is named with counts
 
-The cap itself stays — 20 one-line titles is the right bound for a prompt, and a
-project with a 60-page docs tree shouldn't spend it all here. What was wrong was
-truncating in silence.
+The cap itself stays — a few dozen one-line titles is the right bound for a
+prompt, and a project with a 60-page docs tree shouldn't spend it all here. What
+was wrong was truncating in silence. What the cap does and does not protect (it
+guards the signal ratio inside one prompt, not the context window, and never
+touches the anchor) is written up in
+[docs/limits.md](limits.md#what-max_doc_titles-actually-guards).
 
 ### Why a distillation and not the raw docs
 

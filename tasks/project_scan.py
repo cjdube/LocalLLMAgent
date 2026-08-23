@@ -20,7 +20,7 @@ raw transcripts for this reason. So the model returns a one-line summary and a
 short topic list, and the anchor built from them stays the same size class as a
 wiki page's.
 
-A project with no README, no CLAUDE.md and no docs/ still gets a registry row
+A project with no README, no agent instructions and no docs/ still gets a row
 (its git facts are real), but no blurb — there is nothing to distil, and an
 anchor whose only token is its own name can match nothing but its own spelling.
 Those are logged by name: the fix is a README in that repo, not code here.
@@ -61,7 +61,8 @@ MAX_SUMMARY_CHARS = 300
 
 DISTILL_SYSTEM_PROMPT = """You summarize a software project from its own \
 documentation, for an index of the user's projects. You will be given a project \
-name, its README, its CLAUDE.md if it has one, and the titles of its docs pages.
+name, its README, its agent instructions if it has any, and the titles of its \
+docs pages.
 
 Output EXACTLY two lines, nothing else:
 
@@ -90,7 +91,9 @@ def render_prompt(row: dict) -> str:
     if row.get("readme"):
         parts.append(f"README:\n{row['readme']}")
     if row.get("claude_md"):
-        parts.append(f"CLAUDE.md:\n{row['claude_md']}")
+        # Labelled by what it is, not by filename: the field holds CLAUDE.md or
+        # AGENTS.md, and naming the wrong one is a false statement in the prompt.
+        parts.append(f"agent instructions:\n{row['claude_md']}")
     if row.get("doc_titles"):
         parts.append("docs pages: " + ", ".join(row["doc_titles"]))
     return "\n\n".join(parts)
@@ -172,8 +175,8 @@ def main(argv=None) -> int:
             # synthesis nudge, and that would otherwise be invisible. Naming them
             # makes the fix obvious (add a README to that repo).
             logger.warning(
-                f"{len(undocumented)} project(s) have no README, CLAUDE.md or docs/ "
-                f"and so get no anchor: {', '.join(undocumented)}"
+                f"{len(undocumented)} project(s) have no README, CLAUDE.md/AGENTS.md "
+                f"or docs/ and so get no anchor: {', '.join(undocumented)}"
             )
 
         # Same reasoning one step further in: a project whose docs/ outgrew
