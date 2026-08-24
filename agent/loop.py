@@ -435,6 +435,48 @@ def _strip_think_markup(text: str) -> str:
     return _THINK_TAG_RE.sub("", _THINK_BLOCK_RE.sub("", text)).strip()
 
 
+# gemma4:26b-mlx sometimes reaches for LaTeX where a character would do: five
+# replies in logs/wren.log carry `$\rightarrow$` in prose bound for the phone.
+# Nothing downstream renders math — the chat bubble is textContent inside a
+# `white-space: pre-wrap` div — so the markup reaches the reader verbatim.
+#
+# The backslash is what makes this safe. A span converts only as `$\command$`,
+# never as `$...$`: dollar signs here are overwhelmingly money ("$0 to $" and
+# "$1.03 text vs $" are both real log lines), and a rule spanning two of them
+# would eat the prose in between. Money carries no backslash.
+#
+# Only \rightarrow was measured; the rest are its immediate neighbours, a row
+# of data each rather than new code. Deliberately narrow — `$n=2$` has no
+# backslash and is left alone, as is any command not on this list.
+_LATEX_SYMBOLS = {
+    "rightarrow": "→", "to": "→",
+    "leftarrow": "←", "gets": "←",
+    "leftrightarrow": "↔",
+    "Rightarrow": "⇒",
+    "le": "≤", "leq": "≤",
+    "ge": "≥", "geq": "≥",
+    "ne": "≠", "neq": "≠",
+    "approx": "≈",
+    "times": "×",
+    "pm": "±",
+}
+# Longest name first so `\leq` is never tried as `\le`, and a trailing-letter
+# check so an ordinary word like `\total` doesn't come back as `→tal`.
+_LATEX_NAMES = "|".join(sorted(_LATEX_SYMBOLS, key=len, reverse=True))
+_LATEX_RE = re.compile(
+    rf"\$\\({_LATEX_NAMES})\$"           # $\rightarrow$ — the form the model writes
+    rf"|\\({_LATEX_NAMES})(?![A-Za-z])"  # a bare \rightarrow
+)
+
+
+def _latex_to_unicode(text: str) -> str:
+    # Untouched when there's no backslash at all, so the common clean reply
+    # keeps its exact whitespace.
+    if not text or "\\" not in text:
+        return text
+    return _LATEX_RE.sub(lambda m: _LATEX_SYMBOLS[m.group(1) or m.group(2)], text)
+
+
 def _llm_chat(
     messages: list[dict],
     backend: Optional[str] = None,
@@ -464,7 +506,8 @@ def _llm_chat(
                                logger=logger, should_cancel=should_cancel, think=think)
     else:
         raise ValueError(f"unknown WREN_LLM_BACKEND {b!r} (expected 'ollama' or 'gemini')")
-    message["content"] = _strip_think_markup(message.get("content") or "")
+    content = _strip_think_markup(message.get("content") or "")
+    message["content"] = _latex_to_unicode(content)
     return message
 
 

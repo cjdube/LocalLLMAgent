@@ -1120,3 +1120,65 @@ def test_missing_content_does_not_crash_the_seam(monkeypatch):
                         lambda messages, **kwargs: {"role": "assistant", "tool_calls": []})
 
     assert loop._llm_chat([{"role": "user", "content": "hi"}])["content"] == ""
+
+
+# --------------------------------------------------------------------------- #
+# LaTeX in prose. gemma4:26b-mlx writes `$\rightarrow$` where it means →, and
+# nothing between the seam and the phone renders math (logs/wren.log,
+# 2026-08-14). The regression that matters is money: two prices in one
+# sentence must not read as a math span.
+# --------------------------------------------------------------------------- #
+
+def test_dollar_wrapped_latex_becomes_the_character(monkeypatch):
+    _llm_returning(r"Initial Contact $\rightarrow$ Discovery Call", monkeypatch)
+
+    assert loop.complete_text("sys", "user") == "Initial Contact → Discovery Call"
+
+
+def test_money_on_both_sides_of_prose_is_left_alone(monkeypatch):
+    # The whole reason the rule demands a backslash: without one, "$5 to $10"
+    # looks exactly like a math span and the words between the prices vanish.
+    _llm_returning("They raised $5 to $10 million last year.", monkeypatch)
+
+    assert loop.complete_text("sys", "user") == "They raised $5 to $10 million last year."
+
+
+def test_a_bare_command_converts_too(monkeypatch):
+    _llm_returning(r"scored 8 \times faster, \geq the target", monkeypatch)
+
+    assert loop.complete_text("sys", "user") == "scored 8 × faster, ≥ the target"
+
+
+def test_a_longer_command_is_not_matched_as_a_shorter_one(monkeypatch):
+    _llm_returning(r"$\leftrightarrow$ and $\leq$", monkeypatch)
+
+    assert loop.complete_text("sys", "user") == "↔ and ≤"
+
+
+def test_a_word_that_starts_with_a_command_name_survives(monkeypatch):
+    _llm_returning(r"the \total came to \gets", monkeypatch)
+
+    assert loop.complete_text("sys", "user") == r"the \total came to ←"
+
+
+def test_math_without_a_backslash_is_left_alone(monkeypatch):
+    # Deliberately out of scope: no backslash means no safe way to tell this
+    # from a pair of dollar amounts.
+    _llm_returning("with $n=2$ samples", monkeypatch)
+
+    assert loop.complete_text("sys", "user") == "with $n=2$ samples"
+
+
+def test_an_unlisted_command_is_left_alone(monkeypatch):
+    _llm_returning(r"C:\Programs and $\alpha$", monkeypatch)
+
+    assert loop.complete_text("sys", "user") == r"C:\Programs and $\alpha$"
+
+
+def test_the_chat_path_converts_latex_too(monkeypatch):
+    _llm_returning(r"Lead $\rightarrow$ Proposal.", monkeypatch)
+
+    result = loop.advance([{"role": "user", "content": "hi"}], [], {})
+
+    assert result["type"] == "final"
+    assert result["text"] == "Lead → Proposal."
