@@ -30,6 +30,7 @@ import logging
 import os
 import re
 import sys
+import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -160,6 +161,32 @@ _FUND_NAME_RE = re.compile(
 )
 
 
+# EDGAR's full-text search returns a 500 now and then — twice in six weeks, and
+# the next run was fine both times. A 5xx or a dropped connection is worth
+# another attempt; a 4xx is our own malformed request, so retrying it only
+# burns the window.
+_EDGAR_RETRIES = 3
+_EDGAR_RETRY_WAIT_S = 2
+
+
+def _edgar_get(params: dict, headers: dict):
+    """GET one EDGAR search page, retrying transient failures. Re-raises the
+    last exception once the attempts run out, so poll_edgar's own handler still
+    turns it into {"error": ...}."""
+    for attempt in range(_EDGAR_RETRIES):
+        try:
+            resp = requests.get(EDGAR_SEARCH_URL, params=params,
+                                headers=headers, timeout=_TIMEOUT_S)
+            resp.raise_for_status()
+            return resp
+        except requests.exceptions.RequestException as e:
+            # No response at all (timeout, connection reset) counts as transient.
+            status = getattr(e.response, "status_code", None)
+            if (status is not None and status < 500) or attempt == _EDGAR_RETRIES - 1:
+                raise
+            time.sleep(_EDGAR_RETRY_WAIT_S * (attempt + 1))
+
+
 def poll_edgar(start_date: str, end_date: str, states: list) -> dict:
     """New Form D filings with a principal place of business in `states`,
     filed within [start_date, end_date] (YYYY-MM-DD). Same-day filings by one
@@ -190,9 +217,7 @@ def poll_edgar(start_date: str, end_date: str, states: list) -> dict:
                     "locationCodes": state,
                     "from": page * _EDGAR_PAGE_SIZE,
                 }
-                resp = requests.get(EDGAR_SEARCH_URL, params=params,
-                                    headers=headers, timeout=_TIMEOUT_S)
-                resp.raise_for_status()
+                resp = _edgar_get(params, headers)
                 payload = resp.json().get("hits", {})
                 hits = payload.get("hits", [])
                 state_total = (payload.get("total") or {}).get("value", 0)
@@ -689,9 +714,16 @@ def build_and_send_digest(logger: Optional[logging.Logger] = None) -> dict:
         ).isoformat()
 
         edgar_result = poll_edgar(edgar_start, run_day, _states())
-        log.info(f"poll_edgar({edgar_start}..{run_day}) -> "
-                 f"{len(edgar_result.get('items', []))} items, "
-                 f"error={edgar_result.get('error')}")
+        # A dead source degrades to [] rather than killing the run, but at INFO
+        # that degradation was invisible: the 2026-08-23 EDGAR 500 sat in the
+        # log unread while the run reported success. WARNING puts it in
+        # log_inspector's morning sweep. Keep the " -> " — chat/insights.py
+        # reads a line carrying it as tool activity, so the run still parses as
+        # a success rather than a failure.
+        log.log(logging.WARNING if edgar_result.get("error") else logging.INFO,
+                f"poll_edgar({edgar_start}..{run_day}) -> "
+                f"{len(edgar_result.get('items', []))} items, "
+                f"error={edgar_result.get('error')}")
         # A truncated poll never reached the oldest filings in the window, so
         # the watermark holds where coverage actually ends — advancing it to
         # run_day would skip them for good.
@@ -711,8 +743,9 @@ def build_and_send_digest(logger: Optional[logging.Logger] = None) -> dict:
                  f"{len(ats_result.get('items', []))} leadership openings")
 
         hn_result = poll_hn()
-        log.info(f"poll_hn -> {len(hn_result.get('items', []))} items, "
-                 f"error={hn_result.get('error')}")
+        log.log(logging.WARNING if hn_result.get("error") else logging.INFO,
+                f"poll_hn -> {len(hn_result.get('items', []))} items, "
+                f"error={hn_result.get('error')}")
 
         # Each source degrades to [] on error — one dead feed never kills the
         # digest, matching the weekly-learnings posture.

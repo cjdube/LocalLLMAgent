@@ -24,7 +24,13 @@ ask Wren in chat to "send the opportunity digest" anytime — the chat tool
 ## What is it looking at?
 
 Three sources, each polled fresh every run. Each degrades to empty on error —
-one dead feed never kills the digest.
+one dead feed never kills the digest. A degraded poll is logged at WARNING, so
+`log_inspector` reports it the next morning; the run itself still counts as a
+success, because the digest did its job with the sources that answered. EDGAR
+retries a transient failure (5xx, timeout) up to `_EDGAR_RETRIES` times before
+giving up — its full-text search 500s occasionally, and one attempt per week
+turned a blip into a skipped week. A 4xx is not retried: that's a malformed
+request on our side, and repeating it only wastes the window.
 
 1. **SEC EDGAR Form D filings** ("just funded") from companies headquartered
    in the watched states (`OPP_STATES`, default `MA,NH,ME`). Only filings

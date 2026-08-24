@@ -8,8 +8,10 @@ are monkeypatched; nothing touches the network, the model, or Gmail."""
 import json
 import logging
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pytest
+import requests
 
 from agent.store import load_json
 from agent.tools import opportunities as opp
@@ -679,3 +681,117 @@ def test_poll_edgar_collapses_same_day_filings_per_filer(monkeypatch):
     assert acme["title"].endswith("(3 filings)")
     assert "filings" not in acme                      # bookkeeping key stripped
     assert "filings" not in by_company["Beta Labs"]["title"]
+
+
+# --------------------------------------------------------------------------- #
+# EDGAR transient-failure retry
+# --------------------------------------------------------------------------- #
+# EDGAR full-text search 500s intermittently (2026-07-13, 2026-08-23), and both
+# times the next scheduled run was fine. One attempt per week turned a blip into
+# a skipped week, so poll_edgar retries transient failures.
+
+class _FakeResp:
+    def __init__(self, status, hits=()):
+        self.status_code = status
+        self._hits = list(hits)
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.exceptions.HTTPError(
+                f"{self.status_code} Server Error", response=self)
+
+    def json(self):
+        return {"hits": {"hits": self._hits,
+                         "total": {"value": len(self._hits)}}}
+
+
+_ONE_HIT = [{"_source": {"file_date": "2026-08-22", "adsh": "0001234567-26-000001",
+                         "display_names": ["Acme Robotics Inc  (CIK 0001234567)"],
+                         "ciks": ["0001234567"], "biz_locations": ["Boston, MA"]}}]
+
+
+@pytest.fixture
+def edgar_responses(monkeypatch):
+    """Feed poll_edgar a scripted sequence of responses/exceptions and count the
+    attempts. Sleeps are stubbed out so a retry test costs no wall time."""
+    calls = []
+    monkeypatch.setattr(od.time, "sleep", lambda s: None)
+
+    def script(*responses):
+        queue = list(responses)
+
+        def fake_get(url, params=None, headers=None, timeout=None):
+            calls.append(params)
+            item = queue.pop(0) if len(queue) > 1 else queue[0]
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+        monkeypatch.setattr(od.requests, "get", fake_get)
+        return calls
+
+    return script
+
+
+def test_edgar_retries_a_transient_500_and_succeeds(edgar_responses):
+    calls = edgar_responses(_FakeResp(500), _FakeResp(200, _ONE_HIT))
+    result = od.poll_edgar("2026-08-20", "2026-08-23", ["MA"])
+    assert "error" not in result
+    assert [i["company"] for i in result["items"]] == ["Acme Robotics Inc"]
+    assert len(calls) == 2
+
+
+def test_edgar_retries_a_timeout(edgar_responses):
+    calls = edgar_responses(requests.exceptions.Timeout("timed out"),
+                            _FakeResp(200, _ONE_HIT))
+    result = od.poll_edgar("2026-08-20", "2026-08-23", ["MA"])
+    assert "error" not in result
+    assert len(calls) == 2
+
+
+def test_edgar_gives_up_after_the_retry_budget(edgar_responses):
+    calls = edgar_responses(_FakeResp(500))
+    result = od.poll_edgar("2026-08-20", "2026-08-23", ["MA"])
+    assert "EDGAR poll failed" in result["error"]
+    assert len(calls) == od._EDGAR_RETRIES
+
+
+def test_edgar_does_not_retry_a_client_error(edgar_responses):
+    """A 4xx is our own malformed request — retrying it can't help, and three
+    attempts against a rate limiter is worse than one."""
+    calls = edgar_responses(_FakeResp(400))
+    result = od.poll_edgar("2026-08-20", "2026-08-23", ["MA"])
+    assert "EDGAR poll failed" in result["error"]
+    assert len(calls) == 1
+
+
+# --------------------------------------------------------------------------- #
+# A degraded source has to be audible
+# --------------------------------------------------------------------------- #
+# The 2026-08-23 EDGAR outage logged at INFO, so log_inspector's morning sweep
+# (WARNING and above) never saw it and the run reported success.
+
+def test_a_failed_poller_logs_at_warning(stubbed_run, digest_log, monkeypatch):
+    monkeypatch.setattr(od, "poll_edgar", lambda *a: {"error": "EDGAR 503"})
+    monkeypatch.setattr(od, "poll_hn", lambda: {"error": "HN 502"})
+    logger, parse = digest_log
+    od.build_and_send_digest(logger=logger)
+
+    lines = Path(logger.handlers[0].baseFilename).read_text().splitlines()
+    warnings = [ln for ln in lines if "[WARNING]" in ln]
+    assert any("EDGAR 503" in ln for ln in warnings)
+    assert any("HN 502" in ln for ln in warnings)
+    # A healthy poll stays at INFO — the sweep must not cry wolf every week.
+    assert any("[INFO] poll_ats" in ln for ln in lines)
+
+
+def test_a_degraded_run_still_parses_as_a_success(stubbed_run, digest_log, monkeypatch):
+    """The WARNING keeps the " -> " shape, so chat/insights.py still reads it as
+    tool activity. Drop that and the dashboard marks a recovered run failed."""
+    monkeypatch.setattr(od, "poll_edgar", lambda *a: {"error": "EDGAR 503"})
+    logger, parse = digest_log
+    od.build_and_send_digest(logger=logger)
+
+    runs = parse()
+    assert len(runs) == 1
+    assert runs[0]["status"] == "success"
