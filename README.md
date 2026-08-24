@@ -98,8 +98,24 @@ history itself is budgeted too: before each chat turn the server drops the
 oldest whole user-turns once the history exceeds `WREN_CHAT_MAX_HISTORY_CHARS`
 (default 16000 chars, ~4k tokens — half the default window, leaving the rest
 for the tool schemas and the turn's own growth), keeping the system prompt and
-the newest turn. So a long session degrades gracefully — the model forgets the
-oldest exchanges — instead of hitting `num_ctx` and losing its system prompt.
+the newest turn. So a long session degrades gracefully — instead of hitting
+`num_ctx` and losing its system prompt.
+
+Those dropped turns aren't simply forgotten: before evicting them the server has
+the model compact them into notes (what was asked, what was decided, what a tool
+wrote, what's unfinished), capped at `WREN_CHAT_SUMMARY_CHARS` (default 1500)
+and carried in the system message — the one slot the trim never drops. Each
+later compaction folds the previous summary into the new one, so a session keeps
+a single running record rather than starting over each time it trims. If the
+model returns nothing (its usual failure under a tight budget), the previous
+summary stands and the turns drop anyway, logged at WARNING. Set
+`WREN_CHAT_SUMMARY_CHARS=0` to turn compaction off, model call included.
+
+The turn that compacts says so: a quiet grey line in the thread ("Earlier
+messages were summarized to save room"), so the point where a session stopped
+holding its early turns verbatim is visible rather than something you infer from
+a later answer. It shows on a failed or cancelled turn too — the history was
+summarized away before the turn ran either way.
 
 Chat also trims the *tool* overhead: instead of sending every registered tool
 schema each turn, a session sends a small always-loaded core plus whichever tool

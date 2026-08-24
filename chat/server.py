@@ -32,6 +32,7 @@ from agent.loop import (
     TurnCancelled,
     active_model_label,
     advance,
+    complete_text,
     escalation_available,
     escalation_backend,
     load_persona,
@@ -83,6 +84,17 @@ MAX_MESSAGE_CHARS = 8000
 # message up to MAX_MESSAGE_CHARS plus tool results up to
 # OLLAMA_MAX_TOOL_RESULT_CHARS each). Raise together with OLLAMA_NUM_CTX.
 MAX_HISTORY_CHARS = int(os.getenv("WREN_CHAT_MAX_HISTORY_CHARS", "16000"))
+# Cap on the running summary that replaces the turns MAX_HISTORY_CHARS evicts.
+# The summary rides in the system message, so it is spent out of the very budget
+# it exists to protect: left ungrown it would eventually crowd out the live
+# conversation it is meant to make room for. Counted into the startup budget
+# warning below.
+SUMMARY_CHARS = int(os.getenv("WREN_CHAT_SUMMARY_CHARS", "1500"))
+# How much of the evicted transcript the summarizer is shown, and how much of
+# any single message counts toward that. The model is small: a bounded prompt it
+# can actually read beats a complete one it truncates.
+SUMMARY_INPUT_CHARS = 6000
+SUMMARY_MESSAGE_CHARS = 600
 # Read timeout for an interactive turn, deliberately tighter than the
 # OLLAMA_TIMEOUT the scheduled tasks use. It is a between-chunks timeout, so it
 # only has to cover the wait for the FIRST token: model load plus prefill of a
@@ -221,6 +233,11 @@ def _security_headers(resp):
 
 # In-memory only, per the "fresh session" design — lost on server restart.
 conversations: dict[str, list[dict]] = {}
+# The running summary of each session's compacted-away turns, rebuilt into the
+# system message on every turn. It lives outside `conversations` on purpose:
+# anything inside the history is a candidate for the next eviction, and the one
+# message that must survive an eviction is the record of the last one.
+summaries: dict[str, str] = {}
 pending_confirmations: dict[str, dict] = {}
 # When a write paused for confirmation was reached during an escalated (frontier)
 # turn, this holds that turn's backend so the /chat/confirm continuation stays on
@@ -267,6 +284,7 @@ def _evict_idle_sessions() -> None:
         if sid in cancel_events:
             continue  # a turn is somehow still running; leave it alone
         conversations.pop(sid, None)
+        summaries.pop(sid, None)
         pending_confirmations.pop(sid, None)
         pending_backends.pop(sid, None)
         loaded_groups.pop(sid, None)
@@ -342,11 +360,12 @@ def _message_chars(msg: dict) -> int:
     return n
 
 
-def _trim_history(history: list) -> int:
+def _trim_history(history: list) -> list:
     """Drop the oldest whole user-turns (a user message and everything up to
     the next user message) until the history fits MAX_HISTORY_CHARS. The
     system message (index 0) and the most recent turn always survive. Returns
-    how many messages were dropped.
+    the messages it dropped, oldest first, for _summarize_dropped to fold into
+    the system message.
 
     Without this the history grows without bound: every turn re-sends all of
     it, so prefill latency climbs with session length, and once the prompt
@@ -357,16 +376,113 @@ def _trim_history(history: list) -> int:
     so the model never sees an orphaned half of a pair."""
     total = sum(_message_chars(m) for m in history)
     if total <= MAX_HISTORY_CHARS:
-        return 0
+        return []
     starts = [i for i, m in enumerate(history) if m.get("role") == "user"]
-    dropped = 0
+    dropped = []
     while total > MAX_HISTORY_CHARS and len(starts) > 1:
         start, end = starts[0], starts[1]
         total -= sum(_message_chars(m) for m in history[start:end])
+        dropped.extend(history[start:end])
         del history[start:end]
-        dropped += end - start
         starts = [i - (end - start) for i in starts[1:]]
     return dropped
+
+
+_SUMMARY_SYSTEM_PROMPT = (
+    "You compress the earlier part of a conversation so it can be deleted "
+    "without losing what the rest of the conversation depends on. You write "
+    "notes, not prose."
+)
+
+_SUMMARY_PROMPT = """Summary of the conversation so far (may be empty):
+{previous}
+
+Newer messages to fold into it:
+{transcript}
+
+Write the replacement summary. It replaces BOTH blocks above and both are then
+deleted, so carry forward anything the rest of the conversation still needs.
+
+Rules:
+- One fact per line. Start every line with "- ". No preamble, no heading.
+- Keep: what the user asked for, what was decided, facts the user stated about
+  themselves, what a tool wrote or changed, and anything left unfinished.
+- Drop: greetings, restated questions, and tool output nobody acted on.
+- Under {limit} characters total."""
+
+
+def _summary_transcript(dropped: list) -> str:
+    """Render evicted messages as a bounded transcript for the summarizer.
+
+    Trimmed from the front, not the back: the oldest of these are the messages
+    the previous summary most likely already covers, while the newest sit right
+    up against the window that survived."""
+    lines = []
+    for msg in dropped:
+        text = (msg.get("content") or "").strip()
+        for call in msg.get("tool_calls") or []:
+            text = f"{text} {describe_call(call)}".strip()
+        if text:
+            lines.append(f"{msg.get('role', '?')}: {text[:SUMMARY_MESSAGE_CHARS]}")
+    return "\n".join(lines)[-SUMMARY_INPUT_CHARS:]
+
+
+def _summarize_dropped(dropped: list, previous: str) -> str:
+    """Fold the evicted messages into the session's running summary, returning
+    `previous` unchanged if the model can't produce one.
+
+    A failure here degrades to exactly the old behaviour — those turns are gone
+    either way — so it must never raise into the chat request. It logs at
+    WARNING because the symptom otherwise surfaces much later and looks like the
+    model losing the thread rather than like a failed call.
+
+    think=False: this fills a fixed line format from material already in the
+    prompt, and thinking tokens come out of the same budget as the answer, so a
+    reasoning-heavy run returns empty content rather than a shorter summary.
+
+    SUMMARY_CHARS=0 turns the whole thing off, model call included — the escape
+    hatch if compaction's latency on the shared Ollama slot ever costs more than
+    the memory is worth."""
+    if SUMMARY_CHARS <= 0:
+        return ""  # compaction off — back to plain dropping, no model call
+    transcript = _summary_transcript(dropped)
+    if not transcript:
+        return previous
+    prompt = _SUMMARY_PROMPT.format(previous=previous or "(none)",
+                                    transcript=transcript, limit=SUMMARY_CHARS)
+    try:
+        summary = complete_text(_SUMMARY_SYSTEM_PROMPT, prompt, think=False,
+                                timeout=CHAT_MODEL_TIMEOUT, logger=logger).strip()
+    except Exception as e:
+        summary = ""
+        logger.warning(f"compaction call failed ({e})")
+    if not summary:
+        logger.warning(
+            f"compaction produced no summary: {len(dropped)} messages "
+            f"({len(transcript)} chars) dropped, leaving only the previous "
+            f"summary ({len(previous)} chars) standing"
+        )
+        return previous
+    if len(summary) > SUMMARY_CHARS:
+        # Back up to a whole line: half a fact reads as a wrong fact.
+        summary = summary[:SUMMARY_CHARS].rsplit("\n", 1)[0]
+    return summary
+
+
+def _with_summary(system_content: str, summary: str) -> str:
+    """Append the compaction summary to the system prompt. It rides there rather
+    than in a message of its own because index 0 is the one slot _trim_history
+    never evicts — a summary stored as a message would be dropped by the very
+    mechanism that created it."""
+    if not summary:
+        return system_content
+    return (
+        system_content
+        + "\n\n---\n\nEarlier in this conversation, summarized because the "
+        "original messages were dropped to save room. Treat it as something you "
+        "already said and heard, not as new information:\n"
+        + summary
+    )
 
 
 def _make_load_tools(sid: str, tools: list[dict]):
@@ -479,7 +595,8 @@ def _warn_if_final_is_empty(stage: str, text: str, history: list, checkpoint: in
 
 
 def _run_turn(sid: str, history: list, checkpoint: int, cancel: threading.Event,
-              stage: str = "turn", backend: str | None = None):
+              stage: str = "turn", backend: str | None = None,
+              compacted: bool = False):
     """Advance the session's conversation and shape the HTTP response — the
     shared back half of /chat and /chat/confirm. On cancel or failure the
     history is rolled back to `checkpoint` so the next turn starts clean; for
@@ -490,13 +607,18 @@ def _run_turn(sid: str, history: list, checkpoint: int, cancel: threading.Event,
 
     `backend` is None for a normal (local) turn and set only when a /chat/confirm
     continues an escalated turn — so the frontier turn's continuation stays on
-    the frontier model."""
+    the frontier model.
+
+    `compacted` rides out on whatever this turn answers with, cancels and errors
+    included: the history was already summarized away before advance() ran, so
+    the user is owed the notice regardless of how the turn itself ends."""
     # Chat sends only the always-loaded core plus this session's activated
     # groups, not the whole registry — keeps the small model's context lean. The
     # tools list is mutable so a mid-turn load_tools call can extend it (see
     # _make_load_tools); dispatch carries every real tool, gated only in schema.
     tools = tools_for(loaded_groups.get(sid, set()))
     dispatch = {**DISPATCH, "load_tools": _make_load_tools(sid, tools)}
+    note = {"compacted": True} if compacted else {}
     # Logged before advance(), not after: every other per-turn line (the
     # access log, ollama_chat) is written once the turn completes, so a turn
     # that never arrives and one that hangs mid-flight looked identical — both
@@ -513,11 +635,11 @@ def _run_turn(sid: str, history: list, checkpoint: int, cancel: threading.Event,
     except TurnCancelled:
         del history[checkpoint:]  # discard the stopped turn so the next one starts clean
         logger.info(f"chat {stage} cancelled by user")
-        return jsonify({"type": "cancelled"})
+        return jsonify({**note, "type": "cancelled"})
     except Exception as e:
         del history[checkpoint:]  # roll back the failed turn so the next one starts clean
         logger.exception(f"chat {stage} failed: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({**note, "error": str(e)}), 500
     finally:
         cancel_events.pop(sid, None)
 
@@ -527,9 +649,9 @@ def _run_turn(sid: str, history: list, checkpoint: int, cancel: threading.Event,
         # the next continuation stays on the frontier model too.
         if backend:
             pending_backends[sid] = backend
-        return jsonify(_call_response(result))
+        return jsonify({**note, **_call_response(result)})
 
-    resp = _call_response(result)
+    resp = {**note, **_call_response(result)}
     if result["type"] == "final":
         _warn_if_promised_without_acting(stage, result.get("text", ""), history, checkpoint)
         _warn_if_final_is_empty(stage, result.get("text", ""), history, checkpoint)
@@ -602,20 +724,29 @@ def chat():
     # (Re)build the system message every turn, not just on session start, so a
     # fact pinned or a skill saved mid-session takes effect on the very next
     # turn, and the baked-in date rolls over at midnight in a long-lived session.
-    system_message = {"role": "system", "content": _system_message_content()}
+    base_system = _system_message_content()
+    system_message = {"role": "system",
+                      "content": _with_summary(base_system, summaries.get(sid, ""))}
     if history:
         history[0] = system_message
     else:
         history.append(system_message)
 
     # Trim before taking the checkpoint — trimming shifts indices, and
-    # _run_turn's rollback slices from the checkpoint.
-    trimmed = _trim_history(history)
-    if trimmed:
+    # _run_turn's rollback slices from the checkpoint. Whatever the trim evicts
+    # is summarized back into the system message, so a long session forgets the
+    # wording of its early turns rather than the substance. That rewrite happens
+    # after the trim measured the budget, so the history can end the turn up to
+    # SUMMARY_CHARS over it — priced into _context_budget_warning.
+    dropped = _trim_history(history)
+    if dropped:
         logger.info(
-            f"trimmed {trimmed} oldest history messages to fit the context budget "
-            f"({MAX_HISTORY_CHARS} chars)"
+            f"compacting {len(dropped)} oldest history messages to fit the context "
+            f"budget ({MAX_HISTORY_CHARS} chars)"
         )
+        summaries[sid] = _summarize_dropped(dropped, summaries.get(sid, ""))
+        history[0] = {"role": "system",
+                      "content": _with_summary(base_system, summaries[sid])}
 
     # Deterministic pre-load: attach any tool groups this message's keywords cue
     # so the model usually doesn't have to make the load_tools reasoning hop.
@@ -625,7 +756,7 @@ def chat():
 
     checkpoint = len(history)
     history.append({"role": "user", "content": user_message})
-    return _run_turn(sid, history, checkpoint, cancel)
+    return _run_turn(sid, history, checkpoint, cancel, compacted=bool(dropped))
 
 
 @app.route("/chat/confirm", methods=["POST"])
@@ -789,6 +920,7 @@ def chat_new():
     if event is not None:
         event.set()
     conversations.pop(sid, None)
+    summaries.pop(sid, None)
     pending_confirmations.pop(sid, None)
     pending_backends.pop(sid, None)
     loaded_groups.pop(sid, None)
@@ -885,22 +1017,26 @@ def _context_budget_warning() -> str | None:
     have to be raised together, and nothing couples them. _trim_history bounds
     the history *between* turns, but a turn's tool results pile on top of that
     ceiling inside advance() — up to MAX_TOOL_ITERATIONS of them — so the real
-    worst case is history + every tool result. Overflow doesn't raise: Ollama
+    worst case is history + every tool result, plus the compaction summary that
+    is written into the system message after the trim already measured the
+    budget. Overflow doesn't raise: Ollama
     silently drops the FRONT of the prompt, which is the system prompt (identity,
     tool rules, pinned memories), and the model degrades into repetition loops.
 
     That failure is near-impossible to diagnose from the symptom, so price it out
     at startup instead. Pure (returns the text, no logging or push) so the
     arithmetic is testable without side effects."""
-    worst_case = MAX_HISTORY_CHARS + (MAX_TOOL_ITERATIONS * MAX_TOOL_RESULT_CHARS)
+    worst_case = (MAX_HISTORY_CHARS + SUMMARY_CHARS
+                  + (MAX_TOOL_ITERATIONS * MAX_TOOL_RESULT_CHARS))
     num_ctx = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
     capacity = num_ctx * _CHARS_PER_TOKEN
     if worst_case <= capacity:
         return None
     return (
         f"context budget over num_ctx: worst-case prompt ~{worst_case:,} chars "
-        f"(history {MAX_HISTORY_CHARS:,} + {MAX_TOOL_ITERATIONS} tool results x "
-        f"{MAX_TOOL_RESULT_CHARS:,}) vs num_ctx={num_ctx:,} (~{capacity:,} chars). "
+        f"(history {MAX_HISTORY_CHARS:,} + summary {SUMMARY_CHARS:,} + "
+        f"{MAX_TOOL_ITERATIONS} tool results x {MAX_TOOL_RESULT_CHARS:,}) vs "
+        f"num_ctx={num_ctx:,} (~{capacity:,} chars). "
         f"A tool-heavy turn can silently truncate the system prompt — raise "
         f"OLLAMA_NUM_CTX, or lower WREN_CHAT_MAX_HISTORY_CHARS / "
         f"OLLAMA_MAX_TOOL_RESULT_CHARS."

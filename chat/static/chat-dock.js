@@ -170,6 +170,13 @@
 
   function handleResult(result, typingEl) {
     if (typingEl) typingEl.remove();
+    // The server summarized this session's oldest turns away before answering.
+    // Said here rather than in any one branch: it happened before the turn ran,
+    // so it is just as true of an error or a cancel as of a reply. Marked in the
+    // thread so a later "she forgot that" has a visible cause to scroll back to.
+    if (result.compacted) {
+      addMessage("system", "Earlier messages were summarized to save room.");
+    }
     if (result.error) {
       addMessage("system", "Error: " + result.error);
       // A failed escalation leaves the local answer intact, so let it be retried.

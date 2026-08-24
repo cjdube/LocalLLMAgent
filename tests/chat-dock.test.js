@@ -134,6 +134,39 @@ describe("sending a turn", () => {
   });
 });
 
+// The server summarizes a long session's oldest turns away and drops them. That
+// is the moment the thread stops remembering exact wording, so it gets a visible
+// marker — otherwise a later "she forgot that" has no cause you can scroll to.
+describe("a turn the server compacted", () => {
+  test("notes the compaction above the reply", async () => {
+    resolvesWith({ type: "final", text: "hi back", compacted: true });
+    submit("hello");
+    await settle();
+    const system = messages().querySelectorAll(".msg.system");
+    expect(system).toHaveLength(1);
+    expect(system[0].textContent).toContain("summarized to save room");
+    // The note comes first: it explains the reply that follows it.
+    expect(lastMessage()).toBe("hi back");
+  });
+
+  test("notes it on a failed turn too — the history is gone either way", async () => {
+    resolvesWith({ error: "model unreachable", compacted: true });
+    submit("hello");
+    await settle();
+    const system = [...messages().querySelectorAll(".msg.system")].map((m) => m.textContent);
+    expect(system[0]).toContain("summarized to save room");
+    expect(system[1]).toContain("model unreachable");
+    expect(input().disabled).toBe(false);
+  });
+
+  test("says nothing on an ordinary turn", async () => {
+    resolvesWith({ type: "final", text: "hi back" });
+    submit("hello");
+    await settle();
+    expect(messages().querySelectorAll(".msg.system")).toHaveLength(0);
+  });
+});
+
 describe("a turn that fails", () => {
   // The regression this file exists for. A dropped connection (laptop asleep,
   // tailnet blip) rejects the fetch; an HTML error page rejects .json(). Either

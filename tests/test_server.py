@@ -24,10 +24,29 @@ from agent.tools import memory
 from chat import server as srv
 
 
+@pytest.fixture(autouse=True)
+def compaction_model(monkeypatch):
+    """Stub the compaction summarizer's model call for the whole file.
+
+    Autouse because any /chat that goes over the history budget now calls it,
+    which would otherwise be a real Ollama request from an unrelated test. The
+    compaction tests below override the return value; everything else just needs
+    it not to reach the network."""
+    calls = []
+
+    def fake_complete_text(system_prompt, user_prompt, **kwargs):
+        calls.append({"system": system_prompt, "prompt": user_prompt, **kwargs})
+        return "- a summary"
+
+    monkeypatch.setattr(srv, "complete_text", fake_complete_text)
+    return calls
+
+
 @pytest.fixture
 def client():
     srv.app.config["TESTING"] = True
     srv.conversations.clear()
+    srv.summaries.clear()
     srv.pending_confirmations.clear()
     srv.pending_backends.clear()
     srv.loaded_groups.clear()
@@ -230,7 +249,7 @@ def _turn(i, size=100):
 def test_trim_history_is_a_noop_under_budget():
     history = [{"role": "system", "content": "s"}, *_turn(1)]
     before = list(history)
-    assert srv._trim_history(history) == 0
+    assert srv._trim_history(history) == []
     assert history == before
 
 
@@ -240,7 +259,9 @@ def test_trim_drops_oldest_whole_turns_keeps_system_and_last(monkeypatch):
 
     dropped = srv._trim_history(history)
 
-    assert dropped == 8  # turns 1 and 2, four messages each
+    assert len(dropped) == 8  # turns 1 and 2, four messages each
+    # Returned in order, so the summarizer reads them as a transcript.
+    assert "question 1" in dropped[0]["content"] and "question 2" in dropped[4]["content"]
     assert history[0]["role"] == "system"
     # What survives starts at a user-message boundary: no orphaned tool result
     # or assistant half-turn at the front of the retained window.
@@ -251,7 +272,7 @@ def test_trim_drops_oldest_whole_turns_keeps_system_and_last(monkeypatch):
 def test_trim_never_drops_the_only_turn(monkeypatch):
     monkeypatch.setattr(srv, "MAX_HISTORY_CHARS", 10)  # everything is over budget
     history = [{"role": "system", "content": "s"}, *_turn(1)]
-    assert srv._trim_history(history) == 0
+    assert srv._trim_history(history) == []
     assert len(history) == 5
 
 
@@ -273,6 +294,170 @@ def test_chat_trims_before_running_the_turn(auth_client, monkeypatch):
     contents = " ".join(m.get("content") or "" for m in history)
     assert "question 1" not in contents and "question 2" not in contents
     assert "question 3" in contents and "next question" in contents
+
+
+# --------------------------------------------------------------------------- #
+# Compaction — what replaces the turns the trim evicts
+# --------------------------------------------------------------------------- #
+
+
+def _final_advance(monkeypatch):
+    def fake_advance(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
+                     should_cancel=None, **_):
+        return {"type": "final", "text": "done"}
+
+    monkeypatch.setattr(srv, "advance", fake_advance)
+
+
+def test_chat_compacts_dropped_turns_into_the_system_message(
+        auth_client, monkeypatch, compaction_model):
+    monkeypatch.setattr(srv, "MAX_HISTORY_CHARS", 400)
+    monkeypatch.setattr(srv, "_system_message_content", lambda: "base prompt")
+    srv.conversations[SID] = [{"role": "system", "content": "s"},
+                              *_turn(1), *_turn(2), *_turn(3)]
+    _final_advance(monkeypatch)
+
+    assert auth_client.post("/chat", json={"message": "next question"}).status_code == 200
+
+    # The dropped turns reached the summarizer...
+    assert len(compaction_model) == 1
+    assert "question 1" in compaction_model[0]["prompt"]
+    # ...think is off: a template-filling call, where thinking tokens eat the
+    # answer budget and return empty content.
+    assert compaction_model[0]["think"] is False
+    # ...and the summary rides in the system message, which the trim never evicts.
+    system = srv.conversations[SID][0]
+    assert system["role"] == "system"
+    assert system["content"].startswith("base prompt")
+    assert "- a summary" in system["content"]
+    assert srv.summaries[SID] == "- a summary"
+
+
+def test_chat_tells_the_client_it_compacted(auth_client, monkeypatch):
+    """The dock renders a note from this flag. Without it the session quietly
+    changes what it remembers mid-conversation and nothing on screen says so."""
+    monkeypatch.setattr(srv, "MAX_HISTORY_CHARS", 400)
+    srv.conversations[SID] = [{"role": "system", "content": "s"},
+                              *_turn(1), *_turn(2), *_turn(3)]
+    _final_advance(monkeypatch)
+
+    resp = auth_client.post("/chat", json={"message": "next question"})
+
+    assert resp.get_json()["compacted"] is True
+
+
+def test_chat_omits_the_compacted_flag_on_an_ordinary_turn(auth_client, monkeypatch):
+    srv.conversations[SID] = [{"role": "system", "content": "s"}, *_turn(1)]
+    _final_advance(monkeypatch)
+
+    resp = auth_client.post("/chat", json={"message": "hi"})
+
+    assert "compacted" not in resp.get_json()
+
+
+def test_compacted_flag_rides_out_on_a_failed_turn(auth_client, monkeypatch):
+    """The history was summarized away before advance() ran, so the notice is
+    owed even though the turn itself blew up."""
+    monkeypatch.setattr(srv, "MAX_HISTORY_CHARS", 400)
+    srv.conversations[SID] = [{"role": "system", "content": "s"},
+                              *_turn(1), *_turn(2), *_turn(3)]
+
+    def boom(*a, **k):
+        raise RuntimeError("model unreachable")
+
+    monkeypatch.setattr(srv, "advance", boom)
+    resp = auth_client.post("/chat", json={"message": "next question"})
+
+    assert resp.status_code == 500
+    assert resp.get_json()["compacted"] is True
+
+
+def test_compaction_summary_survives_the_next_compaction(
+        auth_client, monkeypatch, compaction_model):
+    """The second compaction is handed the first one's summary, so the session
+    keeps one running record rather than forgetting each time it trims."""
+    monkeypatch.setattr(srv, "MAX_HISTORY_CHARS", 400)
+    monkeypatch.setattr(srv, "_system_message_content", lambda: "base prompt")
+    srv.summaries[SID] = "- established earlier"
+    srv.conversations[SID] = [{"role": "system", "content": "s"},
+                              *_turn(1), *_turn(2), *_turn(3)]
+    _final_advance(monkeypatch)
+
+    assert auth_client.post("/chat", json={"message": "next question"}).status_code == 200
+
+    assert "- established earlier" in compaction_model[0]["prompt"]
+
+
+def test_compaction_keeps_the_old_summary_when_the_model_returns_nothing(
+        auth_client, monkeypatch, caplog):
+    """An empty model response is the small-model failure mode (thinking eats the
+    budget). The turns are gone either way, so the request must still succeed —
+    but it logs WARNING, because the symptom otherwise looks like the model
+    losing the thread weeks later."""
+    monkeypatch.setattr(srv, "MAX_HISTORY_CHARS", 400)
+    monkeypatch.setattr(srv, "complete_text", lambda *a, **k: "   ")
+    srv.summaries[SID] = "- established earlier"
+    srv.conversations[SID] = [{"role": "system", "content": "s"},
+                              *_turn(1), *_turn(2), *_turn(3)]
+    _final_advance(monkeypatch)
+
+    with caplog.at_level(logging.WARNING):
+        assert auth_client.post("/chat", json={"message": "next"}).status_code == 200
+
+    assert srv.summaries[SID] == "- established earlier"
+    assert "compaction produced no summary" in caplog.text
+
+
+def test_compaction_survives_a_failing_model_call(auth_client, monkeypatch, caplog):
+    def boom(*a, **k):
+        raise RuntimeError("ollama is busy")
+
+    monkeypatch.setattr(srv, "MAX_HISTORY_CHARS", 400)
+    monkeypatch.setattr(srv, "complete_text", boom)
+    srv.conversations[SID] = [{"role": "system", "content": "s"},
+                              *_turn(1), *_turn(2), *_turn(3)]
+    _final_advance(monkeypatch)
+
+    with caplog.at_level(logging.WARNING):
+        assert auth_client.post("/chat", json={"message": "next"}).status_code == 200
+
+    assert srv.summaries[SID] == ""
+    assert "ollama is busy" in caplog.text
+
+
+def test_summary_transcript_is_bounded(monkeypatch):
+    """Both caps hold: per message, and overall. The overall cut keeps the END —
+    the newest evicted messages, the ones the previous summary hasn't covered."""
+    monkeypatch.setattr(srv, "SUMMARY_MESSAGE_CHARS", 10)
+    monkeypatch.setattr(srv, "SUMMARY_INPUT_CHARS", 40)
+    dropped = [{"role": "user", "content": f"{i} " + "x" * 500} for i in range(5)]
+
+    transcript = srv._summary_transcript(dropped)
+
+    assert len(transcript) <= 40
+    assert transcript.endswith("4 xxxxxxxx")
+
+
+def test_summarize_truncates_to_a_whole_line(monkeypatch):
+    monkeypatch.setattr(srv, "SUMMARY_CHARS", 20)
+    monkeypatch.setattr(srv, "complete_text", lambda *a, **k: "- one fact\n- a second fact")
+
+    assert srv._summarize_dropped([{"role": "user", "content": "hi"}], "") == "- one fact"
+
+
+def test_summary_chars_zero_disables_compaction(monkeypatch, compaction_model):
+    """The documented off switch: plain dropping, and no model call at all —
+    the latency on the shared Ollama slot is the reason to reach for it."""
+    monkeypatch.setattr(srv, "SUMMARY_CHARS", 0)
+
+    assert srv._summarize_dropped([{"role": "user", "content": "hi"}], "- earlier") == ""
+    assert compaction_model == []
+
+
+def test_chat_new_clears_the_summary(auth_client):
+    srv.summaries[SID] = "- established earlier"
+    assert auth_client.post("/chat/new").status_code == 200
+    assert SID not in srv.summaries
 
 
 def test_chat_rebuilds_system_message_every_turn(auth_client, monkeypatch):
@@ -677,6 +862,7 @@ def test_chat_confirm_while_turn_running_is_409(auth_client):
 def test_idle_sessions_evicted_on_next_chat(auth_client, monkeypatch):
     srv.conversations["stale-sid"] = [{"role": "system", "content": "s"}]
     srv.pending_confirmations["stale-sid"] = EMAIL_CALL
+    srv.summaries["stale-sid"] = "- established earlier"
     srv._session_last_active["stale-sid"] = time.time() - srv.SESSION_IDLE_EVICT_S - 1
     srv.conversations["fresh-sid"] = [{"role": "system", "content": "s"}]
     srv._session_last_active["fresh-sid"] = time.time()
@@ -688,6 +874,7 @@ def test_idle_sessions_evicted_on_next_chat(auth_client, monkeypatch):
 
     assert "stale-sid" not in srv.conversations
     assert "stale-sid" not in srv.pending_confirmations
+    assert "stale-sid" not in srv.summaries
     assert "fresh-sid" in srv.conversations
     assert SID in srv.conversations  # the active session obviously survives
 
