@@ -378,10 +378,57 @@ def current_history_id() -> dict:
     return {"history_id": str(profile.get("historyId"))}
 
 
+def _thread_is_watched(thread_id: str, watch_label_id: str, logger=None) -> bool:
+    """Does any message on this thread carry the watch label?
+
+    **This is what replaces storing watched threads.** Gmail already holds the
+    answer — the label he applied is still on the earlier message — so asking it
+    each time keeps no state, grows nothing, and lets him stop a thread simply by
+    peeling the label off. A stored set would keep alerting until it aged out.
+
+    Costs one `threads.get` per distinct new thread. That is single digits a day
+    on this mailbox; revisit the trade if it ever becomes thousands.
+
+    Answers False when it cannot tell, and logs why. Silently degrading is what
+    CLAUDE.md forbids — degrading out loud is the allowed kind.
+    """
+    if not thread_id:
+        return False
+    try:
+        thread = _service().users().threads().get(
+            userId="me", id=thread_id, format="minimal").execute()
+    except Exception as e:
+        if logger:
+            logger.warning(
+                f"could not read thread {thread_id} to check for the watch "
+                f"label ({e}) — treating it as unwatched, so any new mail on it "
+                "was NOT reported.")
+        return False
+    for message in thread.get("messages") or []:
+        if watch_label_id in (message.get("labelIds") or []):
+            return True
+    return False
+
+
+# Labels that mean "he wrote this", so the watcher must not alert him about it.
+#
+# DRAFT is the one that is easy to miss, and it cost a live false alert. Gmail
+# autosaves a reply as a draft *before* it is sent, that draft is a real message
+# on the thread and so inherits the watch label, and it carries DRAFT — never
+# SENT. So a SENT-only filter still alerts him the moment he starts typing. The
+# draft is then destroyed on send, which is why its id 404s afterwards.
+_IGNORED_LABELS = {"SENT", "DRAFT"}
+
+
 def list_history(start_history_id: str, watch_label_id: str = None,
                  logger=None) -> dict:
-    """Message ids added since `start_history_id`, filtered to one label and
-    excluding mail the user sent himself.
+    """Message ids added since `start_history_id`, kept only when their **thread**
+    carries the watch label, and excluding anything he wrote himself
+    (see `_IGNORED_LABELS`).
+
+    The thread is the unit, not the message: Gmail does not put a hand-added
+    label on replies that arrive later, so a per-message check would report the
+    first email on a thread and then go quiet. See `_thread_is_watched`.
 
     Returns `{"message_ids": [...], "history_id": <latest>, "resynced": bool}`.
 
@@ -393,16 +440,17 @@ def list_history(start_history_id: str, watch_label_id: str = None,
     if not start_history_id:
         return {"error": "list_history needs a start_history_id"}
 
+    # No labelId filter. Gmail puts a hand-added label only on the messages that
+    # existed when it was added, so filtering here would miss every later reply
+    # on a watched thread — which is the whole point of watching a thread.
     params = {
         "userId": "me",
         "startHistoryId": str(start_history_id),
         "historyTypes": ["messageAdded"],
     }
-    if watch_label_id:
-        params["labelId"] = watch_label_id
 
     service = _service()
-    message_ids, latest, page_token = [], str(start_history_id), None
+    candidates, latest, page_token = [], str(start_history_id), None
     while True:
         try:
             page = service.users().history().list(
@@ -430,14 +478,11 @@ def list_history(start_history_id: str, watch_label_id: str = None,
                 message = added.get("message") or {}
                 if not message.get("id"):
                     continue
-                # Skip his own outgoing mail. A Gmail label covers the whole
-                # thread, so a reply he writes on a watched thread inherits the
-                # watch label — without this the watcher alerts him about an
-                # email he just sent. The history entry already carries the
-                # labels, so this costs no extra API call.
-                if "SENT" in (message.get("labelIds") or []):
+                # Skip anything he wrote. Cheap, and it runs before the thread
+                # lookup so his own drafts never cost a call.
+                if _IGNORED_LABELS & set(message.get("labelIds") or []):
                     continue
-                message_ids.append(message["id"])
+                candidates.append((message["id"], message.get("threadId")))
         latest = str(page.get("historyId") or latest)
         page_token = page.get("nextPageToken")
         if not page_token:
@@ -446,27 +491,41 @@ def list_history(start_history_id: str, watch_label_id: str = None,
     # One message can be named by several history entries; de-dupe while
     # keeping arrival order.
     seen, ordered = set(), []
-    for message_id in message_ids:
+    for message_id, thread_id in candidates:
         if message_id not in seen:
             seen.add(message_id)
-            ordered.append(message_id)
+            ordered.append((message_id, thread_id))
 
-    return {"message_ids": ordered, "history_id": latest, "resynced": False}
+    if watch_label_id:
+        # Resolve each thread once. Several new messages usually share one
+        # thread, and the answer cannot change inside a single call.
+        verdicts = {tid: _thread_is_watched(tid, watch_label_id, logger)
+                    for tid in {tid for _, tid in ordered}}
+        ordered = [(mid, tid) for mid, tid in ordered if verdicts.get(tid)]
+
+    return {"message_ids": [mid for mid, _ in ordered],
+            "history_id": latest, "resynced": False}
 
 
-def register_watch(topic_name: str, watch_label_id: str = None) -> dict:
+def register_watch(topic_name: str) -> dict:
     """Tell Gmail to publish mailbox changes to our Pub/Sub topic.
 
     Returns `{"history_id": ..., "expiration": ...}` — expiration in epoch
     milliseconds, about 7 days out. Gmail stops publishing at that point and
     says nothing, which is why tasks/mail_watch_renew.py runs daily.
 
+    **The watch is deliberately NOT filtered to the watch label.** Gmail applies
+    a hand-added label only to the messages that exist at that moment — a reply
+    arriving later does not inherit it. A label-filtered watch therefore never
+    publishes for that reply, so no amount of filtering downstream can recover
+    it. Watching the whole mailbox and deciding in `list_history` is what makes
+    a hand-labelled thread work. It costs more notifications, nearly all of
+    which resolve to nothing.
+
     A 403 saying the topic is not accessible almost always means
     `gmail-api-push@system.gserviceaccount.com` lost the Pub/Sub Publisher role
     on the topic. The error does not name that; see docs/mail-watch.md."""
-    body = {"topicName": topic_name, "labelFilterBehavior": "INCLUDE"}
-    if watch_label_id:
-        body["labelIds"] = [watch_label_id]
+    body = {"topicName": topic_name}
     try:
         result = _service().users().watch(userId="me", body=body).execute()
     except Exception as e:

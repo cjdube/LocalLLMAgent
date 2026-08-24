@@ -50,8 +50,8 @@ def gmail(monkeypatch):
         "watch_calls": [],
     }
 
-    def fake_register_watch(topic_name, label_id=None):
-        state["watch_calls"].append((topic_name, label_id))
+    def fake_register_watch(topic_name):
+        state["watch_calls"].append(topic_name)
         return state["watch"]
 
     monkeypatch.setattr(mail_watch_renew.gmail_read, "label_id", lambda *a, **k: state["label"])
@@ -66,9 +66,12 @@ def test_topic_name_is_assembled_from_config(monkeypatch):
     assert mail_watch_renew.topic_name() == "projects/wren-123/topics/wren-mail"
 
 
-def test_renewal_registers_the_watch_for_the_label(gmail, alerts):
+def test_renewal_registers_a_watch_over_the_whole_mailbox(gmail, alerts):
+    """The label is resolved (and a missing one still fails the run) but is NOT
+    passed to users.watch: a label-filtered watch never publishes for a reply
+    that arrived after the label was applied by hand."""
     assert mail_watch_renew.main() == 0
-    assert gmail["watch_calls"] == [("projects/wren-123/topics/wren-mail", "Label_7")]
+    assert gmail["watch_calls"] == ["projects/wren-123/topics/wren-mail"]
 
 
 def test_renewal_stores_the_expiry_and_the_history_id(gmail, alerts):

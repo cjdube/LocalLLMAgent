@@ -26,15 +26,44 @@ design choice — Tailscale Funnel would break it. So the mini opens a *streamin
 pull* subscription instead: it dials out, holds the connection, and Google pushes
 down it. Same latency, **no port opens**.
 
-**The label is the control, and you set it.** Gmail's filter decides what Wren
-sees. Nothing in the code decides; nothing about the rest of the mailbox reaches
-her watcher. A Gmail label applies to the whole **thread**, so once a thread is
-labelled, every later reply on it triggers Wren with no further action.
+**The label is the control, and you set it.** Either a Gmail filter applies it
+or you apply it by hand. Nothing in the code decides which threads matter.
 
-**Your own replies are skipped.** Because the label covers the thread, a reply
-*you* write on a watched thread carries the watch label too. `list_history`
-drops anything labelled `SENT`, so Wren never alerts you about an email you just
-sent.
+**The thread is the unit, not the message.** Label any message and Wren follows
+that whole conversation from then on, including replies that never carry the
+label themselves.
+
+That last point is the correction to an assumption that shipped wrong. Gmail
+puts a hand-added label only on the messages that existed *at that moment*. A
+reply arriving later does **not** inherit it. So the first build reported the
+first email on a hand-labelled thread and then went permanently silent — and it
+looked like it worked, because the test thread's subject was `[wren]` and the
+Gmail *filter* kept re-applying the label to each reply.
+
+Two things follow from it:
+
+- **The watch is not label-filtered.** `users.watch` covers the whole mailbox.
+  A label-filtered watch would never publish for that unlabelled reply, and no
+  amount of filtering downstream can recover a notification that was never sent.
+  The cost is many more notifications, nearly all resolving to nothing.
+- **`_thread_is_watched` decides, by asking Gmail.** For each new message, does
+  any message on its thread carry the watch label? One `threads.get` per
+  distinct new thread — single digits a day on this mailbox.
+
+**Nothing about watched threads is stored.** That was considered and rejected.
+Gmail already holds the answer, so asking it keeps no state, grows nothing, and
+means peeling the label off a thread stops Wren immediately. A stored set would
+keep alerting until it aged out, and would need a cap nobody can pick well.
+Revisit only if the mailbox ever runs thousands of messages a day.
+
+**Your own words are skipped.** `list_history` drops anything labelled `SENT`
+**or `DRAFT`**, before the thread lookup.
+
+`DRAFT` is the one that is easy to miss, and it produced a live false alert.
+Gmail autosaves a reply as a draft *before* you send it. That draft is a real
+message on the thread, and it carries `DRAFT`, never `SENT`. A `SENT`-only
+filter therefore alerts you the moment you start typing. The draft is destroyed
+on send, which is why its message id 404s afterwards.
 
 **Read-only.** The watcher holds `gmail.readonly`. It cannot reply, delete,
 archive or send. `send_email` is a separate scope and a separate, gated tool.
@@ -92,6 +121,10 @@ On desktop Gmail (nested labels cannot be created on mobile):
 3. Test it with mail from an **outside** address. Mail you send yourself threads
    with the Sent copy and does not reliably produce the arrival event the watcher
    listens for.
+
+The filter is a convenience for threads *you* start. Any thread can also be
+watched by applying the label to it by hand — including one a stranger started,
+whose subject you do not control. That is the case the thread lookup exists for.
 
 The nested `Wren/...` shape is deliberate: sibling labels are planned, and a flat
 `Wren` label would have to be rebuilt.

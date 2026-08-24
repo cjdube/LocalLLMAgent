@@ -389,21 +389,107 @@ def test_search_mail_needs_a_query():
 # History
 # --------------------------------------------------------------------------- #
 
+def _watched(*message_labels):
+    """A thread whose messages carry these label sets."""
+    return {"messages": [{"labelIds": list(labels)} for labels in message_labels]}
+
+
 def test_list_history_collects_added_message_ids(gmail):
     gmail.history_pages = [{
         "history": [
-            {"messagesAdded": [{"message": {"id": "m1"}}]},
-            {"messagesAdded": [{"message": {"id": "m2"}}]},
+            {"messagesAdded": [{"message": {"id": "m1", "threadId": "t1"}}]},
+            {"messagesAdded": [{"message": {"id": "m2", "threadId": "t1"}}]},
         ],
         "historyId": "500",
     }]
+    gmail.thread_data = {"t1": _watched(["Label_7", "INBOX"])}
     result = gmail_read.list_history("100", "Label_7")
 
     assert result["message_ids"] == ["m1", "m2"]
     assert result["history_id"] == "500"
     assert result["resynced"] is False
-    assert gmail.last_history_call["labelId"] == "Label_7"
     assert gmail.last_history_call["historyTypes"] == ["messageAdded"]
+    # The API call must NOT filter by label; see test_list_history_reports_a_...
+    assert gmail.last_history_call["labelId"] is None
+
+
+def test_list_history_reports_a_reply_that_never_got_the_label(gmail):
+    """The live miss this design exists for. He labelled the first email on a
+    thread by hand; Gmail put the label on that message only. The reply arriving
+    later carries INBOX and nothing else, so a label filter — at the API or on
+    the message — reports the first email and then goes silent forever."""
+    gmail.history_pages = [{
+        "history": [{"messagesAdded": [
+            {"message": {"id": "reply", "threadId": "t1", "labelIds": ["INBOX"]}},
+        ]}],
+        "historyId": "500",
+    }]
+    gmail.thread_data = {"t1": _watched(["Label_7", "INBOX"], ["INBOX"])}
+
+    assert gmail_read.list_history("100", "Label_7")["message_ids"] == ["reply"]
+
+
+def test_list_history_ignores_mail_on_a_thread_he_never_labelled(gmail):
+    gmail.history_pages = [{
+        "history": [{"messagesAdded": [
+            {"message": {"id": "noise", "threadId": "t9", "labelIds": ["INBOX"]}},
+        ]}],
+        "historyId": "500",
+    }]
+    gmail.thread_data = {"t9": _watched(["INBOX"])}
+
+    assert gmail_read.list_history("100", "Label_7")["message_ids"] == []
+
+
+def test_list_history_resolves_each_thread_once(gmail):
+    """Several new messages usually share a thread, and the answer cannot change
+    inside one call — so this must not cost one lookup per message."""
+    gmail.history_pages = [{
+        "history": [{"messagesAdded": [
+            {"message": {"id": "a", "threadId": "t1"}},
+            {"message": {"id": "b", "threadId": "t1"}},
+            {"message": {"id": "c", "threadId": "t1"}},
+        ]}],
+        "historyId": "500",
+    }]
+    gmail.thread_data = {"t1": _watched(["Label_7"])}
+    lookups = []
+    real = gmail.threads
+
+    def _counting():
+        thread_api = real()
+        get = thread_api.get
+
+        def _get(userId=None, id=None, format=None):
+            lookups.append(id)
+            return get(userId=userId, id=id, format=format)
+
+        thread_api.get = _get
+        return thread_api
+
+    gmail.threads = _counting
+
+    assert gmail_read.list_history("100", "Label_7")["message_ids"] == ["a", "b", "c"]
+    assert lookups == ["t1"]
+
+
+def test_an_unreadable_thread_is_dropped_but_says_so(gmail):
+    """Degrading is only allowed out loud: a thread we cannot classify is
+    treated as unwatched, so real mail may go unreported."""
+    gmail.history_pages = [{
+        "history": [{"messagesAdded": [
+            {"message": {"id": "m1", "threadId": "gone"}},
+        ]}],
+        "historyId": "500",
+    }]
+    gmail.thread_data = {}  # threads().get 404s
+    logger = _Recorder()
+
+    result = gmail_read.list_history("100", "Label_7", logger=logger)
+
+    assert result["message_ids"] == []
+    assert len(logger.warnings) == 1
+    assert "gone" in logger.warnings[0]
 
 
 def test_list_history_skips_mail_he_sent_himself(gmail):
@@ -413,14 +499,34 @@ def test_list_history_skips_mail_he_sent_himself(gmail):
     gmail.history_pages = [{
         "history": [
             {"messagesAdded": [
-                {"message": {"id": "mine", "labelIds": ["SENT", "Label_7"]}},
-                {"message": {"id": "theirs", "labelIds": ["INBOX", "Label_7"]}},
+                {"message": {"id": "mine", "threadId": "t1",
+                             "labelIds": ["SENT"]}},
+                {"message": {"id": "theirs", "threadId": "t1",
+                             "labelIds": ["INBOX"]}},
             ]},
         ],
         "historyId": "500",
     }]
+    gmail.thread_data = {"t1": _watched(["Label_7", "INBOX"])}
 
     assert gmail_read.list_history("100", "Label_7")["message_ids"] == ["theirs"]
+
+
+def test_list_history_skips_a_draft_he_is_still_writing(gmail):
+    """The live false alert a SENT-only filter did not catch: Gmail autosaves a
+    reply as a draft before it is sent, the draft is a real message on the
+    thread and inherits the watch label, and it carries DRAFT and not SENT — so
+    he got pushed his own half-written reply."""
+    gmail.history_pages = [{
+        "history": [{"messagesAdded": [
+            {"message": {"id": "half-typed", "threadId": "t1",
+                         "labelIds": ["DRAFT"]}},
+        ]}],
+        "historyId": "500",
+    }]
+    gmail.thread_data = {"t1": _watched(["Label_7", "INBOX"])}
+
+    assert gmail_read.list_history("100", "Label_7")["message_ids"] == []
 
 
 def test_list_history_keeps_messages_with_no_labels_listed(gmail):
@@ -505,14 +611,14 @@ def test_list_history_needs_a_start_id():
 # Registering the watch
 # --------------------------------------------------------------------------- #
 
-def test_register_watch_sends_the_topic_and_label(gmail):
-    result = gmail_read.register_watch("projects/p/topics/wren-mail", "Label_7")
+def test_register_watch_covers_the_whole_mailbox_not_just_the_label(gmail):
+    """A label-filtered watch never publishes for a reply that arrived after the
+    label was applied by hand, because Gmail does not put the label on it. No
+    downstream filtering can recover a notification that was never sent, so the
+    watch has to be unfiltered and the decision made per thread."""
+    result = gmail_read.register_watch("projects/p/topics/wren-mail")
 
-    assert gmail.watch_calls == [{
-        "topicName": "projects/p/topics/wren-mail",
-        "labelFilterBehavior": "INCLUDE",
-        "labelIds": ["Label_7"],
-    }]
+    assert gmail.watch_calls == [{"topicName": "projects/p/topics/wren-mail"}]
     assert result == {"history_id": "1234", "expiration": "1756000000000"}
 
 
@@ -522,4 +628,4 @@ def test_register_watch_reports_the_error_rather_than_raising(gmail):
 
     gmail.watch = _boom
 
-    assert "error" in gmail_read.register_watch("projects/p/topics/t", "Label_7")
+    assert "error" in gmail_read.register_watch("projects/p/topics/t")

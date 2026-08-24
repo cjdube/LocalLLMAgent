@@ -57,7 +57,12 @@ def main() -> int:
             raise RuntimeError(f"label lookup failed: {label['error']}")
         logger.info(f"watching label {label['name']!r} (id {label['label_id']})")
 
-        result = gmail_read.register_watch(topic_name(), label["label_id"])
+        # The label is not passed to users.watch — the watch covers the whole
+        # mailbox, and tasks/mail_watcher.py decides per thread (see
+        # gmail_read._thread_is_watched). It is still resolved above because
+        # nothing works without it, and failing here says so once a day rather
+        # than leaving the watcher quietly matching nothing.
+        result = gmail_read.register_watch(topic_name())
         if "error" in result:
             # A 403 here is nearly always the publisher grant, not the code.
             raise RuntimeError(
