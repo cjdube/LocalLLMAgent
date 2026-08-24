@@ -1060,3 +1060,63 @@ def test_a_suppressed_call_past_the_cap_is_labelled_capped(monkeypatch):
     capped = [_json.loads(m["content"]) for m in messages
               if m.get("role") == "tool" and '"not_run"' in m["content"]]
     assert capped and capped[0]["already"] == "capped"
+
+
+# --------------------------------------------------------------------------- #
+# Leaked <think> markup. qwen3.8:27b-mlx returned a complete answer followed by
+# a bare closing tag, which failed json.loads on output that was otherwise
+# entirely correct (docs/model-eval.md, 2026-08-24).
+# --------------------------------------------------------------------------- #
+
+def _llm_returning(content, monkeypatch):
+    monkeypatch.setattr(loop, "_ollama_chat",
+                        lambda messages, **kwargs: {"role": "assistant", "content": content})
+
+
+def test_orphan_closing_think_tag_is_stripped_so_strict_parsers_survive(monkeypatch):
+    monkeypatch.setattr(loop, "_ollama_chat",
+                        lambda messages, **kwargs: {"content": '{"1": "7"}\n</think>'})
+
+    out = loop.complete_text("sys", "user")
+
+    assert out == '{"1": "7"}'
+    assert _json.loads(out) == {"1": "7"}
+
+
+def test_a_matched_think_block_is_dropped_and_the_answer_kept(monkeypatch):
+    _llm_returning("<think>weighing it up\nstill weighing</think>\nthe answer", monkeypatch)
+
+    assert loop.complete_text("sys", "user") == "the answer"
+
+
+def test_a_reply_that_is_only_scratchpad_reads_as_empty(monkeypatch):
+    # Not a regression: stripping must not manufacture an answer out of
+    # reasoning. Empty is what the num_predict warning is there to explain.
+    _llm_returning("<think>never got to the point</think>", monkeypatch)
+
+    assert loop.complete_text("sys", "user") == ""
+
+
+def test_content_without_think_markup_keeps_its_exact_whitespace(monkeypatch):
+    monkeypatch.setattr(loop, "_ollama_chat",
+                        lambda messages, **kwargs: {"content": "  line\n\n  next  "})
+
+    message = loop._llm_chat([{"role": "user", "content": "hi"}])
+
+    assert message["content"] == "  line\n\n  next  "
+
+
+def test_the_chat_path_strips_leaked_markup_too(monkeypatch):
+    _llm_returning("Added it.\n</think>", monkeypatch)
+
+    result = loop.advance([{"role": "user", "content": "hi"}], [], {})
+
+    assert result["type"] == "final"
+    assert result["text"] == "Added it."
+
+
+def test_missing_content_does_not_crash_the_seam(monkeypatch):
+    monkeypatch.setattr(loop, "_ollama_chat",
+                        lambda messages, **kwargs: {"role": "assistant", "tool_calls": []})
+
+    assert loop._llm_chat([{"role": "user", "content": "hi"}])["content"] == ""

@@ -241,8 +241,21 @@ away. Chat p90 is 51.1s against 26b's 14.0s. On a phone the tail is what is felt
 **qwen3.8's two `calendar_colorizer` parse failures are ours, not the model's.**
 It emitted correct JSON for all 12 events and then a stray `</think>` tag, and
 `_parse_classification` died on the trailing text. Strip the tag and all three
-reps parse. Read its task scores as 100%/100%, not 90%/89%. Nothing strips a
-loose think tag today; that is a one-line fix in the parse path, still open.
+reps parse. Read its task scores as 100%/100%, not 90%/89%.
+
+Fixed at the seam rather than in the parser: `_llm_chat` now runs
+`_strip_think_markup` over the content every backend returns, because the leak
+belongs to the model and any `complete_text` caller could meet it. Measured
+after, calling the same case 8 times each way: the unstripped `_ollama_chat`
+path leaked the tag **5 of 8** times, through the seam **0 of 8**, with the
+answer itself untouched. A matched `<think>...</think>` block is dropped whole;
+an orphan tag loses only the tag, so a reply that is nothing but scratchpad
+still reads as empty rather than being laundered into a plausible answer.
+
+One unrelated qwen failure survives at roughly 1 in 8: it occasionally appends
+extra content after the closing brace, which `json.loads` rejects as "Extra
+data". No think tag is involved, and it is not worth chasing while qwen is not
+the model in production.
 
 ### gemma4:26b stopped saving memories, and the prompt did it
 

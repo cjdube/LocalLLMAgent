@@ -410,6 +410,31 @@ def escalation_available() -> bool:
     return False
 
 
+# A reasoning model's scratchpad is meant to arrive in its own `thinking` field,
+# which every backend here discards. qwen3.8:27b-mlx sometimes leaks the
+# terminator into `content` instead — a complete answer followed by a bare
+# `</think>`, no opening tag — and that one stray line is enough to fail a strict
+# parser: json.loads raised "Extra data" on 2 of 3 calendar_colorizer runs whose
+# 12 colours were every one correct (docs/model-eval.md, 2026-08-24). Applied at
+# the seam, not in one parser, because the leak belongs to the model rather than
+# to whatever happens to be reading it.
+#
+# Strip the markup, never the answer: a matched block is scratchpad and goes
+# whole, an orphan tag is a leak and only the tag goes. A model that spends the
+# entire budget inside an unclosed <think> therefore still reads as empty, which
+# is what the num_predict warning above is for.
+_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+_THINK_TAG_RE = re.compile(r"</?think>")
+
+
+def _strip_think_markup(text: str) -> str:
+    # Left untouched when there's nothing to strip, so the overwhelmingly common
+    # clean reply keeps its exact whitespace.
+    if not text or "think>" not in text:
+        return text
+    return _THINK_TAG_RE.sub("", _THINK_BLOCK_RE.sub("", text)).strip()
+
+
 def _llm_chat(
     messages: list[dict],
     backend: Optional[str] = None,
@@ -431,13 +456,16 @@ def _llm_chat(
     0 outright), so forcing it there would break more than it fixed."""
     b = _resolve_backend(backend)
     if b == "ollama":
-        return _ollama_chat(messages, model=model, host=host, tools=tools,
-                            timeout=timeout, logger=logger, should_cancel=should_cancel,
-                            think=think)
-    if b in ("gemini", "google"):
-        return _gemini_chat(messages, model=model, tools=tools, timeout=timeout,
-                            logger=logger, should_cancel=should_cancel, think=think)
-    raise ValueError(f"unknown WREN_LLM_BACKEND {b!r} (expected 'ollama' or 'gemini')")
+        message = _ollama_chat(messages, model=model, host=host, tools=tools,
+                               timeout=timeout, logger=logger, should_cancel=should_cancel,
+                               think=think)
+    elif b in ("gemini", "google"):
+        message = _gemini_chat(messages, model=model, tools=tools, timeout=timeout,
+                               logger=logger, should_cancel=should_cancel, think=think)
+    else:
+        raise ValueError(f"unknown WREN_LLM_BACKEND {b!r} (expected 'ollama' or 'gemini')")
+    message["content"] = _strip_think_markup(message.get("content") or "")
+    return message
 
 
 # Argument keys that may carry secrets — redacted before they reach the logs.
