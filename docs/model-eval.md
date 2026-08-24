@@ -150,7 +150,7 @@ weak evidence, but nothing suggesting it is worse.
 
 **Re-run it when an MLX build ships.** One command, no code changes:
 `--models qwen3.8:27b-mlx gemma4:26b-mlx`, then merge or compare against the
-existing raw file.
+existing raw file. Done on 2026-08-24, below.
 
 ## Run of 2026-08-18 — gemma4:26b-mlx vs gemma4:12b-mlx
 
@@ -220,6 +220,91 @@ reading `WREN_<TASK>_MODEL`, symmetric to `resolve_backend`
 (`agent/loop.py:339`), with the ~11 `complete_text()` call sites passing
 `model=`. Measure the swap cost first: two resident models at `num_ctx=32768`
 is roughly 12GB + 27GB of 48GB, with swap already in use.
+
+## Run of 2026-08-24 — qwen3.8:27b-mlx vs gemma4:26b-mlx
+
+180 runs, 3 reps, production settings. The MLX build the 2026-08-16 deferral was
+waiting for. **Outcome: stayed on `gemma4:26b-mlx`** — and the run's real finding
+was not about qwen at all, it was a prompt regression in the incumbent.
+
+| | right tool | args right | used the result | non-empty task answer | median chat | p90 chat | median task |
+|---|---|---|---|---|---|---|---|
+| qwen3.8:27b-mlx | 98% (59/60) | 100% (24/24) | 98% (44/45) | 100% (21/21) | 9.6s | 51.1s | 9.0s |
+| gemma4:26b-mlx | 95% (57/60) | 88% (21/24) | 98% (44/45) | 95% (20/21) | 4.1s | 14.0s | 2.5s |
+
+**The MLX build removes the packaging penalty, not the family's latency.** The
+GGUF arm ran 30-142s per case; this one medians 9.6s. That is in line with
+`qwen3.6:27b-mlx`'s 15.7s and confirms the 2026-08-16 reading — most of the old
+gap was packaging, the rest is the thinking-token cost, and the rest does not go
+away. Chat p90 is 51.1s against 26b's 14.0s. On a phone the tail is what is felt.
+
+**qwen3.8's two `calendar_colorizer` parse failures are ours, not the model's.**
+It emitted correct JSON for all 12 events and then a stray `</think>` tag, and
+`_parse_classification` died on the trailing text. Strip the tag and all three
+reps parse. Read its task scores as 100%/100%, not 90%/89%. Nothing strips a
+loose think tag today; that is a one-line fix in the parse path, still open.
+
+### gemma4:26b stopped saving memories, and the prompt did it
+
+`memory_remember` scored **0/3** for the incumbent — it replied "I've pinned that
+preference for you" and called nothing. It had passed 3/3 on 2026-08-15 and
+3/3 on 2026-08-18.
+
+The cause was a paragraph added to `agent/wren_chat.md` on 2026-08-18 by
+`073d699`, which exists to stop a confirmed write drawing a second confirmation
+card:
+
+> Once a tool result comes back, that action has already run. [...] Do not call
+> the tool a second time to be sure
+
+Every clause of that is true *after* a tool result. The block sat immediately
+after "call the tool in that same reply", opened by asserting the action had
+already run, and carried the strongest imperative in the section — *do not call
+the tool*. With no tool result in the turn yet, the model applied it anyway and
+reported a save it never made. This is the failure class
+[model-constraints.md](model-constraints.md) already names — describing an action
+instead of performing it — re-entering through the fix for a different bug.
+
+**A prompt clause that is only true under a precondition must state the
+precondition first, and restate the default after.** The repair scopes it
+("if you can already see a tool result for that action in this conversation")
+and closes by re-asserting what to do otherwise ("when no tool result for it is
+there yet, the action has not run — make the call"). Measured 15 reps per arm,
+interleaved, on the live model:
+
+| | saves the memory | confirms once, no repeat card | handles a decline |
+|---|---|---|---|
+| old wording | 14/15 | 15/15 | 15/15 |
+| scoped rewrite | 15/15 | 14/15 | 15/15 |
+
+The rewrite's one `confirm_then_stop` loss is not the double-card bug returning:
+it called the tool exactly once and `no_repeat_confirm_ok` passed — the reply
+just said "The event has been added to your calendar" without naming the day or
+title, so `final_ok` failed. A vague sentence, not a lost write.
+
+### Three reps cannot tell 76% from broken
+
+The bake-off's `0/3` looked like a hard break. It was a streak on a flaky one.
+Re-measured across four batches, the old wording saved the memory **29 of 38
+times (76%)**; every rewrite variant went 35/35.
+
+| batch | old wording |
+|---|---|
+| bake-off (3 reps) | 0/3 |
+| batch 1 | 4/5 |
+| batch 2, interleaved | 11/15 |
+| batch 3, interleaved | 14/15 |
+
+Fisher one-sided p = 0.002 pooled, 0.026 on the interleaved batches alone. The
+direction held in all four — the rewrite never lost — but the effect is a
+*degradation*, not a break, and `--reps 3` cannot see the difference. **When a
+case fails 0/3, re-measure it at 15 before believing the rate.** The default 3
+reps is enough to flag a case, not to size it; sizing it is what separates "the
+model cannot do this" from "we made it worse by a quarter".
+
+The rate also drifted upward across batches (0%, 80%, 73%, 93%) with nothing
+changed, which is its own reason to interleave arms rather than run them
+back-to-back.
 
 ## Adding a case
 
