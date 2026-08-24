@@ -117,6 +117,7 @@ from agent.backends import gemini as _gemini_backend
 from agent.tools import background as _background
 from agent.tools import email as _email
 from agent.tools import games as _games
+from agent.tools import mail_state as _mail_state
 from agent.tools import memory as _memory
 from agent.tools import notify as _notify
 from agent.tools import opportunities as _opportunities
@@ -129,6 +130,7 @@ from evals import run_eval as _run_eval
 from tasks import _chat_transcripts as _chat_transcripts
 from tasks import _common
 from tasks import ai_chat_learnings as _ai_chat_learnings
+from tasks import mail_watcher as _mail_watcher
 from tasks import morning_brief as _morning_brief
 from tasks import opportunity_digest as _opportunity_digest
 
@@ -327,6 +329,11 @@ def _isolate_remaining_config_stores(tmp_path, monkeypatch):
     # call time, so this one redirect covers the task that writes it, the chat
     # tools that read it, and daily_synthesis's project anchors.
     monkeypatch.setattr(_projects_tool, "PROJECTS_PATH", tmp_path / "projects.json")
+    # The Gmail watcher's watermark, watch expiry and seen-message set. Both the
+    # always-on watcher and the daily renewal job write it, and every function in
+    # agent/tools/mail_state.py resolves _STORE_PATH at call time, so this one
+    # redirect covers the tasks, their tests, and the CLI.
+    monkeypatch.setattr(_mail_state, "_STORE_PATH", tmp_path / "mail_state.json")
     # wiki.py resolves this env on every _vault() call. the user's real vault is a
     # readable path on this machine, so without the redirect a wiki test that
     # forgets to stub reads his actual notes into a fixture assertion.
@@ -422,6 +429,30 @@ def _isolate_projects_dir(tmp_path, monkeypatch):
     env on every call, so the env var is enough; test_projects.py points it at
     its own fixture tree per-test."""
     monkeypatch.setenv("PROJECTS_DIR", str(tmp_path / "projects_dir"))
+
+
+@pytest.fixture(autouse=True)
+def _block_mail_subscriber(monkeypatch):
+    """Stop any test from opening a real Pub/Sub streaming pull.
+
+    tasks/mail_watcher.py's _subscribe() is a thread-spawner: the Pub/Sub client
+    runs its callback on background threads and blocks the caller on
+    future.result(). That is the exact shape of the incident at the top of this
+    file — a thread that outlives its test resolves monkeypatched paths after
+    teardown, and here those paths are the mail state store. It would also
+    authenticate with the user's real Google credentials and reach the network.
+
+    tests/test_mail_watcher.py drives handle_notification() directly, which is
+    where the logic lives; nothing legitimately needs the real subscriber.
+    """
+    def _no_subscriber(*a, **k):
+        raise AssertionError(
+            "tasks.mail_watcher._subscribe was called in a test — it opens a real "
+            "Pub/Sub streaming pull and spawns background threads. Test "
+            "handle_notification() instead."
+        )
+
+    monkeypatch.setattr(_mail_watcher, "_subscribe", _no_subscriber)
 
 
 @pytest.fixture(autouse=True)

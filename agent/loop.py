@@ -87,6 +87,16 @@ TOOL_RESULT_CHAR_CAPS = {
     # pins the worst case underneath the number here.
     "search_web": 13000,
     "list_notifications": 13000,
+    # One conversation the user asked for, like read_wiki_page above — not a
+    # feed. gmail_read trims the thread to MAIL_THREAD_CHAR_BUDGET (12000),
+    # dropping whole OLD messages and saying how many it left out; this is the
+    # backstop above that, with room for the JSON wrapper. Keep the gap: equal
+    # numbers made every trimmed thread land just over, and the loop then cut
+    # the tail off a result the tool had already trimmed on purpose.
+    "read_email": 14000,
+    # Row cap plus its own MAIL_SEARCH_CHAR_BUDGET (6000), same pairing as
+    # search_web — a result count never bounds a payload.
+    "search_mail": 7000,
 }
 
 

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.wren.mailwatcher</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__WREN_ROOT__/.venv/bin/python</string>
+        <string>-m</string>
+        <string>tasks.mail_watcher</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__WREN_ROOT__</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Always on, like the chat server: this holds a streaming-pull
+         subscription open, so an exit means mail stops arriving. -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__WREN_ROOT__/logs/mail_watcher.launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>__WREN_ROOT__/logs/mail_watcher.launchd.log</string>
+</dict>
+</plist>

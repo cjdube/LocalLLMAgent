@@ -41,6 +41,7 @@ from agent.tools.email import TOOL_SCHEMA as EMAIL_SCHEMA, send_email_tool
 from agent.tools.evaluate_app import TOOL_SCHEMA as EVALUATE_APP_SCHEMA, evaluate_app
 from agent.tools.evaluate_against import TOOL_SCHEMA as EVALUATE_AGAINST_SCHEMA, evaluate_against
 from agent.tools.games import TOOL_SCHEMA as GAMES_SCHEMA, list_games
+from agent.tools.gmail_read import MAIL_TOOL_SCHEMAS, read_email, search_mail
 from agent.tools.github_starred import TOOL_SCHEMA as GITHUB_STARRED_SCHEMA, fetch_starred_repos
 from agent.tools.projects import PROJECT_TOOL_SCHEMAS, list_projects, read_project
 from agent.tools.google_tasks import (
@@ -158,6 +159,7 @@ TOOLS = [
     GAMES_SCHEMA,
     *PROJECT_TOOL_SCHEMAS,
     NUDGES_SCHEMA,
+    *MAIL_TOOL_SCHEMAS,
 ]
 
 DISPATCH = {
@@ -226,6 +228,11 @@ DISPATCH = {
     "read_project": read_project,
     # Read-only: reads the dated nudge archive daily_synthesis wrote. Writes nothing.
     "list_nudges": list_nudges,
+    # Read-only against the mailbox (gmail.readonly). Ungated for the same
+    # reason search_web is — but note what they return is untrusted text a
+    # stranger wrote, so nothing downstream may treat it as instruction.
+    "search_mail": search_mail,
+    "read_email": read_email,
 }
 
 WRITE_TOOLS = frozenset({
@@ -333,6 +340,7 @@ TOOL_GROUP_NAMES = {
     "games": ["list_games"],
     "projects": ["list_projects", "read_project"],
     "nudges": ["list_nudges"],
+    "mail": ["search_mail", "read_email"],
 }
 
 # One-line "when to load it" blurb per group, rendered into the chat prompt so
@@ -357,6 +365,9 @@ _GROUP_BLURBS = {
               "at X, it fits your Y note'. Load this for any ask about what you have "
               "suggested, recommended or noticed; the ones that were sent are only "
               "the ones the tool returns, never ones you recall.",
+    "mail": f"{_NAME}'s email — search his mailbox and read a conversation. "
+            "His mail is not something you know: only the messages the tools "
+            "return exist, and if a search finds nothing, say so.",
 }
 
 # Case-insensitive word-boundary cues that pre-load a group before the model
@@ -392,6 +403,12 @@ GROUP_KEYWORDS = {
     # unrelated ask ("suggest a restaurant") — one extra schema, and the tool's
     # own description keeps it from being called for anything but the archive.
     "nudges": ["nudge", "synthesis", "suggest", "recommend", "connection", "notice"],
+    # "email" and "mail" also cue the `brief` group (send_email lives there),
+    # so both load — two extra schemas, and each tool's description keeps the
+    # read and the send apart. "inbox"/"wrote"/"reply" are the ways in that
+    # brief's cues miss.
+    "mail": ["email", "mail", "inbox", "wrote to me", "reply", "replied",
+             "message from", "hear back", "heard from"],
 }
 
 # The meta-tool. Not in TOOLS/DISPATCH — its callable is bound per session in

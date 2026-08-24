@@ -589,7 +589,9 @@ def describe_tools(tools: list[dict], write_tools) -> list[dict]:
 TOOL_SERVICES = {
     "google_calendar": ("Google Calendar", ["get_upcoming_events", "log_calendar_event",
                                             "get_events_by_date", "recolor_event"]),
-    "gmail": ("Gmail", ["send_email"]),
+    # Both directions now: send_email writes, and the mail tools read. Two
+    # different OAuth scopes on one service, so one node.
+    "gmail": ("Gmail", ["send_email", "search_mail", "read_email"]),
     "google_tasks": ("Google Tasks", ["get_tasks", "get_tasks_due_soon", "create_task",
                                       "update_task_due_date", "complete_task"]),
     "chrome": ("Chrome History", ["fetch_chrome_history"]),
@@ -645,6 +647,12 @@ ROUTINE_USES = {
     "starred_installed": ["ntfy"],  # runs local version commands + reads local config; no external source
     "project_scan": ["projects", "ntfy"],  # reads local checkouts under PROJECTS_DIR; no external source
     "log_inspector": ["gmail", "ntfy"],  # rollup push via ntfy, email fallback on ntfy outage
+    # The Gmail push pipeline. mail_watcher is the only always-on routine besides
+    # the chat server: it holds a Pub/Sub streaming pull open and pushes a
+    # one-line alert per labelled email. mail_watch_renew re-registers the watch
+    # daily, because Gmail drops it after 7 days without saying so.
+    "mail_watcher": ["gmail", "ntfy"],
+    "mail_watch_renew": ["gmail", "ntfy"],
     # Federated from ObsidianWikiAgent (WREN_EXTERNAL_TASK_ROOTS). These are the
     # other half of the learnings pipeline: the daily tasks above write into the
     # vault's raw/, and these file it into wiki/ — which is what agent/tools/wiki.py

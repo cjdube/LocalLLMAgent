@@ -46,6 +46,16 @@ GOOGLE_HTTP_TIMEOUT_S = int(os.getenv("GOOGLE_HTTP_TIMEOUT_S", "30"))
 SCOPES = [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/gmail.send",
+    # Read the mailbox (agent/tools/gmail_read.py) and call users.watch, which
+    # is what registers Gmail's push notifications. A *restricted* scope: an
+    # OAuth app still in "Testing" issues refresh tokens that expire after 7
+    # days, so confirm the consent screen reads "In production" before relying
+    # on the cached token surviving. See docs/mail-watch.md.
+    "https://www.googleapis.com/auth/gmail.readonly",
+    # The mail watcher's streaming-pull subscriber (tasks/mail_watcher.py)
+    # authenticates as the user with these same credentials — deliberately, so
+    # there is no service-account key file to place and protect.
+    "https://www.googleapis.com/auth/pubsub",
     "https://www.googleapis.com/auth/tasks",
     "https://www.googleapis.com/auth/youtube.readonly",
 ]
@@ -106,7 +116,15 @@ def get_credentials() -> Credentials:
                 # account that owns the target channel, and a wrong default is
                 # what triggers Google's "service isn't available for your
                 # account" error.
-                creds = flow.run_local_server(port=0, prompt="select_account")
+                # GOOGLE_OAUTH_PORT pins the loopback listener. It matters
+                # because this mini is headless and consent is done from the
+                # Windows laptop over SSH: the browser resolves "localhost" to
+                # the laptop, so the callback only lands if an `ssh -L` tunnel
+                # forwards that port here — and a tunnel needs a port known in
+                # advance. Default 0 keeps the random-port behavior for anyone
+                # sitting at a machine with its own browser.
+                port = int(os.getenv("GOOGLE_OAUTH_PORT", "0"))
+                creds = flow.run_local_server(port=port, prompt="select_account")
             token_path.write_text(creds.to_json())
             # Contains a refresh token — keep it readable only by the owner.
             os.chmod(token_path, 0o600)

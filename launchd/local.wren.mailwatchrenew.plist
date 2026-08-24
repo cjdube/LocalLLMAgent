@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.wren.mailwatchrenew</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__WREN_ROOT__/.venv/bin/python</string>
+        <string>-m</string>
+        <string>tasks.mail_watch_renew</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__WREN_ROOT__</string>
+
+    <!-- Daily. Gmail drops the watch after 7 days without saying so, so this
+         runs far more often than it needs to: one missed day then costs
+         nothing. Renewing is idempotent. 4:15 sits in the gap before the
+         4:30 model-driven jobs start — this one only talks to Google. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>4</integer>
+        <key>Minute</key>
+        <integer>15</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>__WREN_ROOT__/logs/mail_watch_renew.launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>__WREN_ROOT__/logs/mail_watch_renew.launchd.log</string>
+
+    <!-- So a reboot re-registers the watch immediately rather than waiting
+         for 5:15am with the watcher listening to a topic nothing publishes to. -->
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>

@@ -15,12 +15,23 @@
 #
 # To bump a dependency:
 #   1. edit the pin in requirements.txt
-#   2. python3.12 -m venv /tmp/lockenv && /tmp/lockenv/bin/pip install -r requirements.txt
+#   2. python3.12 -m venv /tmp/lockenv && /tmp/lockenv/bin/pip install \
+#        -r requirements.txt -c requirements.lock
+#      The `-c` is not optional. Without it a fresh resolve re-floats every
+#      transitive: adding google-cloud-pubsub on 2026-08-24 also moved
+#      google-api-core, google-auth, protobuf, idna and charset-normalizer,
+#      none of which had anything to do with the change. Constraining against
+#      this file holds them and lets only genuinely-new packages resolve. To
+#      deliberately bump one, drop its line from the constraints first.
 #   3. /tmp/lockenv/bin/pip freeze > requirements.lock   (keep this header)
 #   4. .venv/bin/pip install -r requirements.lock -r requirements-dev.txt
 #   5. run pytest AND a real Google/Ollama smoke call — the suite cannot see
 #      transitive breakage (see docs/model-constraints.md for the same lesson
 #      about what monkeypatched tests hide)
+Flask==3.1.3
+Jinja2==3.1.6
+MarkupSafe==3.0.3
+Werkzeug==3.1.8
 annotated-types==0.8.0
 anyio==4.14.2
 blinker==1.9.0
@@ -30,23 +41,27 @@ charset-normalizer==3.5.0
 click==8.4.2
 cryptography==50.0.0
 distro==1.9.0
-Flask==3.1.3
 google-api-core==2.34.0
 google-api-python-client==2.198.0
 google-auth-httplib2==0.4.0
 google-auth-oauthlib==1.4.0
 google-auth==2.56.3
+google-cloud-pubsub==2.39.1
 google-genai==2.11.0
 googleapis-common-protos==1.75.1
+grpc-google-iam-v1==0.14.5
+grpcio-status==1.83.0
+grpcio==1.83.0
 h11==0.16.0
 httpcore==1.0.9
 httplib2==0.32.0
 httpx==0.28.1
 idna==3.18
 itsdangerous==2.2.0
-Jinja2==3.1.6
-MarkupSafe==3.0.3
 oauthlib==3.3.1
+opentelemetry-api==1.44.0
+opentelemetry-sdk==1.44.0
+opentelemetry-semantic-conventions==0.65b0
 packaging==26.2
 proto-plus==1.28.3
 protobuf==7.35.1
@@ -66,4 +81,3 @@ typing_extensions==4.16.0
 uritemplate==4.2.0
 urllib3==2.7.0
 websockets==16.1.1
-Werkzeug==3.1.8

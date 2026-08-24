@@ -23,6 +23,7 @@ config/starred_installed_versions.json
 config/escalations.json
 config/ai_chat_learnings_state.json
 config/projects.json
+config/mail_state.json
 config/.interpreter_id
 config/*.lock
 config/*.corrupt-*

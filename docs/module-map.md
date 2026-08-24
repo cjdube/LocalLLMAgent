@@ -25,6 +25,7 @@ per-module detail behind them.
 ## Scheduling and state
 
 - `tasks/*.py` — unattended entrypoints run by launchd; `tasks/_common.py` has `setup_logger`/`notify_failure`, and `tasks/_learnings_common.py` the shared gather→persist→email helpers for the two daily-learnings tasks. `tasks/bg_worker.py` is the generic runner that polls `config/bg_jobs.json` for user-initiated background jobs with push-to-approve.
+- `tasks/mail_watcher.py` — the **second** always-on process on the mini, alongside the chat server. It holds a Pub/Sub streaming-pull subscription open rather than polling, which is what buys seconds of latency on new mail without opening a port. Its Pub/Sub client runs callbacks on background threads, so it is autouse-stubbed in `tests/conftest.py` and tested through `handle_notification()`. State (history watermark, dedupe set, watch expiry) is in `agent/tools/mail_state.py`, and the reads in `agent/tools/gmail_read.py`. [mail-watch.md](mail-watch.md)
 - `launchd/` — the scheduler: one plist per task (`StartInterval` for pollers, `StartCalendarInterval` for daily/weekly jobs), logging to `logs/`.
 - `tests/` — flat pytest suite, one `test_<module>.py` per source module — except where a module sits behind a seam and is tested through it (`agent/backends/gemini.py` in `tests/test_loop.py`). Plus the jest/jsdom suites (`npm test`), also flat in `tests/` — one `tests/<script>.test.js` per standalone browser script in `chat/static/`.
 - `config/` — `.env` (documented in `.env.example`) plus gitignored JSON stores.

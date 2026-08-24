@@ -23,6 +23,13 @@ itsdangerous==2.2.0
 # column) — a direct runtime import, otherwise present only transitively via
 # pytest, so pin it rather than rely on a dev dep being installed.
 packaging==26.2
+# Gmail push notifications (docs/mail-watch.md). tasks/mail_watcher.py holds a
+# streaming-pull subscription on the Pub/Sub topic Gmail's users.watch publishes
+# to — that is what keeps the mini off the public internet, so this is a hard
+# dependency of the mail watcher, not an optional extra. It drags grpcio and
+# protobuf in with it; both are locked below rather than left to float.
+google-cloud-pubsub==2.39.1
+
 # Optional cloud backend (WREN_LLM_BACKEND=gemini). Imported lazily, only when
 # that backend is selected, so a purely local (Ollama) install never loads it.
 google-genai==2.11.0
