@@ -82,6 +82,30 @@ def _service():
     return build_service("gmail", "v1")
 
 
+# The mailbox owner's own address, once resolved. Only a success is cached: a
+# transient profile failure must not pin an empty answer for the life of the
+# process.
+_MY_ADDRESS: dict = {}
+
+
+def my_address() -> str:
+    """The address of the mailbox we are reading, from the Gmail profile.
+
+    **Not BRIEF_TO_EMAIL.** That is where Wren *delivers* things — a preference,
+    and not necessarily the mailbox she reads. This is identity, and a reply
+    needs it to tell his own messages on a thread from everyone else's.
+
+    Returns "" if the profile can't be read; the caller decides what that means.
+    """
+    if "value" not in _MY_ADDRESS:
+        try:
+            profile = _service().users().getProfile(userId="me").execute()
+        except Exception:
+            return ""
+        _MY_ADDRESS["value"] = (profile.get("emailAddress") or "").strip()
+    return _MY_ADDRESS["value"]
+
+
 # --------------------------------------------------------------------------- #
 # Parsing one message into a plain dict
 # --------------------------------------------------------------------------- #
@@ -204,7 +228,9 @@ def compact_message(message: dict, body_chars: int = None) -> dict:
         "body": body,
         "body_truncated": truncated,
         "label_ids": message.get("labelIds") or [],
-        # For a threaded reply later. Not used by anything today.
+        # What a threaded reply needs: agent/tools/email.py's reply_plan() puts
+        # these on the outgoing mail as In-Reply-To/References, so the recipient
+        # sees an answer rather than a new conversation.
         "rfc_message_id": headers.get("Message-ID", ""),
         "references": headers.get("References", ""),
         "in_reply_to": headers.get("In-Reply-To", ""),

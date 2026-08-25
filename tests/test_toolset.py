@@ -260,3 +260,75 @@ def test_run_in_background_describer_truncates_a_long_task():
         {"function": {"name": "run_in_background", "arguments": {"task": long_task}}})
     assert summary.endswith('…"')
     assert len(summary) < len(long_task)
+
+
+# --------------------------------------------------------------------------- #
+# reply_to_thread: the one tool that mails someone other than the user. Its
+# recipients are not in its arguments — they come from the thread's headers — so
+# the confirmation card has to go and read them, and these tests are what keep
+# the card honest about who is about to be emailed.
+# --------------------------------------------------------------------------- #
+
+def _reply_call(**args) -> dict:
+    return {"function": {"name": "reply_to_thread", "arguments": args}}
+
+
+def test_reply_schema_declares_only_thread_id_and_body():
+    # No `to`, no `cc`. There is nothing for an injected address to land in.
+    props = email_mod.REPLY_TO_THREAD_TOOL_SCHEMA["function"]["parameters"]["properties"]
+    assert set(props) == {"thread_id", "body"}
+
+
+def test_reply_is_gated_in_chat_and_in_the_background():
+    # Both halves: WRITE_TOOLS is the chat card, CONSEQUENTIAL_TOOLS is the
+    # phone approval a background run must get. A reply in his name to a real
+    # contact needs both, and listing it in only one would look fine.
+    assert "reply_to_thread" in toolset.WRITE_TOOLS
+    assert "reply_to_thread" in toolset.CONSEQUENTIAL_TOOLS
+
+
+def test_reply_summary_names_the_people_it_will_actually_go_to(monkeypatch):
+    monkeypatch.setattr(toolset, "reply_plan", lambda tid: {
+        "to": ["Dana Fox <dana@acme.com>", "Sam <sam@acme.com>"],
+        "subject": "Re: Walkthrough", "in_reply_to": "", "references": ""})
+
+    text = toolset.describe_call(_reply_call(thread_id="t1", body="ok"))
+
+    assert "dana@acme.com" in text and "sam@acme.com" in text
+
+
+def test_reply_summary_gives_the_real_reason_there_are_no_recipients(monkeypatch):
+    """A card that silently omits the recipients is worse than one that admits
+    it does not know them — he can still deny it. And the reason must be the
+    real one: a mailing list refusal read fine, so "could not be read" would
+    send him looking for a Gmail outage that isn't there."""
+    monkeypatch.setattr(toolset, "reply_plan",
+                        lambda tid: {"error": "26 people are on it — reply in Gmail instead"})
+
+    text = toolset.describe_call(_reply_call(thread_id="t1", body="ok"))
+
+    assert "reply in Gmail instead" in text
+    assert "could not be read" not in text
+
+
+def test_reply_summary_survives_a_raising_thread_read(monkeypatch):
+    def boom(tid):
+        raise RuntimeError("gmail down")
+    monkeypatch.setattr(toolset, "reply_plan", boom)
+
+    assert "could not be read" in toolset.describe_call(_reply_call(thread_id="t1"))
+
+
+def test_reply_summary_reads_no_thread_when_there_is_no_thread_id(monkeypatch):
+    """describe_call runs on the confirmation path, and the describer table test
+    calls it with empty arguments — neither may reach Gmail."""
+    def boom(tid):
+        raise AssertionError("reply_plan reached without a thread id")
+    monkeypatch.setattr(toolset, "reply_plan", boom)
+
+    assert toolset.describe_call(_reply_call())
+
+
+def test_reply_detail_shows_the_body_being_sent():
+    detail = toolset.describe_call_detail(_reply_call(thread_id="t1", body="Thursday works."))
+    assert detail == "Thursday works."

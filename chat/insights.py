@@ -589,9 +589,9 @@ def describe_tools(tools: list[dict], write_tools) -> list[dict]:
 TOOL_SERVICES = {
     "google_calendar": ("Google Calendar", ["get_upcoming_events", "log_calendar_event",
                                             "get_events_by_date", "recolor_event"]),
-    # Both directions now: send_email writes, and the mail tools read. Two
-    # different OAuth scopes on one service, so one node.
-    "gmail": ("Gmail", ["send_email", "search_mail", "read_email"]),
+    # Both directions now: send_email and reply_to_thread write, and the mail
+    # tools read. Two different OAuth scopes on one service, so one node.
+    "gmail": ("Gmail", ["send_email", "reply_to_thread", "search_mail", "read_email"]),
     "google_tasks": ("Google Tasks", ["get_tasks", "get_tasks_due_soon", "create_task",
                                       "update_task_due_date", "complete_task"]),
     "chrome": ("Chrome History", ["fetch_chrome_history"]),

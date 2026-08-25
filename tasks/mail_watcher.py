@@ -139,10 +139,17 @@ def push_for(message: dict, logger=None) -> dict:
 def handle_notification(data: bytes, logger, label_id: str = None) -> None:
     """Do the work for one Pub/Sub message, and commit state.
 
-    Raises on anything that should NOT be acked. Returning normally means the
-    caller may ack — and it acks only after this has committed, because acking
-    first turns a crash in here into permanently lost mail: Pub/Sub considers
-    the notification delivered while nothing on disk remembers it was handled.
+    State is committed before this returns, and the caller acks only after that.
+    Acking first would turn a crash in here into permanently lost mail: Pub/Sub
+    treats the notification as delivered while nothing on disk remembers it was
+    handled.
+
+    **Raising means "this notification did no work" — not "do not ack".** The
+    caller acks a raise too, deliberately (see _make_callback: an exception
+    escaping a Pub/Sub callback cancels the whole subscription). So redelivery
+    is not the recovery. The recovery is that every raise happens *before*
+    mail_state.commit(), so the watermark has not moved and the next
+    notification re-walks the same window.
     """
     # `data` is already the raw payload. Pub/Sub's *push* delivery base64-encodes
     # it inside a JSON envelope, and most of the Gmail documentation shows that
@@ -230,8 +237,13 @@ def _make_callback(logger, label_id: str = None):
 
     A raised exception inside a Pub/Sub callback cancels the subscription — the
     watcher would go quiet and, being KeepAlive, would be restarted into the
-    same poison message forever. So: log it, ack it, keep listening. The message
-    is lost, which is the lesser failure and is at least audible in the log."""
+    same poison message forever. So: log it, ack it, keep listening.
+
+    Acking a failure is safe because handle_notification only advances the
+    watermark once its work has succeeded. The *notification* is lost; the mail
+    behind it is not, because the next notification walks the same window from
+    the unmoved watermark. What genuinely does not come back is a mailbox that
+    then falls silent for a week, and the 404 resync says so when it happens."""
     def callback(pubsub_message):
         try:
             handle_notification(pubsub_message.data, logger, label_id)

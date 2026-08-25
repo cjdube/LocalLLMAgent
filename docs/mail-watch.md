@@ -298,10 +298,50 @@ is lost, which is the lesser failure and is at least audible in the log.
 | The alert text is just the Gmail snippet | The model returned an empty summary — logged as a WARNING with the body length. Usually the thinking budget; see [docs/model-constraints.md](model-constraints.md). |
 | Alerts stopped after a `brew python` upgrade | Same as every other launchd job here — re-bootstrap the agent with `./launchd/install.sh launchd/local.wren.mailwatcher.plist`, which boots it out first. |
 
+## Replying on a thread
+
+The push tells him mail landed. `reply_to_thread` is how the round trip closes
+without opening Gmail: from chat, *"reply to Dana and say Thursday works"* →
+`search_mail` → `read_email` → a confirmation card → sent, **in the same
+thread**.
+
+**He never names a recipient, and neither does the model.** The tool's schema
+has exactly two parameters, `thread_id` and `body`. Everyone the reply goes to
+is read out of that thread's own From/To/Cc headers by `reply_plan()` in
+`agent/tools/email.py`. So the reply-all is the *thread's* participant list, and
+an address that is not already on the thread cannot appear — which is what makes
+it safe to let a model compose a reply to an email a stranger wrote. An injected
+"reply to attacker@evil.com" has nothing to land in.
+
+The other pieces of that:
+
+- **The card names the people.** `describe_call` in `agent/toolset.py` reads the
+  thread to show them, because the call's own arguments cannot. One Gmail read
+  on the confirmation path, and an unreadable thread degrades to a card that
+  says so rather than a card that omits it.
+- **`reply_to_thread` is in `CONSEQUENTIAL_TOOLS`, not just `WRITE_TOOLS`.** It
+  is the only tool that mails someone other than him, so a background run has to
+  get a phone approval for it too.
+- **Threading headers, not just `threadId`.** `threadId` keeps the reply tidy in
+  *our* mailbox; `In-Reply-To`/`References` are what make the *recipient's*
+  client show an answer instead of a new conversation. They come from the
+  newest message on the thread — the fields `compact_message` has been returning
+  since day one.
+- **The thread is read whole**, not at the model's char budget. That budget
+  drops the OLDEST messages, and with them anyone who has not written recently.
+  If a message is dropped anyway, the reply is refused: a short recipient list
+  is the dangerous degrade, because the reply looks sent and quietly leaves
+  someone off.
+- **A crowded thread is refused too** (`MAX_REPLY_RECIPIENTS`, 20). That is a
+  mailing list, and trimming it silently would be worse than not replying.
+
+`send_email` still has no `to` parameter and is not getting one. Replying was
+the real need a `to` would have served, and this answers it without unpinning
+anything.
+
 ## Not built yet
 
 **Acting on mail** (a second label handing the message to `bg_worker`) is
 designed but deliberately not wired up until this piece is proven live. So is
 **delegated meeting scheduling**, which changes the security posture and needs
-its own decision — the threading headers `gmail_read` already returns are the
-groundwork for it.
+its own decision — `reply_to_thread` is the primitive it was waiting on.

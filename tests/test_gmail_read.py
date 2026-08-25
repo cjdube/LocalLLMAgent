@@ -52,7 +52,10 @@ class _FakeGmail:
     """Just enough of the Gmail client for these tests."""
 
     def __init__(self, messages=None, threads=None, labels=None,
-                 history_pages=None, profile_history_id="9000"):
+                 history_pages=None, profile_history_id="9000",
+                 profile_address="craig@example.com"):
+        self.profile_address = profile_address
+        self.profile_calls = 0
         self.messages_by_id = {m["id"]: m for m in messages or []}
         self.thread_data = threads or {}
         self.label_data = labels if labels is not None else [
@@ -81,7 +84,9 @@ class _FakeGmail:
         return _FakeHistory(self)
 
     def getProfile(self, userId=None):
-        return _Exec({"historyId": self.profile_history_id})
+        self.profile_calls += 1
+        return _Exec({"historyId": self.profile_history_id,
+                      "emailAddress": self.profile_address})
 
     def watch(self, userId=None, body=None):
         self.watch_calls.append(body)
@@ -160,6 +165,16 @@ def _http_error(status, message):
     return HttpError(_FakeResponse(status), json.dumps({"error": message}).encode())
 
 
+@pytest.fixture(autouse=True)
+def _clear_address_cache():
+    """my_address() caches for the life of the process, so one test's fake
+    address would otherwise answer every later test — and the module under test
+    would look correct while the cache did the work."""
+    gmail_read._MY_ADDRESS.clear()
+    yield
+    gmail_read._MY_ADDRESS.clear()
+
+
 @pytest.fixture
 def gmail(monkeypatch):
     """Install a fake client and hand it back so a test can shape it."""
@@ -192,8 +207,8 @@ def test_headers_are_matched_case_insensitively():
 
 
 def test_threading_headers_are_returned():
-    """Not used today. They cost nothing here and are what a threaded reply
-    needs later, and retrofitting them means reopening this module."""
+    """What reply_plan() puts on an outgoing reply as In-Reply-To/References,
+    so the recipient's client shows an answer rather than a new conversation."""
     raw = _message(extra_headers=[{"name": "References", "value": "<a@x> <b@x>"}])
     result = gmail_read.compact_message(raw)
 
@@ -629,3 +644,30 @@ def test_register_watch_reports_the_error_rather_than_raising(gmail):
     gmail.watch = _boom
 
     assert "error" in gmail_read.register_watch("projects/p/topics/t")
+
+
+# --------------------------------------------------------------------------- #
+# my_address — identity, not delivery preference. A reply uses it to tell his
+# own messages on a thread from everyone else's.
+# --------------------------------------------------------------------------- #
+
+def test_my_address_comes_from_the_gmail_profile(gmail):
+    gmail.profile_address = "craig@example.com"
+    assert gmail_read.my_address() == "craig@example.com"
+
+
+def test_my_address_is_only_fetched_once(gmail):
+    gmail_read.my_address()
+    gmail_read.my_address()
+    assert gmail.profile_calls == 1
+
+
+def test_a_failed_profile_read_is_not_cached(monkeypatch, gmail):
+    """Caching "" would pin the failure for the life of the daemon, and every
+    later reply would quietly include him on his own thread."""
+    monkeypatch.setattr(gmail_read, "_service",
+                        lambda: (_ for _ in ()).throw(RuntimeError("gmail down")))
+    assert gmail_read.my_address() == ""
+
+    monkeypatch.setattr(gmail_read, "_service", lambda: gmail)
+    assert gmail_read.my_address() == "craig@example.com"

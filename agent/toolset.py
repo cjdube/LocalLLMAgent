@@ -37,7 +37,13 @@ from agent.tools.calendar import (
     recolor_event,
 )
 from agent.tools.chrome_history import TOOL_SCHEMA as CHROME_SCHEMA, fetch_chrome_history
-from agent.tools.email import TOOL_SCHEMA as EMAIL_SCHEMA, send_email_tool
+from agent.tools.email import (
+    REPLY_TO_THREAD_TOOL_SCHEMA,
+    TOOL_SCHEMA as EMAIL_SCHEMA,
+    reply_plan,
+    reply_to_thread_tool,
+    send_email_tool,
+)
 from agent.tools.evaluate_app import TOOL_SCHEMA as EVALUATE_APP_SCHEMA, evaluate_app
 from agent.tools.evaluate_against import TOOL_SCHEMA as EVALUATE_AGAINST_SCHEMA, evaluate_against
 from agent.tools.games import TOOL_SCHEMA as GAMES_SCHEMA, list_games
@@ -123,6 +129,7 @@ TOOLS = [
     CHROME_SCHEMA,
     YOUTUBE_SCHEMA,
     EMAIL_SCHEMA,
+    REPLY_TO_THREAD_TOOL_SCHEMA,
     STRAVA_SCHEMA,
     SPORTS_SCHEMA,
     WEATHER_SCHEMA,
@@ -172,6 +179,10 @@ DISPATCH = {
     # The wrapper, not send_email itself: it drops model-supplied arguments the
     # schema doesn't declare (to, html), pinning the recipient to BRIEF_TO_EMAIL.
     "send_email": send_email_tool,
+    # Same wrapper reasoning, and one more: this tool has no recipient argument
+    # at all. Its recipients come from the thread's own headers in Python
+    # (email.reply_plan), so an injected address has nothing to land in.
+    "reply_to_thread": reply_to_thread_tool,
     "fetch_strava": fetch_strava,
     # Read-only: one public scoreboard GET per league the user follows.
     "fetch_scores": fetch_scores,
@@ -236,7 +247,8 @@ DISPATCH = {
 }
 
 WRITE_TOOLS = frozenset({
-    "log_calendar_event", "send_email", "recolor_event", "send_morning_brief",
+    "log_calendar_event", "send_email", "reply_to_thread", "recolor_event",
+    "send_morning_brief",
     "create_task", "update_task_due_date", "complete_task", "forget",
     # remember/pin/recategorize are gated alongside forget: chat turns ingest
     # untrusted web/search content inline, and a pinned fact is injected into
@@ -262,6 +274,10 @@ WRITE_TOOLS = frozenset({
 CONSEQUENTIAL_TOOLS = frozenset({
     "send_email", "send_morning_brief", "send_opportunity_digest", "forget",
     "delete_skill",
+    # The only tool here that mails someone who is not the user. Its recipients
+    # cannot be steered (see DISPATCH above), but the words can be, and a reply
+    # in his name to a real contact is not something to retract.
+    "reply_to_thread",
 })
 
 # Tools an unattended (background) run must not have AT ALL — removed from its
@@ -340,7 +356,7 @@ TOOL_GROUP_NAMES = {
     "games": ["list_games"],
     "projects": ["list_projects", "read_project"],
     "nudges": ["list_nudges"],
-    "mail": ["search_mail", "read_email"],
+    "mail": ["search_mail", "read_email", "reply_to_thread"],
 }
 
 # One-line "when to load it" blurb per group, rendered into the chat prompt so
@@ -365,9 +381,9 @@ _GROUP_BLURBS = {
               "at X, it fits your Y note'. Load this for any ask about what you have "
               "suggested, recommended or noticed; the ones that were sent are only "
               "the ones the tool returns, never ones you recall.",
-    "mail": f"{_NAME}'s email — search his mailbox and read a conversation. "
-            "His mail is not something you know: only the messages the tools "
-            "return exist, and if a search finds nothing, say so.",
+    "mail": f"{_NAME}'s email — search his mailbox, read a conversation, and "
+            "reply on one. His mail is not something you know: only the messages "
+            "the tools return exist, and if a search finds nothing, say so.",
 }
 
 # Case-insensitive word-boundary cues that pre-load a group before the model
@@ -495,12 +511,36 @@ def _email_recipient() -> str:
     return os.getenv("BRIEF_TO_EMAIL") or "(BRIEF_TO_EMAIL unset)"
 
 
+def _reply_recipients(thread_id: str) -> str:
+    """Who a pending reply_to_thread call will actually go to.
+
+    Costs one Gmail read, on the confirmation path only. It has to: this call's
+    arguments carry no address at all — the recipients live in the thread's
+    headers — and a card that cannot say who the mail goes to is not worth
+    tapping. Never raises: a thread that yields no recipients degrades to a line
+    saying why, which is still an honest card, rather than losing the
+    confirmation. reply_plan's refusals are already written for a person, so
+    they are shown as-is — "could not be read" would be a lie on a thread that
+    read fine and was refused for being a mailing list."""
+    if not (thread_id or "").strip():
+        return "(no thread id — this call will fail)"
+    try:
+        plan = reply_plan(thread_id)
+    except Exception:
+        return "(the thread could not be read)"
+    if "error" in plan:
+        return f"(no one — {plan['error']})"
+    return ", ".join(plan["to"])
+
+
 def describe_call(call: dict) -> str:
     """One human line summarizing a tool call awaiting confirmation."""
     name = call["function"]["name"]
     args = call["function"].get("arguments", {}) or {}
     if name == "send_email":
         return f'Send an email to {_email_recipient()} — subject: "{args.get("subject", "")}"'
+    if name == "reply_to_thread":
+        return f"Reply on the email thread to {_reply_recipients(args.get('thread_id'))}"
     if name == "send_morning_brief":
         return "Send the morning brief (weather, calendar, tasks due soon, starred repos)"
     if name == "log_calendar_event":
@@ -550,23 +590,28 @@ def describe_call(call: dict) -> str:
     return f"{name}({json.dumps(args)})"
 
 
+def _body_preview(body: str) -> str | None:
+    """A readable, truncated preview of an outgoing message body."""
+    body = (body or "").strip()
+    if not body:
+        return None
+    # Chat-composed bodies are plain text; strip any stray tags defensively
+    # (in case the model emitted HTML) and collapse whitespace so the preview
+    # stays readable, then truncate.
+    text = re.sub(r"<[^>]+>", "", body)
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) > BODY_PREVIEW_CHARS:
+        text = text[:BODY_PREVIEW_CHARS].rsplit(" ", 1)[0] + "…"
+    return text
+
+
 def describe_call_detail(call: dict) -> str | None:
-    """A secondary preview line for a confirmation. For send_email this is the
-    message body, so the human approving the send actually sees what will go
-    out — not just the subject. Returns None when there's nothing extra to show
+    """A secondary preview line for a confirmation. For the two mail sends this
+    is the message body, so the human approving actually sees what will go out —
+    not just who it goes to. Returns None when there's nothing extra to show
     (the summary alone suffices)."""
     name = call["function"]["name"]
     args = call["function"].get("arguments", {}) or {}
-    if name == "send_email":
-        body = (args.get("body") or "").strip()
-        if not body:
-            return None
-        # Chat-composed bodies are plain text; strip any stray tags defensively
-        # (in case the model emitted HTML) and collapse whitespace so the
-        # preview stays readable, then truncate.
-        text = re.sub(r"<[^>]+>", "", body)
-        text = re.sub(r"\s+", " ", text).strip()
-        if len(text) > BODY_PREVIEW_CHARS:
-            text = text[:BODY_PREVIEW_CHARS].rsplit(" ", 1)[0] + "…"
-        return text
+    if name in ("send_email", "reply_to_thread"):
+        return _body_preview(args.get("body"))
     return None

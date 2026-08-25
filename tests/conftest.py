@@ -377,6 +377,10 @@ def _block_email_send(monkeypatch):
     def _no_real_email(*a, **k):
         raise RuntimeError("real Gmail send blocked in tests — stub send_email")
     monkeypatch.setattr(_email, "send_email", _no_real_email)
+    # The other send path. reply_to_thread builds and sends its own message
+    # rather than going through send_email, so the guard above never covered
+    # it — and this one mails a real third party, not the user.
+    monkeypatch.setattr(_email, "reply_to_thread", _no_real_email)
 
 
 @pytest.fixture(autouse=True)

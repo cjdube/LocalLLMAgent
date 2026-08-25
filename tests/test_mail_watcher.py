@@ -368,12 +368,34 @@ def test_a_partial_batch_warns_with_the_counts(gmail, pushes, model, logger):
     assert any("1 of 2" in w for w in logger.warnings)
 
 
-def test_a_history_error_raises_so_the_message_is_not_acked(gmail, logger):
+def test_a_history_error_raises_rather_than_reporting_an_empty_mailbox(gmail, logger):
     mail_state.commit(new_history_id="100")
     gmail["history"] = {"error": "backend error"}
 
     with pytest.raises(RuntimeError):
         mail_watcher.handle_notification(_payload(), logger)
+
+
+def test_a_history_error_is_acked_but_leaves_the_watermark_where_it_was(gmail, logger):
+    """The other half of the guarantee above, and the half that was never
+    asserted: the callback acks a raise anyway, on purpose, because an exception
+    escaping a Pub/Sub callback cancels the subscription. So redelivery is not
+    what saves the mail — the unmoved watermark is. Assert both, or the raise
+    test stays green while the callback quietly throws the notification away."""
+    mail_state.commit(new_history_id="100")
+    gmail["history"] = {"error": "backend error"}
+    acked = []
+
+    class _PubSubMessage:
+        data = _payload()
+
+        def ack(self):
+            acked.append(True)
+
+    mail_watcher._make_callback(logger)(_PubSubMessage())  # must not raise
+
+    assert acked == [True]
+    assert mail_state.history_id() == "100"
 
 
 # --------------------------------------------------------------------------- #
