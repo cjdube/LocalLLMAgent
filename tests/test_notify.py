@@ -59,6 +59,54 @@ def test_posts_body_and_auth_header(monkeypatch):
     assert captured["headers"]["Priority"] == "high"
 
 
+# --------------------------------------------------------------------------- #
+# Titles that came from outside
+# --------------------------------------------------------------------------- #
+#
+# mail_watcher puts a Gmail subject in the title, and a sender chooses that
+# text. An HTTP header value is encoded latin-1 by http.client, so an emoji
+# there raised UnicodeEncodeError and aborted the whole POST — the alert was
+# lost, not just its emoji. These assert the encodability directly rather than
+# just comparing strings: requests is stubbed out here, so a captured header
+# that "looks right" proves nothing about what the real socket would accept.
+
+def test_an_emoji_in_the_title_does_not_lose_the_push(monkeypatch):
+    monkeypatch.setenv("NTFY_URL", "http://box.ts.net:2586/wren-alerts")
+    captured = _capture_post(monkeypatch)
+
+    result = notify("Jane: Asks about Tuesday.", title="Mail: \U0001F389 Order shipped")
+
+    assert result == {"ok": True}
+    title = captured["headers"]["Title"]
+    title.encode("latin-1")  # what http.client does; raised before the fix
+    assert title == "Mail: Order shipped"
+    # The body is sent as UTF-8 bytes, so it was never subject to this.
+    assert captured["data"] == "Jane: Asks about Tuesday.".encode("utf-8")
+
+
+def test_accented_letters_in_a_title_survive_intact(monkeypatch):
+    """latin-1, not ASCII, so real names and subjects are not mangled."""
+    monkeypatch.setenv("NTFY_URL", "http://box.ts.net:2586/wren-alerts")
+    captured = _capture_post(monkeypatch)
+
+    notify("hi", title="Mail: Café réservé")
+
+    assert captured["headers"]["Title"] == "Mail: Café réservé"
+    captured["headers"]["Title"].encode("latin-1")
+
+
+def test_a_title_with_nothing_encodable_is_dropped_rather_than_sent_blank(monkeypatch):
+    """An all-emoji or all-CJK subject reduces to nothing. A blank Title header
+    is worse than none — ntfy shows the topic name in its place."""
+    monkeypatch.setenv("NTFY_URL", "http://box.ts.net:2586/wren-alerts")
+    captured = _capture_post(monkeypatch)
+
+    result = notify("Jane: Asks about Tuesday.", title="\U0001F389\U0001F389")
+
+    assert result == {"ok": True}
+    assert "Title" not in captured["headers"]
+
+
 def test_omits_auth_header_when_no_token(monkeypatch):
     monkeypatch.setenv("NTFY_URL", "http://box.ts.net:2586/wren-alerts")
     monkeypatch.delenv("NTFY_TOKEN", raising=False)

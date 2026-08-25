@@ -25,10 +25,27 @@ import requests
 from agent.tools import push_log
 from agent.tools._http import http_error, load_env, print_result
 
-# ntfy headers must be ASCII (title/message travel as HTTP headers/body); the
-# body is sent UTF-8 encoded, but keep titles plain to avoid header issues.
+# The title travels as an HTTP header and the message as the body; the body is
+# sent UTF-8 encoded, and the title goes through _header_safe() below.
 _TIMEOUT_S = 10
 _MAX_MESSAGE_CHARS = 500
+
+# Titles that came from outside. mail_watcher puts a Gmail subject here, and a
+# sender chooses that text — so it routinely contains an emoji. A title travels
+# as an HTTP header, http.client encodes header values as latin-1, and an emoji
+# raises UnicodeEncodeError there. That aborted the whole POST: the alert was
+# lost, not just its emoji. Drop what latin-1 cannot carry and send the rest.
+def _header_safe(title: str) -> str:
+    """`title` reduced to characters an HTTP header can carry.
+
+    latin-1 rather than ASCII on purpose — it covers the accented Latin letters
+    that show up in real names and subjects, so "Café" survives intact and only
+    the genuinely unencodable characters go."""
+    cleaned = title.encode("latin-1", "ignore").decode("latin-1")
+    # An all-emoji or all-CJK subject reduces to nothing, and a blank Title
+    # header is worse than none: ntfy then shows the topic name instead.
+    return " ".join(cleaned.split())
+
 
 # Priority is a word in the plaintext header path but a 1-5 int in the JSON
 # publish path (used when action buttons are attached).
@@ -96,6 +113,7 @@ def notify(
         if actions:
             parts = urlsplit(url)
             payload = {"topic": parts.path.strip("/"), "message": body, "actions": actions}
+            # JSON, so this path carries UTF-8 fine — no sanitizing needed.
             if title:
                 payload["title"] = title
             if priority:
@@ -104,8 +122,9 @@ def notify(
                 f"{parts.scheme}://{parts.netloc}", json=payload, headers=auth, timeout=_TIMEOUT_S)
         else:
             headers = dict(auth)
-            if title:
-                headers["Title"] = title
+            safe_title = _header_safe(title) if title else ""
+            if safe_title:
+                headers["Title"] = safe_title
             if priority:
                 headers["Priority"] = priority
             resp = requests.post(url, data=body.encode("utf-8"), headers=headers, timeout=_TIMEOUT_S)

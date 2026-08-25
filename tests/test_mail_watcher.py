@@ -255,7 +255,11 @@ def test_an_empty_model_summary_still_pushes_and_warns(gmail, pushes, model, log
     assert any("no summary" in w for w in logger.warnings)
 
 
-def test_an_unreadable_message_is_left_unseen_for_retry(gmail, pushes, model, logger):
+def test_an_unreadable_message_is_marked_seen_and_not_retried(gmail, pushes, model,
+                                                              logger):
+    """history.list named it and messages.get 404s, so it left the mailbox. That
+    never recovers — holding the watermark for it would re-walk the same window
+    on every later notification, forever."""
     mail_state.commit(new_history_id="100")
     gmail["history"] = {"message_ids": ["m1"], "history_id": "500", "resynced": False}
     # No entry in gmail["messages"], so get_message returns an error.
@@ -263,12 +267,19 @@ def test_an_unreadable_message_is_left_unseen_for_retry(gmail, pushes, model, lo
     mail_watcher.handle_notification(_payload(), logger)
 
     assert pushes == []
-    assert mail_state.unseen(["m1"]) == ["m1"]
-    assert logger.warnings
+    assert mail_state.unseen(["m1"]) == []
+    assert mail_state.history_id() == "500"
+    assert any("will not be retried" in w for w in logger.warnings)
 
 
-def test_a_failed_push_leaves_the_message_unseen_for_retry(gmail, model, logger,
-                                                           monkeypatch):
+def test_a_failed_push_holds_the_watermark_so_the_next_notification_retries(
+        gmail, model, logger, monkeypatch):
+    """The bug this pins: leaving the id out of `seen` is not enough on its own.
+
+    handle_notification returns normally, so the caller acks and nothing
+    redelivers the notification. A watermark advanced to 500 would also put the
+    message behind every later history.list — unseen, unacked-for, unreachable.
+    Both halves are needed."""
     mail_state.commit(new_history_id="100")
     gmail["history"] = {"message_ids": ["m1"], "history_id": "500", "resynced": False}
     gmail["messages"]["m1"] = _mail()
@@ -277,6 +288,71 @@ def test_a_failed_push_leaves_the_message_unseen_for_retry(gmail, model, logger,
     mail_watcher.handle_notification(_payload(), logger)
 
     assert mail_state.unseen(["m1"]) == ["m1"]
+    assert mail_state.history_id() == "100"
+    assert any("holding the history watermark" in w for w in logger.warnings)
+
+
+def test_the_held_watermark_advances_once_the_retry_lands(gmail, model, logger,
+                                                          monkeypatch):
+    """The other half: the hold must clear, or the window grows forever."""
+    ntfy = {"down": True}
+    delivered = []
+
+    def flaky(message, title=None, **kwargs):
+        if ntfy["down"]:
+            return {"error": "ntfy down"}
+        delivered.append(message)
+        return {"ok": True}
+
+    monkeypatch.setattr(mail_watcher, "notify", flaky)
+    mail_state.commit(new_history_id="100")
+    gmail["history"] = {"message_ids": ["m1"], "history_id": "500", "resynced": False}
+    gmail["messages"]["m1"] = _mail()
+
+    mail_watcher.handle_notification(_payload(), logger)
+    assert mail_state.history_id() == "100"
+
+    # ntfy comes back and the held window is walked again.
+    ntfy["down"] = False
+    mail_watcher.handle_notification(_payload(), logger)
+
+    assert len(delivered) == 1
+    assert mail_state.history_id() == "500"
+    assert mail_state.unseen(["m1"]) == []
+
+
+def test_a_push_that_landed_is_not_pushed_again_by_the_retry(gmail, model, logger,
+                                                             monkeypatch):
+    """The held watermark re-walks the whole window, so a message that already
+    landed comes back with it. `seen` is what stops it pushing twice."""
+    fail_for = {"m2"}
+    delivered = []
+
+    def flaky(message, title=None, **kwargs):
+        # The stub mail below puts the message id in the subject, so the title
+        # is what says which message this push is for.
+        if any(mid in (title or "") for mid in fail_for):
+            return {"error": "ntfy down"}
+        delivered.append(title)
+        return {"ok": True}
+
+    monkeypatch.setattr(mail_watcher, "notify", flaky)
+    mail_state.commit(new_history_id="100")
+    gmail["history"] = {"message_ids": ["m1", "m2"], "history_id": "500",
+                        "resynced": False}
+    gmail["messages"]["m1"] = _mail("m1", subject="m1")
+    gmail["messages"]["m2"] = _mail("m2", subject="m2")
+
+    mail_watcher.handle_notification(_payload(), logger)
+    assert delivered == ["Mail: m1"]
+    assert mail_state.history_id() == "100"
+
+    fail_for.clear()
+    mail_watcher.handle_notification(_payload(), logger)
+
+    # m2 delivered on the retry; m1 was NOT pushed a second time.
+    assert delivered == ["Mail: m1", "Mail: m2"]
+    assert mail_state.history_id() == "500"
 
 
 def test_a_partial_batch_warns_with_the_counts(gmail, pushes, model, logger):

@@ -62,6 +62,20 @@ SUMMARY_SYSTEM_PROMPT = (
 # the lock screen, and the sender and subject in front of it matter more.
 MAX_SUMMARY_CHARS = 200
 
+# Lease one notification at a time, which makes the callbacks run one at a time.
+# The Pub/Sub client otherwise leases up to 1000 and runs callbacks on a pool of
+# threads, and two of those racing breaks both halves of this file:
+#
+# - `mail_state.unseen()` reads, the push happens, `commit()` writes. Two threads
+#   can both read "not seen" before either writes, so one email pushes twice —
+#   the exact duplicate the `seen` set exists to prevent.
+# - summarize() calls the local model, and Ollama runs ONE request at a time
+#   (OLLAMA_NUM_PARALLEL=1). Concurrent callbacks queue there and starve chat.
+#
+# Mail arrives seconds apart, not milliseconds, so serializing costs nothing
+# real: a push takes about a second end to end.
+FLOW_CONTROL = pubsub_v1.types.FlowControl(max_messages=1)
+
 
 def subscription_path() -> str:
     project = os.getenv("MAIL_PUBSUB_PROJECT", "")
@@ -161,26 +175,54 @@ def handle_notification(data: bytes, logger, label_id: str = None) -> None:
         return
 
     logger.info(f"{len(new_ids)} new message(s): {', '.join(new_ids)}")
-    handled = []
+    handled, unreadable, unpushed = [], [], []
     for message_id in new_ids:
         message = gmail_read.get_message(message_id)
         if "error" in message:
-            # Leave it out of `handled` so a redelivery retries it.
-            logger.warning(f"could not read message {message_id}: {message['error']}")
+            # The message left the mailbox between history.list naming it and
+            # this read. That does not come back, so mark it seen: holding the
+            # watermark for something Gmail will 404 forever would re-walk the
+            # same window on every later notification.
+            logger.warning(
+                f"could not read message {message_id}: {message['error']} — it is "
+                "no longer in the mailbox, so it was NOT reported and will not "
+                "be retried")
+            unreadable.append(message_id)
             continue
         result = push_for(message, logger)
         if result.get("error"):
             logger.warning(f"push for {message_id} failed: {result['error']}")
+            unpushed.append(message_id)
             continue
         logger.info(f"pushed {message_id}: {message['subject']!r}")
         handled.append(message_id)
 
     if len(handled) < len(new_ids):
         logger.warning(
-            f"handled {len(handled)} of {len(new_ids)} new messages — the rest "
-            "will be retried on redelivery")
+            f"handled {len(handled)} of {len(new_ids)} new messages "
+            f"({len(unpushed)} to retry, {len(unreadable)} unreadable)")
 
-    mail_state.commit(seen_ids=handled, new_history_id=history["history_id"])
+    if unpushed:
+        # **Do not advance the watermark.** A failed push is the transient
+        # failure (ntfy down), and this function returns normally, so the caller
+        # acks — nothing redelivers the notification. Advancing here left the
+        # message with no way back: past the watermark, absent from `seen`, and
+        # acked. Holding the watermark makes the NEXT notification re-walk this
+        # window and find it again; `seen` keeps the ones that did land from
+        # being pushed twice.
+        #
+        # Bounded without a counter: the hold clears as soon as one push
+        # succeeds, and if ntfy stays down past Gmail's ~week of history the
+        # 404 resync in list_history moves it on and says so.
+        logger.warning(
+            f"holding the history watermark at {watermark} so the next "
+            f"notification retries {len(unpushed)} failed push(es): "
+            f"{', '.join(unpushed)}")
+        mail_state.commit(seen_ids=handled + unreadable)
+        return
+
+    mail_state.commit(seen_ids=handled + unreadable,
+                      new_history_id=history["history_id"])
 
 
 def _make_callback(logger, label_id: str = None):
@@ -209,7 +251,8 @@ def _subscribe(logger, label_id: str = None):
     and why there is no service-account key file to place or protect."""
     subscriber = pubsub_v1.SubscriberClient(credentials=get_credentials())
     path = subscription_path()
-    future = subscriber.subscribe(path, callback=_make_callback(logger, label_id))
+    future = subscriber.subscribe(
+        path, callback=_make_callback(logger, label_id), flow_control=FLOW_CONTROL)
     logger.info(f"listening on {path}")
     with subscriber:
         future.result()

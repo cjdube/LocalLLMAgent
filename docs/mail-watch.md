@@ -234,6 +234,20 @@ A notification carrying an older `historyId` can land after a newer one. The
 watermark only ever moves **forward** (`max`, compared numerically — Gmail
 returns these as strings, and a string compare gets `"9" > "10"` wrong).
 
+### Notifications are handled one at a time
+
+The subscriber is opened with `FlowControl(max_messages=1)`, so only one
+notification is leased — and therefore only one callback runs — at a time. The
+default leases up to 1000 and runs callbacks on a thread pool, which breaks two
+things at once. `unseen()` reads the store, the push happens, `commit()` writes
+it: two threads can both read "not seen" before either writes, and the same email
+pushes twice. And `summarize()` calls the local model, which serves one request
+at a time (`OLLAMA_NUM_PARALLEL=1`), so concurrent callbacks queue there and
+starve chat.
+
+Mail arrives seconds apart and a push takes about a second end to end, so
+serializing costs nothing real.
+
 ### Gmail's history is only about a week deep
 
 Past that the stored watermark is gone and `history.list` returns 404. That is a
@@ -248,8 +262,23 @@ Acking a Pub/Sub message first would turn a crash into permanently lost mail:
 Pub/Sub treats the notification as delivered while nothing on disk remembers it
 was handled. So `mail_state.commit()` runs, then `ack()`.
 
-A message that could not be read, or whose push failed, is deliberately left out
-of `seen` — so a redelivery retries it.
+A message whose **push failed** is left out of `seen` *and* the history watermark
+is left where it was. Both halves are needed: `handle_notification` returns
+normally, so the notification is acked and nothing redelivers it, and a watermark
+advanced past the message would put it out of reach of every later
+`history.list` too. Holding it makes the next notification re-walk the same
+window; `seen` stops the ones that did land from pushing twice.
+
+The retry rides on the **next notification**, so it is not a timer. In practice
+that is minutes: the watch is unfiltered, so any mailbox change at all publishes
+one. But a completely silent mailbox means a held message waits. The hold clears
+on the first successful push, and if ntfy stays down past Gmail's week of history
+the 404 resync moves it on and logs that it did.
+
+A message that could not be **read** is marked seen instead. `history.list` named
+it and `messages.get` then 404'd, which means it left the mailbox — that never
+recovers, and holding the watermark for it would re-walk the same window forever.
+It is not reported, and the WARNING says so.
 
 ### A poison message must not kill the stream
 
