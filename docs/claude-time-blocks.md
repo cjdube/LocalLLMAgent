@@ -107,8 +107,8 @@ something to match.
 ```
 
 `--dry-run` still calls the model (the titles are the part worth checking) but never
-touches the calendar. Only the plain daily run pushes a "3 blocks, 4.7h logged"
-summary to the phone; `--date` and `--backfill` are targeted re-runs and stay quiet.
+touches the calendar. A successful run is silent — the calendar entries are the
+record. Only a failure pushes to the phone.
 
 **Backfilling over days already blocked out by hand will double up.** The dedup key
 only knows about events this task created — a manually-written "AI - LogViewer

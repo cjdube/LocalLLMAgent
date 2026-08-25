@@ -42,7 +42,6 @@ from agent.tools.calendar import (
     _local_timezone,
     log_calendar_event,
 )
-from agent.tools.notify import notify
 from tasks._chat_transcripts import _compact, fetch_session_activity
 from tasks._common import notify_failure, setup_logger
 from tasks._learnings_common import prior_day
@@ -287,14 +286,7 @@ def main() -> int:
         else:
             start, end, day = prior_day()
             logger.info(f"Day: {day}")
-            logged = run(start, end, day)
-            # One push for the day, not one per block: this is a record of what
-            # happened, not something to act on.
-            if logged and not args.dry_run:
-                notify(
-                    message=f"{len(logged)} block(s), {_hours(logged):.1f}h logged for {day:%b %-d}",
-                    title="Wren: AI time logged",
-                )
+            run(start, end, day)
 
         logger.info("Claude time blocks run complete")
         return 0

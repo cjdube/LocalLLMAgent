@@ -215,7 +215,7 @@ def _write_session(name, stamps, project="/Users/x/Projects/Wren"):
     os.utime(path, (latest, latest))
 
 
-def test_main_logs_one_event_per_block_and_pushes_once(monkeypatch):
+def test_main_logs_one_event_per_block(monkeypatch):
     day_start = datetime(2026, 8, 5, 0, 0, tzinfo=TZ)
     _write_session("morning.jsonl", [day_start.replace(hour=9) + timedelta(minutes=m)
                                      for m in (0, 15, 30)])
@@ -226,10 +226,9 @@ def test_main_logs_one_event_per_block_and_pushes_once(monkeypatch):
 
     monkeypatch.setattr(ctb, "warm_model", lambda **k: True)
     monkeypatch.setattr(ctb, "complete_text", lambda **k: "shipped the digest")
-    logged, pushes = [], []
+    logged = []
     monkeypatch.setattr(ctb, "log_calendar_event",
                         lambda **k: (logged.append(k) or {"event_id": "e"}))
-    monkeypatch.setattr(ctb, "notify", lambda **k: pushes.append(k) or {"ok": True})
     monkeypatch.setattr("sys.argv", ["claude_time_blocks", "--date", "2026-08-05"])
 
     assert ctb.main() == 0
@@ -238,5 +237,3 @@ def test_main_logs_one_event_per_block_and_pushes_once(monkeypatch):
         "claude-time:2026-08-05:0900", "claude-time:2026-08-05:1400",
     ]
     assert logged[0]["summary"] == "AI · Wren — shipped the digest"
-    # --date is a targeted re-run, not the daily pass: no push.
-    assert pushes == []
