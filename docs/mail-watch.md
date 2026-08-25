@@ -115,12 +115,32 @@ carry over.
 On desktop Gmail (nested labels cannot be created on mobile):
 
 1. Create the label `Wren`, then `Watch` nested under it.
-2. Create a filter that applies `Wren/Watch`. Subject containing `[wren]` is a
-   good starting rule. Leave "skip the inbox" **off** — these should still be
-   visible.
-3. Test it with mail from an **outside** address. Mail you send yourself threads
-   with the Sent copy and does not reliably produce the arrival event the watcher
-   listens for.
+2. Create a filter that applies `Wren/Watch`. Match on **both** the subject and
+   the sender — every address you send from, comma-separated:
+
+   ```
+   from:(you@example.com,you@icloud.com) subject:([wren])
+   ```
+
+   Leave "skip the inbox" **off** — these should still be visible.
+3. Test it from one of those `from:` addresses on an **outside** mail service.
+   Both halves matter: an address off the filter list will not be labelled, and
+   mail you send yourself inside Gmail threads with the Sent copy and does not
+   reliably produce the arrival event the watcher listens for.
+
+**The `from:` half is not optional, and subject-only is the wrong rule.** A
+subject-only filter lets a stranger put a thread under watch by writing `[wren]`
+in a subject line — no reply from you, no click. Today that only costs a phone
+buzz on a tool-free summary. But "Not built yet" below hands a labelled message
+to `bg_worker`, and that turns the same subject line into an unsolicited job.
+Narrow the rule now, while it is free. (A From header can be forged, so this is
+a good lock rather than a perfect one; what makes it hold is that the *stranger's
+own* subject line stops being enough.)
+
+Restricting the sender costs nothing on replies. `_thread_is_watched` asks
+whether *any* message on the thread carries the label, so once your opening
+message is tagged the whole conversation is followed — including replies from
+people the filter would never match.
 
 The filter is a convenience for threads *you* start. Any thread can also be
 watched by applying the label to it by hand — including one a stranger started,
@@ -196,8 +216,9 @@ starts listening immediately.
 
 `watch_expires_in_hours` should read about 168.
 
-Then send yourself a `[wren]` email from an outside address, with ntfy open on
-the phone. It should buzz within seconds. `logs/mail_watcher.log` records what
+Then send yourself a `[wren]` email from one of the filter's `from:` addresses
+on an outside mail service, with ntfy open on the phone. It should buzz within
+seconds. `logs/mail_watcher.log` records what
 happened.
 
 Reply to that same thread and confirm two things: the reply also pushes (dedupe
