@@ -405,8 +405,11 @@ def test_search_mail_needs_a_query():
 # --------------------------------------------------------------------------- #
 
 def _watched(*message_labels):
-    """A thread whose messages carry these label sets."""
-    return {"messages": [{"labelIds": list(labels)} for labels in message_labels]}
+    """A thread whose messages carry these label sets, oldest first. Ids and
+    stamps are real because `newest` is now part of the answer."""
+    return {"messages": [
+        {"id": f"tm{n}", "internalDate": str(1000 + n), "labelIds": list(labels)}
+        for n, labels in enumerate(message_labels)]}
 
 
 def test_list_history_collects_added_message_ids(gmail):
@@ -423,7 +426,7 @@ def test_list_history_collects_added_message_ids(gmail):
     assert result["message_ids"] == ["m1", "m2"]
     assert result["history_id"] == "500"
     assert result["resynced"] is False
-    assert gmail.last_history_call["historyTypes"] == ["messageAdded"]
+    assert gmail.last_history_call["historyTypes"] == ["messageAdded", "labelAdded"]
     # The API call must NOT filter by label; see test_list_history_reports_a_...
     assert gmail.last_history_call["labelId"] is None
 
@@ -602,7 +605,8 @@ def test_aged_out_history_id_resyncs_and_logs_a_warning(gmail):
 
     result = gmail_read.list_history("1", "Label_7", logger=logger)
 
-    assert result == {"message_ids": [], "history_id": "9999", "resynced": True}
+    assert result == {"message_ids": [], "message_threads": {}, "threads": {},
+                      "history_id": "9999", "resynced": True}
     assert len(logger.warnings) == 1
     # The warning has to name both ids, or it cannot be acted on.
     assert "1" in logger.warnings[0] and "9999" in logger.warnings[0]
@@ -671,3 +675,186 @@ def test_a_failed_profile_read_is_not_cached(monkeypatch, gmail):
 
     monkeypatch.setattr(gmail_read, "_service", lambda: gmail)
     assert gmail_read.my_address() == "craig@example.com"
+
+
+# --------------------------------------------------------------------------- #
+# Following more than one label. Wren/Watch means "tell me" and Wren/Do means
+# "handle it", they live on different threads, and the caller has to be able to
+# tell which arrived without a second read of the same thread.
+# --------------------------------------------------------------------------- #
+
+def test_list_history_follows_several_labels_at_once(gmail):
+    gmail.history_pages = [{
+        "history": [{"messagesAdded": [
+            {"message": {"id": "watched", "threadId": "t1"}},
+            {"message": {"id": "acted", "threadId": "t2"}},
+        ]}],
+        "historyId": "500",
+    }]
+    gmail.thread_data = {"t1": _watched(["Label_7"]), "t2": _watched(["Label_9"])}
+
+    result = gmail_read.list_history("100", ["Label_7", "Label_9"])
+
+    assert result["message_ids"] == ["watched", "acted"]
+    assert result["threads"] == {"t1": {"labels": ["Label_7"], "newest": "tm0"},
+                                 "t2": {"labels": ["Label_9"], "newest": "tm0"}}
+
+
+def test_list_history_reports_a_thread_carrying_both_labels(gmail):
+    """The caller decides what both-at-once means (act wins). This only has to
+    hand it the facts rather than picking one."""
+    gmail.history_pages = [{
+        "history": [{"messagesAdded": [{"message": {"id": "m1", "threadId": "t1"}}]}],
+        "historyId": "500",
+    }]
+    gmail.thread_data = {"t1": _watched(["Label_7", "Label_9"])}
+
+    result = gmail_read.list_history("100", ["Label_7", "Label_9"])
+
+    assert result["threads"]["t1"]["labels"] == ["Label_7", "Label_9"]
+
+
+def test_list_history_names_no_thread_it_filtered_out(gmail):
+    """A caller reading thread_labels must never find a thread whose messages it
+    was not given — that is how a dropped message becomes an acted-on one."""
+    gmail.history_pages = [{
+        "history": [{"messagesAdded": [
+            {"message": {"id": "kept", "threadId": "t1"}},
+            {"message": {"id": "dropped", "threadId": "t2"}},
+        ]}],
+        "historyId": "500",
+    }]
+    gmail.thread_data = {"t1": _watched(["Label_7"]), "t2": _watched(["INBOX"])}
+
+    result = gmail_read.list_history("100", ["Label_7", "Label_9"])
+
+    assert result["message_ids"] == ["kept"]
+    assert set(result["threads"]) == {"t1"}
+    assert result["message_threads"] == {"kept": "t1"}
+
+
+def test_list_history_still_takes_a_single_label_id(gmail):
+    """The watch-only caller passes one id, and did so before Wren/Do existed."""
+    gmail.history_pages = [{
+        "history": [{"messagesAdded": [{"message": {"id": "m1", "threadId": "t1"}}]}],
+        "historyId": "500",
+    }]
+    gmail.thread_data = {"t1": _watched(["Label_7"])}
+
+    result = gmail_read.list_history("100", "Label_7")
+
+    assert result["message_ids"] == ["m1"]
+    assert result["threads"] == {"t1": {"labels": ["Label_7"], "newest": "tm0"}}
+
+
+def test_thread_state_returns_nothing_for_a_thread_it_cannot_read(gmail):
+    """Unreadable means no labels and no message to act on, so the mail is
+    neither reported nor acted on, and the log says why."""
+    class _Failing:
+        def get(self, **kwargs):
+            raise RuntimeError("gmail 500")
+
+    gmail.threads = lambda: _Failing()
+    logger = _Recorder()
+
+    assert gmail_read._thread_state("t1", ["Label_7"], logger) == {
+        "labels": set(), "newest": None}
+    assert len(logger.warnings) == 1
+    assert "NOT acted on" in logger.warnings[0]
+
+
+def test_thread_state_reads_no_thread_when_there_is_nothing_to_look_for(gmail):
+    """Watch-only with no act label configured must not pay a threads.get to
+    look for a label that does not exist."""
+    class _Exploding:
+        def get(self, **kwargs):
+            raise AssertionError("threads.get reached")
+
+    gmail.threads = lambda: _Exploding()
+
+    assert gmail_read._thread_state("t1", []) == {"labels": set(), "newest": None}
+    assert gmail_read._thread_state("t1", [None]) == {"labels": set(), "newest": None}
+
+
+# --------------------------------------------------------------------------- #
+# Labelling mail that already arrived
+#
+# The live miss. Wren/Do deliberately has no Gmail filter, so dragging the label
+# onto an email BY HAND is the only way it is ever used — and Gmail records that
+# as labelsAdded, a different history type from messagesAdded. Asking for
+# messageAdded alone made the whole feature a no-op that logged "nothing new".
+# --------------------------------------------------------------------------- #
+
+def test_hand_labelling_an_old_email_is_seen(gmail):
+    """No new mail arrived at all: he labelled something already in the mailbox."""
+    gmail.history_pages = [{
+        "history": [{"labelsAdded": [
+            {"labelIds": ["Label_9"],
+             "message": {"id": "old", "threadId": "t1"}},
+        ]}],
+        "historyId": "500",
+    }]
+    gmail.thread_data = {"t1": _watched(["Label_9"])}
+
+    result = gmail_read.list_history("100", ["Label_7", "Label_9"])
+
+    assert result["threads"] == {"t1": {"labels": ["Label_9"], "newest": "tm0"}}
+    # Nothing ARRIVED, so there is nothing to alert about. The thread entry is
+    # the whole answer.
+    assert result["message_ids"] == []
+
+
+def test_labelling_a_long_thread_names_it_once(gmail):
+    """Gmail applies a label to every message on the thread, so this arrives as
+    five labelsAdded entries. Five thread entries would be five background jobs."""
+    gmail.history_pages = [{
+        "history": [{"labelsAdded": [
+            {"labelIds": ["Label_9"], "message": {"id": f"m{n}", "threadId": "t1"}}
+            for n in range(5)
+        ]}],
+        "historyId": "500",
+    }]
+    gmail.thread_data = {"t1": _watched(*[["Label_9"]] * 5)}
+
+    result = gmail_read.list_history("100", ["Label_9"])
+
+    assert list(result["threads"]) == ["t1"]
+    # And it names the LATEST message, not whichever one Gmail listed first.
+    assert result["threads"]["t1"]["newest"] == "tm4"
+
+
+def test_an_everyday_label_change_costs_no_thread_read(gmail):
+    """Reading, starring and archiving are labelsAdded too. Taking them
+    seriously would mean a threads.get for every mailbox fidget."""
+    class _Exploding:
+        def get(self, **kwargs):
+            raise AssertionError("threads.get reached")
+
+    gmail.history_pages = [{
+        "history": [{"labelsAdded": [
+            {"labelIds": ["STARRED"], "message": {"id": "m1", "threadId": "t1"}},
+        ]}],
+        "historyId": "500",
+    }]
+    gmail.threads = lambda: _Exploding()
+
+    result = gmail_read.list_history("100", ["Label_9"])
+
+    assert result["threads"] == {} and result["message_ids"] == []
+
+
+def test_the_newest_message_is_never_a_half_typed_draft(gmail):
+    """Gmail autosaves a reply as a real message on the thread before it is
+    sent. Handing Wren his own unfinished sentence is worse than useless."""
+    gmail.history_pages = [{
+        "history": [{"labelsAdded": [
+            {"labelIds": ["Label_9"], "message": {"id": "m1", "threadId": "t1"}},
+        ]}],
+        "historyId": "500",
+    }]
+    gmail.thread_data = {"t1": _watched(["Label_9", "INBOX"],
+                                        ["Label_9", "DRAFT"])}
+
+    result = gmail_read.list_history("100", ["Label_9"])
+
+    assert result["threads"]["t1"]["newest"] == "tm0"

@@ -1182,3 +1182,143 @@ def test_the_chat_path_converts_latex_too(monkeypatch):
 
     assert result["type"] == "final"
     assert result["text"] == "Lead → Proposal."
+
+
+# --------------------------------------------------------------------------- #
+# Repeating a read, and running out of steps
+#
+# A live mail job spent 3 of its 10 steps on byte-identical get_tasks and
+# search_mail calls, hit MAX_TOOL_ITERATIONS, and raised — so ten tool results
+# were thrown away and the user was told only "the worker failed".
+# --------------------------------------------------------------------------- #
+
+READ_TOOLS = [{"type": "function", "function": {"name": "get_tasks", "parameters": {}}},
+              {"type": "function", "function": {"name": "create_task", "parameters": {}}}]
+
+
+def _read_dispatch():
+    calls = []
+
+    def get_tasks(**kwargs):
+        calls.append(("get_tasks", kwargs))
+        return {"tasks": ["roof replacement"]}
+
+    def create_task(**kwargs):
+        calls.append(("create_task", kwargs))
+        return {"created": True}
+
+    return {"get_tasks": get_tasks, "create_task": create_task}, calls
+
+
+def _says(name, args):
+    return {"role": "assistant", "content": "",
+            "tool_calls": [{"function": {"name": name, "arguments": args}}]}
+
+
+def _replies(monkeypatch, replies):
+    """Drive advance() with a fixed sequence, recording each outgoing payload."""
+    sent, step = [], {"n": 0}
+
+    def fake_post(url, json=None, timeout=None, stream=None):
+        sent.append(json)
+        msg = replies[min(step["n"], len(replies) - 1)]
+        step["n"] += 1
+        return _FakeResponse([{"message": msg, "done": True}])
+
+    monkeypatch.setattr(loop.requests, "post", fake_post)
+    return sent
+
+
+def test_an_identical_read_is_not_run_twice(monkeypatch, caplog):
+    dispatch, executed = _read_dispatch()
+    _replies(monkeypatch, [_says("get_tasks", {"max_results": 100}),
+                           _says("get_tasks", {"max_results": 100}),
+                           {"role": "assistant", "content": "You have 7 tasks."}])
+    logger = logging.getLogger("test_loop.repeat_read")
+
+    messages = [{"role": "user", "content": "what's on my list?"}]
+    with caplog.at_level(logging.WARNING, logger=logger.name):
+        result = loop.advance(messages, READ_TOOLS, dispatch, logger=logger)
+
+    assert result == {"type": "final", "text": "You have 7 tasks."}
+    assert executed == [("get_tasks", {"max_results": 100})]  # run once, not twice
+    assert "did not re-run get_tasks" in caplog.text
+    # And the model is told why, so it answers instead of trying a third time.
+    note = _json.loads(messages[-2]["content"])
+    assert note["not_run"] is True and "already called" in note["note"]
+
+
+def test_the_same_tool_with_different_arguments_still_runs(monkeypatch):
+    """The guard is about identical calls. Narrowing a search is real progress
+    and must not be mistaken for a loop."""
+    dispatch, executed = _read_dispatch()
+    _replies(monkeypatch, [_says("get_tasks", {"max_results": 100}),
+                           _says("get_tasks", {"max_results": 10}),
+                           {"role": "assistant", "content": "ok"}])
+
+    loop.advance([{"role": "user", "content": "list"}], READ_TOOLS, dispatch)
+
+    assert len(executed) == 2
+
+
+def test_a_read_repeated_after_a_write_runs_again(monkeypatch):
+    """Re-reading after changing something is a check, not a loop. Blocking it
+    would make the model report the state it saw BEFORE its own write."""
+    dispatch, executed = _read_dispatch()
+    _replies(monkeypatch, [_says("get_tasks", {}),
+                           _says("create_task", {"title": "order takeout"}),
+                           _says("get_tasks", {}),
+                           {"role": "assistant", "content": "added"}])
+
+    loop.advance([{"role": "user", "content": "add it"}], READ_TOOLS, dispatch,
+                 stateful_tools=frozenset({"create_task"}))
+
+    assert [n for n, _ in executed] == ["get_tasks", "create_task", "get_tasks"]
+
+
+def test_a_write_is_still_not_repeatable_after_itself(monkeypatch):
+    """Clearing the record on a write must not clear the write's own entry, or
+    a model that re-emits create_task creates the task twice."""
+    dispatch, executed = _read_dispatch()
+    _replies(monkeypatch, [_says("create_task", {"title": "order takeout"}),
+                           _says("create_task", {"title": "order takeout"}),
+                           {"role": "assistant", "content": "added"}])
+
+    loop.advance([{"role": "user", "content": "add it"}], READ_TOOLS, dispatch,
+                 stateful_tools=frozenset({"create_task"}))
+
+    assert len(executed) == 1
+
+
+def test_running_out_of_steps_reports_instead_of_raising(monkeypatch, caplog):
+    """It used to raise, and the caller turned that into 'the worker failed' —
+    discarding every tool result the turn had collected."""
+    dispatch, _ = _read_dispatch()
+    sent = _replies(monkeypatch,
+                    [_says("get_tasks", {"n": i}) for i in range(loop.MAX_TOOL_ITERATIONS)]
+                    + [{"role": "assistant", "content": "I read your task list; nothing was written."}])
+    logger = logging.getLogger("test_loop.out_of_steps")
+
+    with caplog.at_level(logging.WARNING, logger=logger.name):
+        result = loop.advance([{"role": "user", "content": "handle it"}],
+                              READ_TOOLS, dispatch, logger=logger)
+
+    assert result["type"] == "final"
+    assert result["out_of_steps"] is True
+    assert "nothing was written" in result["text"]
+    # Degrading is only allowed out loud.
+    assert "MAX_TOOL_ITERATIONS" in caplog.text
+
+
+def test_the_last_ditch_answer_is_asked_for_with_no_tools(monkeypatch):
+    """Leaving the tools attached lets the model spend its last turn on another
+    call, which produces no answer at all — the failure this replaced."""
+    dispatch, _ = _read_dispatch()
+    sent = _replies(monkeypatch,
+                    [_says("get_tasks", {"n": i}) for i in range(loop.MAX_TOOL_ITERATIONS)]
+                    + [{"role": "assistant", "content": "done"}])
+
+    loop.advance([{"role": "user", "content": "handle it"}], READ_TOOLS, dispatch)
+
+    assert sent[0].get("tools")           # the ordinary steps carry tools
+    assert not sent[-1].get("tools")      # the last one cannot call anything

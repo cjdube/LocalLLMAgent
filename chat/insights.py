@@ -649,9 +649,11 @@ ROUTINE_USES = {
     "log_inspector": ["gmail", "ntfy"],  # rollup push via ntfy, email fallback on ntfy outage
     # The Gmail push pipeline. mail_watcher is the only always-on routine besides
     # the chat server: it holds a Pub/Sub streaming pull open and pushes a
-    # one-line alert per labelled email. mail_watch_renew re-registers the watch
-    # daily, because Gmail drops it after 7 days without saying so.
-    "mail_watcher": ["gmail", "ntfy"],
+    # one-line alert per Wren/Watch email. A Wren/Do email instead becomes a
+    # background job, which is why the map draws an edge into the job store.
+    # mail_watch_renew re-registers the watch daily, because Gmail drops it
+    # after 7 days without saying so.
+    "mail_watcher": ["gmail", "ntfy", "background"],
     "mail_watch_renew": ["gmail", "ntfy"],
     # Federated from ObsidianWikiAgent (WREN_EXTERNAL_TASK_ROOTS). These are the
     # other half of the learnings pipeline: the daily tasks above write into the

@@ -146,12 +146,25 @@ def _find(jobs: list, job_id: str) -> dict | None:
 # ---- chat tools -----------------------------------------------------------
 
 def run_in_background(task: str) -> dict:
+    """The model-facing tool. Deliberately has no origin parameter: the gates a
+    job runs under follow from where it came from, and a job started by the
+    model is a chat job by definition. Anything else would let text in the
+    model's context choose its own gates."""
+    return start_job(task)
+
+
+def start_job(task: str, origin: str = "chat") -> dict:
+    """Queue a background job. `origin` is a provenance flag, not a policy: the
+    worker hands it to toolset.confirm_set_for(), which alone decides what a
+    "mail" job may do without a tap. Passing a tool list in from the caller
+    instead would put that policy in two files, and they drift."""
     task = (task or "").strip()
     if not task:
         return {"error": "task description was empty"}
     job = {
         "id": uuid4().hex[:8],
         "task_text": task,
+        "origin": origin,
         "status": "pending",
         "messages": None,
         "pending_call": None,

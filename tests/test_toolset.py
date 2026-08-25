@@ -58,6 +58,65 @@ def test_policy_sets_name_only_real_tools():
     assert toolset.WRITE_TOOLS <= set(toolset.DISPATCH)
     assert toolset.CONSEQUENTIAL_TOOLS <= toolset.WRITE_TOOLS
     assert toolset.UNATTENDED_EXCLUDED_TOOLS <= set(toolset.DISPATCH)
+    assert toolset.MAIL_JOB_SAFE_TOOLS <= set(toolset.DISPATCH)
+
+
+# --------------------------------------------------------------------------- #
+# Mail-job gating. A job built out of an email is driven by a stranger's words,
+# so confirm_set_for("mail") gates everything MAIL_JOB_SAFE_TOOLS does not name.
+#
+# The list is written that way round for maintenance, not elegance: Wren's tools
+# keep growing, and a deny list would need editing per tool with silence as the
+# penalty for forgetting. These two tests are what make that claim true rather
+# than aspirational.
+# --------------------------------------------------------------------------- #
+
+def test_a_tool_nobody_classified_is_gated_on_a_mail_job():
+    """The one that carries the design. Without it, "gated by default" is a
+    comment rather than a behaviour."""
+    newcomer = {"type": "function",
+                "function": {"name": "wire_money", "description": "", "parameters": {}}}
+
+    original = toolset.TOOLS
+    try:
+        toolset.TOOLS = original + [newcomer]
+        assert "wire_money" in toolset.confirm_set_for("mail")
+    finally:
+        toolset.TOOLS = original
+
+
+def test_no_write_tool_is_ever_treated_as_safe_for_a_mail_job():
+    """A write landing in the safe list is the mistake with no symptom: the tap
+    simply stops appearing. Assert it, don't rely on review."""
+    assert not (toolset.WRITE_TOOLS & toolset.MAIL_JOB_SAFE_TOOLS)
+
+
+def test_a_mail_job_gates_far_more_than_a_chat_job():
+    """Both halves. A mail job must gate an ordinary internal write like
+    create_task; a chat job the user typed must NOT — that would put a tap on
+    every background task he asks for himself."""
+    mail = toolset.confirm_set_for("mail")
+    chat = toolset.confirm_set_for("chat")
+
+    assert "create_task" in mail and "create_task" not in chat
+    assert "send_email" in mail and "send_email" in chat
+    assert "search_mail" not in mail  # reading the mailbox is the job
+    assert toolset.CONSEQUENTIAL_TOOLS <= mail
+
+
+def test_a_url_taking_tool_is_gated_on_a_mail_job_even_though_it_writes_nothing():
+    """Exfiltration, not vandalism: an injected email cannot make Wren write
+    anything without a tap, but a fetch whose URL it chose would carry mailbox
+    content out in the query string. "Read-only" is not the same as safe."""
+    for name in ("fetch_webpage", "search_web", "evaluate_app",
+                 "evaluate_against", "research_company"):
+        assert name in toolset.confirm_set_for("mail"), name
+
+
+def test_an_unknown_origin_is_treated_as_a_chat_job():
+    """A job written before origin existed has no origin key. It was started
+    from chat, and re-gating old jobs on read is not what this flag is for."""
+    assert toolset.confirm_set_for(None) == toolset.CONSEQUENTIAL_TOOLS
 
 
 # --------------------------------------------------------------------------- #

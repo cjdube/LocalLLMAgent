@@ -298,6 +298,53 @@ UNATTENDED_EXCLUDED_TOOLS = frozenset({
     "write_skill", "delete_skill",
 })
 
+# What a MAIL-originated background job may call without a tap. Everything else
+# in TOOLS is gated for those jobs — including tools that do not exist yet.
+#
+# **Read the direction, it is the whole point.** The obvious spelling is a deny
+# list ("these extra tools need a tap on a mail job"), and it rots: every tool
+# added later has to be remembered here, and forgetting is silent — the new tool
+# just runs unattended on text a stranger emailed in. Spelled as a safe list,
+# forgetting costs one extra tap and nothing else, and
+# test_every_background_tool_is_classified makes even that hard to forget. This
+# is a maintenance property before it is a security one: Wren's tools keep
+# growing, and nobody should have to come back to this file per tool to decide
+# whether a stranger may drive it.
+#
+# What earns a place here: a read whose destination is fixed and first-party.
+# What does not, and why it is not merely "a read": any tool that puts
+# model-chosen text into an outbound request — fetch_webpage, evaluate_app and
+# evaluate_against take a url, search_web/research_company take a query — is an
+# exfiltration channel, because the mailbox content an injected email wants out
+# fits in a URL. Those are gated for mail jobs even though they write nothing.
+MAIL_JOB_SAFE_TOOLS = frozenset({
+    # The mailbox itself, which is what these jobs are about.
+    "search_mail", "read_email",
+    # Calendar and tasks, read side.
+    "get_events_by_date", "get_upcoming_events", "get_tasks", "get_tasks_due_soon",
+    "list_reminders", "list_scheduled_tasks",
+    # Wren's own notes and state.
+    "recall", "list_skills", "read_skill", "search_wiki", "read_wiki_page",
+    "list_notifications", "list_nudges", "list_opportunities",
+    "list_projects", "read_project", "list_games",
+    # Fixed first-party feeds: the account is the user's and the destination is
+    # not a parameter, so an injected email cannot aim them anywhere.
+    "fetch_weather", "fetch_scores", "fetch_chrome_history",
+    "fetch_liked_videos", "fetch_starred_repos", "fetch_strava",
+})
+
+
+def confirm_set_for(origin: str) -> frozenset:
+    """Which tools pause for the user's tap, given where the job came from.
+
+    A chat job was typed by the user, so only CONSEQUENTIAL_TOOLS pause. A mail
+    job is driven by text a stranger wrote, so it gates everything not named in
+    MAIL_JOB_SAFE_TOOLS — tools registered after this line included. The daemon
+    passes an origin, never a tool list: policy that lives in two files drifts."""
+    if origin != "mail":
+        return CONSEQUENTIAL_TOOLS
+    return frozenset(t["function"]["name"] for t in TOOLS) - MAIL_JOB_SAFE_TOOLS
+
 
 # --------------------------------------------------------------------------- #
 # Lazy tool loading (chat only). The full TOOLS list above stays the source of

@@ -630,7 +630,8 @@ def _run_turn(sid: str, history: list, checkpoint: int, cancel: threading.Event,
     backend_kwargs = {"backend": backend} if backend else {}
     try:
         result = advance(history, tools, dispatch, confirm_before=WRITE_TOOLS,
-                         logger=logger, should_cancel=cancel.is_set,
+                         stateful_tools=WRITE_TOOLS, logger=logger,
+                         should_cancel=cancel.is_set,
                          timeout=CHAT_MODEL_TIMEOUT, **backend_kwargs)
     except TurnCancelled:
         del history[checkpoint:]  # discard the stopped turn so the next one starts clean
@@ -859,7 +860,8 @@ def chat_escalate():
                 backend, prompt_tokens, len(tools))
     try:
         result = advance(working, tools, dispatch, confirm_before=WRITE_TOOLS,
-                         backend=backend, logger=logger, should_cancel=cancel.is_set)
+                         stateful_tools=WRITE_TOOLS, backend=backend,
+                         logger=logger, should_cancel=cancel.is_set)
     except TurnCancelled:
         logger.info("chat escalate cancelled by user")
         return jsonify({"type": "cancelled"})  # working discarded; local answer intact

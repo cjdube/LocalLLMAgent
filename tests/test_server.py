@@ -1439,7 +1439,7 @@ def test_escalate_paused_write_continues_on_the_frontier(auth_client, monkeypatc
     _seed_completed_turn()
 
     def wants_to_write(messages, tools, dispatch, confirm_before=frozenset(),
-                       logger=None, should_cancel=None, backend=None):
+                       logger=None, should_cancel=None, backend=None, **kwargs):
         return {"type": "confirm", "call": EMAIL_CALL}
 
     monkeypatch.setattr(srv, "advance", wants_to_write)

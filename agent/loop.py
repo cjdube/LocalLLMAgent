@@ -669,6 +669,7 @@ def advance(
     should_cancel: Optional[Callable[[], bool]] = None,
     backend: Optional[str] = None,
     timeout: float = None,
+    stateful_tools: frozenset[str] = frozenset(),
 ) -> dict:
     """Advance a tool-calling conversation already seeded in `messages`
     (system + user turns, and any prior assistant/tool turns).
@@ -704,7 +705,29 @@ def advance(
     MAX_GATED_PAUSES_PER_TURN of them. A suppressed call is NOT executed — the
     model gets a tool result telling it to answer in words, and the suppression
     is logged at WARNING.
+
+    An UNgated call identical to one already run in this turn is not re-run
+    either; the model is told the result is above. `stateful_tools` names the
+    tools whose call invalidates that — after one of them runs, an earlier read
+    may be repeated, because re-reading after a write is a check rather than a
+    loop. Callers pass toolset.WRITE_TOOLS.
+
+    Running out of iterations returns a normal final answer with
+    `"out_of_steps": True`, produced by one more model call with no tools. It
+    used to raise, which threw away every tool result the turn had collected.
     """
+    # Identical calls already run in this turn. The model re-reads what it just
+    # read: one live mail job spent 3 of its 10 steps on byte-identical
+    # get_tasks and search_mail calls, then died at the cap having written
+    # nothing (docs/limits.md). Handing the repeat back unrun costs one model
+    # step instead of a tool round-trip, and says plainly that the answer is
+    # already above.
+    #
+    # Only ever a bound on *this* advance() call. A gated write returns out of
+    # advance() and the caller comes back in, so approving something and then
+    # re-reading to check it is never blocked.
+    ran: set[tuple[str, str]] = set()
+
     for _ in range(MAX_TOOL_ITERATIONS):
         if should_cancel is not None and should_cancel():
             raise TurnCancelled()
@@ -777,9 +800,64 @@ def advance(
                                            "note": note}),
                 })
                 continue
-            _execute_tool_call(call, dispatch, messages, logger)
 
-    raise RuntimeError(f"agent loop exceeded MAX_TOOL_ITERATIONS={MAX_TOOL_ITERATIONS} without a final answer")
+            key = _call_key(call)
+            if key in ran:
+                if logger:
+                    logger.warning(
+                        "advance() did not re-run %s: an identical call was "
+                        "already made in this turn and its result is above",
+                        name,
+                    )
+                messages.append({
+                    "role": "tool", "tool_name": name,
+                    "content": json.dumps({
+                        "not_run": True, "already": "answered",
+                        "note": (
+                            f"You already called {name} with exactly these "
+                            "arguments in this turn, and its result is above. "
+                            "It was NOT run again. Use the result you have. If "
+                            "it gave you what you need, answer now."
+                        ),
+                    }),
+                })
+                continue
+
+            ran.add(key)
+            _execute_tool_call(call, dispatch, messages, logger)
+            if name in stateful_tools:
+                # A write changes what an earlier read would return, so
+                # re-reading after it is a check rather than a loop. This
+                # call's own key stays, so the write itself is still not
+                # repeatable.
+                ran = {key}
+
+    # Out of steps, which is not the same as no work done — the turn above may
+    # hold ten tool results. Raising here threw all of it away and told him only
+    # "the worker failed". So ask once more with no tools, which leaves the
+    # model nothing to do but speak, and say in the log that this happened.
+    if logger:
+        logger.warning(
+            f"agent loop hit MAX_TOOL_ITERATIONS={MAX_TOOL_ITERATIONS} without "
+            "an answer — asking once more with no tools so the turn reports "
+            "what it found instead of failing"
+        )
+    messages.append({
+        "role": "user",
+        "content": (
+            "Stop calling tools — you have used every step available. Answer "
+            "now, in plain words, using only what the tool results above "
+            "already tell you. Say what you did, what you found, and what is "
+            "still not done."
+        ),
+    })
+    message = _llm_chat(
+        messages, backend=backend, model=model, host=host, tools=None,
+        logger=logger, should_cancel=should_cancel, timeout=timeout,
+    )
+    messages.append(message)
+    return {"type": "final", "text": message.get("content", ""),
+            "out_of_steps": True}
 
 
 def resolve(

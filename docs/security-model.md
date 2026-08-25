@@ -113,6 +113,18 @@ skills feed *future* system prompts, so a poisoned page read mid-job must not be
 able to plant a durable instruction that outlives the job, even behind an
 approval tap. The read side (`recall`, `read_skill`) stays available.
 
+**A job whose task text came out of an email gates far more.** The posture above
+is calibrated to a task the user typed. `tasks/mail_watcher.py` queues a
+`Wren/Do` email as a job with `origin="mail"`, and `toolset.confirm_set_for()`
+then gates every tool outside `toolset.MAIL_JOB_SAFE_TOOLS` — including
+reversible internal writes, and including read-only tools that take a
+model-chosen URL or query (`fetch_webpage`, `search_web`, `evaluate_app`,
+`evaluate_against`, `research_company`), since a URL is an exfiltration channel
+whatever it fetches. The set is written as an allow list precisely so a tool
+added later is gated by default; `run_in_background` takes no `origin`, so the
+model can never place its own job on the looser branch. See
+[mail-watch.md](mail-watch.md).
+
 The same set also excludes `run_in_background`, `list_background_jobs` and
 `get_job_result`, for a separate reason: a background job has no business
 spawning or inspecting background jobs. That closes a job-queue recursion, not

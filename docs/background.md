@@ -34,8 +34,33 @@ job replicate.
 
 Reversible, *internal* writes to the user's own account (creating a task, recoloring
 an event) do run unattended — a deliberate, bounded exception. The whole policy
-is two editable sets in `agent/toolset.py`: `CONSEQUENTIAL_TOOLS` (require
-approval) and `UNATTENDED_EXCLUDED_TOOLS` (don't offer at all).
+is three editable sets in `agent/toolset.py`: `CONSEQUENTIAL_TOOLS` (require
+approval), `UNATTENDED_EXCLUDED_TOOLS` (don't offer at all), and
+`MAIL_JOB_SAFE_TOOLS` below.
+
+## Where the job came from changes what is gated
+
+That bounded exception assumes the *task text* is the user's. A job built out of
+an email is not: the words were written by a stranger, so a reversible internal
+write is no longer harmless — an injected email could plant a calendar entry
+silently.
+
+So a job carries an `origin`, set at queue time (`background.start_job`), and the
+worker asks `toolset.confirm_set_for(origin)` which tools to pause on:
+
+| Origin | Set at | Gates |
+| --- | --- | --- |
+| `"chat"` (default) | the user asking Wren, via `run_in_background` | `CONSEQUENTIAL_TOOLS` |
+| `"mail"` | `tasks/mail_watcher.py`, on a `Wren/Do` email | everything except `MAIL_JOB_SAFE_TOOLS` |
+
+Two design points worth keeping:
+
+- **`run_in_background` has no `origin` parameter.** It is the model-facing tool,
+  and text in the model's context must not be able to choose its own gates.
+- **`MAIL_JOB_SAFE_TOOLS` names what is safe, not what is dangerous.** A tool
+  added later is gated for mail jobs until someone classifies it, so forgetting
+  costs an extra tap rather than an ungated write. See
+  [mail-watch.md](mail-watch.md) for what earns a place on that list.
 
 ## Job lifecycle
 

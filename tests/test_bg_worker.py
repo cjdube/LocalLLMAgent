@@ -53,7 +53,7 @@ def test_prompt_state_writers_are_excluded_from_unattended_runs():
                             "write_skill", "delete_skill"}
     assert prompt_state_writers <= toolset.UNATTENDED_EXCLUDED_TOOLS
 
-    tools, dispatch = bg_worker._bg_tools_and_dispatch(logger=None)
+    tools, dispatch = bg_worker._bg_tools_and_dispatch("research X", logger=None)
     offered = {t["function"]["name"] for t in tools}
     assert not (toolset.UNATTENDED_EXCLUDED_TOOLS & offered)
     assert not (toolset.UNATTENDED_EXCLUDED_TOOLS & set(dispatch))
@@ -326,3 +326,132 @@ def test_idle_poll_never_imports_the_heavy_stack(tmp_path):
         capture_output=True, text=True, timeout=60,
     )
     assert proc.returncode == 0, proc.stderr
+
+
+# --------------------------------------------------------------------------- #
+# Origin-dependent gating. The worker's only job here is to pass the job's
+# provenance to toolset.confirm_set_for() — the policy itself is tested in
+# test_toolset.py. What these pin is that the flag survives the round trip
+# through the job store, which is where it would quietly stop mattering.
+# --------------------------------------------------------------------------- #
+
+def _capture_confirm_before(monkeypatch):
+    """Record the gate set advance() is actually handed."""
+    seen = {}
+
+    def fake_advance(messages, tools, dispatch, confirm_before=None,
+                     stateful_tools=None, logger=None):
+        seen["confirm_before"] = confirm_before
+        seen["stateful_tools"] = stateful_tools
+        return {"type": "final", "text": "done"}
+
+    monkeypatch.setattr(bg_worker, "advance", fake_advance)
+    return seen
+
+
+def test_a_mail_job_gates_an_ordinary_write_the_chat_path_lets_through(monkeypatch):
+    """Both halves in one test on purpose: asserting only the mail side would
+    stay green if every job started gating everything, which would put a tap on
+    every background task the user asks for himself."""
+    _capture_notify(monkeypatch)
+    seen = _capture_confirm_before(monkeypatch)
+
+    background.start_job("handle this email", origin="mail")
+    assert bg_worker.main() == 0
+    assert "create_task" in seen["confirm_before"]
+
+    background.run_in_background("research X")
+    assert bg_worker.main() == 0
+    assert "create_task" not in seen["confirm_before"]
+    assert "send_email" in seen["confirm_before"]
+
+
+def test_the_origin_survives_the_job_store(monkeypatch):
+    """The flag is written at queue time and read one poll later, in another
+    process. A field the worker cannot see gates nothing."""
+    _capture_notify(monkeypatch)
+    monkeypatch.setattr(bg_worker, "advance",
+                        lambda *a, **k: {"type": "final", "text": "done"})
+
+    jid = background.start_job("handle this email", origin="mail")["id"]
+
+    assert background.next_actionable()["origin"] == "mail"
+    assert bg_worker.main() == 0
+    assert background.get_job_result(jid)["status"] == "done"
+
+
+def test_a_job_the_model_started_is_never_a_mail_job(monkeypatch):
+    """run_in_background takes no origin. If it did, text in the model's context
+    could pick its own gates — which is the thing the gates exist to stop."""
+    jid = background.run_in_background("research X")["id"]
+    assert background.next_actionable()["origin"] == "chat"
+    assert background.get_job_result(jid)["status"] == "pending"
+
+
+# --------------------------------------------------------------------------- #
+# Which tools a job is offered
+#
+# A job used to be handed all 45 registered tools, and a small model reads that
+# as a menu. A two-line email asking whether he ordered takeout produced ten
+# steps of browsing — fetch_chrome_history, two search_wiki calls — and not one
+# action, then died at MAX_TOOL_ITERATIONS.
+# --------------------------------------------------------------------------- #
+
+_TAKEOUT = ("An email arrived on a thread Craig labelled for you to handle.\n"
+            "Subject: Order takeout\ndid you remember to order takeout?")
+
+
+def test_a_job_is_not_offered_every_tool_in_the_registry():
+    tools, _ = bg_worker._bg_tools_and_dispatch(_TAKEOUT, logger=None)
+    offered = {t["function"]["name"] for t in tools}
+    everything = {t["function"]["name"] for t in toolset.TOOLS
+                  if t["function"]["name"] not in toolset.UNATTENDED_EXCLUDED_TOOLS}
+
+    # load_tools is a meta-tool, not a registry entry; compare real tools only.
+    assert (offered - {"load_tools"}) < everything
+    # The exact tools the live run wandered into, none of them cued by the text.
+    assert not {"fetch_chrome_history", "search_wiki"} & offered
+    # And the ones the text does cue are there.
+    assert {"search_mail", "read_email"} <= offered
+
+
+def test_a_job_can_still_reach_a_group_the_keywords_missed():
+    """Keyword selection misses, so a narrower menu must not be a dead end.
+    Both halves: the tool is absent to begin with, and load_tools brings it in."""
+    tools, dispatch = bg_worker._bg_tools_and_dispatch(_TAKEOUT, logger=None)
+    assert "fetch_webpage" not in {t["function"]["name"] for t in tools}
+
+    result = dispatch["load_tools"]("web")
+
+    assert "fetch_webpage" in result["now_available"]
+    # Extended IN PLACE — advance() re-sends this same list object each step, so
+    # a copy would load the group into nothing.
+    assert "fetch_webpage" in {t["function"]["name"] for t in tools}
+
+
+def test_load_tools_cannot_reach_a_tool_unattended_runs_must_not_have():
+    """The narrower menu must not become a way around the exclusion policy."""
+    tools, dispatch = bg_worker._bg_tools_and_dispatch("write a skill", logger=None)
+    for group in toolset.TOOL_GROUPS:
+        dispatch["load_tools"](group)
+
+    offered = {t["function"]["name"] for t in tools}
+    assert not (toolset.UNATTENDED_EXCLUDED_TOOLS & offered)
+
+
+def test_an_unknown_group_is_refused_by_name():
+    _, dispatch = bg_worker._bg_tools_and_dispatch(_TAKEOUT, logger=None)
+
+    result = dispatch["load_tools"]("nonsense")
+
+    assert "error" in result and "available" in result
+
+
+def test_the_job_tells_the_loop_which_tools_change_state(monkeypatch):
+    """Without this the repeat guard blocks a read that follows a write, and the
+    job reports the state it saw BEFORE its own change."""
+    seen = _capture_confirm_before(monkeypatch)
+    background.start_job("handle this email", origin="mail")
+
+    assert bg_worker.main() == 0
+    assert seen["stateful_tools"] == toolset.WRITE_TOOLS

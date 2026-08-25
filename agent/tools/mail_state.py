@@ -96,15 +96,20 @@ def history_id() -> str | None:
     return _load()["history_id"]
 
 
-def unseen(message_ids) -> list[str]:
-    """Those of `message_ids` not already handled, order preserved.
+def unseen(keys) -> list[str]:
+    """Those of `keys` not already handled, order preserved.
+
+    Keys, not plain message ids: the watcher handles one message in more than
+    one way, and it suffixes the key with what it did (see tasks/mail_watcher.py).
+    A message he was told about must still be actionable when he labels it
+    afterwards, and that only works if the two are different entries.
 
     Read-only on purpose. The watcher checks here, does its work, and only then
     calls commit() — marking them seen up front would silently swallow a message
     whose push failed."""
     seen = set(_load()["seen"])
     out, batch = [], set()
-    for mid in message_ids:
+    for mid in keys:
         if mid not in seen and mid not in batch:
             batch.add(mid)
             out.append(mid)

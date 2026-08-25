@@ -3,13 +3,18 @@ runs it on a short StartInterval (launchd never runs two copies of the same job
 at once, so a long job just delays the next poll rather than overlapping).
 
 Execution posture "A + push-to-approve": the job runs the agent tool loop, but
-any tool in toolset.CONSEQUENTIAL_TOOLS pauses the run — the job is saved as
-awaiting_approval and the user gets a tap-to-approve push. The next poll resumes
-it once he's decided. Tools in toolset.UNATTENDED_EXCLUDED_TOOLS (memory/skill
-writers — prompt-visible state — and the bg-management tools) are stripped from
-the toolset entirely, so injected text in content fetched mid-job can't plant a
-durable instruction. Everything else (reads, reversible internal writes) runs
-unattended.
+a gated tool pauses the run — the job is saved as awaiting_approval and the user
+gets a tap-to-approve push. The next poll resumes it once he's decided. Tools in
+toolset.UNATTENDED_EXCLUDED_TOOLS (memory/skill writers — prompt-visible state —
+and the bg-management tools) are stripped from the toolset entirely, so injected
+text in content fetched mid-job can't plant a durable instruction.
+
+*Which* tools are gated depends on the job's origin, via
+toolset.confirm_set_for(). A chat job was typed by the user, so only
+CONSEQUENTIAL_TOOLS pause and everything else (reads, reversible internal
+writes) runs unattended. A job whose text came out of an email — origin "mail",
+see tasks/mail_watcher.py — is driven by a stranger's words, so it gates
+everything outside toolset.MAIL_JOB_SAFE_TOOLS instead.
 
 Reuses agent.loop.advance()/resolve() exactly as chat/server.py does; the only
 difference is the decision arrives via a persisted approval, not a live web tap.
@@ -125,19 +130,61 @@ BG_SYSTEM_PROMPT = (
     f"summary of what you did or found (this becomes the notification {_NAME} "
     "gets). Consequential actions like sending an email are automatically routed "
     f"to {_NAME} for their approval, so go ahead and take them when the task calls "
-    "for it — don't refuse or ask first."
+    "for it — don't refuse or ask first.\n\n"
+    "You have a limited number of steps. Do not gather background you were not "
+    "asked for, and never repeat a tool call you have already made — read what "
+    "the task needs, act, and stop."
 )
 
 
-def _bg_tools_and_dispatch(logger):
-    # Tools an unattended run must not carry — bg-management tools plus
-    # everything that writes prompt-visible state. Policy and rationale live
-    # in toolset.UNATTENDED_EXCLUDED_TOOLS.
+def _make_load_tools(tools: list[dict], excluded: frozenset):
+    """load_tools for an unattended run. Same in-place extension the chat server
+    does, minus the session: advance() re-sends this same list object on every
+    iteration, so an appended schema reaches the model on its very next step."""
+    def load_tools(group: str = "", **_) -> dict:
+        if group not in toolset.TOOL_GROUPS:
+            return {"error": f"unknown group '{group}'",
+                    "available": list(toolset.TOOL_GROUPS)}
+        have = {t["function"]["name"] for t in tools}
+        added = []
+        for schema in toolset.TOOL_GROUPS[group]:
+            name = schema["function"]["name"]
+            if name not in have and name not in excluded:
+                tools.append(schema)
+                have.add(name)
+                added.append(name)
+        return {"loaded": group, "now_available": added}
+
+    return load_tools
+
+
+def _bg_tools_and_dispatch(task_text: str, logger):
+    """The tools one job is offered, and how to run them.
+
+    **Selected by keyword, not handed over whole.** A job used to get every
+    registered tool — 45 of them — and a small model reads that as a menu. A
+    two-line email asking whether he ordered takeout produced ten steps of
+    browsing (`fetch_chrome_history`, two `search_wiki` calls) and not one
+    action. Chat has never done this: it keyword-loads groups and offers 25 core
+    tools (docs/tool-loading.md). This is the same call, so a tool added later
+    reaches background jobs by joining a group, with nobody curating a list.
+
+    Keyword selection can miss, so `load_tools` stays available and the prompt
+    names the groups: a job that needs the web group asks for it, one step and
+    no code change. What is *excluded* is unchanged — that is policy, and it
+    still comes from toolset.UNATTENDED_EXCLUDED_TOOLS.
+    """
     _load_agent_stack()
     excluded = toolset.UNATTENDED_EXCLUDED_TOOLS
-    tools = [t for t in toolset.TOOLS if t["function"]["name"] not in excluded]
+    groups = toolset.groups_for_message(task_text)
+    tools = [t for t in toolset.tools_for(groups)
+             if t["function"]["name"] not in excluded]
     dispatch = {k: v for k, v in toolset.DISPATCH.items() if k not in excluded}
     dispatch["send_morning_brief"] = brief_dispatch(logger)
+    dispatch["load_tools"] = _make_load_tools(tools, excluded)
+    if logger:
+        logger.info(f"{len(tools)} tools offered"
+                    + (f" (groups: {', '.join(sorted(groups))})" if groups else ""))
     return tools, dispatch
 
 
@@ -155,7 +202,14 @@ def _approval_message(call: dict) -> str:
 
 def _seed_messages(task_text: str) -> list:
     today = datetime.now().strftime("%A, %B %-d, %Y")
-    system = with_identity(BG_SYSTEM_PROMPT + f"\n\nToday's date is {today}.")
+    # The groups index, for the same reason chat carries it: the tools offered
+    # are now keyword-selected, so the model has to be told what it can pull in
+    # when the selection missed. Without this the narrower menu is a dead end.
+    system = with_identity(
+        BG_SYSTEM_PROMPT
+        + f"\n\nToday's date is {today}."
+        + f"\n\n{toolset.render_toolgroups_index()}"
+    )
     return [
         {"role": "system", "content": system},
         {"role": "user", "content": task_text},
@@ -183,7 +237,12 @@ def _run_job(job: dict, tools, dispatch, logger) -> None:
         # approved/denied branch and execute the consequential call again.
         background.mark_resumed(job["id"], messages)
 
-    result = advance(messages, tools, dispatch, confirm_before=toolset.CONSEQUENTIAL_TOOLS, logger=logger)
+    # Which tools pause for a tap depends on where the job came from — a job
+    # built out of an email gates far more than one the user typed. The policy
+    # itself lives in agent/toolset.py; this passes the provenance and no more.
+    confirm_before = toolset.confirm_set_for(job.get("origin"))
+    result = advance(messages, tools, dispatch, confirm_before=confirm_before,
+                     stateful_tools=toolset.WRITE_TOOLS, logger=logger)
 
     if result["type"] == "confirm":
         call = result["call"]
@@ -230,7 +289,7 @@ def main() -> int:
         if job is None:
             _repush_stale_approvals(logger)
             return 0
-        tools, dispatch = _bg_tools_and_dispatch(logger)
+        tools, dispatch = _bg_tools_and_dispatch(job["task_text"], logger)
         _run_job(job, tools, dispatch, logger)
         return 0
     except _transient_exceptions() as e:

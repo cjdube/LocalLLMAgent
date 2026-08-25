@@ -65,11 +65,17 @@ MAIL_SEARCH_CHAR_BUDGET = int(os.getenv("MAIL_SEARCH_CHAR_BUDGET", "6000"))
 SEARCH_DEFAULT_LIMIT = 10
 SEARCH_MAX_LIMIT = 25
 
-# The Gmail label that decides what Wren is told about. Nested from the start —
-# sibling labels (Wren/Do, Wren/Schedule) are planned, and a flat "Wren" would
-# have to be rebuilt. A Gmail label applies to the whole THREAD, so every later
-# reply on a labelled thread reaches Wren with no further action.
+# The Gmail labels that decide what Wren does with a thread. Nested from the
+# start, which is what let Wren/Do arrive without rebuilding Wren/Watch; a flat
+# "Wren" would have had to be replaced. A Gmail label applies to the whole
+# THREAD, so every later reply on a labelled thread reaches Wren with no further
+# action — that is the feature, and it is also why Wren/Do is worth peeling off
+# once the thing is done.
 MAIL_WATCH_LABEL = os.getenv("MAIL_WATCH_LABEL", "Wren/Watch")
+
+# Tell Wren to act on the thread, not just report it. See tasks/mail_watcher.py
+# and docs/mail-watch.md for what "act" is allowed to mean.
+MAIL_ACT_LABEL = os.getenv("MAIL_ACT_LABEL", "Wren/Do")
 
 # Headers worth carrying out of a message. Message-ID/References/In-Reply-To
 # cost nothing here and are what a threaded reply needs later; returning them
@@ -404,36 +410,61 @@ def current_history_id() -> dict:
     return {"history_id": str(profile.get("historyId"))}
 
 
-def _thread_is_watched(thread_id: str, watch_label_id: str, logger=None) -> bool:
-    """Does any message on this thread carry the watch label?
+def _thread_state(thread_id: str, wanted_label_ids, logger=None) -> dict:
+    """Which of `wanted_label_ids` this thread carries, and its newest message.
 
     **This is what replaces storing watched threads.** Gmail already holds the
     answer — the label he applied is still on the earlier message — so asking it
     each time keeps no state, grows nothing, and lets him stop a thread simply by
     peeling the label off. A stored set would keep alerting until it aged out.
 
+    It returns the labels rather than a yes/no because the caller has more than
+    one question to ask of the same thread — watch means *tell him*, act means
+    *hand it to Wren* — and both answers come out of one `threads.get`.
+
+    The newest message rides along for free from the same call, and acting needs
+    it: labelling a thread in Gmail labels **every** message on it at once, so
+    the only sane unit for "handle this" is the thread's latest message rather
+    than each of the five the label just landed on.
+
     Costs one `threads.get` per distinct new thread. That is single digits a day
     on this mailbox; revisit the trade if it ever becomes thousands.
 
-    Answers False when it cannot tell, and logs why. Silently degrading is what
+    Answers empty when it cannot tell, and logs why. Silently degrading is what
     CLAUDE.md forbids — degrading out loud is the allowed kind.
     """
-    if not thread_id:
-        return False
+    wanted = {lid for lid in (wanted_label_ids or []) if lid}
+    empty = {"labels": set(), "newest": None}
+    if not thread_id or not wanted:
+        return empty
     try:
         thread = _service().users().threads().get(
             userId="me", id=thread_id, format="minimal").execute()
     except Exception as e:
         if logger:
             logger.warning(
-                f"could not read thread {thread_id} to check for the watch "
-                f"label ({e}) — treating it as unwatched, so any new mail on it "
-                "was NOT reported.")
-        return False
+                f"could not read thread {thread_id} to check for Wren's labels "
+                f"({e}) — treating it as unlabelled, so any new mail on it was "
+                "NOT reported and NOT acted on.")
+        return empty
+
+    found, newest, newest_at = set(), None, -1
     for message in thread.get("messages") or []:
-        if watch_label_id in (message.get("labelIds") or []):
-            return True
-    return False
+        labels = set(message.get("labelIds") or [])
+        found |= wanted & labels
+        # A DRAFT is half-typed text and never a basis for acting. SENT is kept
+        # on purpose: if he answers a thread and *then* hands it over, his own
+        # reply is the most recent statement of what he wants done. That is the
+        # opposite of _IGNORED_LABELS below, which is about not alerting him
+        # over his own mail — nobody is being alerted here, he asked.
+        if "DRAFT" in labels:
+            continue
+        # internalDate, not history order: Gmail does not promise the messages
+        # of a thread come back oldest-first, and `minimal` carries the stamp.
+        at = int(message.get("internalDate") or 0)
+        if message.get("id") and at >= newest_at:
+            newest, newest_at = message["id"], at
+    return {"labels": found, "newest": newest}
 
 
 # Labels that mean "he wrote this", so the watcher must not alert him about it.
@@ -446,17 +477,32 @@ def _thread_is_watched(thread_id: str, watch_label_id: str, logger=None) -> bool
 _IGNORED_LABELS = {"SENT", "DRAFT"}
 
 
-def list_history(start_history_id: str, watch_label_id: str = None,
+def list_history(start_history_id: str, watch_label_id=None,
                  logger=None) -> dict:
     """Message ids added since `start_history_id`, kept only when their **thread**
-    carries the watch label, and excluding anything he wrote himself
+    carries one of Wren's labels, and excluding anything he wrote himself
     (see `_IGNORED_LABELS`).
+
+    `watch_label_id` takes one label id or several — several since Wren/Watch
+    and Wren/Do mean different things and a thread may carry both. Passing none
+    keeps every message.
 
     The thread is the unit, not the message: Gmail does not put a hand-added
     label on replies that arrive later, so a per-message check would report the
-    first email on a thread and then go quiet. See `_thread_is_watched`.
+    first email on a thread and then go quiet. See `_thread_state`.
 
-    Returns `{"message_ids": [...], "history_id": <latest>, "resynced": bool}`.
+    Returns::
+
+        {"message_ids": [...],                    # mail that ARRIVED
+         "message_threads": {message_id: thread_id},
+         "threads": {thread_id: {"labels": [...], "newest": message_id}},
+         "history_id": <latest>, "resynced": bool}
+
+    The two collections answer two different questions, because the two labels
+    are triggered differently. `message_ids` is mail that arrived on a followed
+    thread — the unit a watch alert is about. `threads` is every followed thread
+    this window touched **including one he only just labelled**, which is the
+    unit an act is about. A caller that only wants alerts can ignore `threads`.
 
     **Gmail keeps only about a week of history.** Past that, the stored id is
     gone and the call 404s. That is not a crash and it is not "no new mail":
@@ -466,17 +512,29 @@ def list_history(start_history_id: str, watch_label_id: str = None,
     if not start_history_id:
         return {"error": "list_history needs a start_history_id"}
 
+    wanted = ([watch_label_id] if isinstance(watch_label_id, str)
+              else [lid for lid in (watch_label_id or []) if lid])
+
     # No labelId filter. Gmail puts a hand-added label only on the messages that
     # existed when it was added, so filtering here would miss every later reply
     # on a watched thread — which is the whole point of watching a thread.
+    #
+    # **Both history types, because they are different events and Gmail returns
+    # only what you ask for.** messageAdded is mail arriving on a thread he
+    # already labelled. labelAdded is him labelling mail that already arrived —
+    # and that is the *only* way Wren/Do is ever used, since it deliberately has
+    # no Gmail filter (docs/mail-watch.md). Asking for messageAdded alone made
+    # hand-labelling a silent no-op: the label went on, Gmail recorded a
+    # labelsAdded, and nothing ever looked at it.
     params = {
         "userId": "me",
         "startHistoryId": str(start_history_id),
-        "historyTypes": ["messageAdded"],
+        "historyTypes": ["messageAdded", "labelAdded"],
     }
 
     service = _service()
-    candidates, latest, page_token = [], str(start_history_id), None
+    candidates, labelled_threads = [], set()
+    latest, page_token = str(start_history_id), None
     while True:
         try:
             page = service.users().history().list(
@@ -493,8 +551,8 @@ def list_history(start_history_id: str, watch_label_id: str = None,
                         f"resyncing the watermark to {fresh['history_id']}. Any mail "
                         "that arrived while the watcher was down is not recoverable "
                         "from history and was NOT reported.")
-                return {"message_ids": [], "history_id": fresh["history_id"],
-                        "resynced": True}
+                return {"message_ids": [], "message_threads": {}, "threads": {},
+                        "history_id": fresh["history_id"], "resynced": True}
             return {"error": str(e)}
         except Exception as e:
             return {"error": str(e)}
@@ -509,6 +567,16 @@ def list_history(start_history_id: str, watch_label_id: str = None,
                 if _IGNORED_LABELS & set(message.get("labelIds") or []):
                     continue
                 candidates.append((message["id"], message.get("threadId")))
+            for added in entry.get("labelsAdded") or []:
+                # Only a label Wren follows counts. Reading, starring, and
+                # archiving are all labelsAdded too, and every thread we take
+                # seriously here costs a threads.get — so this is a cost
+                # control as much as a filter.
+                if not set(added.get("labelIds") or []) & set(wanted):
+                    continue
+                thread_id = (added.get("message") or {}).get("threadId")
+                if thread_id:
+                    labelled_threads.add(thread_id)
         latest = str(page.get("historyId") or latest)
         page_token = page.get("nextPageToken")
         if not page_token:
@@ -522,14 +590,24 @@ def list_history(start_history_id: str, watch_label_id: str = None,
             seen.add(message_id)
             ordered.append((message_id, thread_id))
 
-    if watch_label_id:
-        # Resolve each thread once. Several new messages usually share one
-        # thread, and the answer cannot change inside a single call.
-        verdicts = {tid: _thread_is_watched(tid, watch_label_id, logger)
-                    for tid in {tid for _, tid in ordered}}
-        ordered = [(mid, tid) for mid, tid in ordered if verdicts.get(tid)]
+    if not wanted:
+        return {"message_ids": [mid for mid, _ in ordered],
+                "message_threads": {mid: tid for mid, tid in ordered if tid},
+                "threads": {}, "history_id": latest, "resynced": False}
+
+    # Resolve each thread once. Several new messages usually share one thread,
+    # and the answer cannot change inside a single call.
+    states = {tid: _thread_state(tid, wanted, logger)
+              for tid in ({tid for _, tid in ordered if tid} | labelled_threads)}
+    threads = {tid: {"labels": sorted(state["labels"]), "newest": state["newest"]}
+               for tid, state in states.items() if state["labels"]}
+    # Only messages whose thread survived the filter, so a caller never sees a
+    # message it has no thread entry for.
+    ordered = [(mid, tid) for mid, tid in ordered if tid in threads]
 
     return {"message_ids": [mid for mid, _ in ordered],
+            "message_threads": {mid: tid for mid, tid in ordered},
+            "threads": threads,
             "history_id": latest, "resynced": False}
 
 
