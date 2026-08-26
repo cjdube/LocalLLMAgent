@@ -101,6 +101,16 @@ alerted and what was acted on as separate entries, so the ordinary flow works:
 the alert arrives, you read it, you decide Wren should deal with it, you label
 it. Keying both the same way would have made that last step do nothing.
 
+**But acting on an email *does* use it up, permanently.** Taking `Wren/Do` off
+and putting it back does **nothing** — the `<message id>:act` key is already in
+`seen`, so the new `labelsAdded` event logs "nothing new after dedupe" and stops.
+That is not a fault; it is what stops Pub/Sub's at-least-once delivery starting
+the same job twice. It does mean re-labelling is not a way to say "try that
+again" — ask in chat instead. To re-run one deliberately (testing, usually),
+delete that one key from `seen` in `config/mail_state.json` first. Keying the act
+on the label event rather than the message was considered on 2026-08-25 and left
+alone.
+
 **Your own words are skipped.** `list_history` drops anything labelled `SENT`
 **or `DRAFT`**, before the thread lookup.
 
