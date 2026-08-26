@@ -1,0 +1,1267 @@
+<!DOCTYPE html>
+<!--
+  PROTOTYPE — THROWAWAY. Not a real page; not in VIEW_PAGES; delete when a
+  variant wins. Named `_`-prefixed to match chat/static/_harness.html.
+
+  QUESTION: what should /map look like now that journaling split into Scribe?
+  Three variants of the system map, switchable via ?variant=A|B|C, served from
+  /static/_map-prototype.html. Real data, live from /api/system_map.
+
+  ONE THING THE REAL FIX NEEDS: the payload has no owner field. system_map() in
+  chat/insights.py:681 would emit `"agent": ...` per routine, derived from the
+  plist Label (`local.wren.*` / `local.scribe.*`) which _task_from_plist already
+  reads, plus task["external"] for federated roots. Until then this file
+  hardcodes the split in SCRIBE_KEYS below.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PROTOTYPE — Wren/Scribe map</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding-bottom: 74px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    color: #c8cdd8; background: #05060e;
+  }
+  header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 11px 16px; background: rgba(10,12,24,.85);
+    border-bottom: 1px solid #171b2e;
+  }
+  header h1 { font-size: 16px; margin: 0; color: #e8eaf2; }
+  header .sub { font-size: 12.5px; color: #565d75; }
+  header .proto {
+    font-size: 10px; font-weight: 700; letter-spacing: .14em;
+    background: #4a1d1d; color: #f87171; padding: 3px 9px; border-radius: 20px;
+  }
+  #stage { padding: 18px; }
+  .err { color: #f87171; padding: 40px; font-size: 14px; line-height: 1.7; }
+
+  /* ------------------------------------------------ shared small pieces */
+  .wren  { --ag: #6f8fd9; }
+  .scribe{ --ag: #2dd4bf; }
+  .ext   { --ag: #a78bfa; }
+  .chip {
+    display: inline-block; font-size: 11.5px; padding: 3px 9px; margin: 2px;
+    border-radius: 14px; background: #12162a; color: #aab1c7;
+    border: 1px solid #1d2238; white-space: nowrap;
+  }
+  .chip.mut { border-color: #3a2a12; color: #e3b341; }
+  .colhead {
+    font-size: 10.5px; letter-spacing: .22em; font-weight: 700;
+    text-transform: uppercase; color: var(--ag, #6a7391); margin-bottom: 10px;
+  }
+
+  /* ------------------------------------------------ variant A (svg) */
+  #stage svg { width: 100%; max-width: 1820px; display: block; margin: 0 auto; }
+  .hub-name { fill: #e8eaf2; font-size: 20px; font-weight: 700; text-anchor: middle; }
+  .hub-sub  { fill: #565d75; font-size: 11px; text-anchor: middle; }
+  .nlabel   { fill: #aab1c7; font-size: 10.5px; }
+  .nsub     { fill: #4d5470; font-size: 9px; }
+  .arclabel { font-size: 10.5px; letter-spacing: .2em; font-weight: 700; text-anchor: middle; }
+  .seam     { fill: #6a7391; font-size: 11px; text-anchor: middle; letter-spacing: .05em; }
+
+  .pa-wrap { display: flex; align-items: stretch; gap: 0; height: calc(100vh - 122px); }
+  .pa-stage {
+    flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(circle at 46% 44%, #10142a 0%, #0a0d1d 48%, #05060e 80%);
+    border-radius: 12px;
+  }
+  .pa-stage svg { width: 100%; height: 100%; max-width: 100%; }
+  .pa-panel { overflow-y: auto; }
+  .pa-panel {
+    width: 320px; flex: 0 0 320px; padding: 16px 18px 26px;
+    background: rgba(10,13,26,.92); border-left: 1px solid #171b2e;
+  }
+  g.node { cursor: pointer; transition: opacity .22s; }
+  svg.dimmed g.node { opacity: .13; }
+  svg.dimmed g.node.focus { opacity: 1; }
+  svg.dimmed g.node.focus g.node { opacity: 1; }
+  .edge { fill: none; stroke: #e3b341; stroke-width: 1.3; opacity: 0;
+          transition: opacity .22s; pointer-events: none; }
+  .edge.lit { opacity: .8; }
+  .pa-panel .kind {
+    display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .14em;
+    text-transform: uppercase; padding: 3px 9px; border-radius: 20px;
+    background: #171b2e; color: #7c86a3; margin-bottom: 10px;
+  }
+  .pa-panel h2 { margin: 0 0 8px; font-size: 17px; color: #e8eaf2; font-weight: 650; }
+  .pa-panel .agentpill {
+    display: inline-block; font-size: 11px; font-weight: 600; padding: 3px 10px;
+    border-radius: 20px; margin-bottom: 12px;
+    border: 1px solid currentColor; color: #7c86a3;
+  }
+  .pa-panel .agentpill.wren { color: #6f8fd9; }
+  .pa-panel .agentpill.scribe { color: #2dd4bf; }
+  .pa-panel .agentpill.ext { color: #a78bfa; }
+  .pa-panel .meta { font-size: 12px; color: #565d75; margin-bottom: 10px; }
+  .pa-panel p.desc { font-size: 13px; line-height: 1.55; color: #aab1c7; margin: 0 0 12px; }
+  .pa-panel p.hint { font-size: 13px; line-height: 1.6; color: #565d75; margin: 0; }
+  .pa-panel ul.tool-list { list-style: none; margin: 0 0 12px; padding: 0; }
+  .pa-panel ul.tool-list li { padding: 6px 0; border-bottom: 1px solid #12162a; font-size: 13px; }
+  .pa-panel .tname { color: #cdd3e2; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  .pa-panel .wbadge {
+    display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 7px;
+    border-radius: 10px; margin-left: 7px; background: #3a2a12; color: #e3b341;
+  }
+  .pa-panel pre {
+    font-size: 12px; line-height: 1.5; color: #aab1c7; background: #0b0e1e;
+    border: 1px solid #171b2e; border-radius: 8px; padding: 10px 12px;
+    white-space: pre-wrap; word-break: break-word; margin: 0;
+  }
+  .pa-panel .status-ok { color: #4ade80; }
+  .pa-panel .status-bad { color: #f87171; }
+
+  /* ------------------------------------------------ variant B (flow) */
+  .flow { display: flex; gap: 0; align-items: stretch; max-width: 1500px; margin: 0 auto; }
+  .flow .col { flex: 1 1 0; min-width: 0; padding: 0 14px; }
+  .flow .arrow {
+    flex: 0 0 26px; display: flex; align-items: center; justify-content: center;
+    color: #2e3450; font-size: 22px;
+  }
+  .band {
+    border: 1px solid #1d2238; border-top: 3px solid var(--ag, #2e3450);
+    border-radius: 10px; background: #0a0d1d; padding: 13px; height: 100%;
+  }
+  .band h3 { margin: 0 0 3px; font-size: 15px; color: #e8eaf2; font-weight: 650; }
+  .band .agentline { font-size: 11px; color: var(--ag, #565d75); margin-bottom: 11px; font-weight: 600; }
+  .band .row { padding: 7px 0; border-bottom: 1px solid #12162a; font-size: 12.5px; }
+  .band .row b { color: #cdd3e2; font-weight: 600; display: block; }
+  .band .row span { color: #565d75; font-size: 11px; }
+  .band .big { font-size: 30px; color: #e8eaf2; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .band .biglab { font-size: 11px; color: #565d75; margin-bottom: 12px; }
+
+  /* ------------------------------------------------ variant C (ledger) */
+  .ledger { display: flex; gap: 16px; max-width: 1400px; margin: 0 auto; flex-wrap: wrap; }
+  .card {
+    flex: 1 1 380px; border: 1px solid #1d2238; border-radius: 12px;
+    background: #0a0d1d; overflow: hidden;
+  }
+  .card .cap { padding: 16px 18px; border-bottom: 1px solid #171b2e; border-left: 5px solid var(--ag); }
+  .card .cap h2 { margin: 0; font-size: 22px; color: #e8eaf2; }
+  .card .cap .role { font-size: 12.5px; color: var(--ag); margin-top: 3px; font-weight: 600; }
+  .card .cap .model { font-size: 11.5px; color: #565d75; margin-top: 6px; font-family: ui-monospace, Menlo, monospace; }
+  .card section { padding: 14px 18px; border-bottom: 1px solid #12162a; }
+  .card section:last-child { border-bottom: none; }
+  .card h4 {
+    margin: 0 0 9px; font-size: 10.5px; letter-spacing: .18em;
+    text-transform: uppercase; color: #565d75; font-weight: 700;
+  }
+  .card .num { font-size: 34px; font-weight: 700; color: #e8eaf2; font-variant-numeric: tabular-nums; }
+  .card .num.zero { color: var(--ag); }
+  .card .numlab { font-size: 12px; color: #565d75; margin-left: 8px; }
+  .card table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .card td { padding: 5px 0; border-bottom: 1px solid #12162a; color: #aab1c7; }
+  .card td.t { color: #565d75; text-align: right; white-space: nowrap; padding-left: 10px; font-variant-numeric: tabular-nums; }
+  .card td.s { width: 10px; }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
+  .ok { background: #4ade80; } .bad { background: #f87171; } .none { background: #3a4060; }
+  .seambar {
+    max-width: 1400px; margin: 16px auto 0; padding: 13px 18px; text-align: center;
+    border: 1px dashed #2e3450; border-radius: 12px; color: #7c86a3; font-size: 13px;
+  }
+  .seambar b { color: #e8eaf2; }
+
+  /* ------------------------------------------------ switcher */
+  #bar {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 4px; z-index: 99;
+    background: #e8eaf2; color: #0a0d1d; border-radius: 30px;
+    padding: 6px 8px; box-shadow: 0 8px 30px rgba(0,0,0,.6);
+    font-size: 13px; font-weight: 600;
+  }
+  #bar button {
+    border: none; background: transparent; font-size: 17px; cursor: pointer;
+    padding: 2px 11px; color: #0a0d1d; border-radius: 20px; line-height: 1;
+  }
+  #bar button:hover { background: #c8cdd8; }
+  #bar .lab { padding: 0 8px; white-space: nowrap; }
+  #bar .lab em { font-style: normal; color: #565d75; font-weight: 500; }
+
+  /* ------------------------------------------------ variant D */
+  .vd-stage { position: relative; }
+  .vd-toggle {
+    position: absolute; top: 6px; left: 10px; z-index: 5;
+    display: flex; align-items: center; gap: 6px;
+    background: #11162c; border: 1px solid #2a3050; border-radius: 26px;
+    padding: 5px 7px 5px 14px;
+  }
+  .vd-label { color: #6c7593; font-size: 11px; letter-spacing: .12em;
+              text-transform: uppercase; margin-right: 2px; }
+  .vd-pill {
+    border: 1px solid transparent; background: transparent; cursor: pointer;
+    font: inherit; font-size: 13px; font-weight: 600; color: #8b93ab;
+    padding: 5px 15px; border-radius: 20px;
+  }
+  .vd-pill:hover { color: #e8eaf2; }
+  .vd-pill.wren.on { background: #6f8fd9; color: #08112a; }
+  .vd-pill.scribe.on { background: #2dd4bf; color: #062622; }
+  .ring-title {
+    text-anchor: middle; font-size: 11px; font-weight: 700; letter-spacing: .28em;
+    fill: #545c78; pointer-events: none;
+  }
+  .ring-title.empty { fill: #414863; pointer-events: auto; }
+  .ring-title.apps { fill: #5f79b8; }
+  .ring-title.routines { fill: #9a7c39; }
+  .ring-title.skills { fill: #a06534; }
+  .node-label {
+    text-anchor: middle; font-size: 10.5px; fill: #aeb6cc; pointer-events: none;
+  }
+  .node-sublabel {
+    text-anchor: middle; font-size: 9px; fill: #6c7593; pointer-events: none;
+  }
+  .cat-label {
+    text-anchor: middle; font-size: 9px; font-weight: 700; letter-spacing: .16em;
+    opacity: .8; pointer-events: none;
+  }
+  .skills-orbit { transform-origin: 600px 600px; animation: vdspin 70s linear infinite; }
+  @keyframes vdspin { to { transform: rotate(360deg); } }
+  .center-halo { animation: vdpulse 4.5s ease-in-out infinite; transform-origin: 600px 600px; }
+  @keyframes vdpulse { 0%,100% { opacity:.16 } 50% { opacity:.34 } }
+  ul.counts { list-style: none; margin: 14px 0 0; padding: 0; }
+  ul.counts li {
+    display: flex; justify-content: space-between; padding: 6px 0;
+    border-bottom: 1px solid #1e2338; font-size: 13px; color: #8b93ab;
+  }
+  ul.counts li b { color: #e8eaf2; }
+</style>
+</head>
+<body>
+  <header>
+    <span class="proto">PROTOTYPE</span>
+    <h1>System map</h1>
+    <span class="sub">four variants · real data · ?variant=A|B|C|D</span>
+  </header>
+  <div id="stage"><div class="err" style="color:#565d75">Loading /api/system_map …</div></div>
+  <div id="bar"></div>
+
+<script>
+"use strict";
+
+// Hardcoded owner split — the real fix puts this in system_map(). See the
+// comment at the top of this file.
+const SCRIBE_KEYS = new Set(["strava_download", "calendar_colorizer", "claude_time_blocks",
+  "daily_chrome_learnings", "daily_youtube_learnings", "ai_chat_learnings"]);
+const SCRIBE_ROLE = "writes the record";
+const WREN_ROLE = "reads the record, acts on request";
+const AG_COLOR = { wren: "#6f8fd9", scribe: "#2dd4bf", ext: "#a78bfa" };
+
+function ownerOf(key) {
+  if (SCRIBE_KEYS.has(key)) return "scribe";
+  if (key.startsWith("wiki-")) return "ext";        // federated ObsidianWikiAgent
+  return "wren";
+}
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+function s(tag, attrs, text) {
+  const e = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v);
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+function fmtTs(ts) {
+  if (!ts) return "—";
+  const d = new Date(String(ts).replace(",", "."));
+  return isNaN(d) ? ts : d.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+// ===========================================================================
+// VARIANT A — Two suns. Keeps the radial map but gives Scribe its own centre.
+// The record sits between them, and every arrow points the one direction the
+// seam allows: Scribe writes it, Wren reads it.
+// ===========================================================================
+function variantA(d) {
+  const W = 1900, H = 1000;
+  const svg = s("svg", { viewBox: `0 0 ${W} ${H}` });
+  const wrenHub = [560, 470], scribeHub = [1380, 470], midX = 950;
+
+  const routines = d.routines.map(r => ({ ...r, ag: ownerOf(r.key) }));
+
+  // Which agents' routines touch each service. A service used from more than
+  // one side is genuinely shared and belongs in the middle — that placement is
+  // derived from the data, not decided by hand.
+  const touchedBy = new Map();
+  routines.forEach(r => r.uses.forEach(k => {
+    if (!touchedBy.has(k)) touchedBy.set(k, new Set());
+    touchedBy.get(k).add(r.ag);
+  }));
+  const side = {};   // service key -> "wren" | "scribe" | "shared"
+  d.services.forEach(v => {
+    const ags = touchedBy.get(v.key) || new Set();
+    if (ags.size > 1) side[v.key] = "shared";
+    else if (ags.size === 1 && !ags.has("wren")) side[v.key] = [...ags][0];
+    else side[v.key] = "wren";     // chat-only services are Wren's alone
+  });
+  const wrenSvc = d.services.filter(v => side[v.key] === "wren");
+  const sharedSvc = d.services.filter(v => side[v.key] === "shared");
+  const scribeSvc = d.services.filter(v => side[v.key] === "scribe" || side[v.key] === "ext");
+
+  // ---------------------------------------------------------------- focus
+  const routineGroups = new Map(), serviceGroups = new Map(), edges = [];
+  const routineUses = {}, serviceRoutines = {};
+  routines.forEach(r => {
+    routineUses[r.key] = r.uses;
+    r.uses.forEach(k => (serviceRoutines[k] = serviceRoutines[k] || []).push(r.key));
+  });
+  function setFocus(rk, sk) {
+    svg.classList.add("dimmed");
+    edges.forEach(e => e.classList.toggle("lit", rk.has(e.dataset.r) && sk.has(e.dataset.s)));
+    routineGroups.forEach((g, k) => g.classList.toggle("focus", rk.has(k)));
+    serviceGroups.forEach((g, k) => g.classList.toggle("focus", sk.has(k)));
+  }
+  function clearFocus() {
+    svg.classList.remove("dimmed");
+    edges.forEach(e => e.classList.remove("lit"));
+    routineGroups.forEach(g => g.classList.remove("focus"));
+    serviceGroups.forEach(g => g.classList.remove("focus"));
+  }
+
+  // ---------------------------------------------------------------- panel
+  const panel = el("aside", "pa-panel");
+  function show(kind, title, agent, build) {
+    panel.textContent = "";
+    panel.appendChild(el("span", "kind", kind));
+    panel.appendChild(el("h2", null, title));
+    if (agent) {
+      const a = el("div", "agentpill " + agent);
+      a.textContent = agent === "wren" ? "Wren · reads the record"
+        : agent === "scribe" ? "Scribe · writes the record"
+        : agent === "ext" ? "ObsidianWikiAgent · federated"
+        : "shared by both agents";
+      panel.appendChild(a);
+    }
+    build(panel);
+  }
+  function showRoutine(rt) {
+    show("routine", rt.display_name, rt.ag, p => {
+      p.appendChild(el("div", "meta", rt.human_schedule + (rt.next_run ? " · next " + fmtTs(rt.next_run) : "")));
+      const line = el("p", "desc");
+      if (rt.last_run) {
+        line.appendChild(document.createTextNode("Last run " + fmtTs(rt.last_run.start) + " — "));
+        line.appendChild(el("span", rt.last_run.status === "success" ? "status-ok" : "status-bad", rt.last_run.status));
+        if (rt.last_run.duration_s != null) line.appendChild(document.createTextNode(` in ${rt.last_run.duration_s}s`));
+      } else line.textContent = "No runs recorded yet.";
+      p.appendChild(line);
+      if (rt.uses.length) p.appendChild(el("div", "meta", "talks to: " + rt.uses.join(", ")));
+      p.appendChild(el("div", "meta", "launchd: local." + (rt.ag === "scribe" ? "scribe" : "wren") + ".*"));
+    });
+  }
+  function showService(v) {
+    show("application", v.label, side[v.key], p => {
+      if (!v.tools.length) p.appendChild(el("p", "desc", "Used by scheduled routines only — no chat tools."));
+      const ul = el("ul", "tool-list");
+      v.tools.forEach(t => {
+        const li = el("li");
+        li.appendChild(el("span", "tname", t.name));
+        if (t.mutates) li.appendChild(el("span", "wbadge", "write"));
+        ul.appendChild(li);
+      });
+      if (v.tools.length) p.appendChild(ul);
+      const linked = serviceRoutines[v.key] || [];
+      if (linked.length) p.appendChild(el("div", "meta", "used by: " + linked.join(", ")));
+    });
+  }
+  function showTool(v, t) {
+    show("tool", t.name, "wren", p => {
+      p.appendChild(el("div", "meta", v.label + (t.mutates ? " · write action (confirmation-gated)" : " · read-only")));
+      p.appendChild(el("p", "desc", t.description));
+    });
+  }
+  function showSkill(sk) {
+    show("skill", sk.name, "wren", p => {
+      if (sk.description) p.appendChild(el("p", "desc", sk.description));
+      p.appendChild(el("pre", null, sk.body));
+    });
+  }
+  function showAgent(name, ag, body) {
+    show("agent", name, ag, p => p.appendChild(el("p", "desc", body)));
+  }
+  function showOverview() {
+    show("system map", "Two agents", null, p => {
+      p.appendChild(el("p", "hint",
+        "Hover a routine or an application to light up what talks to what. " +
+        "Click any node for detail. The middle column is what both agents touch."));
+    });
+  }
+
+  // ---------------------------------------------------------------- geometry
+  function arc(n, hub, r, mid, span) {
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const t = n === 1 ? 0.5 : i / (n - 1);
+      const a = ((mid - span / 2) + t * span) * Math.PI / 180;
+      out.push([hub[0] + r * Math.cos(a), hub[1] + r * Math.sin(a), a]);
+    }
+    return out;
+  }
+  const pos = new Map();   // key -> [x, y]
+
+  function nodeG() { return s("g", { class: "node" }); }
+  function dot(g, x, y, r, fill, stroke) {
+    g.appendChild(s("circle", { cx: x, cy: y, r,
+      fill: fill || "#0a0d1d", stroke: stroke || fill, "stroke-width": 1.4 }));
+  }
+  function label(g, x, y, anchor, text, sub) {
+    g.appendChild(s("text", { x, y: y + 1, class: "nlabel", "text-anchor": anchor }, text));
+    if (sub) g.appendChild(s("text", { x, y: y + 12, class: "nsub", "text-anchor": anchor }, sub));
+  }
+
+  // Bow every edge away from its hub, so a routine reaching the middle column
+  // sweeps around its own centre instead of straight through it.
+  function edgePath(p1, p2, hub) {
+    const [x1, y1] = p1, [x2, y2] = p2;
+    const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+    const vx = mx - hub[0], vy = my - hub[1], len = Math.hypot(vx, vy);
+    let cx, cy;
+    if (len < 46) {
+      const dx = x2 - x1, dy = y2 - y1, dd = Math.hypot(dx, dy) || 1;
+      const sign = y1 < hub[1] ? -1 : 1;
+      cx = mx + sign * (-dy / dd) * 120; cy = my + sign * (dx / dd) * 120;
+    } else {
+      cx = mx + (vx / len) * 36; cy = my + (vy / len) * 36;
+    }
+    return `M ${x1} ${y1} Q ${cx} ${cy} ${x2} ${y2}`;
+  }
+
+  // ---------------------------------------------------------------- nodes
+  const gEdges = s("g"), gNodes = s("g");
+
+  function placeService(v, x, y, anchor, color) {
+    pos.set("s:" + v.key, [x, y]);
+    const g = nodeG();
+    g.appendChild(s("polygon", {
+      points: [0, 1, 2, 3, 4, 5].map(i => {
+        const a = -Math.PI / 2 + i * Math.PI / 3;
+        return `${x + 14 * Math.cos(a)},${y + 14 * Math.sin(a)}`;
+      }).join(" "),
+      fill: "#101a38", stroke: color, "stroke-width": 1.4,
+    }));
+    g.appendChild(s("text", { x, y: y + 4, fill: color, "font-size": "11",
+      "font-weight": "700", "text-anchor": "middle" }, v.label.slice(0, 1)));
+    const lx = anchor === "end" ? x - 22 : anchor === "start" ? x + 22 : x;
+    const ly = anchor === "middle" ? y + 30 : y;
+    label(g, lx, ly, anchor, v.label, v.tools.length ? v.tools.length + " tools" : "no chat tools");
+    // tool satellites, fanned toward the label side
+    v.tools.forEach((t, j) => {
+      const off = (j - (v.tools.length - 1) / 2) * 9;
+      const sx = anchor === "end" ? x + 24 : anchor === "start" ? x - 24 : x;
+      const sy = anchor === "middle" ? y - 26 : y + off;
+      const tx = anchor === "middle" ? x + off : sx;
+      const tn = nodeG();
+      tn.appendChild(t.mutates
+        ? s("rect", { x: tx - 3, y: sy - 3, width: 6, height: 6,
+            transform: `rotate(45 ${tx} ${sy})`, fill: "none", stroke: "#8fb0f0", "stroke-width": 1.2 })
+        : s("circle", { cx: tx, cy: sy, r: 3, fill: "#4d7fe3", opacity: .9 }));
+      tn.addEventListener("click", ev => { ev.stopPropagation(); showTool(v, t); });
+      g.appendChild(tn);
+    });
+    g.addEventListener("click", () => showService(v));
+    g.addEventListener("mouseenter", () => setFocus(new Set(serviceRoutines[v.key] || []), new Set([v.key])));
+    g.addEventListener("mouseleave", clearFocus);
+    serviceGroups.set(v.key, g);
+    gNodes.appendChild(g);
+  }
+
+  function placeRoutine(rt, x, y, anchor) {
+    pos.set("r:" + rt.key, [x, y]);
+    const g = nodeG();
+    dot(g, x, y, 8, "#e3b341");
+    const st = rt.last_run ? rt.last_run.status : null;
+    g.appendChild(s("circle", { cx: x + 9, cy: y - 9, r: 3,
+      fill: st === "success" ? "#4ade80" : st ? "#f87171" : "#565d75" }));
+    const lx = anchor === "end" ? x - 14 : x + 14;
+    label(g, lx, y, anchor, rt.display_name, rt.human_schedule);
+    g.addEventListener("click", () => showRoutine(rt));
+    g.addEventListener("mouseenter", () => setFocus(new Set([rt.key]), new Set(rt.uses)));
+    g.addEventListener("mouseleave", clearFocus);
+    routineGroups.set(rt.key, g);
+    gNodes.appendChild(g);
+  }
+
+  // Wren: routines inner arc, her own applications on two outer arcs, facing left
+  const wrenR = routines.filter(r => r.ag === "wren");
+  arc(wrenR.length, wrenHub, 214, 180, 168).forEach((p, i) => placeRoutine(wrenR[i], p[0], p[1], "end"));
+  const half = Math.ceil(wrenSvc.length / 2);
+  [[wrenSvc.slice(0, half), 322], [wrenSvc.slice(half), 422]].forEach(([list, r]) => {
+    arc(list.length, wrenHub, r, 180, 152).forEach((p, i) =>
+      placeService(list[i], p[0], p[1], "end", "#4d7fe3"));
+  });
+
+  // Scribe: routines inner arc, her own raw sources outer, facing right
+  const scribeR = routines.filter(r => r.ag === "scribe");
+  arc(scribeR.length, scribeHub, 214, 0, 150).forEach((p, i) => placeRoutine(scribeR[i], p[0], p[1], "start"));
+  arc(scribeSvc.length, scribeHub, 340, 0, 70).forEach((p, i) =>
+    placeService(scribeSvc[i], p[0], p[1], "start", "#2dd4bf"));
+
+  // The federated wiki agent's routines, stacked low in the middle
+  const extR = routines.filter(r => r.ag === "ext");
+  extR.forEach((rt, i) => placeRoutine(rt, midX, 830 + i * 52, "start"));
+
+  // The shared middle column
+  const topY = 350, step = 74;
+  sharedSvc.forEach((v, i) => placeService(v, midX, topY + i * step, "middle", "#7c86a3"));
+
+  // ---------------------------------------------------------------- edges
+  routines.forEach(rt => {
+    const p1 = pos.get("r:" + rt.key);
+    const hub = rt.ag === "scribe" ? scribeHub : rt.ag === "ext" ? [midX, 900] : wrenHub;
+    rt.uses.forEach(k => {
+      const p2 = pos.get("s:" + k);
+      if (!p1 || !p2) return;
+      const path = s("path", { class: "edge", d: edgePath(p1, p2, hub) });
+      path.dataset.r = rt.key; path.dataset.s = k;
+      edges.push(path);
+      gEdges.appendChild(path);
+    });
+  });
+  svg.appendChild(gEdges);
+  svg.appendChild(gNodes);
+
+  // ------------------------------------------------ what each agent carries
+  // Skills and memories are Wren's alone, so they orbit her sun. The wiki is
+  // the record itself, so its pages fill the middle box. On today's one-centre
+  // map all three sit in the same undifferentiated band.
+  const gBands = s("g");
+  d.skills.forEach((sk, i) => {
+    const a = -Math.PI / 2 + (i * 2 * Math.PI) / Math.max(d.skills.length, 1);
+    const x = wrenHub[0] + 128 * Math.cos(a), y = wrenHub[1] + 128 * Math.sin(a);
+    const g = nodeG();
+    g.appendChild(s("circle", { cx: x, cy: y, r: 6, fill: "#e8853a" }));
+    g.appendChild(s("text", { x, y: y + 18, class: "nsub", "text-anchor": "middle" }, sk.name));
+    g.addEventListener("click", ev => { ev.stopPropagation(); showSkill(sk); });
+    gBands.appendChild(g);
+  });
+  gBands.appendChild(s("circle", { cx: wrenHub[0], cy: wrenHub[1], r: 128, fill: "none",
+    stroke: "#d98d4a", "stroke-width": 1.2, opacity: .35, "stroke-dasharray": "2 9" }));
+  gBands.appendChild(s("text", { x: wrenHub[0], y: wrenHub[1] - 142, class: "arclabel",
+    fill: "#d98d4a" }, "SKILLS"));
+  svg.appendChild(gBands);
+
+  // ---------------------------------------------------------------- hubs
+  function hub(cx, cy, name, sub, color, ag, blurb) {
+    const g = nodeG();
+    g.appendChild(s("circle", { cx, cy, r: 78, fill: color, opacity: ".07" }));
+    g.appendChild(s("circle", { cx, cy, r: 62, fill: "#0a0d1d", stroke: color, "stroke-width": 2 }));
+    g.appendChild(s("text", { x: cx, y: cy + 7, class: "hub-name", fill: color }, name));
+    g.appendChild(s("text", { x: cx, y: cy + 172, class: "hub-sub" }, sub));
+    g.addEventListener("click", () => showAgent(name, ag, blurb));
+    svg.appendChild(g);
+  }
+  hub(wrenHub[0], wrenHub[1], "Wren", WREN_ROLE, AG_COLOR.wren, "wren",
+    "The interactive agent. 51 chat tools, a tool-calling loop, and 9 scheduled " +
+    "routines. She reads what Scribe wrote — through the calendar and the wiki — " +
+    "and acts on request.");
+  hub(scribeHub[0], scribeHub[1], "Scribe", SCRIBE_ROLE, AG_COLOR.scribe, "scribe",
+    "The journaling agent. A pipeline: gather → one model call → write. No tool " +
+    "registry, never advance(), zero chat tools. Its own model dial (SCRIBE_*).");
+
+  // The record, at the top of the middle column
+  const rec = nodeG();
+  rec.appendChild(s("rect", { x: midX - 104, y: 96, width: 208, height: 120, rx: 14,
+    fill: "#0a0d1d", stroke: "#2e3450", "stroke-width": 1.5 }));
+  rec.appendChild(s("text", { x: midX, y: 126, class: "arclabel", fill: "#7c86a3" }, "THE RECORD"));
+  rec.appendChild(s("text", { x: midX, y: 164, class: "hub-name", "font-size": "28" },
+    String(d.memory.wiki_page_count)));
+  rec.appendChild(s("text", { x: midX, y: 182, class: "hub-sub" }, "wiki pages"));
+  rec.appendChild(s("text", { x: midX, y: 202, class: "hub-sub" }, "+ calendar, memories"));
+  rec.addEventListener("click", () => showAgent("The record", null,
+    d.memory.wiki_page_count + " wiki pages, " + d.memory.entries.length +
+    " memories, plus the calendar. Scribe writes it. Wren reads it. " +
+    "Nothing in this map flows the other way."));
+  svg.appendChild(rec);
+
+  // seam arrows
+  const defs = s("defs");
+  const mk = s("marker", { id: "ah", viewBox: "0 0 10 10", refX: "9", refY: "5",
+    markerWidth: "7", markerHeight: "7", orient: "auto" });
+  mk.appendChild(s("path", { d: "M0,0 L10,5 L0,10 z", fill: "#6a7391" }));
+  defs.appendChild(mk); svg.appendChild(defs);
+  svg.appendChild(s("line", { x1: scribeHub[0] - 90, y1: 156, x2: midX + 118, y2: 156,
+    stroke: "#6a7391", "stroke-width": 1.6, "marker-end": "url(#ah)" }));
+  svg.appendChild(s("line", { x1: midX - 118, y1: 156, x2: wrenHub[0] + 90, y2: 156,
+    stroke: "#6a7391", "stroke-width": 1.6, "marker-end": "url(#ah)" }));
+  svg.appendChild(s("text", { x: (scribeHub[0] + midX) / 2, y: 144, class: "seam" }, "writes"));
+  svg.appendChild(s("text", { x: (wrenHub[0] + midX) / 2, y: 144, class: "seam" }, "reads"));
+  svg.appendChild(s("text", { x: midX, y: 300, class: "arclabel", fill: "#7c86a3" },
+    "SHARED BY BOTH"));
+  svg.appendChild(s("text", { x: midX, y: 800, class: "arclabel", fill: AG_COLOR.ext },
+    "OBSIDIANWIKIAGENT (FEDERATED)"));
+
+  svg.addEventListener("click", ev => { if (ev.target === svg) { clearFocus(); showOverview(); } });
+
+  const wrap = el("div", "pa-wrap");
+  const stage = el("div", "pa-stage");
+  stage.appendChild(svg);
+  wrap.appendChild(stage);
+  wrap.appendChild(panel);
+  showOverview();
+  return wrap;
+}
+
+// ===========================================================================
+// VARIANT B — The pipeline. Throws the radial layout out entirely and reads
+// left to right, the way the data actually moves through a day.
+// ===========================================================================
+function variantB(d) {
+  const routines = d.routines.map(r => ({ ...r, ag: ownerOf(r.key) }));
+  const scribeR = routines.filter(r => r.ag === "scribe");
+  const wrenR = routines.filter(r => r.ag === "wren");
+  const extR = routines.filter(r => r.ag === "ext");
+  const toolCount = d.services.reduce((n, x) => n + x.tools.length, 0);
+
+  const flow = el("div", "flow");
+  function col(cls, title, agentline, build) {
+    const c = el("div", "col " + (cls || ""));
+    const b = el("div", "band");
+    b.appendChild(el("h3", null, title));
+    if (agentline) b.appendChild(el("div", "agentline", agentline));
+    build(b);
+    c.appendChild(b);
+    flow.appendChild(c);
+  }
+  function arrow() { flow.appendChild(el("div", "arrow", "→")); }
+  function row(b, name, sub) {
+    const r = el("div", "row");
+    r.appendChild(el("b", null, name));
+    if (sub) r.appendChild(el("span", null, sub));
+    b.appendChild(r);
+  }
+
+  col("", "Your day", "raw, nobody's agent yet", b => {
+    ["Chrome history", "YouTube Likes", "Strava rides", "Claude Code sessions",
+     "Gemini chats", "Calendar events"].forEach(x => row(b, x));
+  });
+  arrow();
+
+  col("scribe", "Scribe", "the journaling agent · " + SCRIBE_ROLE, b => {
+    b.appendChild(el("div", "big", "0"));
+    b.appendChild(el("div", "biglab", "chat tools — Scribe is a pipeline, not a chatbot"));
+    scribeR.forEach(r => row(b, r.display_name, r.human_schedule));
+  });
+  arrow();
+
+  col("ext", "The record", "written once, read forever", b => {
+    b.appendChild(el("div", "big", String(d.memory.wiki_page_count)));
+    b.appendChild(el("div", "biglab", "wiki pages in the vault"));
+    row(b, "Google Calendar", "rides + time blocks + colours");
+    row(b, "Memories", d.memory.entries.length + " entries");
+    row(b, "Skills", d.skills.length + " written procedures");
+    b.appendChild(el("div", "agentline", "kept tidy by ObsidianWikiAgent:"));
+    extR.forEach(r => row(b, r.display_name, r.human_schedule));
+  });
+  arrow();
+
+  col("wren", "Wren", "the interactive agent · " + WREN_ROLE, b => {
+    b.appendChild(el("div", "big", String(toolCount)));
+    b.appendChild(el("div", "biglab", "chat tools across " + d.services.length + " applications"));
+    d.services.filter(x => x.tools.length).forEach(x => {
+      const c = el("span", "chip", x.label + " " + x.tools.length);
+      b.appendChild(c);
+    });
+    b.appendChild(el("div", "agentline", " "));
+    wrenR.forEach(r => row(b, r.display_name, r.human_schedule));
+  });
+  arrow();
+
+  col("", "Reaches you", "", b => {
+    ["Chat, on your phone", "Morning brief email", "ntfy push alerts",
+     "Synthesis nudges", "Opportunity digest"].forEach(x => row(b, x));
+  });
+
+  const wrap = el("div");
+  wrap.appendChild(flow);
+  const seam = el("div", "seambar");
+  seam.appendChild(document.createTextNode("The seam: "));
+  seam.appendChild(el("b", null, "Scribe writes the record, Wren reads it."));
+  seam.appendChild(document.createTextNode(
+    " Nothing flows right to left. That is why the raw-capture tools left Wren's registry."));
+  wrap.appendChild(seam);
+  return wrap;
+}
+
+// ===========================================================================
+// VARIANT C — The ledger. No graph at all. Two agent spec-sheets side by side,
+// so "what can each one actually do" is a column you read, not a shape you
+// interpret.
+// ===========================================================================
+function variantC(d) {
+  const routines = d.routines.map(r => ({ ...r, ag: ownerOf(r.key) }));
+  const toolCount = d.services.reduce((n, x) => n + x.tools.length, 0);
+  const writeCount = d.services.reduce((n, x) => n + x.tools.filter(t => t.mutates).length, 0);
+
+  function card(cls, name, role, model, build) {
+    const c = el("div", "card " + cls);
+    const cap = el("div", "cap");
+    cap.appendChild(el("h2", null, name));
+    cap.appendChild(el("div", "role", role));
+    cap.appendChild(el("div", "model", model));
+    c.appendChild(cap);
+    build(c);
+    return c;
+  }
+  function sect(c, title, build) {
+    const x = el("section");
+    x.appendChild(el("h4", null, title));
+    build(x);
+    c.appendChild(x);
+  }
+  function big(x, n, lab, zero) {
+    const w = el("div");
+    w.appendChild(el("span", "num" + (zero ? " zero" : ""), String(n)));
+    w.appendChild(el("span", "numlab", lab));
+    x.appendChild(w);
+  }
+  function schedule(x, list) {
+    const t = el("table");
+    list.forEach(r => {
+      const tr = el("tr");
+      const st = r.last_run ? (r.last_run.status === "success" ? "ok" : "bad") : "none";
+      const td0 = el("td", "s"); td0.appendChild(el("span", "dot " + st));
+      tr.appendChild(td0);
+      tr.appendChild(el("td", null, r.display_name));
+      tr.appendChild(el("td", "t", r.human_schedule));
+      t.appendChild(tr);
+    });
+    x.appendChild(t);
+  }
+
+  const ledger = el("div", "ledger");
+
+  ledger.appendChild(card("wren", "Wren", WREN_ROLE, d.identity.model, c => {
+    sect(c, "Can be asked to do things", x => {
+      big(x, toolCount, "chat tools, " + writeCount + " of them confirmation-gated");
+      d.services.filter(v => v.tools.length).forEach(v => {
+        v.tools.forEach(t => {
+          x.appendChild(el("span", "chip" + (t.mutates ? " mut" : ""), t.name));
+        });
+      });
+    });
+    sect(c, "Runs on a schedule", x => {
+      schedule(x, routines.filter(r => r.ag === "wren"));
+    });
+    sect(c, "Reads", x => {
+      ["Google Calendar", "the wiki (" + d.memory.wiki_page_count + " pages)",
+       "memories", "skills", "Gmail", "the web"].forEach(v => x.appendChild(el("span", "chip", v)));
+    });
+  }));
+
+  ledger.appendChild(card("scribe", "Scribe", SCRIBE_ROLE, "gemma4 local + gemini (its own dial)", c => {
+    sect(c, "Can be asked to do things", x => {
+      big(x, 0, "chat tools — by design", true);
+      x.appendChild(el("p", "agentline",
+        "Scribe is a pipeline: gather → one model call → write. " +
+        "No tool registry, never advance(). You cannot talk to it; you read what it wrote."));
+    });
+    sect(c, "Runs on a schedule", x => {
+      schedule(x, routines.filter(r => r.ag === "scribe"));
+    });
+    sect(c, "Writes", x => {
+      ["daily vault pages", "Strava rides → calendar", "Claude Code time blocks",
+       "calendar colours"].forEach(v => x.appendChild(el("span", "chip mut", v)));
+    });
+  }));
+
+  ledger.appendChild(card("ext", "ObsidianWikiAgent", "files the raw notes into the wiki", "separate repo, federated in", c => {
+    sect(c, "Can be asked to do things", x => {
+      big(x, 0, "chat tools — a different repo entirely", true);
+      x.appendChild(el("p", "agentline",
+        "Joined to this dashboard through WREN_EXTERNAL_TASK_ROOTS. " +
+        "Wren sees its runs; it has no idea Wren exists."));
+    });
+    sect(c, "Runs on a schedule", x => {
+      schedule(x, routines.filter(r => r.ag === "ext"));
+    });
+    sect(c, "Writes", x => {
+      ["the wiki/ folder", "a nightly git snapshot"].forEach(v => x.appendChild(el("span", "chip mut", v)));
+    });
+  }));
+
+  const wrap = el("div");
+  wrap.appendChild(ledger);
+  const seam = el("div", "seambar");
+  seam.appendChild(document.createTextNode("The seam: "));
+  seam.appendChild(el("b", null, "Scribe writes the record, Wren reads it."));
+  seam.appendChild(document.createTextNode(
+    " Both share one substrate (agent/loop.py, store, dates, Google auth) — the porch."));
+  wrap.appendChild(seam);
+  return wrap;
+}
+
+// ===========================================================================
+// switcher
+// ===========================================================================
+// ===========================================================================
+// VARIANT D — One sun at a time. The original map, unchanged in shape, drawn
+// once per agent. The toggle swaps whose universe you are standing in, and
+// every ring redraws from that agent's own point of view.
+// ===========================================================================
+function variantD(d) {
+  const C = 600, TOP = -Math.PI / 2;
+  const R = { center: 62, skills: 130, memIn: 185, memRowStep: 26, memRows: 4,
+              catLabel: 306, routines: 360, satellites: 438, apps: 470, appLabel: 504 };
+  const MEM = { preference: "#2dd4bf", person: "#f472b6", schedule: "#eab308",
+                project: "#60a5fa", health: "#4ade80", place: "#a78bfa",
+                trivia: "#94a3b8", other: "#8b93ab", uncategorized: "#8b93ab",
+                wiki: "#22d3ee" };
+  const polar = (r, a) => [C + r * Math.cos(a), C + r * Math.sin(a)];
+
+  const routines = d.routines.map(r => ({ ...r, ag: ownerOf(r.key) }));
+  const byKey = Object.fromEntries(d.services.map(v => [v.key, v]));
+
+  // ------------------------------------------------ each agent's own universe
+  function universe(agent) {
+    if (agent === "scribe") {
+      const rs = routines.filter(r => r.ag === "scribe");
+      const keys = [...new Set(rs.flatMap(r => r.uses))];
+      return {
+        key: "scribe", name: "SCRIBE", color: AG_COLOR.scribe,
+        model: "SCRIBE_* → gemma4 local / gemini",
+        role: "the journaling agent — writes the record",
+        routines: rs,
+        // Scribe reaches these, but never as chat tools: she has no registry.
+        services: keys.map(k => byKey[k]).filter(Boolean).map(v => ({ ...v, tools: [] })),
+        skills: [], memories: [], wiki: [], wikiCount: 0,
+        writes: ["daily vault pages", "Strava rides → calendar",
+                 "Claude Code time blocks", "calendar colours"],
+        blurb: "A pipeline agent: gather → one complete_text() call → write. " +
+               "No tool registry, never advance(). Nothing here can be asked to " +
+               "do anything — it runs on a clock and leaves a record behind. " +
+               "Its model dial is its own (SCRIBE_*), with no fallback to Wren's.",
+      };
+    }
+    const rs = routines.filter(r => r.ag !== "scribe");
+    const used = new Set(rs.flatMap(r => r.uses));
+    return {
+      key: "wren", name: "WREN", color: AG_COLOR.wren, model: d.identity.model,
+      role: "the interactive agent — reads the record, acts on request",
+      routines: rs,
+      services: d.services.filter(v => v.tools.length || used.has(v.key)),
+      skills: d.skills, memories: d.memory.entries,
+      wiki: d.memory.wiki_pages, wikiCount: d.memory.wiki_page_count,
+      writes: null,
+      blurb: "The interactive agent. A tool-calling loop over " +
+             d.services.reduce((n, v) => n + v.tools.length, 0) +
+             " chat tools, plus her own scheduled work. Asked what you did " +
+             "yesterday she reads the calendar and the wiki — the record Scribe " +
+             "wrote — rather than fetching anything herself.",
+    };
+  }
+
+  // ------------------------------------------------ chrome
+  const wrap = el("div", "pa-wrap");
+  const stage = el("div", "pa-stage vd-stage");
+  const panel = el("aside", "pa-panel");
+  const toggle = el("div", "vd-toggle");
+  wrap.appendChild(stage); wrap.appendChild(panel);
+
+  function show(kind, title, tag, build) {
+    panel.textContent = "";
+    panel.appendChild(el("span", "kind", kind));
+    panel.appendChild(el("h2", null, title));
+    if (tag) panel.appendChild(el("div", "agentpill " + tag.cls, tag.text));
+    build(panel);
+  }
+
+  // ------------------------------------------------ one full redraw
+  function draw(agentKey) {
+    const u = universe(agentKey);
+    const tag = { cls: u.key, text: u.key === "wren" ? "Wren · reads the record"
+                                                     : "Scribe · writes the record" };
+    const svg = s("svg", { viewBox: `0 0 1200 1200` });
+    const edges = [], routineGroups = new Map(), serviceGroups = new Map();
+    const serviceRoutines = {};
+    u.routines.forEach(r => r.uses.forEach(k =>
+      (serviceRoutines[k] = serviceRoutines[k] || []).push(r.key)));
+
+    function setFocus(rk, sk) {
+      svg.classList.add("dimmed");
+      edges.forEach(e => e.classList.toggle("lit", rk.has(e.dataset.r) && sk.has(e.dataset.s)));
+      routineGroups.forEach((g, k) => g.classList.toggle("focus", rk.has(k)));
+      serviceGroups.forEach((g, k) => g.classList.toggle("focus", sk.has(k)));
+    }
+    function clearFocus() {
+      svg.classList.remove("dimmed");
+      edges.forEach(e => e.classList.remove("lit"));
+      routineGroups.forEach(g => g.classList.remove("focus"));
+      serviceGroups.forEach(g => g.classList.remove("focus"));
+    }
+    function nodeG() { return s("g", { class: "node" }); }
+
+    // ---------------- panel builders
+    function showOverview() {
+      show("system map", u.name.charAt(0) + u.name.slice(1).toLowerCase(), tag, p => {
+        p.appendChild(el("div", "meta", u.model));
+        p.appendChild(el("p", "desc", u.blurb));
+        const counts = el("ul", "counts");
+        [["Applications", u.services.length],
+         ["Chat tools", u.services.reduce((n, v) => n + v.tools.length, 0)],
+         ["Routines", u.routines.length],
+         ["Memories", u.memories.length],
+         ["Wiki pages", u.wikiCount],
+         ["Skills", u.skills.length]].forEach(([k, n]) => {
+          const li = el("li", null, k);
+          li.appendChild(el("b", null, String(n)));
+          counts.appendChild(li);
+        });
+        p.appendChild(counts);
+      });
+    }
+    function showRoutine(rt) {
+      const t = rt.ag === "ext"
+        ? { cls: "ext", text: "ObsidianWikiAgent · federated in" } : tag;
+      show("routine", rt.display_name, t, p => {
+        p.appendChild(el("div", "meta", rt.human_schedule +
+          (rt.next_run ? " · next " + fmtTs(rt.next_run) : "")));
+        const line = el("p", "desc");
+        if (rt.last_run) {
+          line.appendChild(document.createTextNode("Last run " + fmtTs(rt.last_run.start) + " — "));
+          line.appendChild(el("span", rt.last_run.status === "success" ? "status-ok" : "status-bad",
+            rt.last_run.status));
+          if (rt.last_run.duration_s != null)
+            line.appendChild(document.createTextNode(` in ${rt.last_run.duration_s}s`));
+        } else line.textContent = "No runs recorded yet.";
+        p.appendChild(line);
+        if (rt.uses.length) p.appendChild(el("div", "meta", "talks to: " + rt.uses.join(", ")));
+        else p.appendChild(el("div", "meta",
+          "talks to: nothing recorded — its ROUTINE_USES entry is empty"));
+      });
+    }
+    function showService(v) {
+      show("application", v.label, tag, p => {
+        if (!v.tools.length) {
+          p.appendChild(el("p", "desc", u.key === "scribe"
+            ? "Scribe reaches this on a schedule. It is not a chat tool, because " +
+              "Scribe has no tool registry at all."
+            : "Used by scheduled routines only — no chat tools."));
+        }
+        const ul = el("ul", "tool-list");
+        v.tools.forEach(t => {
+          const li = el("li");
+          li.appendChild(el("span", "tname", t.name));
+          if (t.mutates) li.appendChild(el("span", "wbadge", "write"));
+          ul.appendChild(li);
+        });
+        if (v.tools.length) p.appendChild(ul);
+        const linked = serviceRoutines[v.key] || [];
+        if (linked.length) p.appendChild(el("div", "meta", "used by: " + linked.join(", ")));
+      });
+    }
+    function showTool(v, t) {
+      show("tool", t.name, tag, p => {
+        p.appendChild(el("div", "meta", v.label +
+          (t.mutates ? " · write action (confirmation-gated)" : " · read-only")));
+        p.appendChild(el("p", "desc", t.description));
+      });
+    }
+    function showSkill(sk) {
+      show("skill", sk.name, tag, p => {
+        if (sk.description) p.appendChild(el("p", "desc", sk.description));
+        p.appendChild(el("pre", null, sk.body));
+      });
+    }
+    function showMemory(m) {
+      show("memory", m.category || "memory", tag, p => {
+        p.appendChild(el("div", "meta", `${m.scope} · saved ${fmtTs(m.created)}`));
+        p.appendChild(el("p", "desc", m.text));
+      });
+    }
+    function showWikiPage(name) {
+      show("wiki page", name, tag, p => p.appendChild(el("p", "desc",
+        "A page in the learnings wiki. Scribe drops the raw notes, " +
+        "ObsidianWikiAgent files them, Wren reads them.")));
+    }
+    function showEmptyBand(title, why) {
+      show("empty band", title, tag, p => p.appendChild(el("p", "desc", why)));
+    }
+
+    // ---------------- rings + titles
+    const rings = s("g");
+    rings.appendChild(s("circle", { cx: C, cy: C, r: R.apps, fill: "none",
+      stroke: u.color, "stroke-width": 1, opacity: .45 }));
+    rings.appendChild(s("circle", { cx: C, cy: C, r: R.routines, fill: "none",
+      stroke: "#c9a34a", "stroke-width": 1, opacity: .4 }));
+    const orbit = s("g", { class: "skills-orbit" });
+    orbit.appendChild(s("circle", { cx: C, cy: C, r: R.skills, fill: "none", stroke: "#d98d4a",
+      "stroke-width": 1.6, opacity: u.skills.length ? .5 : .18, "stroke-dasharray": "2 8" }));
+    orbit.appendChild(s("circle", { cx: C, cy: C, r: R.skills - 14, fill: "none", stroke: "#d98d4a",
+      "stroke-width": 1.2, opacity: u.skills.length ? .3 : .12, "stroke-dasharray": "2 10" }));
+    rings.appendChild(orbit);
+    function ringTitle(cls, r, text, empty, why) {
+      const t = s("text", { class: "ring-title " + cls + (empty ? " empty" : ""),
+        x: C, y: C - r }, text);
+      if (empty) { t.style.cursor = "pointer"; t.addEventListener("click", () => showEmptyBand(text, why)); }
+      rings.appendChild(t);
+    }
+    ringTitle("apps", R.apps + 32, "APPLICATIONS");
+    ringTitle("routines", R.routines + 20, "ROUTINES");
+    ringTitle("memory", R.memIn + (R.memRows - 1) * R.memRowStep + 26,
+      u.key === "scribe" ? "WRITES" : "MEMORY", false);
+    ringTitle("skills", R.skills + 22, u.skills.length ? "SKILLS" : "SKILLS — NONE",
+      !u.skills.length,
+      "Skills are procedures Wren writes down for herself and reads back later. " +
+      "Scribe has none, and cannot: it has no tool registry, so nothing can call " +
+      "write_skill. Its procedure is its Python.");
+    svg.appendChild(rings);
+
+    // ---------------- edges (drawn under everything)
+    const gEdges = s("g");
+    const serviceAngles = new Map();
+    u.services.forEach((v, i) =>
+      serviceAngles.set(v.key, TOP + ((i + 0.5) * 2 * Math.PI) / Math.max(u.services.length, 1)));
+    const routineAngles = new Map();
+    u.routines.forEach((rt, i) =>
+      routineAngles.set(rt.key, TOP + ((i + 0.5) * 2 * Math.PI) / Math.max(u.routines.length, 1)));
+    u.routines.forEach(rt => {
+      const a1 = routineAngles.get(rt.key);
+      const [x1, y1] = polar(R.routines, a1);
+      rt.uses.forEach(k => {
+        const a2 = serviceAngles.get(k);
+        if (a2 === undefined) return;
+        const [x2, y2] = polar(R.apps, a2);
+        let da = a2 - a1;
+        if (da > Math.PI) da -= 2 * Math.PI;
+        if (da < -Math.PI) da += 2 * Math.PI;
+        const [cx, cy] = polar(R.apps - 30, a1 + da / 2);
+        const path = s("path", { class: "edge", d: `M ${x1} ${y1} Q ${cx} ${cy} ${x2} ${y2}` });
+        path.dataset.r = rt.key; path.dataset.s = k;
+        edges.push(path); gEdges.appendChild(path);
+      });
+    });
+    svg.appendChild(gEdges);
+
+    // ---------------- skills orbit
+    if (u.skills.length) {
+      const g = s("g");
+      u.skills.forEach((sk, i) => {
+        const a = TOP + (i * 2 * Math.PI) / u.skills.length;
+        const [x, y] = polar(R.skills, a);
+        const n = nodeG();
+        n.appendChild(s("circle", { cx: x, cy: y, r: 7, fill: "#e8853a" }));
+        n.appendChild(s("text", { class: "node-label", x, y: y + 22 }, sk.name));
+        n.addEventListener("click", ev => { ev.stopPropagation(); showSkill(sk); });
+        g.appendChild(n);
+      });
+      svg.appendChild(g);
+    }
+
+    // ---------------- memory band (Wren) / writes band (Scribe)
+    const gMem = s("g");
+    if (u.key === "scribe") {
+      u.writes.forEach((w, i) => {
+        const a = TOP + 0.4 + (i * 2 * Math.PI) / u.writes.length;
+        const [x, y] = polar(R.memIn + 40, a);
+        const n = nodeG();
+        n.appendChild(s("circle", { cx: x, cy: y, r: 6, fill: "none",
+          stroke: AG_COLOR.scribe, "stroke-width": 1.6 }));
+        n.appendChild(s("text", { class: "node-sublabel", x, y: y + 20 }, w));
+        gMem.appendChild(n);
+      });
+    } else {
+      const groups = new Map();
+      u.memories.forEach(m => {
+        const k = m.category || "uncategorized";
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k).push({ kind: "memory", item: m });
+      });
+      if (u.wiki.length) groups.set("wiki", u.wiki.map(p => ({ kind: "wiki", item: p })));
+      const total = [...groups.values()].reduce((n, v) => n + v.length, 0) || 1;
+      const GAP = 0.06;
+      const shares = [...groups.entries()].map(([k, items]) =>
+        [k, items, Math.max(items.length / total, 0.055)]);
+      const sum = shares.reduce((n, x) => n + x[2], 0);
+      const usable = 2 * Math.PI - GAP * shares.length;
+      let angle = TOP + 0.35 + GAP / 2;
+      shares.forEach(([k, items, share]) => {
+        const span = (share / sum) * usable;
+        const color = MEM[k] || MEM.other;
+        items.forEach((entry, j) => {
+          const a = angle + ((j + 0.5) * span) / items.length;
+          const [x, y] = polar(R.memIn + (j % R.memRows) * R.memRowStep, a);
+          const n = nodeG();
+          n.appendChild(s("circle", { cx: x, cy: y, r: entry.kind === "wiki" ? 3 : 4.5,
+            fill: color, opacity: entry.kind === "wiki" ? .55 : .95 }));
+          n.addEventListener("click", ev => {
+            ev.stopPropagation();
+            entry.kind === "wiki" ? showWikiPage(entry.item) : showMemory(entry.item);
+          });
+          gMem.appendChild(n);
+        });
+        const [lx, ly] = polar(R.catLabel, angle + span / 2);
+        gMem.appendChild(s("text", { class: "cat-label", x: lx, y: ly, fill: color },
+          k.toUpperCase()));
+        angle += span + GAP;
+      });
+    }
+    svg.appendChild(gMem);
+
+    // ---------------- routines ring
+    const gR = s("g");
+    u.routines.forEach(rt => {
+      const [x, y] = polar(R.routines, routineAngles.get(rt.key));
+      const n = nodeG();
+      n.appendChild(s("circle", { cx: x, cy: y, r: 9,
+        fill: rt.ag === "ext" ? AG_COLOR.ext : "#e3b341" }));
+      const st = rt.last_run ? rt.last_run.status : null;
+      n.appendChild(s("circle", { cx: x + 10, cy: y - 10, r: 3.2,
+        fill: st === "success" ? "#4ade80" : st ? "#f87171" : "#565d75" }));
+      n.appendChild(s("text", { class: "node-label", x, y: y + 25 }, rt.display_name));
+      n.appendChild(s("text", { class: "node-sublabel", x, y: y + 39 }, rt.human_schedule));
+      n.addEventListener("click", ev => { ev.stopPropagation(); showRoutine(rt); });
+      n.addEventListener("mouseenter", () => setFocus(new Set([rt.key]), new Set(rt.uses)));
+      n.addEventListener("mouseleave", clearFocus);
+      routineGroups.set(rt.key, n);
+      gR.appendChild(n);
+    });
+    svg.appendChild(gR);
+
+    // ---------------- applications ring
+    const gA = s("g");
+    u.services.forEach(v => {
+      const a = serviceAngles.get(v.key);
+      const [x, y] = polar(R.apps, a);
+      const n = nodeG();
+      n.appendChild(s("polygon", {
+        points: [0, 1, 2, 3, 4, 5].map(i => {
+          const t = -Math.PI / 2 + (i * Math.PI) / 3;
+          return `${x + 17 * Math.cos(t)},${y + 17 * Math.sin(t)}`;
+        }).join(" "),
+        fill: "#101a38", stroke: u.color, "stroke-width": 1.4,
+      }));
+      n.appendChild(s("text", { x, y: y + 4.5, fill: u.color, "font-size": "12",
+        "font-weight": "700", "text-anchor": "middle" }, v.label.slice(0, 1)));
+      const [lx, ly] = polar(R.appLabel, a);
+      n.appendChild(s("text", { class: "node-label", x: lx, y: ly + 4 }, v.label));
+      v.tools.forEach((t, j) => {
+        const ta = a + (j - (v.tools.length - 1) / 2) * 0.052;
+        const [tx, ty] = polar(R.satellites, ta);
+        const tn = nodeG();
+        tn.appendChild(t.mutates
+          ? s("rect", { x: tx - 3.4, y: ty - 3.4, width: 6.8, height: 6.8,
+              transform: `rotate(45 ${tx} ${ty})`, fill: "none", stroke: "#8fb0f0", "stroke-width": 1.3 })
+          : s("circle", { cx: tx, cy: ty, r: 3.4, fill: "#4d7fe3", opacity: .9 }));
+        tn.addEventListener("click", ev => { ev.stopPropagation(); showTool(v, t); });
+        n.appendChild(tn);
+      });
+      n.addEventListener("click", ev => { ev.stopPropagation(); showService(v); });
+      n.addEventListener("mouseenter", () => setFocus(new Set(serviceRoutines[v.key] || []), new Set([v.key])));
+      n.addEventListener("mouseleave", clearFocus);
+      serviceGroups.set(v.key, n);
+      gA.appendChild(n);
+    });
+    svg.appendChild(gA);
+
+    // ---------------- the sun
+    const centre = nodeG();
+    centre.appendChild(s("circle", { class: "center-halo", cx: C, cy: C, r: R.center + 12,
+      fill: u.color, opacity: .3 }));
+    centre.appendChild(s("circle", { cx: C, cy: C, r: R.center, fill: "#12162e",
+      stroke: u.color, "stroke-width": 1.4 }));
+    centre.appendChild(s("text", { x: C, y: C + 1, fill: "#e8eaf2", "font-size": "18",
+      "font-weight": "700", "letter-spacing": "0.22em", "text-anchor": "middle" }, u.name));
+    centre.appendChild(s("text", { x: C, y: C + 22, class: "node-sublabel" }, u.model));
+    centre.addEventListener("click", ev => { ev.stopPropagation(); showOverview(); });
+    svg.appendChild(centre);
+
+    svg.addEventListener("click", ev => { if (ev.target === svg) { clearFocus(); showOverview(); } });
+
+    stage.textContent = "";
+    stage.appendChild(toggle);
+    stage.appendChild(svg);
+    showOverview();
+  }
+
+  // ------------------------------------------------ the toggle itself
+  function currentAgent() {
+    return new URLSearchParams(location.search).get("agent") === "scribe" ? "scribe" : "wren";
+  }
+  function pick(key) {
+    const url = new URL(location.href);
+    url.searchParams.set("agent", key);
+    history.replaceState(null, "", url);
+    build();
+  }
+  function build() {
+    const now = currentAgent();
+    toggle.textContent = "";
+    toggle.appendChild(el("span", "vd-label", "viewing"));
+    [["wren", "Wren"], ["scribe", "Scribe"]].forEach(([k, name]) => {
+      const b = el("button", "vd-pill " + k + (k === now ? " on" : ""), name);
+      b.onclick = () => pick(k);
+      toggle.appendChild(b);
+    });
+    draw(now);
+  }
+  build();
+  return wrap;
+}
+
+const VARIANTS = [
+  ["A", "Two suns", variantA],
+  ["B", "The pipeline", variantB],
+  ["C", "The ledger", variantC],
+  ["D", "One sun at a time", variantD],
+];
+let DATA = null;
+
+function current() {
+  const v = (new URLSearchParams(location.search).get("variant") || "A").toUpperCase();
+  return VARIANTS.some(x => x[0] === v) ? v : "A";
+}
+function go(key) {
+  const u = new URL(location.href);
+  u.searchParams.set("variant", key);
+  history.replaceState(null, "", u);
+  render();
+}
+function cycle(step) {
+  const i = VARIANTS.findIndex(x => x[0] === current());
+  go(VARIANTS[(i + step + VARIANTS.length) % VARIANTS.length][0]);
+}
+function render() {
+  const key = current();
+  const [, name, fn] = VARIANTS.find(x => x[0] === key);
+  const stage = document.getElementById("stage");
+  stage.textContent = "";
+  if (DATA) stage.appendChild(fn(DATA));
+
+  const bar = document.getElementById("bar");
+  bar.textContent = "";
+  const prev = el("button", null, "←"); prev.onclick = () => cycle(-1);
+  const next = el("button", null, "→"); next.onclick = () => cycle(1);
+  const lab = el("div", "lab");
+  lab.appendChild(document.createTextNode(key + " — " + name + "  "));
+  lab.appendChild(el("em", null, DATA
+    ? `${DATA.routines.length} routines · ${DATA.services.length} apps`
+    : "no data"));
+  bar.appendChild(prev); bar.appendChild(lab); bar.appendChild(next);
+}
+document.addEventListener("keydown", e => {
+  const t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+  if (e.key === "ArrowLeft") cycle(-1);
+  if (e.key === "ArrowRight") cycle(1);
+});
+
+fetch("/api/system_map").then(r => {
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}).then(d => { DATA = d; render(); }).catch(e => {
+  document.getElementById("stage").textContent = "";
+  const box = el("div", "err");
+  box.appendChild(el("div", null, "Could not load /api/system_map (" + e.message + ")."));
+  box.appendChild(el("div", null, "Open /map first so the login cookie is set, then reload this page."));
+  document.getElementById("stage").appendChild(box);
+  render();
+});
+</script>
+</body>
+</html>
