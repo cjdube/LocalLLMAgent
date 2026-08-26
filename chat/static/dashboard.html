@@ -120,6 +120,10 @@
   .house-head:hover { filter: brightness(0.985); }
   .house-head .caret { font-size: 15px; line-height: 1; color: var(--ag-fg); width: 15px; flex-shrink: 0; padding-top: 10px; opacity: .8; }
   .house-head .mark { width: 34px; height: 34px; border-radius: 9px; background: var(--ag); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 15px; flex-shrink: 0; }
+  /* An agent with a face drops the coloured tile — its icon already carries the
+     background, and it is the same square /map and the browser tab both use. */
+  .house-head .mark.face { background: none; overflow: hidden; }
+  .house-head .mark.face img { width: 100%; height: 100%; display: block; }
   .house-head h3 { margin: 0; font-size: 15px; color: var(--ag-fg); }
   .house-head .role { font-size: 12px; color: #4b5563; margin-top: 2px; }
   .house-head .slow { font-size: 11px; color: #6b7280; margin-top: 3px; }
@@ -396,8 +400,11 @@ async function loadVaultHealth() {
 // sorted by time said nothing about who owns what. Each owner gets a box
 // holding its own duration charts and its own table, foldable down to a header.
 const AGENTS = {
-  wren:      { name: "Wren",      letter: "W", role: "reads the record, acts on request" },
-  scribejay: { name: "ScribeJay", letter: "S", role: "writes the record — journaling only" },
+  // Only the two agents have an icon. Federated and Always-on are groupings
+  // rather than agents, so they keep the lettered tile and there is nothing to
+  // draw for them.
+  wren:      { name: "Wren",      letter: "W", icon: "/static/favicon.svg",  role: "reads the record, acts on request" },
+  scribejay: { name: "ScribeJay", letter: "S", icon: "/static/scribejay.svg", role: "writes the record — journaling only" },
   external:  { name: "Federated", letter: "F", role: "another repo's jobs, reported here only" },
   daemon:    { name: "Always-on", letter: "∞", role: "daemons and pollers — no schedule, no run history" },
 };
@@ -453,6 +460,17 @@ async function loadTasks() {
   syncFoldAll();
 }
 
+// The tile at the head of a box: the agent's icon where there is one, the
+// lettered square otherwise.
+function agentMark(meta) {
+  if (!meta.icon) return el("div", "mark", meta.letter);
+  const tile = el("div", "mark face");
+  const img = el("img");
+  img.src = meta.icon;
+  img.alt = "";
+  tile.appendChild(img);
+  return tile;
+}
 function agentBox(key, tasks, statsByKey, days) {
   const meta = AGENTS[key];
   const stats = tasks.map(t => statsByKey[t.key]).filter(Boolean);
@@ -461,7 +479,7 @@ function agentBox(key, tasks, statsByKey, days) {
   const head = el("div", "house-head");
   const caret = el("div", "caret");
   head.appendChild(caret);
-  head.appendChild(el("div", "mark", meta.letter));
+  head.appendChild(agentMark(meta));
 
   const who = el("div");
   who.appendChild(el("h3", null, meta.name));
