@@ -48,10 +48,10 @@ empty) `TASK_ONLY_SCHEMAS` allowlist.
 
 The `activity` group — `fetch_strava`, `fetch_chrome_history`,
 `fetch_liked_videos` — and `recolor_event` left the registry entirely when
-journaling moved to Scribe ([scribe.md](scribe.md)): capture is Scribe's job,
+journaling moved to ScribeJay ([scribejay.md](scribejay.md)): capture is ScribeJay's job,
 and Wren reads what it wrote through the calendar and the wiki instead. Those
 three modules stay in `agent/tools/` as plain libraries with no `TOOL_SCHEMA`,
-guarded by `test_scribe_capture_modules_expose_no_tool_schema` and
+guarded by `test_scribejay_capture_modules_expose_no_tool_schema` and
 `test_capture_tools_are_absent_from_wrens_registry`, so re-adding a schema there
 without registering it fails loudly rather than sitting unreachable for months
 the way `fetch_liked_videos` did.

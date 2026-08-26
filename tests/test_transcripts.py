@@ -1,4 +1,4 @@
-"""Tests for scribe/transcripts.py — parsing Claude Code session logs and the
+"""Tests for scribejay/transcripts.py — parsing Claude Code session logs and the
 Gemini drop folder. Both sources are redirected to tmp_path by conftest, so these
 never touch the real ~/.claude transcripts or the user's vault."""
 
@@ -7,7 +7,7 @@ import os
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from scribe import transcripts as ct
+from scribejay import transcripts as ct
 
 DAY = date(2024, 6, 1)
 START = datetime(2024, 6, 1, 0, 0, 0, tzinfo=timezone.utc)

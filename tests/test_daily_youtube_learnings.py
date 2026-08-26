@@ -1,4 +1,4 @@
-"""Tests for scribe/daily_youtube_learnings.py — main() drafts a synthesis, appends
+"""Tests for scribejay/daily_youtube_learnings.py — main() drafts a synthesis, appends
 the deterministic video list, and persists a Daily-YouTube entry; a day with no
 Liked videos writes nothing. Collaborators are monkeypatched; no model, YouTube,
 vault, or Gmail access."""
@@ -6,13 +6,13 @@ vault, or Gmail access."""
 import pytest
 
 from chat.insights import _is_run_success
-from scribe import daily_youtube_learnings as yt
+from scribejay import daily_youtube_learnings as yt
 
 
 @pytest.fixture
 def stubbed_run(monkeypatch):
     seen = {"persists": []}
-    monkeypatch.setattr(yt, "scribe_backend", lambda key: None)
+    monkeypatch.setattr(yt, "scribejay_backend", lambda key: None)
     monkeypatch.setattr(yt, "warm_model", lambda **k: True)
     monkeypatch.setattr(yt, "complete_text",
                         lambda **k: "## YouTube Learnings: July 12, 2026\n\n### Themes Explored\n- **Git:** internals")

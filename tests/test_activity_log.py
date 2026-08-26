@@ -1,5 +1,5 @@
 """Tests for agent/activity_log.py — the prior-day range math, the source
-compaction and its exclusions, and the persist-or-email fallback that Scribe's
+compaction and its exclusions, and the persist-or-email fallback that ScribeJay's
 journal entries and tasks/daily_synthesis.py share. Collaborators are
 monkeypatched; nothing touches the model, the vault, or Gmail.
 

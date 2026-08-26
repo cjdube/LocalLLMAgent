@@ -2,7 +2,7 @@
 run by launchd every day at 5pm, covering the day that just ended.
 
 Usage:
-    python -m scribe.calendar_colorizer
+    python -m scribejay.calendar_colorizer
 """
 
 import json
@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent import prefs
 from agent.loop import complete_text, warm_model
-from scribe.model import backend as scribe_backend, log_backend
+from scribejay.model import backend as scribejay_backend, log_backend
 from agent.tools.calendar import (
     CATEGORY_COLORS,
     SESSION_BLOCK_SOURCE_PREFIX,
@@ -142,7 +142,7 @@ def main() -> int:
         events = [
             e for e in events_result.get("events", [])
             if e.get("summary") and e.get("status") != "cancelled"
-            # scribe/claude_time_blocks.py logged these hours earlier the same
+            # scribejay/claude_time_blocks.py logged these hours earlier the same
             # morning, already colored. This run always re-classifies — even
             # events colored by a previous run or by hand — so without this skip
             # it would guess a category from the title and overwrite that color.
@@ -161,7 +161,7 @@ def main() -> int:
         # return above, so a quiet day doesn't pay the ~17GB load for nothing —
         # rather than letting the load and the prefill stack inside the streamed
         # call's read timeout.
-        backend = scribe_backend("calendar_colorizer")
+        backend = scribejay_backend("calendar_colorizer")
         log_backend(logger, "calendar_colorizer", backend)
         warm_model(logger=logger, backend=backend)
         raw_response = complete_text(
@@ -184,7 +184,7 @@ def main() -> int:
         try:
             send_email(
                 subject="Calendar colorizer run failed",
-                body=f"scribe.calendar_colorizer raised an exception:\n\n{e}",
+                body=f"scribejay.calendar_colorizer raised an exception:\n\n{e}",
             )
         except Exception:
             pass

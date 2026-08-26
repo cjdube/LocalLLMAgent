@@ -1,4 +1,4 @@
-"""Tests for scribe/claude_time_blocks.py — the timeline segmentation, the entry
+"""Tests for scribejay/claude_time_blocks.py — the timeline segmentation, the entry
 text Python owns, and the calendar write's idempotency key. The model call, the
 model pre-load, the calendar write and the push are all monkeypatched; nothing
 touches the network.
@@ -15,8 +15,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from scribe import transcripts as ct
-from scribe import claude_time_blocks as ctb
+from scribejay import transcripts as ct
+from scribejay import claude_time_blocks as ctb
 
 _LOGGER = logging.getLogger("test_claude_time_blocks")
 

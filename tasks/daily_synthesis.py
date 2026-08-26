@@ -239,7 +239,7 @@ def _match(a_tokens: set, b_tokens: set) -> dict | None:
 
 
 def _ai_chat_signals(day, logger) -> list:
-    """Yesterday's AI-agent chats, read from the daily log scribe/ai_chat_learnings.py
+    """Yesterday's AI-agent chats, read from the daily log scribejay/ai_chat_learnings.py
     writes at 4:30 AM (this task runs at 5:45).
 
     Deliberately the distilled file rather than the raw transcripts: a session's

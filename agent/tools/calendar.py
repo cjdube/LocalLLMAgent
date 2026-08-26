@@ -22,7 +22,7 @@ from agent.tools.google_auth import build_service
 _ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(_ROOT / "config" / ".env")
 
-# source_id prefix for the events scribe/claude_time_blocks.py logs. It lives here,
+# source_id prefix for the events scribejay/claude_time_blocks.py logs. It lives here,
 # next to log_calendar_event (which owns source_id), so the writer and the
 # colorizer that must leave those events alone can share it without either task
 # importing the other.
@@ -66,8 +66,8 @@ LOG_TOOL_SCHEMA = {
 }
 
 # get_events_by_date's own budget. Only the chat path is capped;
-# get_events_in_range stays whole for scribe/calendar_colorizer.py and
-# scribe/daily_chrome_learnings.py, which need every event and have no context
+# get_events_in_range stays whole for scribejay/calendar_colorizer.py and
+# scribejay/daily_chrome_learnings.py, which need every event and have no context
 # window to protect. Measured on the real calendar: ~3.2 events a day, so the
 # old uncapped result blew the 8000-char tool-result cap at about ten days —
 # a 7-week ask returned 181 events and 39KB, of which the model saw a fifth and
@@ -82,11 +82,11 @@ MAX_CHAT_EVENT_CHARS = 6000
 
 # Carried by get_events_in_range for the colorizer and the learnings task. Chat
 # needs none of them, and at ~90 chars an event they were most of the overflow.
-# `id` stays: scribe/calendar_colorizer.py patches events by id.
+# `id` stays: scribejay/calendar_colorizer.py patches events by id.
 _TASK_ONLY_EVENT_FIELDS = ("colorId", "status", "source_id")
 
 # Single source of truth for category -> (colorId, color name), defined in
-# config/preferences.json. Also used by scribe/calendar_colorizer.py to build
+# config/preferences.json. Also used by scribejay/calendar_colorizer.py to build
 # its classification prompt.
 CATEGORY_COLORS = {
     c["name"]: (c["color_id"], c["color_name"]) for c in prefs.calendar_categories()
@@ -133,7 +133,7 @@ def get_upcoming_events(hours_ahead: int = 24) -> dict:
 
 def get_events_in_range(time_min: str, time_max: str) -> dict:
     """List events between two ISO 8601 datetimes (inclusive), with colorId —
-    used by scribe/daily_chrome_learnings.py to categorize the prior day's events.
+    used by scribejay/daily_chrome_learnings.py to categorize the prior day's events.
 
     Does NOT page: no maxResults, no pageToken loop, so Google's default page
     size of 250 is a silent ceiling — a wider range returns exactly 250 events
@@ -176,7 +176,7 @@ def get_events_in_range(time_min: str, time_max: str) -> dict:
             "status": e.get("status"),
             # The id log_calendar_event stamped on events Wren created, so a
             # caller can tell its own writes apart from the user's (None for a
-            # hand-made event). scribe/calendar_colorizer.py uses it to skip the
+            # hand-made event). scribejay/calendar_colorizer.py uses it to skip the
             # session blocks, which arrive already colored.
             "source_id": e.get("extendedProperties", {}).get("private", {}).get("source_id"),
         })
@@ -346,7 +346,7 @@ def log_calendar_event(
 
 def set_event_color(event_id: str, color_id: str) -> dict:
     """Patch just the colorId of an existing event — used by
-    scribe/calendar_colorizer.py to recolor yesterday's events by category."""
+    scribejay/calendar_colorizer.py to recolor yesterday's events by category."""
     calendar_id = os.getenv("GOOGLE_CALENDAR_ID", "primary")
 
     try:

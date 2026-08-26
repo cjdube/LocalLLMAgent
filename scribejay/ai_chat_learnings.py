@@ -11,11 +11,11 @@ clean).
 
 Neither Claude nor Gemini exposes an API to fetch past conversations, so the
 sources are what lands on disk: Claude Code's local session logs, and a folder
-the user drops Gemini exports into (see scribe/transcripts.py).
+the user drops Gemini exports into (see scribejay/transcripts.py).
 
 Usage:
-    python -m scribe.ai_chat_learnings                 # yesterday (Claude + Gemini)
-    python -m scribe.ai_chat_learnings --backfill 14   # each of the last 14 days
+    python -m scribejay.ai_chat_learnings                 # yesterday (Claude + Gemini)
+    python -m scribejay.ai_chat_learnings --backfill 14   # each of the last 14 days
 """
 
 import argparse
@@ -29,10 +29,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent import prefs
 from agent.loop import complete_text, warm_model
-from scribe.model import backend as scribe_backend, log_backend
+from scribejay.model import backend as scribejay_backend, log_backend
 from agent.store import atomic_write_json, load_json, locked
 from agent.tools.calendar import _local_timezone
-from scribe.transcripts import DEFAULT_MAX_CHARS, fetch_claude_sessions, fetch_gemini_chats
+from scribejay.transcripts import DEFAULT_MAX_CHARS, fetch_claude_sessions, fetch_gemini_chats
 from tasks._common import notify_failure, setup_logger
 from agent.activity_log import persist_or_email, prior_day
 
@@ -154,7 +154,7 @@ def main() -> int:
 
     try:
         max_chars = int(os.getenv("AI_CHAT_LEARNINGS_MAX_CHARS", DEFAULT_MAX_CHARS))
-        backend = scribe_backend("ai_chat_learnings")
+        backend = scribejay_backend("ai_chat_learnings")
         log_backend(logger, "ai_chat_learnings", backend)
         warm_model(logger=logger, backend=backend)
 

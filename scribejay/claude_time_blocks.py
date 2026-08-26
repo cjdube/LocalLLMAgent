@@ -16,14 +16,14 @@ all.
 Python owns the timeline, the rounding, the titles' structure and the descriptions;
 the model only writes the phrase that says what the stretch was about.
 
-Companion to scribe/ai_chat_learnings.py, not part of it: the learnings review is
+Companion to scribejay/ai_chat_learnings.py, not part of it: the learnings review is
 worth having whether or not you track time.
 
 Usage:
-    python -m scribe.claude_time_blocks                    # yesterday
-    python -m scribe.claude_time_blocks --dry-run          # show the blocks, write nothing
-    python -m scribe.claude_time_blocks --date 2026-08-05  # one specific day
-    python -m scribe.claude_time_blocks --backfill 7       # each of the last 7 days
+    python -m scribejay.claude_time_blocks                    # yesterday
+    python -m scribejay.claude_time_blocks --dry-run          # show the blocks, write nothing
+    python -m scribejay.claude_time_blocks --date 2026-08-05  # one specific day
+    python -m scribejay.claude_time_blocks --backfill 7       # each of the last 7 days
 """
 
 import argparse
@@ -37,13 +37,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent import prefs
 from agent.loop import complete_text, warm_model
-from scribe.model import backend as scribe_backend, log_backend
+from scribejay.model import backend as scribejay_backend, log_backend
 from agent.tools.calendar import (
     SESSION_BLOCK_SOURCE_PREFIX,
     _local_timezone,
     log_calendar_event,
 )
-from scribe.transcripts import _compact, fetch_session_activity
+from scribejay.transcripts import _compact, fetch_session_activity
 from tasks._common import notify_failure, setup_logger
 from agent.activity_log import prior_day
 
@@ -256,7 +256,7 @@ def main() -> int:
         gap = int(os.getenv("WREN_SESSION_BLOCK_GAP_MINUTES", DEFAULT_GAP_MINUTES))
         min_minutes = int(os.getenv("WREN_SESSION_BLOCK_MIN_MINUTES", DEFAULT_MIN_MINUTES))
         max_chars = int(os.getenv("WREN_SESSION_BLOCK_MAX_CHARS", DEFAULT_MAX_CHARS))
-        backend = scribe_backend("claude_time_blocks")
+        backend = scribejay_backend("claude_time_blocks")
         log_backend(logger, "claude_time_blocks", backend)
 
         # Loaded lazily and once: a quiet day shouldn't pay for a ~17GB model load,

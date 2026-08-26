@@ -1,11 +1,11 @@
-"""Which LLM backend Scribe's tasks run on.
+"""Which LLM backend ScribeJay's tasks run on.
 
 Deliberately its OWN environment chain, separate from Wren's `WREN_*` variables:
-Scribe is a second agent with a second model dial, and the whole reason the split
+ScribeJay is a second agent with a second model dial, and the whole reason the split
 exists is so the journal can be pointed somewhere else (a free OpenRouter model,
 say) without touching what chat runs on.
 
-    SCRIBE_<TASK_KEY>_BACKEND  ->  SCRIBE_LLM_BACKEND  ->  None
+    SCRIBEJAY_<TASK_KEY>_BACKEND  ->  SCRIBEJAY_LLM_BACKEND  ->  None
 
 `None` means "no opinion", which agent.loop._llm_chat resolves to local Ollama —
 the local-first default.
@@ -18,7 +18,7 @@ that quietly drops to the small local model loses whole sections of its draft
 rather than erroring.
 
 Usage:
-    from scribe.model import backend, log_backend
+    from scribejay.model import backend, log_backend
     b = backend("daily_chrome_learnings")
     log_backend(logger, "daily_chrome_learnings", b)
 """
@@ -27,10 +27,10 @@ import os
 
 
 def backend(task_key: str) -> str | None:
-    """SCRIBE_<TASK_KEY>_BACKEND, else SCRIBE_LLM_BACKEND, else None."""
+    """SCRIBEJAY_<TASK_KEY>_BACKEND, else SCRIBEJAY_LLM_BACKEND, else None."""
     return (
-        os.getenv(f"SCRIBE_{task_key.upper()}_BACKEND")
-        or os.getenv("SCRIBE_LLM_BACKEND")
+        os.getenv(f"SCRIBEJAY_{task_key.upper()}_BACKEND")
+        or os.getenv("SCRIBEJAY_LLM_BACKEND")
         or None
     )
 
@@ -42,10 +42,10 @@ def log_backend(logger, task_key: str, resolved: str | None) -> None:
     unset variable is not an error, it is just a different (smaller) model, and
     the only visible symptom is a thinner draft nobody compares against
     yesterday's."""
-    if os.getenv(f"SCRIBE_{task_key.upper()}_BACKEND"):
-        source = f"SCRIBE_{task_key.upper()}_BACKEND"
-    elif os.getenv("SCRIBE_LLM_BACKEND"):
-        source = "SCRIBE_LLM_BACKEND"
+    if os.getenv(f"SCRIBEJAY_{task_key.upper()}_BACKEND"):
+        source = f"SCRIBEJAY_{task_key.upper()}_BACKEND"
+    elif os.getenv("SCRIBEJAY_LLM_BACKEND"):
+        source = "SCRIBEJAY_LLM_BACKEND"
     else:
         source = "unset"
     logger.info(f"backend: {resolved or 'ollama (default)'} (from {source})")

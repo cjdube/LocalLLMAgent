@@ -1,6 +1,6 @@
-"""Shared helpers for the daily activity reviews — Scribe's journaling entries
-(scribe/daily_chrome_learnings.py, scribe/daily_youtube_learnings.py,
-scribe/ai_chat_learnings.py) and Wren's tasks/daily_synthesis.py.
+"""Shared helpers for the daily activity reviews — ScribeJay's journaling entries
+(scribejay/daily_chrome_learnings.py, scribejay/daily_youtube_learnings.py,
+scribejay/ai_chat_learnings.py) and Wren's tasks/daily_synthesis.py.
 
 They all follow the same shape — resolve the prior day, compact the fetched data
 to bound the prompt for the small local model, draft with the model, then persist
@@ -8,10 +8,10 @@ to the Obsidian vault (emailing the draft if the vault write fails so an entry i
 never silently lost). This module holds the pieces they share.
 
 It lives in agent/ rather than in either caller precisely BECAUSE both agents use
-it: Scribe must never import from tasks/, and Wren must never import from
-scribe/, so anything they both need belongs to the shared substrate. Journaling-
+it: ScribeJay must never import from tasks/, and Wren must never import from
+scribejay/, so anything they both need belongs to the shared substrate. Journaling-
 only rendering (the Liked-videos list, the empty-draft check) is not here — it is
-in scribe/journal.py.
+in scribejay/journal.py.
 """
 
 from datetime import datetime, timedelta

@@ -1,4 +1,4 @@
-"""Tests for scribe/ai_chat_learnings.py — main() summarizes each Claude session and
+"""Tests for scribejay/ai_chat_learnings.py — main() summarizes each Claude session and
 new Gemini drop file into one dated file; empty/all-"None" days write nothing;
 --backfill runs each day separately and skips Gemini. Collaborators are stubbed;
 no model, transcript, vault, or Gmail access."""
@@ -9,14 +9,14 @@ from datetime import datetime
 import pytest
 
 from agent.store import load_json
-from scribe import ai_chat_learnings as ai
+from scribejay import ai_chat_learnings as ai
 
 
 @pytest.fixture
 def stubbed(monkeypatch):
     seen = {"persists": []}
     monkeypatch.setattr(sys, "argv", ["ai_chat_learnings"])  # argparse must not see pytest's argv
-    monkeypatch.setattr(ai, "scribe_backend", lambda key: None)
+    monkeypatch.setattr(ai, "scribejay_backend", lambda key: None)
     monkeypatch.setattr(ai, "warm_model", lambda **k: True)
     monkeypatch.setattr(ai, "complete_text",
                         lambda **k: "**Accomplished**\n- Built the thing\n**Learned**\n- A useful fact")

@@ -101,14 +101,14 @@
   button.btn:disabled { opacity: 0.5; cursor: default; }
 
   /* --- agent identity ---------------------------------------------------
-     One colour per owner, matching /map: Wren blue, Scribe teal, a federated
+     One colour per owner, matching /map: Wren blue, ScribeJay teal, a federated
      repo purple. Everything below — the chart line, the card tint, the header
      band — reads its colour from whichever of these the enclosing .house sets,
      so ownership is carried by the palette rather than restated in every row. */
-  .ag-wren     { --ag: #3b6fd4; --ag-bg: #eff4ff; --ag-fg: #1d4ed8; }
-  .ag-scribe   { --ag: #0d9488; --ag-bg: #effcfa; --ag-fg: #0f766e; }
-  .ag-external { --ag: #7c5cd6; --ag-bg: #f5f2ff; --ag-fg: #6d28d9; }
-  .ag-daemon   { --ag: #98a2b3; --ag-bg: #f2f4f7; --ag-fg: #667085; }
+  .ag-wren      { --ag: #3b6fd4; --ag-bg: #eff4ff; --ag-fg: #1d4ed8; }
+  .ag-scribejay { --ag: #0d9488; --ag-bg: #effcfa; --ag-fg: #0f766e; }
+  .ag-external  { --ag: #7c5cd6; --ag-bg: #f5f2ff; --ag-fg: #6d28d9; }
+  .ag-daemon    { --ag: #98a2b3; --ag-bg: #f2f4f7; --ag-fg: #667085; }
 
   /* --- one box per agent ------------------------------------------------
      The header is the whole control: click it to fold the agent away. Folded,
@@ -396,12 +396,12 @@ async function loadVaultHealth() {
 // sorted by time said nothing about who owns what. Each owner gets a box
 // holding its own duration charts and its own table, foldable down to a header.
 const AGENTS = {
-  wren:     { name: "Wren",   letter: "W", role: "reads the record, acts on request" },
-  scribe:   { name: "Scribe", letter: "S", role: "writes the record — journaling only" },
-  external: { name: "Federated", letter: "F", role: "another repo's jobs, reported here only" },
-  daemon:   { name: "Always-on", letter: "∞", role: "daemons and pollers — no schedule, no run history" },
+  wren:      { name: "Wren",      letter: "W", role: "reads the record, acts on request" },
+  scribejay: { name: "ScribeJay", letter: "S", role: "writes the record — journaling only" },
+  external:  { name: "Federated", letter: "F", role: "another repo's jobs, reported here only" },
+  daemon:    { name: "Always-on", letter: "∞", role: "daemons and pollers — no schedule, no run history" },
 };
-const AGENT_ORDER = ["wren", "scribe", "external", "daemon"];
+const AGENT_ORDER = ["wren", "scribejay", "external", "daemon"];
 
 // Which box a task belongs in. Daemons share one box whoever owns them: they
 // have no schedule and no run history, so there is nothing per-agent to show.

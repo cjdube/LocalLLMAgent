@@ -1,6 +1,6 @@
-"""Journaling-only helpers — the parts of a daily entry that are Scribe's alone.
+"""Journaling-only helpers — the parts of a daily entry that are ScribeJay's alone.
 
-Everything Scribe SHARES with Wren's tasks/daily_synthesis.py (the prior-day
+Everything ScribeJay SHARES with Wren's tasks/daily_synthesis.py (the prior-day
 window, the prompt-bounding compaction, the vault write with its email fallback)
 lives in agent/activity_log.py instead, because neither agent may import the
 other. What is here is rendering and quality-checking of a journal entry, which

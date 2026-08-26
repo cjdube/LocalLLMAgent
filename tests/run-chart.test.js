@@ -277,12 +277,12 @@ describe("driven by the page", () => {
     api.render(document.getElementById("a"),
       [task({ key: "w1", display_name: "Wren job", runs: [run(5)] })], 30);
     api.render(document.getElementById("b"),
-      [task({ key: "s1", display_name: "Scribe job", runs: [run(5)] }),
-       task({ key: "s2", display_name: "Scribe job 2", runs: [run(5)] })], 30);
+      [task({ key: "s1", display_name: "ScribeJay job", runs: [run(5)] }),
+       task({ key: "s2", display_name: "ScribeJay job 2", runs: [run(5)] })], 30);
     const names = (id) => [...document.getElementById(id).querySelectorAll(".chart-name")]
       .map((n) => n.textContent);
     expect(names("a")).toEqual(["Wren job"]);
-    expect(names("b")).toEqual(["Scribe job", "Scribe job 2"]);
+    expect(names("b")).toEqual(["ScribeJay job", "ScribeJay job 2"]);
   });
 
   test("re-rendering a mount replaces its grid rather than stacking a second", () => {

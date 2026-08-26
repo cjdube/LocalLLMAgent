@@ -127,9 +127,9 @@ from agent.tools import reminders as _reminders
 from chat import insights as _insights
 from chat import wikilint as _wikilint
 from evals import run_eval as _run_eval
-from scribe import transcripts as _chat_transcripts
+from scribejay import transcripts as _chat_transcripts
 from tasks import _common
-from scribe import ai_chat_learnings as _ai_chat_learnings
+from scribejay import ai_chat_learnings as _ai_chat_learnings
 from tasks import mail_watcher as _mail_watcher
 from tasks import morning_brief as _morning_brief
 from tasks import opportunity_digest as _opportunity_digest

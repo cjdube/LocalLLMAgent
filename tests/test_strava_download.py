@@ -1,11 +1,11 @@
-"""Tests for the deterministic Strava-to-calendar field-map in scribe.strava_download.
+"""Tests for the deterministic Strava-to-calendar field-map in scribejay.strava_download.
 
 fetch_strava and log_calendar_event are monkeypatched, so no network runs —
 the tests exercise the mapping, the overnight-rollover guard, the skip/error
 paths, and the source_id idempotency contract.
 """
 
-from scribe import strava_download
+from scribejay import strava_download
 
 
 def _activity(**overrides) -> dict:

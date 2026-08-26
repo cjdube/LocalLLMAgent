@@ -931,7 +931,7 @@ def test_api_system_map_shape(auth_client, tmp_path, monkeypatch):
     assert set(data) == {"agents", "services", "routines", "memory", "skills"}
     # Both agents ship in every payload — /map draws one at a time from them.
     assert data["agents"]["wren"]["name"] == "Wren"
-    assert data["agents"]["scribe"]["name"] == "Scribe"
+    assert data["agents"]["scribejay"]["name"] == "ScribeJay"
     # Every registered chat tool lands in exactly one service group.
     grouped = [t["name"] for s in data["services"] for t in s["tools"]]
     registered = [t["function"]["name"] for t in srv.TOOLS]
@@ -943,7 +943,7 @@ def test_api_system_map_shape(auth_client, tmp_path, monkeypatch):
     for rt in data["routines"]:
         assert set(rt) == {"key", "display_name", "human_schedule", "next_run",
                            "last_run", "uses", "agent", "writes"}
-        assert rt["agent"] in {"wren", "scribe", "external"}
+        assert rt["agent"] in {"wren", "scribejay", "external"}
 
 
 # --------------------------------------------------------------------------- #
@@ -1346,16 +1346,16 @@ def test_api_schedules_says_which_agent_owns_each_task(auth_client, monkeypatch)
     from chat import routes_dashboard
     monkeypatch.setattr(routes_dashboard, "discover_tasks", lambda: [
         _fake_task("brief", "local.wren.brief"),
-        _fake_task("strava_download", "local.scribe.stravadownload"),
+        _fake_task("strava_download", "local.scribejay.stravadownload"),
         _fake_task("wiki_ingest", "local.wiki.ingest", external=True),
         _fake_task("bg_worker", "local.wren.bgworker", is_daemon=True),
     ])
     tasks = auth_client.get("/api/schedules").get_json()["tasks"]
     assert {t["key"]: t["agent"] for t in tasks} == {
         "brief": "wren",
-        # A scribe.* label is the whole difference — the module path above still
+        # A scribejay.* label is the whole difference — the module path above still
         # says tasks.*, and the answer must not come from it.
-        "strava_download": "scribe",
+        "strava_download": "scribejay",
         "wiki_ingest": "external",
         "bg_worker": "wren",
     }

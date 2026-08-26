@@ -7,8 +7,8 @@ what was loaded, not what was engaged with. The watch-history playlist has been
 non-functional through the API since ~2016, but the Likes playlist works.
 
 Library module, not a registered chat tool. Wren stopped carrying the capture
-tools when journaling moved to Scribe (scribe/__init__.py): the callers now are
-Scribe's daily entries and Wren's tasks/daily_synthesis.py, which import the
+tools when journaling moved to ScribeJay (scribejay/__init__.py): the callers now are
+ScribeJay's daily entries and Wren's tasks/daily_synthesis.py, which import the
 function directly. There is deliberately no TOOL_SCHEMA here — if you add one
 back, register it in agent/toolset.py or tests/test_toolset.py will fail.
 
@@ -77,7 +77,7 @@ def fetch_liked_videos(start_date: str, end_date: str) -> dict:
     """Liked videos whose like-date falls within [start_date, end_date] inclusive.
 
     Dates are resolved in Python (never trusting the model to compute them);
-    explicit 'YYYY-MM-DD' strings — what scribe.daily_youtube_learnings passes — are
+    explicit 'YYYY-MM-DD' strings — what scribejay.daily_youtube_learnings passes — are
     honored as-is. Returns {"videos": [...]} or, on any failure, the same shape
     with an "error" so callers can degrade to an empty list.
     """

@@ -10,8 +10,8 @@ for AI-agent conversations and has its own doc because its sources are unusual.
 
 | Task | Schedule | Channel |
 |---|---|---|
-| `scribe/daily_chrome_learnings.py` | Daily 5:15 AM | Chrome browsing history |
-| `scribe/daily_youtube_learnings.py` | Daily 5:05 AM | YouTube Liked videos |
+| `scribejay/daily_chrome_learnings.py` | Daily 5:15 AM | Chrome browsing history |
+| `scribejay/daily_youtube_learnings.py` | Daily 5:05 AM | YouTube Liked videos |
 
 ## Chrome
 

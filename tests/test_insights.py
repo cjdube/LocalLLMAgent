@@ -729,14 +729,14 @@ def test_every_scheduled_routine_has_routine_uses(monkeypatch):
     assert not undeclared, f"routines missing from ROUTINE_USES: {sorted(undeclared)}"
 
 
-def test_every_scribe_routine_declares_what_it_writes(monkeypatch):
-    # Scribe's /map draws ROUTINE_WRITES where Wren's draws her memory band, so
+def test_every_scribejay_routine_declares_what_it_writes(monkeypatch):
+    # ScribeJay's /map draws ROUTINE_WRITES where Wren's draws her memory band, so
     # a journaling task added without an entry silently leaves a gap in the ring.
-    scribe = {t["key"] for t in _scheduled_tasks(monkeypatch)
-              if insights._agent_of(t) == "scribe"}
-    assert scribe, "no local.scribe.* plists found"
-    undeclared = scribe - set(insights.ROUTINE_WRITES)
-    assert not undeclared, f"Scribe routines missing from ROUTINE_WRITES: {sorted(undeclared)}"
+    scribejay = {t["key"] for t in _scheduled_tasks(monkeypatch)
+              if insights._agent_of(t) == "scribejay"}
+    assert scribejay, "no local.scribejay.* plists found"
+    undeclared = scribejay - set(insights.ROUTINE_WRITES)
+    assert not undeclared, f"ScribeJay routines missing from ROUTINE_WRITES: {sorted(undeclared)}"
 
 
 def test_routine_writes_has_no_entries_for_tasks_that_do_not_exist(monkeypatch):
@@ -747,56 +747,56 @@ def test_routine_writes_has_no_entries_for_tasks_that_do_not_exist(monkeypatch):
 
 def test_agent_of_reads_the_launchd_label_not_the_module(monkeypatch):
     # The label is what launchd actually runs, and it is what the /map toggle
-    # filters on. Both halves asserted: a scribe label AND a wren label.
-    scribe = {"label": "local.scribe.dailychromelearnings", "external": False}
+    # filters on. Both halves asserted: a scribejay label AND a wren label.
+    scribejay = {"label": "local.scribejay.dailychromelearnings", "external": False}
     wren = {"label": "local.wren.morningbrief", "external": False}
     external = {"label": "local.wikiagent.learnings-ingest", "external": True}
-    assert insights._agent_of(scribe) == "scribe"
+    assert insights._agent_of(scribejay) == "scribejay"
     assert insights._agent_of(wren) == "wren"
     # An external root belongs to neither agent even if its label says otherwise.
     assert insights._agent_of(external) == "external"
-    assert insights._agent_of({"label": "local.scribe.x", "external": True}) == "external"
+    assert insights._agent_of({"label": "local.scribejay.x", "external": True}) == "external"
 
 
 def test_system_map_tags_routines_with_agent_and_output(tmp_path, monkeypatch):
     _isolate_map_sources(tmp_path, monkeypatch)
     _write_plist(tmp_path / "a.plist", {"Hour": 6, "Minute": 0},
-                 label="local.scribe.dailychromelearnings",
+                 label="local.scribejay.dailychromelearnings",
                  stdout=str(tmp_path / "daily_chrome_learnings.log"))
     _write_plist(tmp_path / "b.plist", {"Hour": 7, "Minute": 0},
                  label="local.wren.morningbrief",
                  stdout=str(tmp_path / "morning_brief.log"))
     out = insights.system_map(SAMPLE_TOOLS, write_tools=[])
     by_key = {rt["key"]: rt for rt in out["routines"]}
-    assert by_key["daily_chrome_learnings"]["agent"] == "scribe"
+    assert by_key["daily_chrome_learnings"]["agent"] == "scribejay"
     assert by_key["daily_chrome_learnings"]["writes"] == "daily browsing page"
     assert by_key["morning_brief"]["agent"] == "wren"
-    # Wren's routines have no "writes" label — only Scribe's map draws that band.
+    # Wren's routines have no "writes" label — only ScribeJay's map draws that band.
     assert by_key["morning_brief"]["writes"] is None
 
 
 def test_system_map_describes_both_agents(tmp_path, monkeypatch):
     _isolate_map_sources(tmp_path, monkeypatch)
-    monkeypatch.setenv("SCRIBE_LLM_BACKEND", "gemini")
+    monkeypatch.setenv("SCRIBEJAY_LLM_BACKEND", "gemini")
     monkeypatch.setenv("WREN_LLM_BACKEND", "ollama")
     out = insights.system_map(SAMPLE_TOOLS, write_tools=[])
     assert out["agents"]["wren"]["name"] == "Wren"
-    assert out["agents"]["scribe"]["name"] == "Scribe"
+    assert out["agents"]["scribejay"]["name"] == "ScribeJay"
     # Each agent reports the model IT would use, from its own env chain.
     assert "(ollama)" in out["agents"]["wren"]["model"]
-    assert "(gemini)" in out["agents"]["scribe"]["model"]
+    assert "(gemini)" in out["agents"]["scribejay"]["model"]
 
 
-def test_scribe_model_does_not_fall_back_to_wrens_backend(tmp_path, monkeypatch):
-    # SCRIBE_* has no WREN_* fallback on purpose (docs/scribe.md). With only
-    # WREN_LLM_BACKEND set, the map must still show Scribe on the local model —
-    # otherwise it would advertise a cloud backend Scribe never uses.
+def test_scribejay_model_does_not_fall_back_to_wrens_backend(tmp_path, monkeypatch):
+    # SCRIBEJAY_* has no WREN_* fallback on purpose (docs/scribejay.md). With only
+    # WREN_LLM_BACKEND set, the map must still show ScribeJay on the local model —
+    # otherwise it would advertise a cloud backend ScribeJay never uses.
     _isolate_map_sources(tmp_path, monkeypatch)
-    monkeypatch.delenv("SCRIBE_LLM_BACKEND", raising=False)
+    monkeypatch.delenv("SCRIBEJAY_LLM_BACKEND", raising=False)
     monkeypatch.setenv("WREN_LLM_BACKEND", "gemini")
     out = insights.system_map(SAMPLE_TOOLS, write_tools=[])
     assert "(gemini)" in out["agents"]["wren"]["model"]
-    assert "(ollama)" in out["agents"]["scribe"]["model"]
+    assert "(ollama)" in out["agents"]["scribejay"]["model"]
 
 
 def test_every_registered_chat_tool_is_mapped_to_a_service():

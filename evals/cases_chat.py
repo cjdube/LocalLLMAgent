@@ -134,7 +134,7 @@ CASES = [
         # then a confirmation-gated task write. Scored on whether the write was
         # actually CALLED — a turn that narrates it and stops is the failure.
         #
-        # This used to read Strava first. Journaling moved to Scribe, so Wren has
+        # This used to read Strava first. Journaling moved to ScribeJay, so Wren has
         # no fetch_strava; the chain was re-anchored on tools she still owns. The
         # bug being guarded is about the SECOND step, so the first step's source
         # never mattered.
@@ -317,7 +317,7 @@ CASES = [
     },
     {
         "id": "run_from_the_record",
-        # The seam the Scribe split created, stated as an eval: Scribe logs each
+        # The seam the ScribeJay split created, stated as an eval: ScribeJay logs each
         # Strava activity onto the calendar, so Wren answers "how far did I run"
         # by READING THE RECORD. She has no fetch_strava any more — a run that
         # reaches for one is a regression in the split, not a model miss.

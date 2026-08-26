@@ -36,7 +36,7 @@ schema of whichever file is live. **Restart the chat server after editing**
 
 | Field | Required | Purpose |
 |---|---|---|
-| `name` | yes | Category label; becomes the classification table Scribe's colorizer shows the model |
+| `name` | yes | Category label; becomes the classification table ScribeJay's colorizer shows the model |
 | `color_id` | yes | Google Calendar colorId ("1"–"11"); need not be unique |
 | `color_name` | yes | Google's name for that color (shown to the model in the classification table) |
 | `hint` | no | Extra classification guidance appended in the colorizer prompt (e.g. "with others") |
@@ -51,9 +51,9 @@ against a label.
 from what you call your categories, so renaming "Work/LLC" to "Consulting"
 breaks nothing. Recognized values, each expected on exactly one category:
 
-- `fitness` — the color Strava activities are logged with (`scribe/strava_download.py`)
+- `fitness` — the color Strava activities are logged with (`scribejay/strava_download.py`)
 - `fallback` — the colorId the colorizer uses when it can't classify an event
-  (`scribe/calendar_colorizer.py`)
+  (`scribejay/calendar_colorizer.py`)
 - `work`, `meetings`, `appointments` — **legacy, no consumer.** These were the
   weekly review's event buckets; the weekly review was split into the daily
   learnings tasks, which then dropped calendar bucketing entirely. Kept on their

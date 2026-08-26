@@ -197,10 +197,10 @@ fi
 # reload, which on an interpreter change is every agent we own.
 flagged=()
 stale=()
-# Both prefixes: journaling runs under local.scribe.* since Scribe was split
+# Both prefixes: journaling runs under local.scribejay.* since ScribeJay was split
 # out of Wren, and those agents exec the same .venv interpreter, so leaving them
 # out of this glob would leave exactly them broken after a Homebrew python bump.
-for dest in "$AGENTS"/local.wren.*.plist "$AGENTS"/local.scribe.*.plist; do
+for dest in "$AGENTS"/local.wren.*.plist "$AGENTS"/local.scribejay.*.plist; do
     [ -e "$dest" ] || continue
     label="$(basename "$dest" .plist)"
     [ "$label" = "$SERVER_LABEL" ] && continue   # judged by interpreter, below

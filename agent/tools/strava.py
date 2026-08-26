@@ -5,8 +5,8 @@ refresh token. On each run it exchanges the refresh token for a short-lived
 access token, then lists the athlete's recent activities.
 
 Library module, not a registered chat tool. Wren stopped carrying the capture
-tools when journaling moved to Scribe (scribe/__init__.py): the callers now are
-Scribe's daily entries and Wren's tasks/daily_synthesis.py, which import the
+tools when journaling moved to ScribeJay (scribejay/__init__.py): the callers now are
+ScribeJay's daily entries and Wren's tasks/daily_synthesis.py, which import the
 function directly. There is deliberately no TOOL_SCHEMA here — if you add one
 back, register it in agent/toolset.py or tests/test_toolset.py will fail.
 

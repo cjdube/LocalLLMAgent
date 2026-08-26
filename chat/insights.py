@@ -594,7 +594,7 @@ TOOL_SERVICES = {
     "gmail": ("Gmail", ["send_email", "reply_to_thread", "search_mail", "read_email"]),
     "google_tasks": ("Google Tasks", ["get_tasks", "get_tasks_due_soon", "create_task",
                                       "update_task_due_date", "complete_task"]),
-    # Routine-only since journaling moved to Scribe: these three services are
+    # Routine-only since journaling moved to ScribeJay: these three services are
     # touched by scheduled tasks (ROUTINE_USES below), never by a chat tool, so
     # they draw on /map as service nodes with an empty tool list. The keys stay
     # because the routine edges point at them.
@@ -670,10 +670,10 @@ ROUTINE_USES = {
     "wiki-learnings-snapshot": ["wiki", "github"],
 }
 
-# What a journaling routine leaves behind, in a handful of words. Only Scribe's
+# What a journaling routine leaves behind, in a handful of words. Only ScribeJay's
 # routines have one: its map draws these where Wren's draws her memory band,
 # because "what did this write?" is the whole question you ask of a journal.
-# A drift-guard test asserts every Scribe routine appears here.
+# A drift-guard test asserts every ScribeJay routine appears here.
 ROUTINE_WRITES = {
     "strava_download": "rides → calendar",
     "calendar_colorizer": "event colours",
@@ -688,13 +688,13 @@ def _agent_of(task: dict) -> str:
     """Which agent owns a routine — what /map's agent toggle filters on.
 
     The launchd Label is the source of truth, not the module path: launchd runs
-    the label, and the labels were renamed to local.scribe.* in the same commit
-    that created scribe/. An external root is a third repo federated in
+    the label, and the labels were renamed to local.scribejay.* in the same commit
+    that created scribejay/. An external root is a third repo federated in
     (docs/external-tasks.md), so it belongs to neither agent.
     """
     if task["external"]:
         return "external"
-    return "scribe" if task["label"].startswith("local.scribe.") else "wren"
+    return "scribejay" if task["label"].startswith("local.scribejay.") else "wren"
 
 # Keep the payload bounded: memory texts are truncated for the map (the detail
 # panel links to /memories for the full store) and the wiki band is capped.
@@ -773,13 +773,13 @@ def system_map(tools: list[dict], write_tools) -> dict:
         "agents": {
             "wren": {"name": "Wren", "model": active_model_label(),
                      "role": "reads the record, acts on request"},
-            # Scribe's model dial is its own chain (SCRIBE_<TASK>_BACKEND →
-            # SCRIBE_LLM_BACKEND → ollama) with NO fallback to WREN_*, so the
+            # ScribeJay's model dial is its own chain (SCRIBEJAY_<TASK>_BACKEND →
+            # SCRIBEJAY_LLM_BACKEND → ollama) with NO fallback to WREN_*, so the
             # default is spelled out here rather than left to _resolve_backend.
-            # Read from the environment instead of importing scribe.model:
-            # chat/ must not import scribe.* (CLAUDE.md).
-            "scribe": {"name": "Scribe",
-                       "model": active_model_label(os.getenv("SCRIBE_LLM_BACKEND", "ollama")),
+            # Read from the environment instead of importing scribejay.model:
+            # chat/ must not import scribejay.* (CLAUDE.md).
+            "scribejay": {"name": "ScribeJay",
+                       "model": active_model_label(os.getenv("SCRIBEJAY_LLM_BACKEND", "ollama")),
                        "role": "writes the record"},
         },
         "services": services,

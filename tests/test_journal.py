@@ -1,9 +1,9 @@
-"""Tests for scribe/journal.py — the journaling-only rendering helpers: the
+"""Tests for scribejay/journal.py — the journaling-only rendering helpers: the
 deterministic Liked-videos list (including its URL scheme guard) and the
-empty-draft check. Everything Scribe shares with tasks/daily_synthesis.py is
+empty-draft check. Everything ScribeJay shares with tasks/daily_synthesis.py is
 tested in tests/test_activity_log.py instead."""
 
-from scribe import journal as lc
+from scribejay import journal as lc
 
 
 # --------------------------------------------------------------------------- #

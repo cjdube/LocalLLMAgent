@@ -1,4 +1,4 @@
-"""Tests for scribe/calendar_colorizer.py's pure logic — the model-response
+"""Tests for scribejay/calendar_colorizer.py's pure logic — the model-response
 parsing and the classify-and-apply accounting. The Google Calendar patch call
 (set_event_color) is monkeypatched; nothing touches the network."""
 
@@ -9,7 +9,7 @@ import pytest
 from agent import prefs
 from agent.tools.calendar import CATEGORY_COLORS
 from chat.insights import _is_run_success
-from scribe import calendar_colorizer as cc
+from scribejay import calendar_colorizer as cc
 
 _LOGGER = logging.getLogger("test_calendar_colorizer")
 

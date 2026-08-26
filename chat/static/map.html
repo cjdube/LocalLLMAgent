@@ -61,7 +61,7 @@
   }
   #agent-toggle button:hover { color: #e8eaf2; }
   #agent-toggle button.on.wren { background: #6f8fd9; color: #08112a; }
-  #agent-toggle button.on.scribe { background: #2dd4bf; color: #062622; }
+  #agent-toggle button.on.scribejay { background: #2dd4bf; color: #062622; }
 
   /* --- SVG node states --- */
   g.node { cursor: pointer; }
@@ -74,7 +74,7 @@
 
   .ring-title { fill: #6a7391; font-size: 15px; letter-spacing: 0.38em; font-weight: 600; text-anchor: middle; }
   .ring-title.apps { fill: #6f8fd9; }
-  .ring-title.apps.scribe { fill: #2dd4bf; }
+  .ring-title.apps.scribejay { fill: #2dd4bf; }
   .ring-title.routines { fill: #c9a34a; }
   .ring-title.memory { fill: #9a86c9; }
   .ring-title.skills { fill: #d98d4a; }
@@ -112,7 +112,7 @@
     border-radius: 20px; margin-bottom: 10px;
   }
   aside .owner.wren { background: rgba(111, 143, 217, 0.16); color: #8fb0f0; }
-  aside .owner.scribe { background: rgba(45, 212, 191, 0.14); color: #5fe3d2; }
+  aside .owner.scribejay { background: rgba(45, 212, 191, 0.14); color: #5fe3d2; }
   aside .owner.external { background: rgba(167, 139, 250, 0.14); color: #bda6ff; }
   aside .meta { font-size: 12px; color: #565d75; margin-bottom: 12px; }
   aside p.desc { font-size: 13px; line-height: 1.55; color: #aab1c7; margin: 0 0 12px; white-space: pre-wrap; }
@@ -186,7 +186,7 @@ const MEM_COLORS = {
 // rather than both being crammed into one picture. Colours follow the agent.
 const AGENT_STYLE = {
   wren:   { ring: "#4d7fe3", glow: "#6f8fd9", letter: "#8fb0f0" },
-  scribe: { ring: "#1fa596", glow: "#2dd4bf", letter: "#7ce8dc" },
+  scribejay: { ring: "#1fa596", glow: "#2dd4bf", letter: "#7ce8dc" },
 };
 const EXTERNAL_COLOR = "#a78bfa";    // routines federated in from another repo
 
@@ -225,19 +225,19 @@ const serviceGroups = new Map(), routineGroups = new Map(), serviceAngles = new 
 let routineUses = {}, serviceRoutines = {};   // key -> connected keys
 
 // ---------------------------------------------------------------- the two views
-// Wren's universe is everything except Scribe's routines; Scribe's is only its
-// own, and only the services those routines reach. Scribe has no tool registry,
+// Wren's universe is everything except ScribeJay's routines; ScribeJay's is only its
+// own, and only the services those routines reach. ScribeJay has no tool registry,
 // no memory and no skills, so those bands come back empty on purpose.
 function universe(agentKey) {
   const style = AGENT_STYLE[agentKey];
   const meta = DATA.agents[agentKey];
-  if (agentKey === "scribe") {
-    const routines = DATA.routines.filter(rt => rt.agent === "scribe");
+  if (agentKey === "scribejay") {
+    const routines = DATA.routines.filter(rt => rt.agent === "scribejay");
     const reached = new Set(routines.flatMap(rt => rt.uses));
     return {
-      key: "scribe", style, name: meta.name, model: meta.model, role: meta.role,
+      key: "scribejay", style, name: meta.name, model: meta.model, role: meta.role,
       routines,
-      // Scribe reaches these on a schedule, never as chat tools — it has no
+      // ScribeJay reaches these on a schedule, never as chat tools — it has no
       // registry at all — so they draw as bare service nodes.
       services: DATA.services.filter(s => reached.has(s.key))
                              .map(s => ({ ...s, tools: [] })),
@@ -245,7 +245,7 @@ function universe(agentKey) {
       skills: [],
     };
   }
-  const routines = DATA.routines.filter(rt => rt.agent !== "scribe");
+  const routines = DATA.routines.filter(rt => rt.agent !== "scribejay");
   const reached = new Set(routines.flatMap(rt => rt.uses));
   return {
     key: "wren", style, name: meta.name, model: meta.model, role: meta.role,
@@ -295,14 +295,14 @@ function showOverview() {
     p.appendChild(ownerPill(U.key));
     p.appendChild(el("div", "meta", U.model ? `model: ${U.model}` : ""));
     p.appendChild(el("p", "hint",
-      U.key === "scribe"
-        ? "Scribe's half of the house. A pipeline agent: gather, one model call, " +
+      U.key === "scribejay"
+        ? "ScribeJay's half of the house. A pipeline agent: gather, one model call, " +
           "write. It has no tool registry and is never asked to do anything — it " +
           "runs on a clock and leaves a record behind. Hover a routine to light " +
           "up what it touches; click any node for detail."
         : "Everything Wren is made of. Hover a routine or application to light " +
           "up what talks to what; click any node for detail. Use the toggle to " +
-          "see the same map drawn for Scribe, the journaling agent."));
+          "see the same map drawn for ScribeJay, the journaling agent."));
     const counts = el("ul", "counts");
     const toolCount = U.services.reduce((n, s) => n + s.tools.length, 0);
     [["Applications", U.services.length],
@@ -324,11 +324,11 @@ function showAgent() {
     p.appendChild(ownerPill(U.key));
     p.appendChild(el("div", "meta", U.model ? `model: ${U.model}` : ""));
     p.appendChild(el("p", "desc",
-      U.key === "scribe"
+      U.key === "scribejay"
         ? "The journaling agent. The rings around this node are the whole of it: " +
-          "the routines that run on schedule and the sources they read. Scribe " +
+          "the routines that run on schedule and the sources they read. ScribeJay " +
           "writes the record — daily vault pages and calendar entries — and Wren " +
-          "reads it back. Its model setting is its own (SCRIBE_LLM_BACKEND), so " +
+          "reads it back. Its model setting is its own (SCRIBEJAY_LLM_BACKEND), so " +
           "it can run on a different model from Wren."
         : "A local, personal agent. The rings around this node are what she's " +
           "made of: the skills she's written down, what she remembers, the " +
@@ -347,8 +347,8 @@ function showService(svc) {
   showPanel("application", svc.label, (p) => {
     p.appendChild(ownerPill(U.key));
     if (!svc.tools.length) {
-      p.appendChild(el("p", "desc", U.key === "scribe"
-        ? "Scribe reaches this on a schedule. It is not a chat tool — Scribe has " +
+      p.appendChild(el("p", "desc", U.key === "scribejay"
+        ? "ScribeJay reaches this on a schedule. It is not a chat tool — ScribeJay has " +
           "no tool registry, so nothing can ask it to touch this on demand."
         : "Used by scheduled routines only — no chat tools."));
     }
@@ -445,10 +445,10 @@ function buildRingsAndTitles() {
   orbit.appendChild(svgEl("circle", { cx: C, cy: C, r: R.skills - 14, fill: "none", stroke: "#d98d4a", "stroke-width": 1.2, opacity: hasSkills ? 0.3 : 0.12, "stroke-dasharray": "2 10" }));
   g.appendChild(orbit);
 
-  ringTitle(g, "apps" + (U.key === "scribe" ? " scribe" : ""), C - R.apps - 32, "APPLICATIONS");
+  ringTitle(g, "apps" + (U.key === "scribejay" ? " scribejay" : ""), C - R.apps - 32, "APPLICATIONS");
   ringTitle(g, "routines", C - R.routines - 20, "ROUTINES");
   const memY = C - R.memIn - (R.memRows - 1) * R.memRowStep - 26;
-  if (U.key === "scribe") {
+  if (U.key === "scribejay") {
     ringTitle(g, "memory", memY, "WRITES");
   } else {
     ringTitle(g, "memory", memY, "MEMORY");
@@ -457,7 +457,7 @@ function buildRingsAndTitles() {
     hasSkills ? "SKILLS" : "SKILLS — NONE",
     hasSkills ? null :
       "Skills are procedures Wren writes down for herself and reads back later. " +
-      "Scribe has none, and cannot have any: with no tool registry there is " +
+      "ScribeJay has none, and cannot have any: with no tool registry there is " +
       "nothing that could call write_skill. Its procedure is its Python.");
   return g;
 }
@@ -489,9 +489,9 @@ function buildSkills() {
   return g;
 }
 
-// Scribe's inner band, where Wren's memory band goes: one ring of what each of
+// ScribeJay's inner band, where Wren's memory band goes: one ring of what each of
 // its routines leaves behind. "What did this write?" is the whole question you
-// ask of a journal, and Scribe remembers nothing between runs.
+// ask of a journal, and ScribeJay remembers nothing between runs.
 function buildWrites() {
   const g = svgEl("g");
   const items = U.routines.filter(rt => rt.writes);
@@ -674,7 +674,7 @@ function buildEdges(routineAngles) {
 function buildToggle(agentKey) {
   toggleBar.textContent = "";
   toggleBar.appendChild(el("span", "lab", "viewing"));
-  ["wren", "scribe"].forEach(k => {
+  ["wren", "scribejay"].forEach(k => {
     const b = el("button", k + (k === agentKey ? " on" : ""), DATA.agents[k].name);
     b.addEventListener("click", () => draw(k));
     toggleBar.appendChild(b);
@@ -713,7 +713,7 @@ function draw(agentKey) {
   svg.appendChild(buildApplications());
   svg.appendChild(buildEdges(routineAngles));  // edges above hexes, below routine nodes
   svg.appendChild(buildRoutines(routineAngles));
-  svg.appendChild(U.key === "scribe" ? buildWrites() : buildMemory(U.memory));
+  svg.appendChild(U.key === "scribejay" ? buildWrites() : buildMemory(U.memory));
   svg.appendChild(buildSkills());
   svg.appendChild(buildCenter());
 
@@ -731,7 +731,7 @@ async function load() {
     return;
   }
   const wanted = new URLSearchParams(location.search).get("agent");
-  draw(wanted === "scribe" ? "scribe" : "wren");
+  draw(wanted === "scribejay" ? "scribejay" : "wren");
 }
 
 load();

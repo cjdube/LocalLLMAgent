@@ -6,7 +6,7 @@ vault — outcomes and takeaways, not the back-and-forth. It follows the same
 gather → compact → local model → persist shape as the other daily learnings
 tasks (`daily_chrome_learnings`, `daily_youtube_learnings`).
 
-Code: `scribe/ai_chat_learnings.py` (the task), `scribe/transcripts.py`
+Code: `scribejay/ai_chat_learnings.py` (the task), `scribejay/transcripts.py`
 (reading + compacting the two sources).
 
 ## Why there's no "past chats" API
@@ -70,9 +70,9 @@ an entry is never silently lost (same contract as the other learnings tasks).
 ## Backfilling
 
 ```bash
-.venv/bin/python -m scribe.ai_chat_learnings                    # yesterday (Claude + Gemini)
-.venv/bin/python -m scribe.ai_chat_learnings --backfill 14      # each of the last 14 days, one process
-.venv/bin/python -m scribe.ai_chat_learnings --date 2026-06-29  # one specific day (Claude only)
+.venv/bin/python -m scribejay.ai_chat_learnings                    # yesterday (Claude + Gemini)
+.venv/bin/python -m scribejay.ai_chat_learnings --backfill 14      # each of the last 14 days, one process
+.venv/bin/python -m scribejay.ai_chat_learnings --date 2026-06-29  # one specific day (Claude only)
 ```
 
 `--backfill N` runs the per-day logic once for each of the last N days
@@ -86,5 +86,5 @@ processes; both write the same idempotent `AI-Chat-Learnings-<date>.md`.
 Transcript text is untrusted input — it contains web/tool output that may carry
 prompt injection. The task only reads local files and writes markdown (no gated
 or consequential tools), and the summarizer treats transcript content as data,
-not instructions. Runs on the local model by design; `SCRIBE_AI_CHAT_LEARNINGS_BACKEND`
+not instructions. Runs on the local model by design; `SCRIBEJAY_AI_CHAT_LEARNINGS_BACKEND`
 can opt into the cloud, but that would send transcript text off-device.

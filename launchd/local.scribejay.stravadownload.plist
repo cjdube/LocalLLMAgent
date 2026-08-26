@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>local.scribe.dailychromelearnings</string>
+    <string>local.scribejay.stravadownload</string>
 
     <key>ProgramArguments</key>
     <array>
         <string>__WREN_ROOT__/.venv/bin/python</string>
         <string>-m</string>
-        <string>scribe.daily_chrome_learnings</string>
+        <string>scribejay.strava_download</string>
     </array>
 
     <key>WorkingDirectory</key>
@@ -20,13 +20,13 @@
         <key>Hour</key>
         <integer>5</integer>
         <key>Minute</key>
-        <integer>15</integer>
+        <integer>50</integer>
     </dict>
 
     <key>StandardOutPath</key>
-    <string>__WREN_ROOT__/logs/daily_chrome_learnings.launchd.log</string>
+    <string>__WREN_ROOT__/logs/strava_download.launchd.log</string>
     <key>StandardErrorPath</key>
-    <string>__WREN_ROOT__/logs/daily_chrome_learnings.launchd.log</string>
+    <string>__WREN_ROOT__/logs/strava_download.launchd.log</string>
 
     <key>RunAtLoad</key>
     <false/>
