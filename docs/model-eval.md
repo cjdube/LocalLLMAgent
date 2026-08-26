@@ -11,7 +11,7 @@ Every failure in [model-constraints.md](model-constraints.md) shares one shape:
 the model returned something well-formed, the job exited 0, and the answer was
 wrong. Those bugs live in the interaction between a specific model and a
 specific prompt — an 8,800-character system prompt, a lazily-loaded subset of
-~25 tools, `num_ctx=32768`, `num_predict=3072`. A benchmark that sends a bare
+~25 tools, `num_ctx=49152`, `num_predict=3072`. A benchmark that sends a bare
 prompt and a hand-written schema is measuring a different system.
 
 Two design rules follow, and they are the reason this harness is thin:
@@ -218,7 +218,7 @@ It needs code that does not exist: `OLLAMA_MODEL` is a single global
 (`agent/loop.py:175`). A per-task model would be `resolve_model(task_key)`
 reading `WREN_<TASK>_MODEL`, symmetric to `resolve_backend`
 (`agent/loop.py:339`), with the ~11 `complete_text()` call sites passing
-`model=`. Measure the swap cost first: two resident models at `num_ctx=32768`
+`model=`. Measure the swap cost first: two resident models at `num_ctx=49152`
 is roughly 12GB + 27GB of 48GB, with swap already in use.
 
 ## Run of 2026-08-24 — qwen3.8:27b-mlx vs gemma4:26b-mlx

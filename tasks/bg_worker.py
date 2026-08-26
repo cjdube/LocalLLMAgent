@@ -200,7 +200,7 @@ def _approval_message(call: dict) -> str:
     return "\n\n".join(lines)
 
 
-def _seed_messages(task_text: str) -> list:
+def _seed_messages(task_text: str, logger=None) -> list:
     today = datetime.now().strftime("%A, %B %-d, %Y")
     # The groups index, for the same reason chat carries it: the tools offered
     # are now keyword-selected, so the model has to be told what it can pull in
@@ -208,7 +208,8 @@ def _seed_messages(task_text: str) -> list:
     system = with_identity(
         BG_SYSTEM_PROMPT
         + f"\n\nToday's date is {today}."
-        + f"\n\n{toolset.render_toolgroups_index()}"
+        + f"\n\n{toolset.render_toolgroups_index()}",
+        logger,
     )
     return [
         {"role": "system", "content": system},
@@ -226,7 +227,7 @@ def _run_job(job: dict, tools, dispatch, logger) -> None:
             messages = job["messages"]
         else:
             logger.info(f"starting job {job['id']}: {job['task_text'][:100]!r}")
-            messages = _seed_messages(job["task_text"])
+            messages = _seed_messages(job["task_text"], logger)
     else:  # approved / denied — resume the paused run
         approved = job["status"] == "approved"
         logger.info(f"resuming job {job['id']} ({'approved' if approved else 'denied'})")

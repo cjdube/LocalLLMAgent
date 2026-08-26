@@ -180,7 +180,7 @@ reworded, so the wording is not evidence of a fix —
 server prices out the worst case:
 
 ```
-worst_case = MAX_HISTORY_CHARS + (MAX_TOOL_ITERATIONS × MAX_TOOL_RESULT_CHARS)
+worst_case = MAX_HISTORY_CHARS + prompt_head + (MAX_TOOL_ITERATIONS × MAX_TOOL_RESULT_CHARS)
 capacity   = OLLAMA_NUM_CTX × 4
 ```
 
@@ -190,10 +190,40 @@ turn's tool results pile on top of it. Raising `WREN_CHAT_MAX_HISTORY_CHARS`
 without a matching `OLLAMA_NUM_CTX` raise would otherwise silently truncate the
 system prompt.
 
-At the live values: 48000 + (10 × 8000) = 128,000 chars worst case, against
-32768 × 4 = 131,072 chars capacity. **It fits, with about 2% headroom.** That is
-tight by design, and the worst case requires all ten tool iterations to return
-full-size results.
+**`prompt_head` is the term to understand**, because it is the biggest one and
+it is the only one with no env var attached. It is everything on every turn that
+is not conversation: the system message (persona, identity, the date paragraph,
+the skills / lens / tool-group indexes, and the pinned-memory block), the
+compaction summary that rides inside it, and the tool schemas priced with every
+group loaded. `_prompt_head_chars()` measures it at boot rather than storing a
+number, because the schema total moves whenever a tool is registered.
+
+Until 2026-08-26 the check did not count it at all, and so reported "fits" on a
+config that did not fit — the terms it counted were exactly the ones with env
+vars attached, which is a tidy illustration of measuring what is easy to name.
+At the live values:
+
+```
+prompt head  =  48,755      (system message + summary + all-groups schemas)
+history      =  48,000
+tool results =  80,000      (10 × 8,000)
+worst case   = 176,755
+capacity     = 196,608      (49152 × 4)
+                 19,853 spare — about 10% headroom
+```
+
+`OLLAMA_NUM_CTX` moved from 32768 to 49152 on the same day for this reason: at
+32768 the true worst case was 45,683 chars **over** capacity, while the old
+arithmetic put it 1,572 under. The worst case still needs all ten tool
+iterations to return full-size results, so it is a ceiling rather than a typical
+turn — which the measured distribution below is there to keep in proportion.
+
+**What real turns actually use.** Over 465 logged chat turns at
+`OLLAMA_NUM_CTX=32768`: median 6,506 tokens (20% of num_ctx), p95 13,932 (43%),
+peak 27,033 (82%). Nothing overflowed on that config, and prompt compaction has
+fired once ever. The peak is the number that matters: one turn climbed 12,214 →
+27,033 tokens across 8 tool steps, and `MAX_HISTORY_CHARS` governed none of that
+climb — `_trim_history` runs before a turn, never inside it.
 
 ### Layer C — inside each tool
 
@@ -218,6 +248,7 @@ This is where most of the constants are. Nearly all follow the same shape.
 | `opportunities` | `_LIST_LIMIT` 20 | `_LIST_CHARS` 5500 | |
 | `push_log` | `DEFAULT_LIMIT` 20, `MAX_LIMIT` 100 | — | `MAX_DAYS` 30. |
 | `skills` index | `MAX_INDEX_SKILLS` 12 | `MAX_INDEX_CHARS` 800 | |
+| `memory` pinned block | `MAX_ACTIVE_MEMORIES` 20 | `MAX_MEMORY_BLOCK_CHARS` 1500 | Uncapped until 2026-08-26, which left the prompt head unpriceable. Sized ~7x the live store (3 active facts, 203 chars) so it should never bite; if it does, the WARNING names the dropped ids. |
 | `projects` | `MAX_DOC_TITLES` 40 | `DOC_CHARS` 2000 | **The two are not a pair** — see below. `DOC_CHARS` bounds the README and agent-instructions *bodies*; nothing bounds the titles. |
 | `evaluate_app` | — | `_CONTENT_CHARS` 6000 | |
 | `evaluate_against` | — | `_LENS_CHARS` 12000, `_TARGET_CHARS` 16000, `_FETCH_CHARS` 20000 | Fetches 20000 because compaction loses 20-30%; fetching exactly 16000 would land under it. `_LENS_CHARS` is 12000, not the 8000 the docs once said. |
@@ -284,8 +315,9 @@ warns even when it succeeds, so the failure rate stays visible.
 ### Layer E — a limit that isn't a number
 
 **Lazy tool loading** (`docs/tool-loading.md`) is a context limit expressed as
-structure rather than a constant. Wren has 40+ tools; sending every schema plus
-a describing paragraph on every turn wastes context the small model can't spare.
+structure rather than a constant. Wren has 55 tools, about 37,000 chars of
+schema in total; chat sends ~17,000 of that as the always-loaded core. Sending
+every schema on every turn wastes context the small model can't spare.
 Chat sends a small always-loaded core plus groups pulled in on demand. Applies to
 chat only — the background worker uses the whole registry.
 

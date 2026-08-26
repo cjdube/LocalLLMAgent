@@ -10,6 +10,7 @@ monkeypatched. Importing chat.server runs its module-level secret check, so the
 two required secrets are stubbed into the environment before the import.
 """
 
+import json
 import logging
 import os
 import threading
@@ -20,6 +21,7 @@ os.environ.setdefault("FLASK_SECRET_KEY", "test-secret")
 
 import pytest
 
+from agent import toolset
 from agent.tools import memory
 from chat import server as srv
 
@@ -1206,7 +1208,13 @@ def _budget(monkeypatch, history, num_ctx, iterations=10, result_chars=8000):
 def test_shipped_config_is_within_budget_and_stays_quiet(monkeypatch):
     # The real config/.env values. A check that fires on the working setup would
     # get muted, so pin that it doesn't.
-    assert _budget(monkeypatch, history=48000, num_ctx=32768) is None
+    #
+    # num_ctx was 32768 until 2026-08-26. It moved because this check started
+    # counting the prompt head it had been ignoring, and 32768 does not in fact
+    # fit the worst case — the old green was the arithmetic being wrong, not the
+    # config being safe. If registering more tools ever turns this red again,
+    # that is the check working: raise OLLAMA_NUM_CTX to match.
+    assert _budget(monkeypatch, history=48000, num_ctx=49152) is None
 
 
 def test_raising_history_without_num_ctx_warns(monkeypatch):
@@ -1225,11 +1233,48 @@ def test_warning_names_the_knobs_to_change(monkeypatch):
 
 def test_budget_counts_tool_results_not_just_history(monkeypatch):
     # History alone fits; it's the in-turn tool results that blow the ceiling —
-    # the whole point of the check.
-    assert _budget(monkeypatch, history=16000, num_ctx=8192, iterations=10,
+    # the whole point of the check. num_ctx is sized off the measured head plus
+    # the history, so the ONLY term that differs between the two calls is the
+    # tool results — a fixed num_ctx here would be over budget on the head alone
+    # and both calls would warn for the wrong reason.
+    fits = (srv._prompt_head_chars() + 16000 + 1000) // 4
+    assert _budget(monkeypatch, history=16000, num_ctx=fits, iterations=10,
                    result_chars=8000) is not None
-    assert _budget(monkeypatch, history=16000, num_ctx=8192, iterations=1,
+    assert _budget(monkeypatch, history=16000, num_ctx=fits, iterations=1,
                    result_chars=100) is None
+
+
+def test_budget_counts_the_prompt_head(monkeypatch):
+    """The head — system message, compaction summary, tool schemas — is on every
+    turn and is the bigger half of the worst case. The check ignored it until
+    2026-08-26 and so blessed a config that could not fit.
+
+    Asserted as the *difference* the head makes, not as a fixed number: the
+    schema total moves every time a tool is registered, and a hard-coded figure
+    here would rot into a test that passes without checking anything."""
+    head = srv._prompt_head_chars()
+    assert head > 20000, "the head is real; a near-zero value means it stopped being measured"
+
+    # A num_ctx that fits history + tool results EXACTLY, with nothing spare.
+    # Under the old arithmetic this was the green case; the head is what tips it.
+    bare = (48000 + (10 * 8000)) // 4
+    warning = _budget(monkeypatch, history=48000, num_ctx=bare)
+    assert warning is not None, "the head is not being counted"
+    assert "prompt head" in warning and f"{head:,}" in warning
+
+    # And the same config passes once num_ctx covers the head too — proving the
+    # head is what tipped it, and not some other term.
+    assert _budget(monkeypatch, history=48000, num_ctx=bare + (head // 4) + 1) is None
+
+
+def test_prompt_head_prices_every_tool_group(monkeypatch):
+    """Worst case means every group loaded. loaded_groups only grows within a
+    session (nothing removes one short of /chat/new), so the all-groups schema
+    total is the real ceiling rather than a pessimistic one."""
+    core_only = sum(len(json.dumps(x)) for x in toolset.tools_for(set()))
+    all_groups = sum(len(json.dumps(x)) for x in toolset.tools_for(set(toolset.TOOL_GROUPS)))
+    assert all_groups > core_only, "groups must add schema, or this check is vacuous"
+    assert srv._prompt_head_chars() >= all_groups
 
 
 def test_main_logs_and_pushes_when_over_budget(monkeypatch, caplog):

@@ -88,7 +88,10 @@ Every chat call sets the context window explicitly via `OLLAMA_NUM_CTX`
 (default 8192) rather than leaving it to Ollama's small default, which would
 silently truncate the front of the prompt (where the system prompt lives). Each
 call also logs the effective `num_ctx` and the actual prompt token count
-(`prompt_tokens`) so you can watch how close a session runs to the ceiling. To
+(`prompt_tokens`) so you can watch how close a session runs to the ceiling.
+This machine runs 49152; the startup check prices the worst case against it and
+pushes a warning if the config can't fit, counting the system prompt and tool
+schemas as well as the history ([docs/limits.md](docs/limits.md)). To
 keep a single large tool result (e.g. a web search dumping page after page of
 listings) from blowing past `num_ctx` — which triggers exactly that front-
 truncation and, with the system prompt gone, a runaway repetition loop — each

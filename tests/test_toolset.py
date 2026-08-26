@@ -280,7 +280,24 @@ def test_unknown_tool_falls_back_to_generic_description():
 # --------------------------------------------------------------------------- #
 
 def test_memory_writes_are_confirm_gated():
-    assert {"remember", "pin", "recategorize"} <= toolset.WRITE_TOOLS
+    # archive is here for the mirror-image reason and was missing until
+    # 2026-08-26: it takes a fact OUT of the always-on block, so an injected
+    # "archive that" strips a standing instruction from every future system
+    # prompt — the quieter of the two attacks, because nothing new appears for
+    # the user to notice. tests/test_bg_worker.py already called archive a
+    # prompt-state writer while this set did not; the two now agree, which is
+    # the actual guarantee: one definition, asserted in both places.
+    assert {"remember", "pin", "recategorize", "archive"} <= toolset.WRITE_TOOLS
+
+
+def test_prompt_state_writers_agree_across_surfaces():
+    """Both halves of "a tool that edits the always-on prompt is gated": the
+    chat surface taps for it (WRITE_TOOLS) AND unattended runs cannot call it at
+    all (UNATTENDED_EXCLUDED_TOOLS). Asserting only one half is how archive sat
+    half-gated — green in one file, ungated in the other."""
+    for name in ("remember", "pin", "recategorize", "archive", "forget"):
+        assert name in toolset.WRITE_TOOLS, f"{name} auto-executes in chat"
+        assert name in toolset.UNATTENDED_EXCLUDED_TOOLS, f"{name} runs unattended"
 
 
 def test_every_write_tool_has_a_specific_describer():

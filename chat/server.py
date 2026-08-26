@@ -179,7 +179,7 @@ def _system_message_content() -> str:
     # The loadable tool-group index: the deferred groups' schemas aren't sent
     # every turn, so this tells the model what it can pull in with load_tools.
     dated += "\n\n" + render_toolgroups_index()
-    return with_identity(dated)
+    return with_identity(dated, logger)
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -1005,10 +1005,29 @@ def bg_resolve():
 # Rough chars-per-token for the mix of prose and JSON that fills a prompt.
 # Deliberately generous: this is only used to catch a config that is *clearly*
 # over budget, not to police the theoretical tail of a working one. A tighter
-# ratio would fire on today's settings, which have never exceeded ~36% of
-# num_ctx in practice — a warning that cries wolf gets muted, so it wouldn't
-# survive contact with real use.
+# ratio would fire on today's settings. Measured over 465 logged chat turns:
+# median 20% of num_ctx, p95 43%, peak 82% (one turn that ran 8 tool steps).
+# The peak is what a tighter ratio would trip on, and a warning that cries wolf
+# gets muted — so it wouldn't survive contact with real use.
 _CHARS_PER_TOKEN = 4
+
+
+def _prompt_head_chars() -> int:
+    """Everything in a prompt that is NOT conversation history: the system
+    message, the compaction summary that rides inside it, and the tool schemas.
+
+    Measured from live values rather than a constant, because the schema total
+    moves every time a tool is registered and a hard-coded number here would rot
+    silently — which is the exact failure mode this whole check exists to catch.
+
+    Schemas are priced with every group loaded, and that is the real worst case
+    rather than a pessimistic one: loaded_groups only ever grows within a
+    session (nothing removes a group short of /chat/new), and a live session was
+    logged holding 35 of the 55 registered tools.
+    """
+    system = len(_system_message_content()) + SUMMARY_CHARS
+    schemas = sum(len(json.dumps(t)) for t in tools_for(set(TOOL_GROUPS)))
+    return system + schemas
 
 
 def _context_budget_warning() -> str | None:
@@ -1027,16 +1046,25 @@ def _context_budget_warning() -> str | None:
 
     That failure is near-impossible to diagnose from the symptom, so price it out
     at startup instead. Pure (returns the text, no logging or push) so the
-    arithmetic is testable without side effects."""
-    worst_case = (MAX_HISTORY_CHARS + SUMMARY_CHARS
-                  + (MAX_TOOL_ITERATIONS * MAX_TOOL_RESULT_CHARS))
+    arithmetic is testable without side effects.
+
+    **The head is counted, and it is the bigger half.** This check used to price
+    only the history terms, which are the ones with env vars attached — so it
+    silently ignored the ~48,000 chars of system message and tool schemas that
+    ride on EVERY turn. At the 2026-08-26 config that gap was 21% of num_ctx,
+    and the check reported "fits" on a config whose worst case did not. Anything
+    added to the prompt head must be inside _prompt_head_chars(), or this check
+    starts lying again."""
+    head = _prompt_head_chars()
+    worst_case = MAX_HISTORY_CHARS + head + (MAX_TOOL_ITERATIONS * MAX_TOOL_RESULT_CHARS)
     num_ctx = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
     capacity = num_ctx * _CHARS_PER_TOKEN
     if worst_case <= capacity:
         return None
     return (
         f"context budget over num_ctx: worst-case prompt ~{worst_case:,} chars "
-        f"(history {MAX_HISTORY_CHARS:,} + summary {SUMMARY_CHARS:,} + "
+        f"(history {MAX_HISTORY_CHARS:,} + prompt head {head:,} "
+        f"[system message + summary {SUMMARY_CHARS:,} + tool schemas] + "
         f"{MAX_TOOL_ITERATIONS} tool results x {MAX_TOOL_RESULT_CHARS:,}) vs "
         f"num_ctx={num_ctx:,} (~{capacity:,} chars). "
         f"A tool-heavy turn can silently truncate the system prompt — raise "

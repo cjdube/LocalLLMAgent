@@ -22,7 +22,7 @@ def _isolate(tmp_path, monkeypatch):
     monkeypatch.setattr(background, "_STORE_PATH", tmp_path / "bg_jobs.json")
     monkeypatch.setenv("FLASK_SECRET_KEY", "test-secret")
     # Avoid touching the real memory store when seeding the system prompt.
-    monkeypatch.setattr(bg_worker, "with_identity", lambda s: s)
+    monkeypatch.setattr(bg_worker, "with_identity", lambda s, logger=None: s)
 
 
 def _capture_notify(monkeypatch):

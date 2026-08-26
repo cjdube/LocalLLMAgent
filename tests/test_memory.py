@@ -4,6 +4,8 @@ Each test points the store at a fresh tmp file via monkeypatch so nothing
 touches the real config/wren_memory.json.
 """
 
+import logging
+
 import threading
 import time
 
@@ -100,6 +102,67 @@ def test_render_memory_block_lists_only_active_facts():
     assert "- I prefer metric units" in block
     assert "- My sister's birthday is March 3" in block
     assert "Crows" not in block
+
+
+# --------------------------------------------------------------------------- #
+# The always-on block is bounded, and says so when it drops a fact.
+#
+# render_memory_block was the one prompt-injected index with no cap, which made
+# chat/server.py's startup budget check unprovable — you cannot price a prompt
+# head that has an unbounded term in it. Caps are sized well above the live
+# store (13 memories, 3 active, 203 chars on 2026-08-26), so in practice these
+# never fire; the warning is the point, because a pinned fact silently missing
+# from the prompt looks exactly like Wren ignoring an instruction.
+# --------------------------------------------------------------------------- #
+
+def test_shipped_caps_are_above_real_usage():
+    # A cap set at or below actual usage silently drops a fact on day one. The
+    # live store on 2026-08-26 was 3 active facts / 203 chars.
+    assert memory.MAX_ACTIVE_MEMORIES >= 20
+    assert memory.MAX_MEMORY_BLOCK_CHARS >= 1500
+
+
+def test_block_is_capped_by_count_and_warns(caplog):
+    for i in range(memory.MAX_ACTIVE_MEMORIES + 5):
+        memory.pin(f"fact number {i}")
+    log = logging.getLogger("cap-count")
+    with caplog.at_level(logging.WARNING, logger="cap-count"):
+        block = memory.render_memory_block(log)
+    assert block.count("\n- ") == memory.MAX_ACTIVE_MEMORIES
+    # Both halves: it truncated AND it said so, with the counts CLAUDE.md asks
+    # for. A cap that drops quietly is the bug, not the fix.
+    assert any("truncated" in r.message for r in caplog.records)
+    assert any(f"of {memory.MAX_ACTIVE_MEMORIES + 5} active" in r.message
+               for r in caplog.records)
+
+
+def test_block_is_capped_by_chars_and_warns(caplog):
+    # Few enough facts to clear the count cap, long enough to blow the budget —
+    # so only the char term can be what truncates here.
+    long_fact = "x" * (memory.MAX_MEMORY_BLOCK_CHARS // 3)
+    for i in range(5):
+        memory.pin(f"{i} {long_fact}")
+    log = logging.getLogger("cap-chars")
+    with caplog.at_level(logging.WARNING, logger="cap-chars"):
+        block = memory.render_memory_block(log)
+    assert len(block) < memory.MAX_MEMORY_BLOCK_CHARS + 200
+    assert any(str(memory.MAX_MEMORY_BLOCK_CHARS) in r.message for r in caplog.records)
+
+
+def test_uncapped_block_does_not_warn(caplog):
+    # The ordinary case, which is every real day: nothing dropped, nothing said.
+    memory.pin("I prefer metric units")
+    log = logging.getLogger("cap-quiet")
+    with caplog.at_level(logging.WARNING, logger="cap-quiet"):
+        assert "- I prefer metric units" in memory.render_memory_block(log)
+    assert caplog.records == []
+
+
+def test_truncation_without_a_logger_still_truncates():
+    # The bound is not conditional on someone passing a logger.
+    for i in range(memory.MAX_ACTIVE_MEMORIES + 5):
+        memory.pin(f"fact number {i}")
+    assert memory.render_memory_block().count("\n- ") == memory.MAX_ACTIVE_MEMORIES
 
 
 # --------------------------------------------------------------------------- #

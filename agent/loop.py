@@ -172,7 +172,7 @@ WREN_CORE = load_persona("wren.md")
 USER_CONTEXT = load_persona("identity.md")
 
 
-def with_identity(system_prompt: str) -> str:
+def with_identity(system_prompt: str, logger: Optional[logging.Logger] = None) -> str:
     # Memories are rendered at call time (not import) so a fact saved mid-session
     # is present in the next conversation's system prompt.
     from agent.tools.memory import render_memory_block
@@ -184,7 +184,12 @@ def with_identity(system_prompt: str) -> str:
     # a config change without a restart.
     model_line = f"The model you are running as right now is: {active_model_label()}."
 
-    parts = [p for p in (WREN_CORE, USER_CONTEXT, model_line, render_memory_block(), system_prompt) if p]
+    # logger is threaded purely so render_memory_block can SAY when its cap
+    # dropped a pinned fact. A truncation nobody is told about looks exactly
+    # like Wren ignoring an instruction, which is the failure CLAUDE.md calls
+    # out: degrading is only safe if it is logged.
+    parts = [p for p in (WREN_CORE, USER_CONTEXT, model_line,
+                         render_memory_block(logger), system_prompt) if p]
     return "\n\n---\n\n".join(parts)
 
 
@@ -917,7 +922,7 @@ def complete_text(
     faster. The chat path leaves this None — there, reasoning is the point."""
     message = _llm_chat(
         [
-            {"role": "system", "content": with_identity(system_prompt)},
+            {"role": "system", "content": with_identity(system_prompt, logger)},
             {"role": "user", "content": user_prompt},
         ],
         backend=backend,

@@ -259,7 +259,14 @@ WRITE_TOOLS = frozenset({
     # after a turn has actually pulled untrusted web content, rather than always
     # — more complex, deferred until the friction is felt (README documents this
     # for the user too, under the memory section).
-    "remember", "pin", "recategorize",
+    # archive belongs with them for the mirror-image reason, and was missed at
+    # first: it does not add a fact, it takes one OUT of the always-on block, so
+    # an injected "archive that" quietly strips a standing instruction from every
+    # future system prompt. Un-pinning is the quieter attack of the two — nothing
+    # new appears for the user to notice. tests/test_bg_worker.py already
+    # classified archive as a prompt-state writer while this set did not; the two
+    # now agree.
+    "remember", "pin", "recategorize", "archive",
     "write_skill", "delete_skill", "set_reminder", "cancel_reminder",
     "run_in_background", "update_opportunity", "watch_company",
     "unwatch_company", "send_opportunity_digest",
@@ -610,6 +617,9 @@ def describe_call(call: dict) -> str:
         return f'Remember "{args.get("text", "")}"'
     if name == "pin":
         return f'Pin memory "{args.get("text", "")}" (kept in mind every conversation)'
+    if name == "archive":
+        label = args.get("memory_text") or args.get("memory_id", "?")
+        return f'Archive memory "{label}" (no longer kept in mind every conversation)'
     if name == "recategorize":
         return f'Re-file memory {args.get("memory_id", "?")} under "{args.get("category", "")}"'
     if name == "write_skill":

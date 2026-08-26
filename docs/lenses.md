@@ -108,8 +108,9 @@ pipeline, not a freeform agent task (small-local-model constraint, see
 
 Those numbers are generous because this call is **not** the chat. `complete_text`
 sends two messages with no conversation behind them, so the whole
-`OLLAMA_NUM_CTX` (32768 tokens) belongs to this one call. Lens + target + system
-prompt at the current bounds is roughly 7K tokens — a fifth of the window.
+`OLLAMA_NUM_CTX` (49152 tokens since 2026-08-26) belongs to this one call. Lens
++ target + system prompt at the current bounds is roughly 7K tokens — a seventh
+of the window.
 
 They read as one bound each now. They did not before. A page passed through
 **three** caps on its way to the model, two of them invisible at the call site:
