@@ -71,6 +71,12 @@ class _FakeGmail:
         # failure the mail_watcher daemon hits after an idle gap.
         self.history_errors = []
         self.history_calls = 0
+        # What messages().get/list were actually asked for. fetch_sent_metadata's
+        # whole promise is that bodies are never FETCHED, not fetched and thrown
+        # away, and the only place that shows up is the request arguments.
+        self.get_calls = []
+        self.list_calls = []
+        self.list_error = None
 
     # The client is service.users().messages().get(...).execute()
     def users(self):
@@ -112,13 +118,18 @@ class _FakeMessages:
     def __init__(self, gmail):
         self.gmail = gmail
 
-    def get(self, userId=None, id=None, format=None):
+    def get(self, userId=None, id=None, format=None, metadataHeaders=None):
+        self.gmail.get_calls.append({"id": id, "format": format,
+                                     "metadataHeaders": metadataHeaders})
         message = self.gmail.messages_by_id.get(id)
         if message is None:
             return _Exec(_http_error(404, "Not Found"))
         return _Exec(message)
 
     def list(self, userId=None, q=None, maxResults=None):
+        self.gmail.list_calls.append({"q": q, "maxResults": maxResults})
+        if self.gmail.list_error is not None:
+            return _Exec(self.gmail.list_error)
         ids = self.gmail.search_results[:maxResults]
         return _Exec({"messages": [{"id": i} for i in ids]})
 
@@ -926,3 +937,132 @@ def test_a_broken_pipe_does_not_move_the_watermark(gmail, monkeypatch):
     result = gmail_read.list_history("100")
 
     assert "history_id" not in result
+
+
+# --------------------------------------------------------------------------- #
+# fetch_sent_metadata — ScribeJay's sent-mail source
+# --------------------------------------------------------------------------- #
+
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+_TZ = ZoneInfo("America/New_York")
+_START = datetime(2026, 8, 21, tzinfo=_TZ)
+_END = datetime(2026, 8, 21, 23, 59, 59, tzinfo=_TZ)
+
+
+def _sent(message_id="s1", thread_id="T1", to="Kat <kat@impact.com>", cc="",
+          subject="Re: Catch Up", internal_date="1755000000000", in_reply_to=None):
+    """A SENT message as the metadata format returns it: headers only, and the
+    payload carries no parts at all — that is what makes it cheap."""
+    headers = [{"name": "To", "value": to}, {"name": "Subject", "value": subject}]
+    if cc:
+        headers.append({"name": "Cc", "value": cc})
+    if in_reply_to:
+        headers.append({"name": "In-Reply-To", "value": in_reply_to})
+    return {"id": message_id, "threadId": thread_id, "internalDate": internal_date,
+            "payload": {"headers": headers}}
+
+
+def test_sent_metadata_returns_a_row_per_message(gmail):
+    gmail.messages_by_id = {"s1": _sent()}
+    gmail.search_results = ["s1"]
+    result = gmail_read.fetch_sent_metadata(_START, _END)
+    assert result["count"] == 1
+    row = result["messages"][0]
+    assert row["to"] == "Kat <kat@impact.com>"
+    assert row["subject"] == "Re: Catch Up"
+    assert row["thread_id"] == "T1"
+
+
+def test_no_body_is_ever_requested(gmail):
+    # The promise of the feature. Asserted on the request, not the result: a row
+    # with no body could equally mean a body was fetched and discarded.
+    gmail.messages_by_id = {"s1": _sent()}
+    gmail.search_results = ["s1"]
+    gmail_read.fetch_sent_metadata(_START, _END)
+    call = gmail.get_calls[0]
+    assert call["format"] == "metadata"
+    assert sorted(call["metadataHeaders"]) == ["Cc", "In-Reply-To", "Subject", "To"]
+
+
+def test_no_row_carries_a_body_or_a_snippet(gmail):
+    gmail.messages_by_id = {"s1": _sent()}
+    gmail.search_results = ["s1"]
+    row = gmail_read.fetch_sent_metadata(_START, _END)["messages"][0]
+    assert set(row) == {"message_id", "thread_id", "to", "cc", "subject", "date", "is_reply"}
+
+
+def test_the_window_is_sent_as_epoch_seconds(gmail):
+    # Gmail's after:/before: take whole days in the ACCOUNT's timezone, which is
+    # not necessarily this machine's — epoch seconds are the only unambiguous
+    # form, so a 00:00-23:59 local day cannot silently slide onto the wrong day.
+    gmail.search_results = []
+    gmail_read.fetch_sent_metadata(_START, _END)
+    query = gmail.list_calls[0]["q"]
+    assert query == (f"in:sent after:{int(_START.timestamp())} "
+                     f"before:{int(_END.timestamp())}")
+
+
+def test_only_sent_mail_is_asked_for(gmail):
+    gmail.search_results = []
+    gmail_read.fetch_sent_metadata(_START, _END)
+    assert gmail.list_calls[0]["q"].startswith("in:sent ")
+
+
+def test_a_reply_is_marked_by_its_threading_header(gmail):
+    gmail.messages_by_id = {"s1": _sent(in_reply_to="<abc@acme.com>"),
+                            "s2": _sent(message_id="s2", in_reply_to=None,
+                                        internal_date="1755000060000")}
+    gmail.search_results = ["s1", "s2"]
+    rows = gmail_read.fetch_sent_metadata(_START, _END)["messages"]
+    assert [r["is_reply"] for r in rows] == [True, False]
+
+
+def test_a_message_with_no_subject_gets_a_label_not_a_blank(gmail):
+    message = _sent()
+    message["payload"]["headers"] = [{"name": "To", "value": "kat@impact.com"}]
+    gmail.messages_by_id = {"s1": message}
+    gmail.search_results = ["s1"]
+    row = gmail_read.fetch_sent_metadata(_START, _END)["messages"][0]
+    assert row["subject"] == "(no subject)"
+    assert row["cc"] == ""
+
+
+def test_rows_come_back_oldest_first(gmail):
+    gmail.messages_by_id = {
+        "s1": _sent(message_id="s1", internal_date="1755009999000"),
+        "s2": _sent(message_id="s2", internal_date="1755000000000"),
+    }
+    gmail.search_results = ["s1", "s2"]
+    rows = gmail_read.fetch_sent_metadata(_START, _END)["messages"]
+    assert [r["message_id"] for r in rows] == ["s2", "s1"]
+
+
+def test_one_unreadable_message_does_not_cost_the_day(gmail):
+    # The list gives ids; a get can still 404 (deleted between the two calls).
+    gmail.messages_by_id = {"s2": _sent(message_id="s2")}
+    gmail.search_results = ["gone", "s2"]
+    result = gmail_read.fetch_sent_metadata(_START, _END)
+    assert result["count"] == 1
+    assert result["messages"][0]["message_id"] == "s2"
+
+
+def test_gmail_being_down_is_an_error_dict_not_a_crash(gmail):
+    # CLAUDE.md: a failing source degrades to empty for its caller.
+    gmail.list_error = _http_error(503, "backend error")
+    result = gmail_read.fetch_sent_metadata(_START, _END)
+    assert "error" in result
+    assert "messages" not in result
+
+
+def test_a_day_with_no_sent_mail_is_empty_not_an_error(gmail):
+    gmail.search_results = []
+    assert gmail_read.fetch_sent_metadata(_START, _END) == {"messages": [], "count": 0}
+
+
+def test_the_result_is_capped(gmail):
+    gmail.messages_by_id = {f"s{i}": _sent(message_id=f"s{i}") for i in range(200)}
+    gmail.search_results = [f"s{i}" for i in range(200)]
+    gmail_read.fetch_sent_metadata(_START, _END)
+    assert gmail.list_calls[0]["maxResults"] == gmail_read.SENT_MAX_RESULTS

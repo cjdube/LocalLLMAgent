@@ -380,6 +380,65 @@ def search_mail(query: str, limit: int = SEARCH_DEFAULT_LIMIT, **ignored) -> dic
     return out
 
 
+# Headers a correspondence record needs, and deliberately nothing else. Gmail's
+# format="metadata" honours this list server-side, so the bodies are never
+# fetched at all rather than fetched and then discarded — the difference between
+# a promise about what we keep and a guarantee about what we ask for.
+SENT_METADATA_HEADERS = ("To", "Cc", "Subject", "In-Reply-To")
+
+# Cap on one day's sent mail. Well clear of a heavy day; it exists so a bulk send
+# can't turn one journaling run into hundreds of API calls.
+SENT_MAX_RESULTS = 60
+
+
+def fetch_sent_metadata(start, end, limit: int = SENT_MAX_RESULTS) -> dict:
+    """Sent messages between two local-aware datetimes, as metadata rows.
+
+    A **library function, not a chat tool** — the same shape `get_events_in_range`
+    has for ScribeJay's colorizer. No TOOL_SCHEMA: reading the record of who was
+    written to is journaling, and Wren reads that record rather than the mailbox.
+
+    No body, no snippet. Each row is {message_id, thread_id, to, cc, subject,
+    date, is_reply}. Errors come back as {"error": ...} and read as an empty day
+    to the caller, like every other source here.
+
+    The window is converted to epoch seconds rather than formatted as dates:
+    Gmail's after:/before: operators take whole days in the *account's* timezone,
+    which is not necessarily the machine's, and would silently slice the day
+    wrong (docs/timezones.md).
+    """
+    query = f"in:sent after:{int(start.timestamp())} before:{int(end.timestamp())}"
+    try:
+        listed = _service().users().messages().list(
+            userId="me", q=query, maxResults=limit).execute()
+    except Exception as e:
+        return {"error": str(e)}
+
+    rows = []
+    for stub in listed.get("messages") or []:
+        try:
+            message = _service().users().messages().get(
+                userId="me", id=stub["id"], format="metadata",
+                metadataHeaders=list(SENT_METADATA_HEADERS)).execute()
+        except Exception:
+            # One unreadable message must not cost the day's record.
+            continue
+        headers = _headers(message.get("payload") or {})
+        rows.append({
+            "message_id": message.get("id"),
+            "thread_id": message.get("threadId"),
+            "to": headers.get("To", ""),
+            "cc": headers.get("Cc", ""),
+            "subject": headers.get("Subject", "(no subject)"),
+            "date": _local_stamp(message.get("internalDate")),
+            # A reply is answering; a new thread is deciding to reach out. The
+            # second is the signal worth separating in the record.
+            "is_reply": bool(headers.get("In-Reply-To")),
+        })
+    rows.sort(key=lambda r: r["date"])
+    return {"messages": rows, "count": len(rows)}
+
+
 def read_email(message_or_thread_id: str, **ignored) -> dict:
     """Read a whole conversation. Model-facing.
 

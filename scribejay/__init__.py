@@ -26,13 +26,20 @@ ScribeJay may import ONLY these from the rest of the repo:
 
     agent.prefs, agent.store, agent.activity_log
     agent.loop            -- complete_text and warm_model only, never advance()
-    agent.tools.{calendar, email, chrome_history, youtube, strava}
+    agent.tools.{calendar, email, chrome_history, youtube, strava, gmail_read}
     tasks._common         -- setup_logger / notify_failure
     tasks._urls           -- safe_url
 
 Those pull in agent.dates, agent.backends, agent.tools.{notify, push_log,
 google_auth, learnings_file, _http} transitively, which is why the extraction
 estimate in docs/scribejay.md is larger than this list.
+
+gmail_read was added to the porch on 2026-08-26 for daily_correspondence, and only
+for `fetch_sent_metadata` and `my_address` — both library functions, neither
+model-facing. It is the same arrangement agent.tools.calendar already has, where
+`get_events_in_range` and `set_event_color` back the colorizer without being
+registered tools. ScribeJay must not reach for the model-facing halves of that
+module (`search_mail`, `read_email`): reading a mailbox on request is Wren's job.
 
 ScribeJay must NOT import `agent.toolset` or anything under `chat/`. Nothing under
 `agent/`, `chat/` or `tasks/` may import `scribejay.*`. `evals/` is the one

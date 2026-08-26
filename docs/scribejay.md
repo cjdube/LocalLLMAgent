@@ -38,6 +38,13 @@ writes blurbs and scores; Python owns dates, structure, URLs and file assembly,
 per the repo's small-local-model rules. Keep it that way — the point of the
 split is that Wren's tool budget is not spent on capture.
 
+**The middle step can be zero calls.** `scribejay/strava_download.py` and
+`scribejay/daily_correspondence.py` are pure field mapping — a Strava activity
+onto a calendar event, a sent-mail header onto a line — with no natural-language
+step to hand the model. Adding one would only let it invent detail the source
+does not carry. Gather and write are the two steps that define the shape; the
+model call is what most tasks need, not what makes it a ScribeJay task.
+
 ## What moved
 
 | Task | Schedule | launchd label |
@@ -47,6 +54,7 @@ split is that Wren's tool budget is not spent on capture.
 | `scribejay/daily_commits.py` | Daily 4:55 AM | `local.scribejay.dailycommits` |
 | `scribejay/daily_youtube_learnings.py` | Daily 5:05 AM | `local.scribejay.dailyyoutubelearnings` |
 | `scribejay/daily_chrome_learnings.py` | Daily 5:15 AM | `local.scribejay.dailychromelearnings` |
+| `scribejay/daily_correspondence.py` | Daily 5:20 AM | `local.scribejay.dailycorrespondence` |
 | `scribejay/strava_download.py` | Daily 5:50 AM | `local.scribejay.stravadownload` |
 | `scribejay/calendar_colorizer.py` | Daily 5:00 PM | `local.scribejay.calendarcolorizer` |
 

@@ -55,7 +55,9 @@ names). Neither writes anything; both make an assertion depend on the machine.
 The learnings tasks write reviews to `LEARNINGS_DIR` — the user's Obsidian vault
 under ~/Vaults. Tests stub the writer per-test, but redirect LEARNINGS_DIR to
 tmp_path suite-wide as the backstop, so a missed stub lands a fixture file in a
-throwaway dir, never in the real vault.
+throwaway dir, never in the real vault. `SYNTHESIS_DIR` and `CORRESPONDENCE_DIR`
+are two more real vault paths written by tasks that deliberately stay out of the
+ingest queue, and get the same treatment.
 
 Those same `main()` calls also reach `notify_failure` on a failure path (e.g.
 strava_download's partial-failure alert), which POSTs to the real ntfy server when
@@ -243,6 +245,10 @@ def _isolate_learnings_dir(tmp_path, monkeypatch):
     # vault dir — a second real path under ~/Vaults, so it gets the same
     # backstop (daily_synthesis._synthesis_dir() also reads it at call time).
     monkeypatch.setenv("SYNTHESIS_DIR", str(tmp_path))
+    # daily_correspondence writes to a third real path under ~/Vaults, kept out
+    # of the ingest queue on purpose (correspondence._correspondence_dir also
+    # reads it at call time), so it gets the same backstop.
+    monkeypatch.setenv("CORRESPONDENCE_DIR", str(tmp_path))
 
 
 @pytest.fixture(autouse=True)
