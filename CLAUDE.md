@@ -10,7 +10,7 @@ Per-module detail is in [docs/module-map.md](docs/module-map.md). What binds a c
 - `agent/loop.py` — `advance()` (tool-calling loop) and `complete_text()` (one-shot, tool-free — what scheduled tasks use), both routed through the `_llm_chat` backend seam. `agent/backends/` holds the opt-in adapters.
 - `agent/toolset.py` — the single tool registry (`TOOLS`, `DISPATCH`) and gating sets (`WRITE_TOOLS`, `CONSEQUENTIAL_TOOLS`, `UNATTENDED_EXCLUDED_TOOLS`); one module per capability in `agent/tools/*.py`.
 - `agent/store.py` — locked/atomic JSON store primitives used by every store under `config/`.
-- `tasks/*.py` — unattended entrypoints run by launchd; shared helpers in `tasks/_common.py` and `tasks/_learnings_common.py`, one plist per task in `launchd/`, logs in `logs/`.
+- `tasks/*.py` — unattended entrypoints run by launchd; shared helpers in `tasks/_common.py` and `agent/activity_log.py`, one plist per task in `launchd/`, logs in `logs/`.
 - `tests/` — flat pytest suite, one `test_<module>.py` per source module, except where a module sits behind a seam and is tested through it. Plus flat jest/jsdom suites (`npm test`), one per standalone script in `chat/static/`.
 - `config/` — `.env` (documented in `.env.example`) plus gitignored JSON stores.
 - **Trap:** `chat/wikilint.py` runs the sibling ObsidianWikiAgent checkout as a **subprocess**, never an import — both repos have a top-level `agent` package.
@@ -47,7 +47,7 @@ The on-device model is small; design around it:
 ## Conventions quick reference
 
 - **New tool**: `TOOL_SCHEMA` dict + plain callable + `main()` CLI in `agent/tools/<name>.py`; register in `agent/toolset.py` (`TOOLS`, `DISPATCH`, and the right gating set) and slot it into `CORE_TOOL_NAMES` or a `TOOL_GROUP_NAMES` group, or the partition test fails ([docs/tool-loading.md](docs/tool-loading.md)). Restart the chat server after edits.
-- **New scheduled task**: `tasks/<name>.py` with `main() -> int`, `setup_logger` and `notify_failure` from `tasks/_common.py`, plus a launchd plist. `tasks/morning_brief.py` is the digest template; `tasks/daily_chrome_learnings.py` the gather→LLM→persist one.
+- **New scheduled task**: `tasks/<name>.py` with `main() -> int`, `setup_logger` and `notify_failure` from `tasks/_common.py`, plus a launchd plist. **Log `Starting <name> run` on entry and `<name> run complete` on every success path** (and `logger.error` on the failure path — `notify_failure` doesn't log): `chat/insights.py:parse_runs` builds the dashboard's run history from those lines, never from exit codes, so a task without them reads as *has not run* and one with no ending hangs as *running*. `mail_watch_renew` renewed the Gmail watch every morning and showed as never-run for weeks. Polling jobs (`StartInterval`, no `StartCalendarInterval`) count as daemons and are excluded on purpose — leave them out. `tasks/morning_brief.py` is the digest template; `tasks/daily_chrome_learnings.py` the gather→LLM→persist one.
 - **Persistence**: JSON stores under `config/` via `agent/store.py` (`locked`, `load_json`, `atomic_write_json`); prune on write so polling stores don't grow unbounded.
 - **Config**: `os.getenv()` with inline defaults; document every new variable in `config/.env.example`.
 - **Tests**: one `tests/test_<module>.py` per module; monkeypatch all network/model/Google collaborators; no real network calls.
