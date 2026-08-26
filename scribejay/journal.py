@@ -37,3 +37,25 @@ def has_substantive_content(text: str) -> bool:
         if stripped.startswith("- ") and "**None:**" not in stripped:
             return True
     return False
+
+
+def commit_totals_line(commits: list) -> str:
+    """Per-repo commit and line totals as one deterministic line.
+
+    Arithmetic the model is never asked for (CLAUDE.md: deterministic Python owns
+    structure). It is also the footnote that makes the drafted bullets checkable —
+    a draft claiming a big day under a two-commit total is visibly wrong."""
+    if not commits:
+        return "*No commits.*"
+    totals: dict = {}
+    for c in commits:
+        row = totals.setdefault(c["repo"], {"commits": 0, "insertions": 0, "deletions": 0})
+        row["commits"] += 1
+        row["insertions"] += c["insertions"]
+        row["deletions"] += c["deletions"]
+    parts = [
+        f"{repo} — {row['commits']} commit{'s' if row['commits'] != 1 else ''}, "
+        f"+{row['insertions']:,}/-{row['deletions']:,}"
+        for repo, row in sorted(totals.items())
+    ]
+    return "*" + " · ".join(parts) + "*"

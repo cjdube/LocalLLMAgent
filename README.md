@@ -39,9 +39,9 @@ send the brief.
 
 **ScribeJay** (`scribejay/`) is the journaling one. It keeps the record: Strava rides
 onto the calendar, yesterday's Claude Code hours as time blocks, the day's
-events color-coded, and daily vault pages from Chrome history, YouTube Likes and
-AI chats. It is a *pipeline* agent — gather → one `complete_text()` call → write.
-It has no tool registry and never calls `advance()`.
+events color-coded, and daily vault pages from Chrome history, YouTube Likes,
+AI chats and the commits he made. It is a *pipeline* agent — gather → one
+`complete_text()` call → write. It has no tool registry and never calls `advance()`.
 
 The seam is one sentence: **ScribeJay writes the record, Wren reads it.** So the
 raw-capture tools (`fetch_strava`, `fetch_chrome_history`, `fetch_liked_videos`)
@@ -258,6 +258,7 @@ the dashboard.
 |---|---|---|
 | `scribejay/ai_chat_learnings.py` | Daily 4:30 AM | Covers the prior day's chats with AI agents — Claude Code sessions from `~/.claude/projects` plus any Gemini export dropped in `WREN_GEMINI_CHATS_DIR` — into an **Accomplished / Learned** summary per session. Writes `AI-Chat-Learnings-<date>.md` in `LEARNINGS_DIR`. A day with no chats writes nothing; `--backfill N` does the last N days. See [docs/ai-chat-learnings.md](docs/ai-chat-learnings.md). |
 | `scribejay/claude_time_blocks.py` | Daily 4:45 AM | Logs yesterday's Claude Code working hours to Google Calendar, so the day is on record without anyone remembering to block it out. Pools every session's timestamps into one timeline, splits it on idle gaps, and creates one event per stretch — non-overlapping by construction, colored as work, deduped by `source_id` so re-runs and `--backfill N` never duplicate. A day with no sessions writes nothing. A successful run sends no phone push — the calendar entries are the record; only a failure alerts. See [docs/claude-time-blocks.md](docs/claude-time-blocks.md). |
+| `scribejay/daily_commits.py` | Daily 4:55 AM | Covers what he actually *shipped* the prior day: yesterday's commits across the checkouts under `PROJECTS_DIR`, grouped by the model into **What I Built** plus **Also** and written as `Daily-Commits-<date>.md` in `LEARNINGS_DIR`. Local git only — no API, no token, no network. Several commits over the same paths become one bullet; the paths themselves are what let the page say a change was tested or documented. The per-repo totals line is computed in Python, not by the model. A day with no commits writes nothing. See [docs/daily-commits.md](docs/daily-commits.md). |
 | `scribejay/daily_youtube_learnings.py` | Daily 5:05 AM | Covers the prior day's YouTube Liked videos — the model writes a short synthesis of what they teach, and the linked list of exact videos is appended in Python so the URLs are always real. Writes `Daily-YouTube-<date>.md` in `LEARNINGS_DIR`. A day with no Likes writes nothing. See [docs/daily-learnings.md](docs/daily-learnings.md). |
 | `scribejay/daily_chrome_learnings.py` | Daily 5:15 AM | Covers the prior day's Chrome browsing into a compact daily log — **Tools & Tech Encountered** plus **Product & Strategy** — written as `Daily-Chrome-<date>.md` in `LEARNINGS_DIR`. Each site carries its top page *paths*, so the review says what was being looked into rather than restating tab titles. Excluded domains/keywords come from [preferences](docs/preferences.md). A quiet day writes nothing; a failed vault write emails the draft instead. See [docs/daily-learnings.md](docs/daily-learnings.md). |
 | `tasks/project_scan.py` | Daily 5:30 AM | Refreshes the local project registry that feeds `daily_synthesis`'s project anchors. Scans each checkout under `PROJECTS_DIR` for git freshness plus its README, CLAUDE.md/AGENTS.md and `docs/` headings, **and nothing else** — never `.env`. One model call per project distils that into a summary and topic terms, cached in `config/projects.json` and keyed on a document hash, so a commit touching no docs costs nothing. `--refresh` regenerates all. See [docs/projects.md](docs/projects.md). |

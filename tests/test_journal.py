@@ -1,6 +1,6 @@
 """Tests for scribejay/journal.py — the journaling-only rendering helpers: the
-deterministic Liked-videos list (including its URL scheme guard) and the
-empty-draft check. Everything ScribeJay shares with tasks/daily_synthesis.py is
+deterministic Liked-videos list (including its URL scheme guard), the
+per-repo commit totals line, and the empty-draft check. Everything ScribeJay shares with tasks/daily_synthesis.py is
 tested in tests/test_activity_log.py instead."""
 
 from scribejay import journal as lc
@@ -50,3 +50,27 @@ def test_has_substantive_content_false_when_only_none_markers():
 
 def test_has_substantive_content_false_when_no_bullets():
     assert not lc.has_substantive_content("## Daily Log: July 12, 2026\n\nheader only")
+
+
+# --------------------------------------------------------------------------- #
+# commit_totals_line
+# --------------------------------------------------------------------------- #
+
+def _c(repo, insertions, deletions):
+    return {"repo": repo, "insertions": insertions, "deletions": deletions}
+
+
+def test_commit_totals_line_sums_per_repo():
+    line = lc.commit_totals_line([
+        _c("LocalLLMAgent", 2111, 127), _c("LocalLLMAgent", 10, 0), _c("ObsidianWikiAgent", 40, 26)])
+    assert line == "*LocalLLMAgent — 2 commits, +2,121/-127 · ObsidianWikiAgent — 1 commit, +40/-26*"
+
+
+def test_commit_totals_line_singular_for_one_commit():
+    assert "1 commit," in lc.commit_totals_line([_c("r", 1, 0)])
+
+
+def test_commit_totals_line_with_no_commits():
+    # The task skips the write on an empty day, so this is a guard rather than a
+    # path anyone renders — it must not raise.
+    assert lc.commit_totals_line([]) == "*No commits.*"

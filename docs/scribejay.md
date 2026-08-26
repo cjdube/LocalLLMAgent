@@ -44,6 +44,7 @@ split is that Wren's tool budget is not spent on capture.
 |---|---|---|
 | `scribejay/ai_chat_learnings.py` | Daily 4:30 AM | `local.scribejay.aichatlearnings` |
 | `scribejay/claude_time_blocks.py` | Daily 4:45 AM | `local.scribejay.claudetimeblocks` |
+| `scribejay/daily_commits.py` | Daily 4:55 AM | `local.scribejay.dailycommits` |
 | `scribejay/daily_youtube_learnings.py` | Daily 5:05 AM | `local.scribejay.dailyyoutubelearnings` |
 | `scribejay/daily_chrome_learnings.py` | Daily 5:15 AM | `local.scribejay.dailychromelearnings` |
 | `scribejay/strava_download.py` | Daily 5:50 AM | `local.scribejay.stravadownload` |

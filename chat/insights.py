@@ -639,6 +639,9 @@ ROUTINE_USES = {
     # calendar = the time blocks it writes; ntfy = notify_failure.
     "claude_time_blocks": ["google_calendar", "ntfy"],
     "daily_chrome_learnings": ["chrome", "gmail", "ntfy"],
+    # Source is the local checkouts under PROJECTS_DIR — the same service node
+    # project_scan reads, and no network at all. gmail = persist_or_email fallback.
+    "daily_commits": ["projects", "gmail", "ntfy"],
     "daily_youtube_learnings": ["youtube", "gmail", "ntfy"],
     # Cross-source: yesterday's browsing + Likes matched against the wiki and the
     # opportunity watchlist; gmail = notify's email fallback when the push fails.
@@ -679,6 +682,7 @@ ROUTINE_WRITES = {
     "calendar_colorizer": "event colours",
     "claude_time_blocks": "Claude Code time blocks",
     "daily_chrome_learnings": "daily browsing page",
+    "daily_commits": "daily commits page",
     "daily_youtube_learnings": "daily YouTube page",
     "ai_chat_learnings": "daily AI-chat page",
 }
