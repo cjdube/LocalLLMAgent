@@ -465,6 +465,8 @@ chat/
   static/run-chart.js # the run-duration charts (hand-rolled SVG, no library)
   static/favicon.svg  # Wren mark (cream wren on terracotta) — header logo + favicon
   static/{favicon-32,apple-touch-icon,icon-512}.png  # raster fallbacks
+  static/scribejay.svg   # ScribeJay mark (cream jay on blue) — agent box + map node
+  static/scribejay-{32,180,512}.png  # raster fallbacks
 ```
 
 It's a single scrollable page (no tabs). Chat lives at `/`, not here:
