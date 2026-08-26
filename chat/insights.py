@@ -588,20 +588,24 @@ def describe_tools(tools: list[dict], write_tools) -> list[dict]:
 # any unmapped tool still shows up on the map under "other".
 TOOL_SERVICES = {
     "google_calendar": ("Google Calendar", ["get_upcoming_events", "log_calendar_event",
-                                            "get_events_by_date", "recolor_event"]),
+                                            "get_events_by_date"]),
     # Both directions now: send_email and reply_to_thread write, and the mail
     # tools read. Two different OAuth scopes on one service, so one node.
     "gmail": ("Gmail", ["send_email", "reply_to_thread", "search_mail", "read_email"]),
     "google_tasks": ("Google Tasks", ["get_tasks", "get_tasks_due_soon", "create_task",
                                       "update_task_due_date", "complete_task"]),
-    "chrome": ("Chrome History", ["fetch_chrome_history"]),
-    "strava": ("Strava", ["fetch_strava"]),
+    # Routine-only since journaling moved to Scribe: these three services are
+    # touched by scheduled tasks (ROUTINE_USES below), never by a chat tool, so
+    # they draw on /map as service nodes with an empty tool list. The keys stay
+    # because the routine edges point at them.
+    "chrome": ("Chrome History", []),
+    "strava": ("Strava", []),
     "weather": ("OpenWeatherMap", ["fetch_weather"]),
     "espn": ("ESPN Scoreboard", ["fetch_scores"]),
     "web_search": ("Tavily Search", ["search_web", "research_company"]),
     "firecrawl": ("Firecrawl", ["fetch_webpage", "evaluate_app", "evaluate_against"]),
     "github": ("GitHub", ["fetch_starred_repos"]),
-    "youtube": ("YouTube", ["fetch_liked_videos"]),
+    "youtube": ("YouTube", []),  # routine-only, see the note above
     # The routine failure-alert channel. list_notifications reads the log
     # notify() writes on every delivered push, so the map draws chat's one edge
     # into a service that was previously write-only.

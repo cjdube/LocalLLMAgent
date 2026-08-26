@@ -148,7 +148,7 @@ CHAT_SYSTEM_PROMPT = (
 def _system_message_content() -> str:
     """Build the chat system prompt with today's date baked in. The local
     model doesn't know the current date, so without this it resolves a bare
-    "July 2nd" to a default year (e.g. 2024) and tools like fetch_strava come
+    "July 2nd" to a default year (e.g. 2024) and tools like get_events_by_date come
     back empty. Computed per turn (the /chat route rebuilds history[0] on
     every message) rather than at import time or per conversation: the server
     is long-running under launchd, so the date would otherwise go stale after

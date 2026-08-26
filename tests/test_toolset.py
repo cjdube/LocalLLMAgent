@@ -20,6 +20,47 @@ from agent.tools import email as email_mod
 TASK_ONLY_SCHEMAS: set[str] = set()
 
 
+# Capture modules Scribe owns. They are imported as plain functions by
+# scribe/*.py and tasks/daily_synthesis.py; Wren's model must not be able to call
+# them at all, which is why they carry no TOOL_SCHEMA (see scribe/__init__.py).
+SCRIBE_CAPTURE_MODULES = ("chrome_history", "strava", "youtube")
+
+
+def test_scribe_capture_modules_expose_no_tool_schema():
+    """The journaling capture modules stay library-only.
+
+    The other half of test_every_model_facing_schema_is_registered below: that
+    one catches a schema added back and left unregistered, this one catches a
+    schema added back and registered — which would quietly hand Wren the capture
+    tools again and undo the split."""
+    with_schema = [
+        name for name in SCRIBE_CAPTURE_MODULES
+        if any(
+            isinstance(getattr(importlib.import_module(f"agent.tools.{name}"), attr), dict)
+            and "function" in getattr(importlib.import_module(f"agent.tools.{name}"), attr)
+            for attr in dir(importlib.import_module(f"agent.tools.{name}"))
+            if attr.endswith("_SCHEMA")
+        )
+    ]
+    assert not with_schema, (
+        f"agent/tools/{with_schema} defines a tool schema. These are Scribe's "
+        "capture sources — journaling moved out of Wren's toolset on purpose. "
+        "Call the function directly from scribe/, don't re-register the tool."
+    )
+
+
+def test_capture_tools_are_absent_from_wrens_registry():
+    """Named explicitly, so removing them can't be silently reverted."""
+    names = {t["function"]["name"] for t in toolset.TOOLS}
+    for gone in ("fetch_strava", "fetch_chrome_history", "fetch_liked_videos",
+                 "recolor_event"):
+        assert gone not in names, f"{gone} is journaling — it belongs to Scribe"
+        assert gone not in toolset.DISPATCH
+    assert "activity" not in toolset.TOOL_GROUP_NAMES
+    # The read side Wren keeps: she answers "what did I do?" from the record.
+    assert {"get_events_by_date", "search_wiki", "read_wiki_page"} <= names
+
+
 def test_every_model_facing_schema_is_registered():
     """Every *_SCHEMA under agent/tools/ is in TOOLS, or explicitly allowlisted."""
     unregistered = {}
@@ -162,13 +203,9 @@ def test_tools_for_appends_group_and_dedupes():
 
 def test_groups_for_message_matches_on_word_boundaries():
     assert "opportunities" in toolset.groups_for_message("any new job openings?")
-    assert "activity" in toolset.groups_for_message("how were my strava runs")
     assert "wiki" in toolset.groups_for_message("what have I been learning about?")
-    assert "activity" in toolset.groups_for_message("what did I like on youtube?")
-    # "liked"/"video" are the YouTube cues, not "like"/"watch": \blike would fire
-    # on "likely", and "watch" belongs to opportunities (watchlist).
-    assert "activity" not in toolset.groups_for_message("is that likely to work")
-    assert "activity" not in toolset.groups_for_message("what's on my watchlist")
+    assert "mail" in toolset.groups_for_message("did anyone reply to me?")
+    assert "projects" in toolset.groups_for_message("what repos have I built?")
     # No cues -> no groups (a plain weather ask stays core-only).
     assert toolset.groups_for_message("what's the temperature outside") == set()
 

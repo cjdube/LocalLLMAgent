@@ -297,7 +297,7 @@ tool-result problem. Their limits bound the **input** they compact into a prompt
 
 | Task | Constants |
 |---|---|
-| `_learnings_common` | `MAX_CHROME_SITES` 40, `MAX_YOUTUBE_VIDEOS` 25, `MAX_YOUTUBE_DESC_CHARS` 500, `MAX_PAGES_PER_SITE` 6 |
+| `agent/activity_log.py` | `MAX_CHROME_SITES` 40, `MAX_YOUTUBE_VIDEOS` 25, `MAX_YOUTUBE_DESC_CHARS` 500, `MAX_PAGES_PER_SITE` 6 |
 | `daily_synthesis` | `MAX_NUDGES` 3, `MAX_ANCHOR_CANDIDATES` 5, `MAX_CROSS_CANDIDATES` 3, `MAX_ANCHOR_SUMMARY_CHARS` 200, `MAX_PROJECT_ANCHOR_TOKENS` 40, `MAX_AI_CHAT_BULLETS` 20, `RECENT_NUDGE_DAYS` 7, `MAX_SYNTHESIS_ATTEMPTS` 2 |
 | `opportunity_digest` | `MAX_SCORE_ITEMS` 40 (batch size — one model call per batch), `_SNIPPET_CHARS` 300, `_EDGAR_MAX_PAGES` 3, `_HN_MAX_PAGES` 3, `_EDGAR_DEFAULT_LOOKBACK_DAYS` 7 |
 | `project_scan` | `MAX_TOPICS` 15, `MAX_SUMMARY_CHARS` 300 (kept under `daily_synthesis`'s own 200-char anchor cap so it doesn't waste prompt budget) |

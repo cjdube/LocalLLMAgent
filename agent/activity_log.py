@@ -1,10 +1,17 @@
-"""Shared helpers for the daily learnings tasks (daily_chrome_learnings,
-daily_youtube_learnings).
+"""Shared helpers for the daily activity reviews — Scribe's journaling entries
+(scribe/daily_chrome_learnings.py, scribe/daily_youtube_learnings.py,
+scribe/ai_chat_learnings.py) and Wren's tasks/daily_synthesis.py.
 
-Both tasks follow the same shape — resolve the prior day, compact the fetched
-data to bound the prompt for the small local model, draft with the model, then
-persist to the Obsidian vault (emailing the draft if the vault write fails so an
-entry is never silently lost). This module holds the pieces they share.
+They all follow the same shape — resolve the prior day, compact the fetched data
+to bound the prompt for the small local model, draft with the model, then persist
+to the Obsidian vault (emailing the draft if the vault write fails so an entry is
+never silently lost). This module holds the pieces they share.
+
+It lives in agent/ rather than in either caller precisely BECAUSE both agents use
+it: Scribe must never import from tasks/, and Wren must never import from
+scribe/, so anything they both need belongs to the shared substrate. Journaling-
+only rendering (the Liked-videos list, the empty-draft check) is not here — it is
+in scribe/journal.py.
 """
 
 from datetime import datetime, timedelta
@@ -15,7 +22,6 @@ from agent.tools.calendar import _local_timezone
 from agent.tools.email import send_email
 from agent.tools.learnings_file import write_entry
 from tasks._common import notify_failure
-from tasks._urls import safe_url
 
 
 def prior_day(now: datetime | None = None) -> tuple[datetime, datetime, "datetime.date"]:
@@ -121,35 +127,6 @@ def compact_videos(videos: list) -> list:
         }
         for v in videos[:MAX_YOUTUBE_VIDEOS]
     ]
-
-
-def videos_section(videos: list) -> str:
-    """Deterministic Markdown section listing every video Liked, with a link to
-    each. Built in Python (not asked of the model) so the titles and URLs are
-    exact and every link is scheme-validated. Titles keep their raw text; only a
-    bad-scheme URL is dropped (the title then renders unlinked)."""
-    lines = ["### Videos Liked"]
-    if not videos:
-        lines.append("- **None:** [No videos Liked this day]")
-        return "\n".join(lines)
-    for v in videos:
-        title = (v.get("title") or "Untitled").strip()
-        channel = (v.get("channel") or "").strip()
-        url = safe_url(v.get("url") or "")
-        label = f"[{title}]({url})" if url else title
-        lines.append(f"- {label}{f' — {channel}' if channel else ''}")
-    return "\n".join(lines)
-
-
-def has_substantive_content(text: str) -> bool:
-    """True if the draft has at least one real bullet — i.e. a bullet that isn't
-    the template's "**None:**" empty-section marker. Lets a task skip writing a
-    log whose every section came back empty rather than save an all-"None" file."""
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("- ") and "**None:**" not in stripped:
-            return True
-    return False
 
 
 def persist_or_email(content: str, prefix: str, day, subject: str,

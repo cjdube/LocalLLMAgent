@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>local.wren.aichatlearnings</string>
+    <string>local.scribe.claudetimeblocks</string>
 
     <key>ProgramArguments</key>
     <array>
         <string>__WREN_ROOT__/.venv/bin/python</string>
         <string>-m</string>
-        <string>tasks.ai_chat_learnings</string>
+        <string>scribe.claude_time_blocks</string>
     </array>
 
     <key>WorkingDirectory</key>
@@ -20,13 +20,13 @@
         <key>Hour</key>
         <integer>4</integer>
         <key>Minute</key>
-        <integer>30</integer>
+        <integer>45</integer>
     </dict>
 
     <key>StandardOutPath</key>
-    <string>__WREN_ROOT__/logs/ai_chat_learnings.launchd.log</string>
+    <string>__WREN_ROOT__/logs/claude_time_blocks.launchd.log</string>
     <key>StandardErrorPath</key>
-    <string>__WREN_ROOT__/logs/ai_chat_learnings.launchd.log</string>
+    <string>__WREN_ROOT__/logs/claude_time_blocks.launchd.log</string>
 
     <key>RunAtLoad</key>
     <false/>

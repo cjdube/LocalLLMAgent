@@ -30,13 +30,10 @@ from agent.tools.calendar import (
     GET_BY_DATE_TOOL_SCHEMA as CALENDAR_BY_DATE_SCHEMA,
     LIST_TOOL_SCHEMA as CALENDAR_LIST_SCHEMA,
     LOG_TOOL_SCHEMA as CALENDAR_LOG_SCHEMA,
-    RECOLOR_TOOL_SCHEMA as CALENDAR_RECOLOR_SCHEMA,
     get_events_by_date,
     get_upcoming_events,
     log_calendar_event,
-    recolor_event,
 )
-from agent.tools.chrome_history import TOOL_SCHEMA as CHROME_SCHEMA, fetch_chrome_history
 from agent.tools.email import (
     REPLY_TO_THREAD_TOOL_SCHEMA,
     TOOL_SCHEMA as EMAIL_SCHEMA,
@@ -103,7 +100,6 @@ from agent.tools.skills import (
     write_skill,
 )
 from agent.tools.sports import TOOL_SCHEMA as SPORTS_SCHEMA, fetch_scores
-from agent.tools.strava import TOOL_SCHEMA as STRAVA_SCHEMA, fetch_strava
 from agent.tools.weather import TOOL_SCHEMA as WEATHER_SCHEMA, fetch_weather
 from agent.tools.web_fetch import TOOL_SCHEMA as WEB_FETCH_SCHEMA, fetch_webpage
 from agent.tools.web_search import TOOL_SCHEMA as WEB_SEARCH_SCHEMA, search_web
@@ -112,7 +108,6 @@ from agent.tools.wiki import (
     read_wiki_page,
     search_wiki,
 )
-from agent.tools.youtube import TOOL_SCHEMA as YOUTUBE_SCHEMA, fetch_liked_videos
 from tasks.morning_brief import SEND_BRIEF_TOOL_SCHEMA, brief_dispatch
 from tasks.opportunity_digest import SEND_DIGEST_TOOL_SCHEMA, digest_dispatch
 
@@ -125,12 +120,8 @@ TOOLS = [
     CALENDAR_LIST_SCHEMA,
     CALENDAR_LOG_SCHEMA,
     CALENDAR_BY_DATE_SCHEMA,
-    CALENDAR_RECOLOR_SCHEMA,
-    CHROME_SCHEMA,
-    YOUTUBE_SCHEMA,
     EMAIL_SCHEMA,
     REPLY_TO_THREAD_TOOL_SCHEMA,
-    STRAVA_SCHEMA,
     SPORTS_SCHEMA,
     WEATHER_SCHEMA,
     WEB_SEARCH_SCHEMA,
@@ -173,9 +164,6 @@ DISPATCH = {
     "get_upcoming_events": get_upcoming_events,
     "log_calendar_event": log_calendar_event,
     "get_events_by_date": get_events_by_date,
-    "recolor_event": recolor_event,
-    "fetch_chrome_history": fetch_chrome_history,
-    "fetch_liked_videos": fetch_liked_videos,
     # The wrapper, not send_email itself: it drops model-supplied arguments the
     # schema doesn't declare (to, html), pinning the recipient to BRIEF_TO_EMAIL.
     "send_email": send_email_tool,
@@ -183,7 +171,6 @@ DISPATCH = {
     # at all. Its recipients come from the thread's own headers in Python
     # (email.reply_plan), so an injected address has nothing to land in.
     "reply_to_thread": reply_to_thread_tool,
-    "fetch_strava": fetch_strava,
     # Read-only: one public scoreboard GET per league the user follows.
     "fetch_scores": fetch_scores,
     "fetch_weather": fetch_weather,
@@ -247,7 +234,7 @@ DISPATCH = {
 }
 
 WRITE_TOOLS = frozenset({
-    "log_calendar_event", "send_email", "reply_to_thread", "recolor_event",
+    "log_calendar_event", "send_email", "reply_to_thread",
     "send_morning_brief",
     "create_task", "update_task_due_date", "complete_task", "forget",
     # remember/pin/recategorize are gated alongside forget: chat turns ingest
@@ -336,8 +323,7 @@ MAIL_JOB_SAFE_TOOLS = frozenset({
     "list_projects", "read_project", "list_games",
     # Fixed first-party feeds: the account is the user's and the destination is
     # not a parameter, so an injected email cannot aim them anywhere.
-    "fetch_weather", "fetch_scores", "fetch_chrome_history",
-    "fetch_liked_videos", "fetch_starred_repos", "fetch_strava",
+    "fetch_weather", "fetch_scores", "fetch_starred_repos",
 })
 
 
@@ -378,7 +364,7 @@ CORE_TOOL_NAMES = [
     # arrives in wording no keyword pre-loader catches, and the cost of the miss
     # is a score invented from pretraining, which reads exactly like a real one.
     "fetch_scores",
-    "get_upcoming_events", "get_events_by_date", "log_calendar_event", "recolor_event",
+    "get_upcoming_events", "get_events_by_date", "log_calendar_event",
     "get_tasks", "get_tasks_due_soon", "create_task", "update_task_due_date", "complete_task",
     "search_web",
     "remember", "pin", "recall", "recategorize", "archive", "forget",
@@ -404,7 +390,6 @@ TOOL_GROUP_NAMES = {
     "wiki": ["search_wiki", "read_wiki_page"],
     "background": ["run_in_background", "list_background_jobs", "get_job_result"],
     "web": ["fetch_webpage", "evaluate_app", "evaluate_against", "fetch_starred_repos"],
-    "activity": ["fetch_strava", "fetch_chrome_history", "fetch_liked_videos"],
     "authoring": ["write_skill", "delete_skill"],
     "brief": ["send_morning_brief", "send_email"],
     "games": ["list_games"],
@@ -420,8 +405,6 @@ _GROUP_BLURBS = {
     "wiki": f"{_NAME}'s learnings wiki — weekly reviews and concept pages.",
     "background": "Hand a long-running task off to run detached and report back.",
     "web": "Fetch a specific web page, evaluate a web app, or list starred GitHub repos.",
-    "activity": f"{_NAME}'s Strava activities, recent Chrome browsing history, "
-                "and the videos he Liked on YouTube.",
     "authoring": "Save or delete a skill (a reusable multi-step procedure).",
     "brief": "Send the morning brief, or send an email.",
     "games": f"The games {_NAME} can play with you, and the link to open one. "
@@ -455,11 +438,6 @@ GROUP_KEYWORDS = {
              "notes", "wrote", "written", "write down", "read about"],
     "background": ["background", "kick off", "hand off", "handoff"],
     "web": ["webpage", "web page", "fetch", "url", "evaluate", "starred", "github"],
-    # "liked"/"video" rather than "like"/"watch": \blike matches "likely", and
-    # "watch" is already an opportunities cue (watchlist).
-    "activity": ["strava", "run", "ran", "ride", "cycling", "workout",
-                 "browsing", "chrome", "history",
-                 "youtube", "liked", "video"],
     "authoring": ["skill"],
     "brief": ["brief", "email"],
     # "play" without "game" catches "let's play something" and "play weigh anchor";
@@ -599,8 +577,6 @@ def describe_call(call: dict) -> str:
         return "Send the morning brief (weather, calendar, tasks due soon, starred repos)"
     if name == "log_calendar_event":
         return f'Create calendar event "{args.get("summary", "")}" from {args.get("start", "?")} to {args.get("end", "?")}'
-    if name == "recolor_event":
-        return f'Recolor calendar event to "{args.get("category", "")}"'
     if name == "create_task":
         due = args.get("due")
         return f'Create task "{args.get("title", "")}"' + (f" (due {due})" if due else "")

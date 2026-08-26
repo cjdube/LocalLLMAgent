@@ -197,7 +197,10 @@ fi
 # reload, which on an interpreter change is every agent we own.
 flagged=()
 stale=()
-for dest in "$AGENTS"/local.wren.*.plist; do
+# Both prefixes: journaling runs under local.scribe.* since Scribe was split
+# out of Wren, and those agents exec the same .venv interpreter, so leaving them
+# out of this glob would leave exactly them broken after a Homebrew python bump.
+for dest in "$AGENTS"/local.wren.*.plist "$AGENTS"/local.scribe.*.plist; do
     [ -e "$dest" ] || continue
     label="$(basename "$dest" .plist)"
     [ "$label" = "$SERVER_LABEL" ] && continue   # judged by interpreter, below
@@ -264,10 +267,10 @@ if [ ${#stale[@]} -gt 0 ]; then
             continue
         fi
         if reload "$label"; then
-            healed="$healed ${label#local.wren.}"
+            healed="$healed ${label#local.*.}"
             log "  reloaded $label"
         else
-            failed="$failed ${label#local.wren.}"
+            failed="$failed ${label#local.*.}"
             log "  FAILED to reload $label — it is not loaded right now"
         fi
     done
@@ -275,10 +278,10 @@ fi
 
 if [ "$server_stale" -eq 1 ]; then
     if reload "$SERVER_LABEL"; then
-        healed="$healed ${SERVER_LABEL#local.wren.}"
+        healed="$healed ${SERVER_LABEL#local.*.}"
         log "  restarted $SERVER_LABEL"
     else
-        failed="$failed ${SERVER_LABEL#local.wren.}"
+        failed="$failed ${SERVER_LABEL#local.*.}"
         log "  FAILED to restart $SERVER_LABEL — the chat server is DOWN"
     fi
 fi
@@ -297,7 +300,7 @@ if [ ${#flagged[@]} -gt 0 ]; then
         is_catchup_candidate "$label" || continue
         is_running "$label" && continue          # skipped above, or already back
         launchctl kickstart "$DOMAIN/$label" >/dev/null 2>&1 || true
-        caught_up="$caught_up ${label#local.wren.}"
+        caught_up="$caught_up ${label#local.*.}"
         log "  re-ran $label — it missed its scheduled window"
     done
 fi

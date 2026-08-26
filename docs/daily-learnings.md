@@ -3,15 +3,15 @@
 Two tasks, one shape: read yesterday's activity from one channel, have the local
 model draft a short review of what it taught, and write one Markdown file per
 day into the Obsidian vault (`LEARNINGS_DIR`). They share the gather → persist →
-email helpers in `tasks/_learnings_common.py`.
+email helpers in `agent/activity_log.py`.
 
 A third task, [ai_chat_learnings](ai-chat-learnings.md), covers the same ground
 for AI-agent conversations and has its own doc because its sources are unusual.
 
 | Task | Schedule | Channel |
 |---|---|---|
-| `tasks/daily_chrome_learnings.py` | Daily 5:15 AM | Chrome browsing history |
-| `tasks/daily_youtube_learnings.py` | Daily 5:05 AM | YouTube Liked videos |
+| `scribe/daily_chrome_learnings.py` | Daily 5:15 AM | Chrome browsing history |
+| `scribe/daily_youtube_learnings.py` | Daily 5:05 AM | YouTube Liked videos |
 
 ## Chrome
 

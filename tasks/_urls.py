@@ -3,7 +3,7 @@
 One function, deliberately: this is the scheme allow-list that stands between a
 feed/API/model-supplied URL and the HTML or Markdown a digest emails out, and it
 used to exist as three identical copies (tasks/morning_brief.py,
-tasks/opportunity_digest.py, tasks/_learnings_common.py) under two different
+tasks/opportunity_digest.py, agent/activity_log.py) under two different
 names. Nothing had drifted yet, which was the reason to consolidate: a future
 hardening would have landed in one copy and quietly left the other two emitters
 unpatched, and a grep for the private name found only two thirds of the call

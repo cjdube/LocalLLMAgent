@@ -4,7 +4,7 @@ A daily unattended task that reconstructs yesterday's Claude Code working hours 
 logs them to Google Calendar, so the calendar is a record of how the day actually
 went without anyone remembering to block it out after the fact.
 
-Code: `tasks/claude_time_blocks.py` (the task), `tasks/_chat_transcripts.py`
+Code: `scribe/claude_time_blocks.py` (the task), `scribe/transcripts.py`
 (`fetch_session_activity`, the reader it shares with `ai_chat_learnings`).
 
 It is a **companion** to [ai-chat-learnings](ai-chat-learnings.md), not part of it:
@@ -100,10 +100,10 @@ something to match.
 ## Running it by hand
 
 ```bash
-.venv/bin/python -m tasks.claude_time_blocks --date 2026-08-05 --dry-run
+.venv/bin/python -m scribe.claude_time_blocks --date 2026-08-05 --dry-run
 ```
 ```bash
-.venv/bin/python -m tasks.claude_time_blocks --backfill 7
+.venv/bin/python -m scribe.claude_time_blocks --backfill 7
 ```
 
 `--dry-run` still calls the model (the titles are the part worth checking) but never
@@ -120,5 +120,5 @@ cover.
 Transcript text is untrusted input (it contains web and tool output that may carry
 prompt injection); the task only reads local files and writes a calendar event, and
 the blurb prompt treats transcript content as data, not instructions. It runs on the
-local model by design — `WREN_CLAUDE_TIME_BLOCKS_BACKEND` can opt into the cloud, but
+local model by design — `SCRIBE_CLAUDE_TIME_BLOCKS_BACKEND` can opt into the cloud, but
 that sends transcript text off-device.

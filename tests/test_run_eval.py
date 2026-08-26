@@ -27,7 +27,7 @@ def test_dispatch_covers_every_real_tool_and_executes_none():
     dispatch = run_eval.make_dispatch({}, [])
     assert set(DISPATCH) <= set(dispatch)
     # Calling any of them returns canned data rather than reaching a real API.
-    assert dispatch["fetch_strava"](days=7) == run_eval.DEFAULT_TOOL_RESULT
+    assert dispatch["get_events_by_date"](date="today") == run_eval.DEFAULT_TOOL_RESULT
     assert dispatch["send_email"](subject="x", body="y") == run_eval.DEFAULT_TOOL_RESULT
 
 

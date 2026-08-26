@@ -32,9 +32,9 @@ Two environment variables in `config/.env`, resolved as
   cloud, where quality matters most and latency is invisible.
 
 `<TASK_KEY>` is the uppercased task/module name. Wired task keys:
-`DAILY_CHROME_LEARNINGS`, `DAILY_YOUTUBE_LEARNINGS`, `AI_CHAT_LEARNINGS`,
-`DAILY_SYNTHESIS`, `OPPORTUNITY_DIGEST`, `MORNING_BRIEF`, `CALENDAR_COLORIZER`,
-`STARRED_BLURBS`, `RESEARCH`, `EVALUATE_APP`, `EVALUATE_AGAINST`.
+`DAILY_SYNTHESIS`, `OPPORTUNITY_DIGEST`, `MORNING_BRIEF`, `STARRED_BLURBS`,
+`RESEARCH`, `EVALUATE_APP`, `EVALUATE_AGAINST`. (Journaling keys moved to the
+`SCRIBE_*` chain below.)
 
 (The list is the set of `resolve_backend("<key>")` call sites — `grep -rn
 'resolve_backend(' agent tasks` is the check when this drifts.)
@@ -44,9 +44,38 @@ key its caller passes, so a `WREN_<ANYTHING>_BACKEND` that doesn't match a call
 site above is silently inert rather than an error.
 
 ```
-# chat + bg_worker stay local; only the Chrome learnings review goes to the cloud
+# chat + bg_worker stay local; only the daily synthesis goes to the cloud
 WREN_LLM_BACKEND=ollama
-WREN_DAILY_CHROME_LEARNINGS_BACKEND=gemini
+WREN_DAILY_SYNTHESIS_BACKEND=gemini
+```
+
+## Scribe has its own chain
+
+The journaling agent (`scribe/`, see [scribe.md](scribe.md)) resolves its backend
+in `scribe/model.py`, not through `resolve_backend`:
+
+```
+SCRIBE_<TASK_KEY>_BACKEND  ->  SCRIBE_LLM_BACKEND  ->  ollama
+```
+
+Wired Scribe task keys: `DAILY_CHROME_LEARNINGS`, `DAILY_YOUTUBE_LEARNINGS`,
+`AI_CHAT_LEARNINGS`, `CLAUDE_TIME_BLOCKS`, `CALENDAR_COLORIZER`.
+(`strava_download` uses no model at all.)
+
+There is deliberately **no** fallback from `SCRIBE_*` to `WREN_*`. Two reasons:
+Scribe is a second agent with a second model dial — the point of the split is
+that the journal can be pointed at a free OpenRouter model without touching what
+chat runs on — and a silent fallback would hide a missed `.env` rename.
+`agent/activity_log.py` sizes its compaction caps for a cloud model, so a task
+that quietly drops to the small local model loses whole draft sections rather
+than erroring.
+
+Every Scribe run logs the backend it resolved to and where that came from, on
+its first line:
+
+```
+backend: gemini (from SCRIBE_DAILY_CHROME_LEARNINGS_BACKEND)
+backend: ollama (default) (from unset)
 ```
 
 `chat/server.py` and `tasks/bg_worker.py` deliberately have no per-task wiring —
@@ -65,7 +94,7 @@ consumer next starts — there's nothing to reload live:
   run, so tasks need no restart — the next run picks up the change.)
 - **Scheduled tasks** — nothing to do; the change applies on the task's next run.
   To exercise it immediately, run the task by hand, e.g.
-  `python -m tasks.daily_chrome_learnings`.
+  `python -m scribe.daily_chrome_learnings`.
 - **Verify** — the dashboard's identity line shows the active chat backend
   (e.g. `gemini-2.5-flash (gemini)`); task logs under `logs/` show a
   `gemini_chat model=…` line when a task ran on the cloud backend.

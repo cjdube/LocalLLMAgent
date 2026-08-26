@@ -69,7 +69,7 @@ need the same answer, so none of them roll their own.
 
 Callers include `agent/tools/chrome_history.py`, `agent/tools/youtube.py`,
 `agent/tools/reminders.py`, `tasks/morning_brief.py`, and
-`tasks/calendar_colorizer.py`.
+`scribe/calendar_colorizer.py`.
 
 ## Testing it
 

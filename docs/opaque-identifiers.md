@@ -26,7 +26,7 @@ exactly like a real one and matches nothing.
 
 ### The calendar colorizer — total failure
 
-`tasks/calendar_colorizer.py`, 2026-07-25. Google's 26-character event ids went
+`scribe/calendar_colorizer.py`, 2026-07-25. Google's 26-character event ids went
 out in the prompt and came back as the response's keys.
 
 The model spent all 3,072 `num_predict` tokens **inside its thinking block**,
@@ -93,7 +93,7 @@ if not 1 <= n <= len(batch):
 scores[batch[n - 1]["id"]] = (score, angle)
 ```
 
-Reference implementations: `tasks/calendar_colorizer.py:_classify_input` /
+Reference implementations: `scribe/calendar_colorizer.py:_classify_input` /
 `_apply_classification`, and `tasks/opportunity_digest.py:_compact_for_scoring` /
 `_parse_scores`.
 

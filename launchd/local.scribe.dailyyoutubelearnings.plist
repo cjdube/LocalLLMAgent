@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>local.wren.calendarcolorizer</string>
+    <string>local.scribe.dailyyoutubelearnings</string>
 
     <key>ProgramArguments</key>
     <array>
         <string>__WREN_ROOT__/.venv/bin/python</string>
         <string>-m</string>
-        <string>tasks.calendar_colorizer</string>
+        <string>scribe.daily_youtube_learnings</string>
     </array>
 
     <key>WorkingDirectory</key>
@@ -18,15 +18,15 @@
     <key>StartCalendarInterval</key>
     <dict>
         <key>Hour</key>
-        <integer>17</integer>
+        <integer>5</integer>
         <key>Minute</key>
-        <integer>0</integer>
+        <integer>5</integer>
     </dict>
 
     <key>StandardOutPath</key>
-    <string>__WREN_ROOT__/logs/calendar_colorizer.launchd.log</string>
+    <string>__WREN_ROOT__/logs/daily_youtube_learnings.launchd.log</string>
     <key>StandardErrorPath</key>
-    <string>__WREN_ROOT__/logs/calendar_colorizer.launchd.log</string>
+    <string>__WREN_ROOT__/logs/daily_youtube_learnings.launchd.log</string>
 
     <key>RunAtLoad</key>
     <false/>

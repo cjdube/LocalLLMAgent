@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>local.wren.stravadownload</string>
+    <string>local.scribe.stravadownload</string>
 
     <key>ProgramArguments</key>
     <array>
         <string>__WREN_ROOT__/.venv/bin/python</string>
         <string>-m</string>
-        <string>tasks.strava_download</string>
+        <string>scribe.strava_download</string>
     </array>
 
     <key>WorkingDirectory</key>

@@ -11,11 +11,11 @@ clean).
 
 Neither Claude nor Gemini exposes an API to fetch past conversations, so the
 sources are what lands on disk: Claude Code's local session logs, and a folder
-the user drops Gemini exports into (see tasks/_chat_transcripts.py).
+the user drops Gemini exports into (see scribe/transcripts.py).
 
 Usage:
-    python -m tasks.ai_chat_learnings                 # yesterday (Claude + Gemini)
-    python -m tasks.ai_chat_learnings --backfill 14   # each of the last 14 days
+    python -m scribe.ai_chat_learnings                 # yesterday (Claude + Gemini)
+    python -m scribe.ai_chat_learnings --backfill 14   # each of the last 14 days
 """
 
 import argparse
@@ -28,12 +28,13 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent import prefs
-from agent.loop import complete_text, resolve_backend, warm_model
+from agent.loop import complete_text, warm_model
+from scribe.model import backend as scribe_backend, log_backend
 from agent.store import atomic_write_json, load_json, locked
 from agent.tools.calendar import _local_timezone
-from tasks._chat_transcripts import DEFAULT_MAX_CHARS, fetch_claude_sessions, fetch_gemini_chats
+from scribe.transcripts import DEFAULT_MAX_CHARS, fetch_claude_sessions, fetch_gemini_chats
 from tasks._common import notify_failure, setup_logger
-from tasks._learnings_common import persist_or_email, prior_day
+from agent.activity_log import persist_or_email, prior_day
 
 # Gemini dedup lives here so a re-run never re-summarizes the same drop file.
 STATE_PATH = Path(__file__).resolve().parent.parent / "config" / "ai_chat_learnings_state.json"
@@ -153,7 +154,8 @@ def main() -> int:
 
     try:
         max_chars = int(os.getenv("AI_CHAT_LEARNINGS_MAX_CHARS", DEFAULT_MAX_CHARS))
-        backend = resolve_backend("ai_chat_learnings")
+        backend = scribe_backend("ai_chat_learnings")
+        log_backend(logger, "ai_chat_learnings", backend)
         warm_model(logger=logger, backend=backend)
 
         if args.date:

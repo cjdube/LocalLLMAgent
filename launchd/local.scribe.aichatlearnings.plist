@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>local.wren.dailyyoutubelearnings</string>
+    <string>local.scribe.aichatlearnings</string>
 
     <key>ProgramArguments</key>
     <array>
         <string>__WREN_ROOT__/.venv/bin/python</string>
         <string>-m</string>
-        <string>tasks.daily_youtube_learnings</string>
+        <string>scribe.ai_chat_learnings</string>
     </array>
 
     <key>WorkingDirectory</key>
@@ -18,15 +18,15 @@
     <key>StartCalendarInterval</key>
     <dict>
         <key>Hour</key>
-        <integer>5</integer>
+        <integer>4</integer>
         <key>Minute</key>
-        <integer>5</integer>
+        <integer>30</integer>
     </dict>
 
     <key>StandardOutPath</key>
-    <string>__WREN_ROOT__/logs/daily_youtube_learnings.launchd.log</string>
+    <string>__WREN_ROOT__/logs/ai_chat_learnings.launchd.log</string>
     <key>StandardErrorPath</key>
-    <string>__WREN_ROOT__/logs/daily_youtube_learnings.launchd.log</string>
+    <string>__WREN_ROOT__/logs/ai_chat_learnings.launchd.log</string>
 
     <key>RunAtLoad</key>
     <false/>

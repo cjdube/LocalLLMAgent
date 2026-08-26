@@ -36,7 +36,7 @@ schema of whichever file is live. **Restart the chat server after editing**
 
 | Field | Required | Purpose |
 |---|---|---|
-| `name` | yes | Category label; becomes the `recolor_event` chat tool's enum and the colorizer's classification table |
+| `name` | yes | Category label; becomes the classification table Scribe's colorizer shows the model |
 | `color_id` | yes | Google Calendar colorId ("1"–"11"); need not be unique |
 | `color_name` | yes | Google's name for that color (shown to the model in the classification table) |
 | `hint` | no | Extra classification guidance appended in the colorizer prompt (e.g. "with others") |
@@ -45,15 +45,15 @@ schema of whichever file is live. **Restart the chat server after editing**
 Several categories may share one `color_id` — Travel, Dining Out, and
 Shows/Events are all Peacock. Distinct names classify better than one
 grab-bag category with a long `hint`: the model matches an event title
-against a label, and each name is separately selectable in `recolor_event`.
+against a label.
 
 **Roles** decouple what the code needs (a "work bucket", a "fitness color")
 from what you call your categories, so renaming "Work/LLC" to "Consulting"
 breaks nothing. Recognized values, each expected on exactly one category:
 
-- `fitness` — the color Strava activities are logged with (`tasks/strava_download.py`)
+- `fitness` — the color Strava activities are logged with (`scribe/strava_download.py`)
 - `fallback` — the colorId the colorizer uses when it can't classify an event
-  (`tasks/calendar_colorizer.py`)
+  (`scribe/calendar_colorizer.py`)
 - `work`, `meetings`, `appointments` — **legacy, no consumer.** These were the
   weekly review's event buckets; the weekly review was split into the daily
   learnings tasks, which then dropped calendar bucketing entirely. Kept on their
@@ -133,7 +133,7 @@ vault, not classifying it), so pick distinctive terms. A short or common term
 will over-match.
 
 `excluded_domains` — domains kept out of the daily learnings reviews
-(`tasks/_learnings_common.py:compact_sites`). Volunteer-admin portals and
+(`agent/activity_log.py:compact_sites`). Volunteer-admin portals and
 Microsoft 365 live here: real activity, but not something to review.
 
 Scoped to the learnings tasks only. `fetch_chrome_history` still returns these
@@ -151,7 +151,7 @@ Note that a service's own domain isn't always enough: a Salesforce-backed
 volunteer portal can serve from both `<org>.my.site.com` and
 `<org>.my.salesforce.com`, and both need listing. After adding an entry, check a
 real day against it (see the exclusion tests in
-`tests/test_learnings_common.py`).
+`tests/test_activity_log.py`).
 
 ### `job_search`
 

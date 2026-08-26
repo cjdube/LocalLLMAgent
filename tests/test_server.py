@@ -1183,11 +1183,11 @@ def test_loaded_groups_persist_across_turns_and_clear_on_new(auth_client, monkey
         return {"type": "final", "text": "ok"}
 
     monkeypatch.setattr(srv, "advance", fake_advance)
-    auth_client.post("/chat", json={"message": "anything about my strava runs?"})
-    assert "activity" in srv.loaded_groups[SID]
+    auth_client.post("/chat", json={"message": "anything in my wiki about that?"})
+    assert "wiki" in srv.loaded_groups[SID]
     # A later plain turn keeps the group loaded (persists across turns).
     auth_client.post("/chat", json={"message": "thanks"})
-    assert "activity" in srv.loaded_groups[SID]
+    assert "wiki" in srv.loaded_groups[SID]
     # Starting a new session drops it.
     auth_client.post("/chat/new")
     assert SID not in srv.loaded_groups

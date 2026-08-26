@@ -8,7 +8,7 @@ teach; a deterministic, scheme-validated linked list of the exact videos is
 appended in Python. A day with no Likes writes nothing (keeps the vault clean).
 
 Usage:
-    python -m tasks.daily_youtube_learnings
+    python -m scribe.daily_youtube_learnings
 """
 
 import sys
@@ -16,11 +16,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent.loop import complete_text, resolve_backend, warm_model
+from agent.loop import complete_text, warm_model
+from scribe.model import backend as scribe_backend, log_backend
 from agent import prefs
 from agent.tools.youtube import fetch_liked_videos
 from tasks._common import notify_failure, setup_logger
-from tasks._learnings_common import persist_or_email, prior_day, videos_section
+from agent.activity_log import persist_or_email, prior_day
+from scribe.journal import videos_section
 
 DRAFT_SYSTEM_PROMPT = f"""You are {prefs.user_name()}'s personal executive assistant. You write a \
 short thematic synthesis of the AI/technical and product-management YouTube videos he Liked \
@@ -71,7 +73,8 @@ def main() -> int:
             logger.info("Daily youtube learnings run complete")
             return 0
 
-        backend = resolve_backend("daily_youtube_learnings")
+        backend = scribe_backend("daily_youtube_learnings")
+        log_backend(logger, "daily_youtube_learnings", backend)
         warm_model(logger=logger, backend=backend)
         # Feed the synthesis only titles + channels: the Liked-video descriptions
         # are long clickbait/link-dumps that derail the small model into repetition

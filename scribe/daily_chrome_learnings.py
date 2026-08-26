@@ -8,7 +8,7 @@ reason the old weekly run had been pushed to a cloud model). Falls back to
 emailing the draft if the vault write fails, so an entry is never silently lost.
 
 Usage:
-    python -m tasks.daily_chrome_learnings
+    python -m scribe.daily_chrome_learnings
 """
 
 import sys
@@ -16,17 +16,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent.loop import complete_text, resolve_backend, warm_model
+from agent.loop import complete_text, warm_model
+from scribe.model import backend as scribe_backend, log_backend
 from agent import prefs
 from agent.tools.chrome_history import fetch_chrome_history
 from tasks._common import notify_failure, setup_logger
-from tasks._learnings_common import (
+from agent.activity_log import (
     MAX_PAGES_PER_SITE,
     compact_sites,
-    has_substantive_content,
     persist_or_email,
     prior_day,
 )
+from scribe.journal import has_substantive_content
 
 DRAFT_SYSTEM_PROMPT = f"""You are {prefs.user_name()}'s personal executive assistant. You write a \
 short daily log entry covering the day just completed, from the data given. You are running \
@@ -102,7 +103,8 @@ def main() -> int:
             f"chrome_sites: {chrome_sites}\n"
         )
 
-        backend = resolve_backend("daily_chrome_learnings")
+        backend = scribe_backend("daily_chrome_learnings")
+        log_backend(logger, "daily_chrome_learnings", backend)
         warm_model(logger=logger, backend=backend)
         entry_text = complete_text(
             system_prompt=DRAFT_SYSTEM_PROMPT, user_prompt=user_prompt, logger=logger,

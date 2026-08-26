@@ -6,10 +6,10 @@ and each one maps directly onto a calendar event. There's no natural-language
 composition here, so no model is involved — that keeps the task reliable (no
 dropped activities or mangled datetimes) and leaves no un-gated model->write
 path. Mirrors the fetch -> iterate -> write -> summarize shape of the sibling
-task tasks/calendar_colorizer.py.
+task scribe/calendar_colorizer.py.
 
 Usage:
-    python -m tasks.strava_download
+    python -m scribe.strava_download
 """
 
 import json

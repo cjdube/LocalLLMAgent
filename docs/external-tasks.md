@@ -30,7 +30,7 @@ three jobs against the `llm-wiki-learnings` vault:
 | `wiki-learnings-snapshot` | Daily 11:00 PM | Commits and pushes the vault to its git remote |
 
 That vault is load-bearing for Wren — it's what `agent/tools/wiki.py` reads,
-where `tasks/daily_chrome_learnings.py` and friends write, and the source of the
+where `scribe/daily_chrome_learnings.py` and friends write, and the source of the
 lens pages `evaluate_against` judges against. So the jobs' health matters here.
 The *code* doesn't belong here:
 

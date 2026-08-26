@@ -40,7 +40,11 @@ def test_send_email_is_gated_but_reversible_writes_are_not():
     # The security core: external/irreversible actions require approval; internal
     # reversible ones auto-run in the background.
     assert "send_email" in toolset.CONSEQUENTIAL_TOOLS
-    for reversible in ("create_task", "recolor_event", "set_reminder", "complete_task"):
+    for reversible in ("create_task", "log_calendar_event", "set_reminder", "complete_task"):
+        # Assert it is a real tool first: "recolor_event" sat in this list after
+        # it was removed from the registry, so the line below passed by naming
+        # nothing rather than by proving the tool was ungated.
+        assert reversible in toolset.WRITE_TOOLS
         assert reversible not in toolset.CONSEQUENTIAL_TOOLS
 
 

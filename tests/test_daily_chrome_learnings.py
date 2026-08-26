@@ -1,11 +1,11 @@
-"""Tests for tasks/daily_chrome_learnings.py — that main() drafts and persists a
+"""Tests for scribe/daily_chrome_learnings.py — that main() drafts and persists a
 Daily-Chrome entry. All collaborators are monkeypatched; nothing touches the
 model, Chrome, the vault, or Gmail."""
 
 import pytest
 
 from chat.insights import _is_run_success
-from tasks import daily_chrome_learnings as dc
+from scribe import daily_chrome_learnings as dc
 
 
 @pytest.fixture
@@ -15,7 +15,7 @@ def stubbed_run(monkeypatch):
     seen = {"persists": [], "drafted": 0}
     monkeypatch.setattr(dc, "fetch_chrome_history",
                         lambda *a, **k: {"sites": [{"domain": "github.com", "title": "gh", "visits": 3}]})
-    monkeypatch.setattr(dc, "resolve_backend", lambda key: None)
+    monkeypatch.setattr(dc, "scribe_backend", lambda key: None)
     monkeypatch.setattr(dc, "warm_model", lambda **k: True)
 
     def _draft(**k):

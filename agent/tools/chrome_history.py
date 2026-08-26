@@ -5,6 +5,12 @@ while Chrome is running) and returns meaningful site visits as JSON.
 
 Day boundaries are interpreted in the system's local timezone (not UTC).
 
+Library module, not a registered chat tool. Wren stopped carrying the capture
+tools when journaling moved to Scribe (scribe/__init__.py): the callers now are
+Scribe's daily entries and Wren's tasks/daily_synthesis.py, which import the
+function directly. There is deliberately no TOOL_SCHEMA here — if you add one
+back, register it in agent/toolset.py or tests/test_toolset.py will fail.
+
 Usage:
     python -m agent.tools.chrome_history --days-ago 7
     python -m agent.tools.chrome_history --start 2026-06-22 --end 2026-06-28
@@ -20,17 +26,12 @@ from pathlib import Path
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
-from agent import prefs
-from agent.dates import DATE_ARG_GUIDANCE, local_timezone, resolve_date
+from agent.dates import local_timezone, resolve_date
 
 if platform.system() == "Darwin":
     HISTORY_PATH = Path.home() / "Library/Application Support/Google/Chrome/Default/History"
 else:
     HISTORY_PATH = Path.home() / "AppData/Local/Google/Chrome/User Data/Default/History"
-
-# The user's name, for the model-facing tool descriptions below. From
-# config/preferences.json; falls back to "the user".
-_NAME = prefs.user_name()
 
 NOISE_DOMAINS = {
     "google.com", "www.google.com",
@@ -45,34 +46,6 @@ NOISE_DOMAINS = {
     "amazon.com", "www.amazon.com",
     "localhost", "127.0.0.1",
 }
-
-TOOL_SCHEMA = {
-    "type": "function",
-    "function": {
-        "name": "fetch_chrome_history",
-        "description": (
-            "Get meaningful (non-noise) Chrome browsing history. Pass 'days_ago' "
-            "for a recent window, or an explicit 'start'/'end' range. Day "
-            f"boundaries use {_NAME}'s local timezone."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "days_ago": {
-                    "type": "integer",
-                    "description": (
-                        "Days back to look, e.g. 7 for 'the last week' — resolved "
-                        "in Python, don't compute a date yourself. Omit if giving "
-                        "start/end."
-                    ),
-                },
-                "start": {"type": "string", "description": "Start date (use with 'end'). " + DATE_ARG_GUIDANCE},
-                "end": {"type": "string", "description": "End date. " + DATE_ARG_GUIDANCE},
-            },
-        },
-    },
-}
-
 
 def _chrome_ts_to_datetime(chrome_ts: int) -> datetime:
     unix_us = chrome_ts - 11644473600 * 1_000_000
@@ -201,13 +174,13 @@ def fetch_chrome_history(start: str = None, end: str = None, days_ago: int = Non
 
     `pages_per_domain` is a Python-only argument, deliberately absent from
     TOOL_SCHEMA: the model never sees it and chat's result shape is unchanged.
-    tasks/daily_chrome_learnings.py passes it to get each domain's top paths.
+    scribe/daily_chrome_learnings.py passes it to get each domain's top paths.
 
     `max_sites` is Python-only for the same reason, and defaults to capped
     rather than whole: a single day of browsing is 8897 chars, over the loop's
     8000-char tool-result cap, and the cut took `total_meaningful_visits` with
     it — the count is the LAST key, so the model got a short list and nothing
-    saying it was short. The two batch callers (tasks/daily_chrome_learnings.py,
+    saying it was short. The two batch callers (scribe/daily_chrome_learnings.py,
     tasks/daily_synthesis.py) pass max_sites=None: they summarize the whole day
     and have no context window to protect. Capped is the default so a new caller
     is safe by accident rather than broken by it.

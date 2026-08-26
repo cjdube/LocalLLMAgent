@@ -76,7 +76,7 @@ def _synthesis_dir() -> Path:
 
 def _today() -> date:
     """Today in the local zone. The archive's filenames are local calendar days
-    (tasks/_learnings_common.prior_day resolves in local tz), so the cutoff has
+    (agent/activity_log.prior_day resolves in local tz), so the cutoff has
     to be computed in the same zone — comparing them against a UTC "today" would
     shift the window by a day for part of every evening."""
     return datetime.now(ZoneInfo(local_timezone())).date()

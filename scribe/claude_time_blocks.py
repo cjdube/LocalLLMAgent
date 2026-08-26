@@ -16,14 +16,14 @@ all.
 Python owns the timeline, the rounding, the titles' structure and the descriptions;
 the model only writes the phrase that says what the stretch was about.
 
-Companion to tasks/ai_chat_learnings.py, not part of it: the learnings review is
+Companion to scribe/ai_chat_learnings.py, not part of it: the learnings review is
 worth having whether or not you track time.
 
 Usage:
-    python -m tasks.claude_time_blocks                    # yesterday
-    python -m tasks.claude_time_blocks --dry-run          # show the blocks, write nothing
-    python -m tasks.claude_time_blocks --date 2026-08-05  # one specific day
-    python -m tasks.claude_time_blocks --backfill 7       # each of the last 7 days
+    python -m scribe.claude_time_blocks                    # yesterday
+    python -m scribe.claude_time_blocks --dry-run          # show the blocks, write nothing
+    python -m scribe.claude_time_blocks --date 2026-08-05  # one specific day
+    python -m scribe.claude_time_blocks --backfill 7       # each of the last 7 days
 """
 
 import argparse
@@ -36,15 +36,16 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent import prefs
-from agent.loop import complete_text, resolve_backend, warm_model
+from agent.loop import complete_text, warm_model
+from scribe.model import backend as scribe_backend, log_backend
 from agent.tools.calendar import (
     SESSION_BLOCK_SOURCE_PREFIX,
     _local_timezone,
     log_calendar_event,
 )
-from tasks._chat_transcripts import _compact, fetch_session_activity
+from scribe.transcripts import _compact, fetch_session_activity
 from tasks._common import notify_failure, setup_logger
-from tasks._learnings_common import prior_day
+from agent.activity_log import prior_day
 
 # Idle gap that ends a block. Tuned against six real days: 10 minutes fragments a
 # working morning into a dozen entries, 30 swallows a coffee break and a commute
@@ -255,7 +256,8 @@ def main() -> int:
         gap = int(os.getenv("WREN_SESSION_BLOCK_GAP_MINUTES", DEFAULT_GAP_MINUTES))
         min_minutes = int(os.getenv("WREN_SESSION_BLOCK_MIN_MINUTES", DEFAULT_MIN_MINUTES))
         max_chars = int(os.getenv("WREN_SESSION_BLOCK_MAX_CHARS", DEFAULT_MAX_CHARS))
-        backend = resolve_backend("claude_time_blocks")
+        backend = scribe_backend("claude_time_blocks")
+        log_backend(logger, "claude_time_blocks", backend)
 
         # Loaded lazily and once: a quiet day shouldn't pay for a ~17GB model load,
         # and a backfill shouldn't pay for it per day.

@@ -162,12 +162,6 @@ def test_long_path_is_truncated():
     assert len(sites[0]["pages"][0]["path"]) == ch._MAX_PATH_CHARS
 
 
-def test_pages_per_domain_is_not_exposed_to_the_model():
-    # Python-only knob: the schema must not offer it, or the model may set it and
-    # blow the tool-result cap in chat.
-    assert "pages_per_domain" not in ch.TOOL_SCHEMA["function"]["parameters"]["properties"]
-
-
 # --- the chat path is bounded, the batch callers are not ---------------------
 # One day of real browsing is 8897 chars against the loop's 8000-char cap, and
 # total_meaningful_visits used to be the LAST key — so the trim took the count

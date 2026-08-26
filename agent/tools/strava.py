@@ -4,6 +4,12 @@ Uses your own Strava API application (client id/secret) plus a long-lived
 refresh token. On each run it exchanges the refresh token for a short-lived
 access token, then lists the athlete's recent activities.
 
+Library module, not a registered chat tool. Wren stopped carrying the capture
+tools when journaling moved to Scribe (scribe/__init__.py): the callers now are
+Scribe's daily entries and Wren's tasks/daily_synthesis.py, which import the
+function directly. There is deliberately no TOOL_SCHEMA here — if you add one
+back, register it in agent/toolset.py or tests/test_toolset.py will fail.
+
 Usage:
     python -m agent.tools.strava --date today
     python -m agent.tools.strava --date yesterday  (default)
@@ -22,7 +28,7 @@ from typing import Optional
 
 import requests
 
-from agent.dates import DATE_ARG_GUIDANCE, resolve_date
+from agent.dates import resolve_date
 from agent.tools._http import load_env, print_result, resolve_key
 
 load_env()
@@ -32,25 +38,6 @@ _AUTHORIZE_URL = "https://www.strava.com/oauth/authorize"
 _ACTIVITIES_URL = "https://www.strava.com/api/v3/athlete/activities"
 _REDIRECT_URI = "http://localhost"
 _SCOPE = "activity:read_all"
-
-TOOL_SCHEMA = {
-    "type": "function",
-    "function": {
-        "name": "fetch_strava",
-        "description": "Get Strava activities for a specific date.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "date": {
-                    "type": "string",
-                    "description": "The day to look up. " + DATE_ARG_GUIDANCE,
-                },
-            },
-            "required": ["date"],
-        },
-    },
-}
-
 
 def _get_access_token(client_id: str, client_secret: str, refresh_token: str) -> str:
     """Exchange the long-lived refresh token for a short-lived access token."""

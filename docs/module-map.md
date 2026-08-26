@@ -22,16 +22,33 @@ per-module detail behind them.
 - `agent/tools/sports.py` — final scores from ESPN's public scoreboard endpoint for the teams in `sports.teams` ([preferences.md](preferences.md#sports)); feeds the morning brief's Scores section and the `fetch_scores` chat tool. Its docstring records why ESPN's undocumented endpoint was chosen over MLB's official one, and why events are never re-filtered by their own UTC date.
 - `agent/store.py` — locked/atomic JSON store primitives used by every store under `config/`.
 
+## The journaling agent (`scribe/`)
+
+- `scribe/*.py` — Scribe, the second agent in this repo. It keeps the record —
+  Strava onto the calendar, Claude Code hours as time blocks, yesterday's events
+  colour-coded, daily vault pages from Chrome/YouTube/AI chats — while Wren reads
+  that record and acts on request. Each task is a pipeline: gather -> one
+  `complete_text()` call -> write. No tool registry, and never `advance()`.
+- `scribe/model.py` — Scribe's own backend chain (`SCRIBE_<TASK>_BACKEND` ->
+  `SCRIBE_LLM_BACKEND` -> ollama), independent of Wren's `WREN_*` variables on
+  purpose. Every run logs which it resolved to, because an unset variable is not
+  an error — just a smaller model and a thinner draft.
+- **Import boundary.** `scribe/` imports only the porch listed in
+  `scribe/__init__.py`, and nothing under `agent/`, `chat/` or `tasks/` may
+  import `scribe.*` (`evals/` excepted). That list is what would have to travel
+  with Scribe if it is ever extracted into its own repo. [scribe.md](scribe.md)
+
 ## Scheduling and state
 
-- `tasks/*.py` — unattended entrypoints run by launchd; `tasks/_common.py` has `setup_logger`/`notify_failure`, and `tasks/_learnings_common.py` the shared gather→persist→email helpers for the two daily-learnings tasks. `tasks/bg_worker.py` is the generic runner that polls `config/bg_jobs.json` for user-initiated background jobs with push-to-approve.
+- `tasks/*.py` — unattended entrypoints run by launchd; `tasks/_common.py` has `setup_logger`/`notify_failure`, and `agent/activity_log.py` the shared gather→persist→email helpers for the two daily-learnings tasks. `tasks/bg_worker.py` is the generic runner that polls `config/bg_jobs.json` for user-initiated background jobs with push-to-approve.
 - `tasks/mail_watcher.py` — the **second** always-on process on the mini, alongside the chat server. It holds a Pub/Sub streaming-pull subscription open rather than polling, which is what buys seconds of latency on new mail without opening a port. Its Pub/Sub client runs callbacks on background threads, so it is autouse-stubbed in `tests/conftest.py` and tested through `handle_notification()`. State (history watermark, dedupe set, watch expiry) is in `agent/tools/mail_state.py`, and the reads in `agent/tools/gmail_read.py`. [mail-watch.md](mail-watch.md)
-- `launchd/` — the scheduler: one plist per task (`StartInterval` for pollers, `StartCalendarInterval` for daily/weekly jobs), logging to `logs/`.
+- `launchd/` — the scheduler: one plist per task (`StartInterval` for pollers, `StartCalendarInterval` for daily/weekly jobs), logging to `logs/`. Wren's jobs are labelled `local.wren.*`, Scribe's `local.scribe.*`; `launchd/reload-after-upgrade.sh` globs both prefixes, since both exec the same `.venv` interpreter.
 - `tests/` — flat pytest suite, one `test_<module>.py` per source module — except where a module sits behind a seam and is tested through it (`agent/backends/gemini.py` in `tests/test_loop.py`). Plus the jest/jsdom suites (`npm test`), also flat in `tests/` — one `tests/<script>.test.js` per standalone browser script in `chat/static/`.
 - `config/` — `.env` (documented in `.env.example`) plus gitignored JSON stores.
 
 ## Related
 
+- [scribe.md](scribe.md) — the journaling agent, the seam, and the porch
 - [tool-loading.md](tool-loading.md) — how tools reach the model's context
 - [limits.md](limits.md) — where every bound is defined
 - [security-model.md](security-model.md) — the trust boundaries these modules sit inside

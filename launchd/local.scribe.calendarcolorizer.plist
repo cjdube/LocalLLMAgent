@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>local.wren.dailychromelearnings</string>
+    <string>local.scribe.calendarcolorizer</string>
 
     <key>ProgramArguments</key>
     <array>
         <string>__WREN_ROOT__/.venv/bin/python</string>
         <string>-m</string>
-        <string>tasks.daily_chrome_learnings</string>
+        <string>scribe.calendar_colorizer</string>
     </array>
 
     <key>WorkingDirectory</key>
@@ -18,15 +18,15 @@
     <key>StartCalendarInterval</key>
     <dict>
         <key>Hour</key>
-        <integer>5</integer>
+        <integer>17</integer>
         <key>Minute</key>
-        <integer>15</integer>
+        <integer>0</integer>
     </dict>
 
     <key>StandardOutPath</key>
-    <string>__WREN_ROOT__/logs/daily_chrome_learnings.launchd.log</string>
+    <string>__WREN_ROOT__/logs/calendar_colorizer.launchd.log</string>
     <key>StandardErrorPath</key>
-    <string>__WREN_ROOT__/logs/daily_chrome_learnings.launchd.log</string>
+    <string>__WREN_ROOT__/logs/calendar_colorizer.launchd.log</string>
 
     <key>RunAtLoad</key>
     <false/>

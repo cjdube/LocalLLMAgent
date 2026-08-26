@@ -6,6 +6,12 @@ weekly learnings review — stronger than raw browsing history, which only shows
 what was loaded, not what was engaged with. The watch-history playlist has been
 non-functional through the API since ~2016, but the Likes playlist works.
 
+Library module, not a registered chat tool. Wren stopped carrying the capture
+tools when journaling moved to Scribe (scribe/__init__.py): the callers now are
+Scribe's daily entries and Wren's tasks/daily_synthesis.py, which import the
+function directly. There is deliberately no TOOL_SCHEMA here — if you add one
+back, register it in agent/toolset.py or tests/test_toolset.py will fail.
+
 Uses the shared Google OAuth helper (agent/tools/google_auth.py). This needs the
 `youtube.readonly` scope — add it to that module's SCOPES, delete
 config/google_token.json, and re-run `python -m agent.tools.google_auth`,
@@ -21,35 +27,11 @@ import sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from agent import prefs
-from agent.dates import DATE_ARG_GUIDANCE, local_timezone, resolve_date
+from agent.dates import local_timezone, resolve_date
 from agent.tools._http import load_env, print_result
 from agent.tools.google_auth import build_service
 
 load_env()
-
-# The user's name, for the model-facing tool descriptions below. From
-# config/preferences.json; falls back to "the user".
-_NAME = prefs.user_name()
-
-TOOL_SCHEMA = {
-    "type": "function",
-    "function": {
-        "name": "fetch_liked_videos",
-        "description": f"Videos {_NAME} Liked on their YouTube channel within a date "
-        "range — their primary channel for tracking AI/tooling learning. Each result has the "
-        "video's title, channel, and description.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "start_date": {"type": "string", "description": "First day of the range. " + DATE_ARG_GUIDANCE},
-                "end_date": {"type": "string", "description": "Last day of the range (inclusive). " + DATE_ARG_GUIDANCE},
-            },
-            "required": ["start_date", "end_date"],
-        },
-    },
-}
-
 
 def _likes_playlist_id() -> str:
     """The authenticated channel's Likes playlist id. mine=True resolves to the
@@ -95,7 +77,7 @@ def fetch_liked_videos(start_date: str, end_date: str) -> dict:
     """Liked videos whose like-date falls within [start_date, end_date] inclusive.
 
     Dates are resolved in Python (never trusting the model to compute them);
-    explicit 'YYYY-MM-DD' strings — what tasks.daily_youtube_learnings passes — are
+    explicit 'YYYY-MM-DD' strings — what scribe.daily_youtube_learnings passes — are
     honored as-is. Returns {"videos": [...]} or, on any failure, the same shape
     with an "error" so callers can degrade to an empty list.
     """

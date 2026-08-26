@@ -10,7 +10,7 @@ because those are the ones that cost weeks of silent breakage:
 
   * `calendar_weekday`  — the model doing weekday arithmetic itself
   * `games_vague`       — a catalogue answered from pretraining
-  * `chain_strava_log`  — describing a gated write instead of calling it
+  * `chain_calendar_task` — describing a gated write instead of calling it
 
 The rest are the common asks, plus three that need no tool at all (a model that
 reaches for one anyway is as broken as one that won't).
@@ -129,20 +129,29 @@ CASES = [
         "final_must_not_contain": ["wordle", "sudoku", "chess", "hangman", "trivia"],
     },
     {
-        "id": "chain_strava_log",
-        # The describe-instead-of-perform bug. Two steps: read Strava, then a
-        # confirmation-gated calendar write. Scored on whether the write was
+        "id": "chain_calendar_task",
+        # The describe-instead-of-perform bug. Two steps: read the calendar,
+        # then a confirmation-gated task write. Scored on whether the write was
         # actually CALLED — a turn that narrates it and stops is the failure.
-        "prompt": "Grab my most recent Strava activity and put it on my calendar.",
-        # Deliberately NOT expect_any_of with fetch_strava: reading Strava and
-        # stopping is the exact failure this case exists to catch, so only the
-        # write counts as having done the job.
-        "expect_tool": "log_calendar_event",
-        "arg_checks": {"summary": _nonempty, "start": _nonempty},
+        #
+        # This used to read Strava first. Journaling moved to Scribe, so Wren has
+        # no fetch_strava; the chain was re-anchored on tools she still owns. The
+        # bug being guarded is about the SECOND step, so the first step's source
+        # never mattered.
+        "prompt": "Look at what's on my calendar tomorrow and add a task to prep for the first meeting.",
+        # Deliberately NOT expect_any_of with the read: reading and stopping is
+        # the exact failure this case exists to catch, so only the write counts
+        # as having done the job.
+        "expect_tool": "create_task",
+        "arg_checks": {"title": _nonempty},
         "tool_results": {
-            "fetch_strava": {"activities": [{
-                "name": "Evening Volleyball", "type": "Workout",
-                "start_date_local": _at(-1, "18:38:00"), "elapsed_time": 9300,
+            "get_events_by_date": {"events": [{
+                "summary": "Quarterly roadmap review", "id": "evt1",
+                "start": _at(1, "09:00:00"), "end": _at(1, "10:00:00"),
+            }]},
+            "get_upcoming_events": {"events": [{
+                "summary": "Quarterly roadmap review", "id": "evt1",
+                "start": _at(1, "09:00:00"), "end": _at(1, "10:00:00"),
             }]},
         },
     },
@@ -307,16 +316,21 @@ CASES = [
         "final_must_contain": ["registration"],
     },
     {
-        "id": "strava_last_run",
+        "id": "run_from_the_record",
+        # The seam the Scribe split created, stated as an eval: Scribe logs each
+        # Strava activity onto the calendar, so Wren answers "how far did I run"
+        # by READING THE RECORD. She has no fetch_strava any more — a run that
+        # reaches for one is a regression in the split, not a model miss.
         "prompt": "How far did I run last week?",
-        "expect_tool": "fetch_strava",
+        "expect_any_of": ["get_events_by_date", "get_upcoming_events"],
         "tool_results": {
-            "fetch_strava": {"activities": [
-                {"name": "Morning Run", "type": "Run", "distance_mi": 4.2,
-                 "start_date_local": _at(-4, "07:10:00")},
+            "get_events_by_date": {"events": [
+                {"summary": "Morning Run", "id": "evt9",
+                 "description": "Distance: 6.8 km\nDuration: 41 min",
+                 "start": _at(-4, "07:10:00"), "end": _at(-4, "07:51:00")},
             ]},
         },
-        "final_must_contain": ["4.2"],
+        "final_must_contain": ["6.8"],
     },
     {
         "id": "web_search",

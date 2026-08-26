@@ -45,7 +45,7 @@ _NAME = prefs.user_name()
 # Per-message body budget. A raw email — quoted history, footers, an HTML part
 # rendered to text — runs to tens of thousands of characters, and the on-device
 # model's whole context is 32k. Compact at the source, the way
-# tasks/_learnings_common.py does, rather than relying on the loop's backstop.
+# agent/activity_log.py does, rather than relying on the loop's backstop.
 MAIL_BODY_CHAR_BUDGET = int(os.getenv("MAIL_BODY_CHAR_BUDGET", "1500"))
 
 # Whole-thread budget for read_email. A count cap never bounds a payload (a

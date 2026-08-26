@@ -61,7 +61,7 @@ _HEALTH_TIMEOUT_S = 5
 
 def _fallback_email(message: str, title: str | None, error: str) -> dict:
     """Best-effort email for a push that didn't send. Same "don't lose it" shape
-    as _learnings_common.persist_or_email's failed-vault-write fallback.
+    as activity_log.persist_or_email's failed-vault-write fallback.
 
     Imported locally so notify() stays importable (and cheap) without pulling in
     the Google client stack on the overwhelmingly common success path."""

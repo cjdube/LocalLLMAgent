@@ -26,7 +26,6 @@ lives in `chat/server.py`.
   - `background` — hand a long task off to run detached
   - `web` — fetch a page, evaluate an app, evaluate a target against a wiki
     lens, list starred repos
-  - `activity` — Strava activities, Chrome browsing history, YouTube Likes
   - `authoring` — write/delete a skill
   - `brief` — send the morning brief, or send an email
   - `games` — the games he can play, and the link to open one
@@ -46,6 +45,16 @@ only as a scheduled-task data source, unreachable in chat and invisible to every
 test. `test_every_model_facing_schema_is_registered` now walks `agent/tools/`
 and asserts each `*_SCHEMA` is either in `TOOLS` or named in the (currently
 empty) `TASK_ONLY_SCHEMAS` allowlist.
+
+The `activity` group — `fetch_strava`, `fetch_chrome_history`,
+`fetch_liked_videos` — and `recolor_event` left the registry entirely when
+journaling moved to Scribe ([scribe.md](scribe.md)): capture is Scribe's job,
+and Wren reads what it wrote through the calendar and the wiki instead. Those
+three modules stay in `agent/tools/` as plain libraries with no `TOOL_SCHEMA`,
+guarded by `test_scribe_capture_modules_expose_no_tool_schema` and
+`test_capture_tools_are_absent_from_wrens_registry`, so re-adding a schema there
+without registering it fails loudly rather than sitting unreachable for months
+the way `fetch_liked_videos` did.
 
 ## How a group gets loaded (two paths)
 

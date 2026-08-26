@@ -9,7 +9,7 @@ The pure helpers (_video_from_item, compact_videos) are unit-tested directly.
 
 import agent.tools.youtube as youtube
 from agent.tools.youtube import _video_from_item, fetch_liked_videos
-from tasks._learnings_common import (
+from agent.activity_log import (
     MAX_YOUTUBE_DESC_CHARS,
     MAX_YOUTUBE_VIDEOS,
     compact_videos,
@@ -167,7 +167,7 @@ def test_fetch_error_degrades_to_empty_list(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# compact_videos (tasks._learnings_common)
+# compact_videos (agent.activity_log)
 # --------------------------------------------------------------------------- #
 
 def test_compact_videos_caps_count():

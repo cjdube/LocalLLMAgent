@@ -22,12 +22,12 @@ Each case declares:
 import json
 
 from agent.tools.research import RESEARCH_SYSTEM_PROMPT
-from tasks.calendar_colorizer import (
+from scribe.calendar_colorizer import (
     CLASSIFY_SYSTEM_PROMPT,
     _classify_input,
     _parse_classification,
 )
-from tasks.claude_time_blocks import BLURB_SYSTEM_PROMPT as BLOCK_BLURB_PROMPT
+from scribe.claude_time_blocks import BLURB_SYSTEM_PROMPT as BLOCK_BLURB_PROMPT
 from tasks.daily_synthesis import (
     SYNTHESIS_SYSTEM_PROMPT,
     parse_nudges,
