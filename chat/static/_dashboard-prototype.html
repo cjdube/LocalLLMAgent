@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PROTOTYPE — dashboard, two agents</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="stylesheet" href="/static/nav.css">
+<!--
+  PROTOTYPE — THROWAWAY. Not a real page; not in VIEW_PAGES; delete when a
+  variant wins. `_`-prefixed to match chat/static/_harness.html.
+
+  QUESTION: now that /map knows about two agents, how should /dashboard show
+  which scheduled processes belong to Wren and which to Scribe?
+
+  Four variants of the "Scheduled tasks" section, at ?variant=A|B|C|D, served
+  from /static/_dashboard-prototype.html. Real data, live from /api/schedules
+  (and /api/run_stats, which only D uses).
+
+  SCOPE: the Scheduled tasks section, plus — in D only — the Run duration
+  charts folded into it. The Learnings wiki and Capabilities sections of the
+  real dashboard are out of frame.
+
+  ONE THING THE REAL FIX NEEDS: /api/schedules has `external` but no `agent`.
+  chat/routes_dashboard.py:52 would add `"agent": _agent_of(task)` — the helper
+  already exists in chat/insights.py and /api/system_map already ships it.
+  Until then this file hardcodes the split in SCRIBE_KEYS below.
+-->
+<style>
+  /* ---- lifted from dashboard.html so density and colour are the real thing ---- */
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    color: #1f2328; background: #f4f4f5;
+    display: flex; flex-direction: column; min-height: 100vh;
+  }
+  header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 16px; background: #fff; border-bottom: 1px solid #e5e7eb;
+  }
+  header img.logo { height: 38px; width: 38px; border-radius: 9px; display: block; }
+  header h1 { font-size: 17px; margin: 0; }
+  header .sub { font-size: 13px; color: #9ca3af; }
+  header .spacer { flex: 1; }
+  header .proto {
+    font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    background: #fef3f2; color: #b42318; padding: 3px 9px; border-radius: 20px;
+  }
+
+  main { flex: 1; display: flex; min-height: 0; }
+  .content { flex: 1; min-width: 0; padding: 20px 18px 90px; display: flex; flex-direction: column; gap: 22px; }
+  .section-label { font-size: 13px; font-weight: 600; color: #6b7280; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: baseline; }
+  .section-label .hint { font-weight: 400; font-size: 12px; color: #9ca3af; }
+  .panel { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px 16px; }
+
+  table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden; }
+  thead th { text-align: left; background: #fafafa; color: #6b7280; font-weight: 600; font-size: 11px; padding: 9px 12px; border-bottom: 1px solid #eef0f2; }
+  tbody td { padding: 12px; font-size: 13px; border-top: 1px solid #f1f2f4; vertical-align: middle; }
+  tbody tr.task-row:hover td { background: #fafafa; }
+  tbody tr.daemon td { background: #fafafa; color: #6b7280; }
+  td.name { font-weight: 600; }
+  td.sched, td.next { color: #4b5563; }
+
+  .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 20px; white-space: nowrap; }
+  .badge.success { background: #ecfdf3; color: #067647; }
+  .badge.failure { background: #fef3f2; color: #b42318; }
+  .badge.running { background: #eff8ff; color: #175cd3; }
+  .badge.none    { background: #f2f4f7; color: #667085; }
+  .dots { display: flex; gap: 3px; margin-top: 7px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: #e5e7eb; }
+  .dot.success { background: #17b26a; }
+  .dot.failure { background: #f04438; }
+
+  .actions { display: flex; flex-wrap: wrap; gap: 6px; }
+  button.btn { font-size: 12px; padding: 6px 11px; border-radius: 8px; border: 1px solid #d0d5dd; background: #fff; color: #1f2328; cursor: pointer; }
+  button.btn.primary { background: #1f2328; color: #fff; border-color: #1f2328; }
+  .muted { color: #9ca3af; font-size: 13px; }
+
+  /* ---- shared by the variants ---------------------------------------- */
+  /* One colour per agent, matching /map: Wren blue, Scribe teal, federated purple. */
+  .ag-wren   { --ag: #3b6fd4; --ag-bg: #eff4ff; --ag-fg: #1d4ed8; }
+  .ag-scribe { --ag: #0d9488; --ag-bg: #effcfa; --ag-fg: #0f766e; }
+  .ag-ext    { --ag: #7c5cd6; --ag-bg: #f5f2ff; --ag-fg: #6d28d9; }
+  .ag-daemon { --ag: #98a2b3; --ag-bg: #f2f4f7; --ag-fg: #667085; }
+  .owner {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 20px;
+    background: var(--ag-bg); color: var(--ag-fg); white-space: nowrap;
+  }
+  .owner .sq { width: 7px; height: 7px; border-radius: 2px; background: var(--ag); }
+
+  /* ---- variant A ------------------------------------------------------- */
+  .filters { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 11px; }
+  .filters button {
+    font-size: 12px; font-weight: 600; padding: 5px 12px; border-radius: 20px; cursor: pointer;
+    border: 1px solid #e5e7eb; background: #fff; color: #4b5563;
+  }
+  .filters button .n { color: #9ca3af; font-weight: 500; margin-left: 5px; }
+  .filters button.on { background: var(--ag-bg, #1f2328); color: var(--ag-fg, #fff); border-color: var(--ag, #1f2328); }
+  .filters button.on .n { color: inherit; opacity: .7; }
+  td.rail, tbody tr.daemon td.rail { width: 4px; padding: 0; background: var(--ag); }
+  tr.dimmed { display: none; }
+
+  /* ---- variant B ------------------------------------------------------- */
+  .house { border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden; background: #fff; margin-bottom: 16px; }
+  .house-head { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; background: var(--ag-bg); border-bottom: 1px solid #e5e7eb; }
+  .house-head .mark { width: 34px; height: 34px; border-radius: 9px; background: var(--ag); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 15px; flex-shrink: 0; }
+  .house-head h3 { margin: 0; font-size: 15px; color: var(--ag-fg); }
+  .house-head .role { font-size: 12px; color: #4b5563; margin-top: 2px; }
+  .house-head .facts { margin-left: auto; text-align: right; font-size: 12px; color: #4b5563; white-space: nowrap; }
+  .house-head .facts b { font-size: 18px; color: #111827; display: block; line-height: 1.15; }
+  .house table { border: none; border-radius: 0; }
+  .house table thead th:first-child { padding-left: 16px; }
+  .house table td.name { padding-left: 16px; }
+
+  /* ---- variant D ------------------------------------------------------- */
+  /* The header is the whole control: click anywhere on it to fold the agent
+     away. Collapsed, it must still answer "is this agent healthy" on its own,
+     so the facts column and the slowest-job line live in the header, not the body. */
+  .house.fold .house-head { cursor: pointer; user-select: none; }
+  .house.fold .house-head:hover { filter: brightness(0.985); }
+  .caret { font-size: 15px; line-height: 1; color: var(--ag-fg); width: 15px; flex-shrink: 0; padding-top: 10px; opacity: .8; }
+  .house-head .slow { font-size: 11px; color: #6b7280; margin-top: 3px; }
+  .house-body[hidden] { display: none; }
+  .house-charts { padding: 14px 16px; border-bottom: 1px solid #e5e7eb; }
+  /* The real dashboard makes each chart its own amber card, because twelve
+     sparklines sharing one panel read as one continuous line. Same reason here,
+     but tinted to the agent instead — the colour is doing the ownership work. */
+  .house-charts .chart-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+  .chart-cell { min-width: 0; background: var(--ag-bg); border: 1px solid #e9ecf0; border-radius: 10px; padding: 10px 12px; }
+  .chart-head { display: flex; align-items: baseline; gap: 8px; }
+  .chart-name { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chart-stat { margin-left: auto; font-size: 11px; color: #9ca3af; white-space: nowrap; }
+  .chart-empty { font-size: 11px; color: #9ca3af; padding: 14px 0; }
+  .chart-svg { width: 100%; height: auto; display: block; }
+  .chart-median { stroke: #d7dbe0; stroke-width: 1; stroke-dasharray: 3 3; }
+  .chart-line { fill: none; stroke: var(--ag); stroke-width: 1.4; stroke-linejoin: round; }
+  .pt { fill: var(--ag); }
+  .pt.fail { fill: #f04438; }
+  .foldall { font-weight: 500; font-size: 12px; color: #6b7280; background: none; border: none; cursor: pointer; padding: 0; text-decoration: underline; }
+
+  /* ---- variant C ------------------------------------------------------- */
+  .clock { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px 18px 10px; overflow-x: auto; }
+  .lane-row { display: flex; align-items: stretch; gap: 12px; }
+  .lane-name { width: 118px; flex-shrink: 0; padding-top: 14px; }
+  .lane-name .who { font-size: 13px; font-weight: 600; color: var(--ag-fg); }
+  .lane-name .cnt { font-size: 11px; color: #9ca3af; }
+  .lane { position: relative; flex: 1; min-width: 1180px; height: 62px; border-bottom: 1px solid #f1f2f4; }
+  .lane .track { position: absolute; left: 0; right: 0; top: 31px; height: 2px; background: #f1f2f4; }
+  .pin { position: absolute; top: 22px; width: 13px; height: 13px; border-radius: 50%; background: var(--ag); border: 2px solid #fff; box-shadow: 0 0 0 1px var(--ag); cursor: pointer; transform: translateX(-50%); }
+  .pin.weekly { border-radius: 3px; }
+  .pin.fail { background: #f04438; box-shadow: 0 0 0 1px #f04438; }
+  .pin.sel { width: 19px; height: 19px; margin: -3px 0 0 0; }
+  .axis { position: relative; height: 22px; margin-left: 130px; min-width: 1180px; }
+  .axis span { position: absolute; font-size: 10px; color: #9ca3af; transform: translateX(-50%); }
+  .axis i { position: absolute; top: -6px; width: 1px; height: 5px; background: #e5e7eb; }
+  .pinfo { margin-top: 10px; border-top: 1px solid #f1f2f4; padding-top: 12px; min-height: 74px; }
+  .pinfo h4 { margin: 0 0 3px; font-size: 14px; }
+  .crowd { margin-top: 14px; display: flex; gap: 10px; align-items: flex-start; background: #fffbeb; border: 1px solid #f2e7c3; border-radius: 10px; padding: 12px 14px; font-size: 12.5px; color: #713f12; line-height: 1.55; }
+  .crowd b { color: #422006; }
+
+  /* ---- switcher (deliberately not part of the design being judged) ----- */
+  #bar {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 4px; z-index: 99;
+    background: #1f2328; color: #fff; border-radius: 30px;
+    padding: 6px 8px; box-shadow: 0 8px 30px rgba(16,24,40,.28);
+    font-size: 13px; font-weight: 600;
+  }
+  #bar button { border: none; background: transparent; font-size: 17px; cursor: pointer; padding: 2px 11px; color: #fff; border-radius: 20px; line-height: 1; }
+  #bar button:hover { background: #3b4149; }
+  #bar .lab { padding: 0 8px; white-space: nowrap; }
+  #bar .lab em { font-style: normal; color: #9ca3af; font-weight: 500; }
+  .err { background: #fef3f2; border: 1px solid #fecdca; color: #b42318; border-radius: 10px; padding: 14px 16px; font-size: 13px; line-height: 1.6; }
+</style>
+</head>
+<body>
+  <header>
+    <img class="logo" src="/static/favicon.svg" alt="Wren">
+    <h1>Wren</h1>
+    <span class="sub">dashboard</span>
+    <span class="proto">prototype</span>
+    <span class="spacer"></span>
+    <nav id="wren-nav" class="wren-nav"></nav>
+  </header>
+  <main><div class="content" id="stage"></div></main>
+  <div id="bar"></div>
+
+<script>
+"use strict";
+
+// Hardcoded only because /api/schedules has no `agent` field yet — see the
+// note at the top of this file. The real fix derives it from the launchd label.
+const SCRIBE_KEYS = new Set(["strava_download", "calendar_colorizer", "claude_time_blocks",
+  "daily_chrome_learnings", "daily_youtube_learnings", "ai_chat_learnings"]);
+const AGENTS = {
+  wren:   { cls: "ag-wren",   name: "Wren",   letter: "W", role: "reads the record, acts on request" },
+  scribe: { cls: "ag-scribe", name: "Scribe", letter: "S", role: "writes the record — journaling only" },
+  ext:    { cls: "ag-ext",    name: "ObsidianWikiAgent", letter: "O", role: "a separate repo, federated in" },
+  daemon: { cls: "ag-daemon", name: "Always-on", letter: "∞", role: "daemons and pollers — no schedule, no run history" },
+};
+function agentOf(t) {
+  if (t.is_daemon) return "daemon";
+  if (t.external) return "ext";
+  return SCRIBE_KEYS.has(t.key) ? "scribe" : "wren";
+}
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+function fmtTs(ts) {
+  if (!ts) return "—";
+  const d = new Date(ts.replace(",", "."));
+  if (isNaN(d)) return ts;
+  return d.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+function fmtDur(s) { return s == null ? "" : s < 60 ? `${s}s` : `${Math.round(s / 60)}m`; }
+function badge(st) {
+  const b = el("span", "badge " + st, st);
+  return b;
+}
+function dotStrip(list) {
+  const d = el("div", "dots");
+  (list || []).slice().reverse().forEach(s => d.appendChild(el("span", "dot " + s)));
+  return d;
+}
+// "Daily 4:15 AM" / "Sundays 8:00 PM" -> hours as a float. Pollers return null.
+function timeOf(h) {
+  const m = /(\d{1,2}):(\d{2})\s*(AM|PM)/i.exec(h || "");
+  if (!m) return null;
+  let hh = (+m[1]) % 12;
+  if (/pm/i.test(m[3])) hh += 12;
+  return hh + (+m[2]) / 60;
+}
+function isWeekly(h) { return /sunday|monday|tuesday|wednesday|thursday|friday|saturday/i.test(h || ""); }
+function clock(f) {
+  const hh = Math.floor(f), mm = Math.round((f - hh) * 60);
+  const ap = hh < 12 ? "AM" : "PM";
+  const h12 = hh % 12 === 0 ? 12 : hh % 12;
+  return `${h12}:${String(mm).padStart(2, "0")} ${ap}`;
+}
+function actionsFor(t) {
+  const a = el("div", "actions");
+  if (t.is_daemon) return el("span", "muted", "—");
+  // Read-only prototype: the buttons are here for density and hit-area, and
+  // deliberately do not call /api/run.
+  if (!t.external) {
+    const b = el("button", "btn primary", "Run now");
+    b.title = "Prototype — does nothing.";
+    a.appendChild(b);
+  }
+  const r = el("button", "btn", "See runs");
+  r.title = "Prototype — does nothing.";
+  a.appendChild(r);
+  return a;
+}
+function houseHead() {
+  const thead = el("thead"), tr = el("tr");
+  ["Task", "Schedule", "Next run", "Last status", ""].forEach(h => tr.appendChild(el("th", null, h)));
+  thead.appendChild(tr);
+  return thead;
+}
+function statusCell(t) {
+  const td = el("td");
+  if (t.is_daemon) { td.appendChild(badge("running")); return td; }
+  td.appendChild(badge(t.last_run ? t.last_run.status : "none"));
+  if (t.last_run) {
+    td.appendChild(el("div", "muted",
+      `${fmtTs(t.last_run.start)} · ${fmtDur(t.last_run.duration_s)}`));
+  }
+  td.appendChild(dotStrip(t.recent_statuses));
+  return td;
+}
+
+// =========================================================================
+// VARIANT A — Owned rows. One table, exactly as today, with ownership added
+// as a FACET: a colour rail, an owner pill, and filter chips above. The bet
+// is that ownership is an attribute you occasionally filter by, not a
+// reorganisation. Cheapest possible change; the whole day stays in one
+// time-ordered list.
+// =========================================================================
+function variantA(tasks) {
+  const wrap = el("div");
+  const sec = el("section");
+  const counts = { all: tasks.length };
+  Object.keys(AGENTS).forEach(k => counts[k] = tasks.filter(t => agentOf(t) === k).length);
+
+  const lab = el("div", "section-label");
+  lab.appendChild(el("span", null, "Scheduled tasks"));
+  lab.appendChild(el("span", "hint",
+    `${tasks.filter(t => !t.is_daemon).length} scheduled · ${counts.daemon} always-on`));
+  sec.appendChild(lab);
+
+  let filter = "all";
+  const filters = el("div", "filters");
+  const btns = [];
+  [["all", "All", ""], ...Object.keys(AGENTS).map(k => [k, AGENTS[k].name, AGENTS[k].cls])]
+    .forEach(([key, name, cls]) => {
+      const b = el("button", cls + (key === "all" ? " on" : ""));
+      b.appendChild(document.createTextNode(name));
+      b.appendChild(el("span", "n", String(counts[key] ?? counts.all)));
+      b.addEventListener("click", () => {
+        filter = key;
+        btns.forEach(x => x.el.classList.toggle("on", x.key === key));
+        apply();
+      });
+      btns.push({ key, el: b });
+      filters.appendChild(b);
+    });
+  sec.appendChild(filters);
+
+  const table = el("table");
+  const thead = el("thead"), htr = el("tr");
+  ["", "Task", "Schedule", "Next run", "Last status", ""].forEach(h => htr.appendChild(el("th", null, h)));
+  thead.appendChild(htr); table.appendChild(thead);
+  const tbody = el("tbody");
+  const rows = [];
+  tasks.forEach(t => {
+    const ag = agentOf(t);
+    const tr = el("tr", (t.is_daemon ? "daemon " : "task-row ") + AGENTS[ag].cls);
+    tr.appendChild(el("td", "rail"));
+    const name = el("td", "name");
+    name.appendChild(document.createTextNode(t.display_name));
+    const pill = el("div", "owner");
+    pill.appendChild(el("span", "sq"));
+    pill.appendChild(document.createTextNode(AGENTS[ag].name));
+    pill.style.marginTop = "5px";
+    name.appendChild(pill);
+    tr.appendChild(name);
+    tr.appendChild(el("td", "sched", t.human_schedule));
+    tr.appendChild(el("td", "next", t.is_daemon ? "—" : fmtTs(t.next_run)));
+    tr.appendChild(statusCell(t));
+    const act = el("td"); act.appendChild(actionsFor(t)); tr.appendChild(act);
+    rows.push({ tr, ag });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  sec.appendChild(table);
+  function apply() {
+    rows.forEach(r => r.tr.classList.toggle("dimmed", filter !== "all" && r.ag !== filter));
+  }
+  wrap.appendChild(sec);
+  return wrap;
+}
+
+// =========================================================================
+// VARIANT B — Two houses. No shared table at all. One panel per owner, each
+// with its own header: who it is, what it is for, how many jobs, when its day
+// runs, and whether anything is failing. You read one agent at a time, the
+// way /map now draws one agent at a time.
+// The obvious follow-on if this wins: group the 18 Run duration sparklines
+// the same way, so that section stops being one undifferentiated grid.
+// =========================================================================
+function variantB(tasks) {
+  const wrap = el("div");
+  const lab = el("div", "section-label");
+  lab.appendChild(el("span", null, "Scheduled tasks"));
+  lab.appendChild(el("span", "hint", "grouped by the agent that owns them"));
+  wrap.appendChild(lab);
+
+  ["wren", "scribe", "ext", "daemon"].forEach(key => {
+    const mine = tasks.filter(t => agentOf(t) === key);
+    if (!mine.length) return;
+    const meta = AGENTS[key];
+    const house = el("div", "house " + meta.cls);
+
+    const head = el("div", "house-head");
+    head.appendChild(el("div", "mark", meta.letter));
+    const who = el("div");
+    who.appendChild(el("h3", null, meta.name));
+    who.appendChild(el("div", "role", meta.role));
+    head.appendChild(who);
+
+    const facts = el("div", "facts");
+    const failing = mine.filter(t => t.last_run && t.last_run.status === "failure").length;
+    facts.appendChild(el("b", null, String(mine.length)));
+    if (key === "daemon") {
+      facts.appendChild(el("div", null, "always running"));
+    } else {
+      const times = mine.map(t => timeOf(t.human_schedule)).filter(v => v !== null).sort((a, b) => a - b);
+      facts.appendChild(el("div", null,
+        failing ? `${failing} failing` : "all green"));
+      if (times.length) {
+        facts.appendChild(el("div", null, `${clock(times[0])} – ${clock(times[times.length - 1])}`));
+      }
+    }
+    head.appendChild(facts);
+    house.appendChild(head);
+
+    const table = el("table");
+    table.appendChild(houseHead());
+    const tbody = el("tbody");
+    mine.forEach(t => {
+      const tr = el("tr", t.is_daemon ? "daemon" : "task-row");
+      tr.appendChild(el("td", "name", t.display_name));
+      tr.appendChild(el("td", "sched", t.human_schedule));
+      tr.appendChild(el("td", "next", t.is_daemon ? "—" : fmtTs(t.next_run)));
+      tr.appendChild(statusCell(t));
+      const act = el("td"); act.appendChild(actionsFor(t)); tr.appendChild(act);
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    house.appendChild(table);
+    wrap.appendChild(house);
+  });
+  return wrap;
+}
+
+// ---- run-duration sparklines -------------------------------------------
+// Trimmed from chat/static/run-chart.js. That file is an IIFE bound to a single
+// #runChart mount and does its own fetch, so it cannot draw one grid per agent;
+// a real D would give it a mount parameter rather than fork it. Log y and
+// x-as-run-index are kept — the reasoning for both is in run-chart.js.
+const CW = 260, CH = 66, CPAD = { top: 8, right: 6, bottom: 8, left: 6 };
+function svgEl(tag, attrs) {
+  const e = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const k in attrs || {}) e.setAttribute(k, attrs[k]);
+  return e;
+}
+function fmtShort(s) {
+  if (s >= 60) return Math.round(s / 60) + "m";
+  if (s < 10) return (Math.round(s * 10) / 10) + "s";
+  return Math.round(s) + "s";
+}
+function plot(runs, st) {
+  const PW = CW - CPAD.left - CPAD.right, PH = CH - CPAD.top - CPAD.bottom;
+  const svg = svgEl("svg", { viewBox: `0 0 ${CW} ${CH}`, class: "chart-svg", role: "img" });
+  const ys = runs.map(r => Math.log10(r.duration_s + 1));
+  const lo = Math.min.apply(null, ys), span = Math.max.apply(null, ys) - lo;
+  const x = i => CPAD.left + (runs.length === 1 ? PW / 2 : (i / (runs.length - 1)) * PW);
+  const y = v => (span === 0 ? CPAD.top + PH / 2 : CPAD.top + PH * (1 - (v - lo) / span));
+  if (st.median_s != null) {
+    const m = y(Math.log10(st.median_s + 1)).toFixed(1);
+    svg.appendChild(svgEl("line", { class: "chart-median", x1: CPAD.left, x2: CW - CPAD.right, y1: m, y2: m }));
+  }
+  svg.appendChild(svgEl("polyline", { class: "chart-line",
+    points: runs.map((r, i) => `${x(i).toFixed(1)},${y(ys[i]).toFixed(1)}`).join(" ") }));
+  runs.forEach((r, i) => {
+    const dot = svgEl("circle", { class: r.status === "failure" ? "pt fail" : "pt",
+      cx: x(i).toFixed(1), cy: y(ys[i]).toFixed(1), r: 2.4 });
+    const tip = svgEl("title");
+    tip.textContent = `${r.start.slice(0, 16)} · ${fmtShort(r.duration_s)} · ${r.status}`;
+    dot.appendChild(tip);
+    svg.appendChild(dot);
+  });
+  return svg;
+}
+function chartCell(st, days) {
+  const cell = el("div", "chart-cell");
+  const head = el("div", "chart-head");
+  const nm = el("span", "chart-name", st.display_name);
+  nm.title = st.display_name;
+  head.appendChild(nm);
+  const timed = st.runs.filter(r => typeof r.duration_s === "number");
+  if (timed.length) {
+    head.appendChild(el("span", "chart-stat",
+      `med ${fmtShort(st.median_s)} · max ${fmtShort(st.max_s)}`));
+  }
+  cell.appendChild(head);
+  if (!timed.length) {
+    cell.appendChild(el("div", "chart-empty",
+      st.unfinished ? `${st.unfinished} unfinished, none timed` : `no runs in ${days} days`));
+    return cell;
+  }
+  cell.appendChild(plot(timed, st));
+  return cell;
+}
+
+// =========================================================================
+// VARIANT D — B, with the Run duration charts folded into each agent's box,
+// and the whole box collapsible down to its header.
+// The bet: "Run duration" stops being a separate 18-card grid and becomes part
+// of the agent that owns it, so the two questions — whose job is this, and is
+// it getting slower — are answered in one place. Collapsing is what makes that
+// affordable: the header alone has to carry health, so it also names the
+// slowest job.
+// =========================================================================
+function variantD(tasks) {
+  const wrap = el("div");
+  const lab = el("div", "section-label");
+  lab.appendChild(el("span", null, "Scheduled tasks"));
+  const right = el("span", "hint");
+  const foldAll = el("button", "foldall", "collapse all");
+  right.appendChild(foldAll);
+  lab.appendChild(right);
+  wrap.appendChild(lab);
+
+  const toggles = [];
+  ["wren", "scribe", "ext", "daemon"].forEach(key => {
+    const mine = tasks.filter(t => agentOf(t) === key);
+    if (!mine.length) return;
+    const meta = AGENTS[key];
+    const stats = mine.map(t => STATS[t.key]).filter(Boolean);
+    const house = el("div", "house fold " + meta.cls);
+
+    const head = el("div", "house-head");
+    const caret = el("div", "caret", "▾");
+    head.appendChild(caret);
+    head.appendChild(el("div", "mark", meta.letter));
+    const who = el("div");
+    who.appendChild(el("h3", null, meta.name));
+    who.appendChild(el("div", "role", meta.role));
+    // Collapsed, this line is the only thing left of the charts — so it says
+    // which job to open the box for.
+    const slowest = stats.filter(x => x.median_s != null).sort((a, b) => b.median_s - a.median_s)[0];
+    if (slowest) {
+      who.appendChild(el("div", "slow",
+        `slowest: ${slowest.display_name} — median ${fmtShort(slowest.median_s)}, max ${fmtShort(slowest.max_s)}`));
+    }
+    head.appendChild(who);
+
+    const facts = el("div", "facts");
+    const failing = mine.filter(t => t.last_run && t.last_run.status === "failure").length;
+    facts.appendChild(el("b", null, String(mine.length)));
+    if (key === "daemon") {
+      facts.appendChild(el("div", null, "always running"));
+    } else {
+      facts.appendChild(el("div", null, failing ? `${failing} failing` : "all green"));
+      const times = mine.map(t => timeOf(t.human_schedule)).filter(v => v !== null).sort((a, b) => a - b);
+      if (times.length) facts.appendChild(el("div", null, `${clock(times[0])} – ${clock(times[times.length - 1])}`));
+    }
+    head.appendChild(facts);
+    house.appendChild(head);
+
+    const body = el("div", "house-body");
+    if (stats.length) {
+      const charts = el("div", "house-charts");
+      const grid = el("div", "chart-grid");
+      stats.forEach(st => grid.appendChild(chartCell(st, STAT_DAYS)));
+      charts.appendChild(grid);
+      body.appendChild(charts);
+    }
+    const table = el("table");
+    table.appendChild(houseHead());
+    const tbody = el("tbody");
+    mine.forEach(t => {
+      const tr = el("tr", t.is_daemon ? "daemon" : "task-row");
+      tr.appendChild(el("td", "name", t.display_name));
+      tr.appendChild(el("td", "sched", t.human_schedule));
+      tr.appendChild(el("td", "next", t.is_daemon ? "—" : fmtTs(t.next_run)));
+      tr.appendChild(statusCell(t));
+      const act = el("td"); act.appendChild(actionsFor(t)); tr.appendChild(act);
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    body.appendChild(table);
+    house.appendChild(body);
+
+    // Daemons have no schedule and no run history, so they start folded away.
+    let open = key !== "daemon";
+    function apply() {
+      body.hidden = !open;
+      caret.textContent = open ? "▾" : "▸";
+      head.setAttribute("aria-expanded", String(open));
+    }
+    head.addEventListener("click", () => { open = !open; apply(); });
+    toggles.push(v => { open = v; apply(); });
+    apply();
+    wrap.appendChild(house);
+  });
+
+  let allOpen = true;
+  foldAll.addEventListener("click", () => {
+    allOpen = !allOpen;
+    toggles.forEach(f => f(allOpen));
+    foldAll.textContent = allOpen ? "collapse all" : "expand all";
+  });
+  return wrap;
+}
+
+// =========================================================================
+// VARIANT C — The morning. Throw the table out. The day is the x-axis, each
+// agent is a lane, and every job is a pin at the minute it fires. Ownership
+// stops being a column and becomes a row you can read across.
+// This is the only variant that answers "who is queued behind whom", which
+// matters here because all four consumers share ONE Ollama slot.
+// =========================================================================
+function variantC(tasks) {
+  const wrap = el("div");
+  const lab = el("div", "section-label");
+  lab.appendChild(el("span", null, "Scheduled tasks"));
+  lab.appendChild(el("span", "hint", "the day, one lane per agent · round = daily, square = weekly"));
+  wrap.appendChild(lab);
+
+  const box = el("div", "clock");
+  const info = el("div", "pinfo");
+  // The panel reserves its height, so say what fills it rather than sit empty.
+  info.appendChild(el("div", "muted", "Click a pin for its schedule, last run and controls."));
+  const allPins = [];
+
+  function show(t, ag, pin) {
+    allPins.forEach(p => p.classList.remove("sel"));
+    pin.classList.add("sel");
+    info.textContent = "";
+    const owner = el("div", "owner " + AGENTS[ag].cls);
+    owner.appendChild(el("span", "sq"));
+    owner.appendChild(document.createTextNode(AGENTS[ag].name));
+    info.appendChild(owner);
+    info.appendChild(el("h4", null, t.display_name));
+    const line = el("div", "muted");
+    line.textContent = `${t.human_schedule} · next ${fmtTs(t.next_run)}`;
+    info.appendChild(line);
+    if (t.last_run) {
+      const l2 = el("div", "muted");
+      l2.textContent = `last run ${fmtTs(t.last_run.start)} — ${t.last_run.status}, ${fmtDur(t.last_run.duration_s)}`;
+      info.appendChild(l2);
+    }
+    info.appendChild(actionsFor(t));
+  }
+
+  ["wren", "scribe", "ext"].forEach(key => {
+    const mine = tasks.filter(t => agentOf(t) === key && timeOf(t.human_schedule) !== null);
+    if (!mine.length) return;
+    const row = el("div", "lane-row " + AGENTS[key].cls);
+    const nm = el("div", "lane-name");
+    nm.appendChild(el("div", "who", AGENTS[key].name));
+    nm.appendChild(el("div", "cnt", `${mine.length} job${mine.length === 1 ? "" : "s"}`));
+    row.appendChild(nm);
+    const lane = el("div", "lane");
+    lane.appendChild(el("div", "track"));
+    // Starred Releases and Starred Blurbs both fire at 8:00 PM, so their pins
+    // land on the same pixel. Stack collisions off the track rather than let
+    // one hide the other.
+    const LANE_W = 1180, ROW_OFF = [0, -16, 16];
+    const rowEnd = [];
+    mine.slice().sort((a, b) => timeOf(a.human_schedule) - timeOf(b.human_schedule)).forEach(t => {
+      const h = timeOf(t.human_schedule);
+      const x = h / 24 * LANE_W;
+      let row = rowEnd.findIndex(e => x - e >= 15);
+      if (row === -1) row = Math.min(rowEnd.length, ROW_OFF.length - 1);
+      rowEnd[row] = x;
+      const pin = el("div", "pin" + (isWeekly(t.human_schedule) ? " weekly" : "") +
+        (t.last_run && t.last_run.status === "failure" ? " fail" : ""));
+      pin.style.left = (h / 24 * 100) + "%";
+      pin.style.top = (22 + ROW_OFF[row]) + "px";
+      pin.title = `${t.display_name} — ${t.human_schedule}`;
+      pin.addEventListener("click", () => show(t, key, pin));
+      allPins.push(pin);
+      lane.appendChild(pin);
+    });
+    row.appendChild(lane);
+    box.appendChild(row);
+  });
+
+  const axis = el("div", "axis");
+  for (let h = 0; h <= 24; h += 3) {
+    const tick = el("i"); tick.style.left = (h / 24 * 100) + "%"; axis.appendChild(tick);
+    const s = el("span", null, h === 0 ? "12 AM" : h === 24 ? "12 AM" : h === 12 ? "12 PM" : (h % 12) + (h < 12 ? " AM" : " PM"));
+    s.style.left = (h / 24 * 100) + "%";
+    axis.appendChild(s);
+  }
+  box.appendChild(axis);
+
+  // The one thing this layout is for. Counted from the data, not asserted.
+  const early = tasks.filter(t => {
+    const h = timeOf(t.human_schedule);
+    return h !== null && h >= 4 && h <= 6.25 && !isWeekly(t.human_schedule);
+  });
+  const byAg = {};
+  early.forEach(t => { const a = agentOf(t); byAg[a] = (byAg[a] || 0) + 1; });
+  const crowd = el("div", "crowd");
+  crowd.appendChild(el("div", null, "⚠"));
+  const ct = el("div");
+  ct.appendChild(el("b", null, `${early.length} jobs fire between 4:15 and 6:00 AM`));
+  ct.appendChild(document.createTextNode(
+    ` — ${Object.entries(byAg).map(([k, n]) => `${n} ${AGENTS[k].name}`).join(", ")}. ` +
+    "They interleave rather than running as two blocks, and they share one " +
+    "Ollama slot, so they queue behind each other. A table sorted by time " +
+    "shows the same rows and none of this."));
+  crowd.appendChild(ct);
+
+  box.appendChild(info);
+  wrap.appendChild(box);
+  wrap.appendChild(crowd);
+
+  const pollers = tasks.filter(t => timeOf(t.human_schedule) === null);
+  if (pollers.length) {
+    const p = el("div", "panel");
+    p.style.marginTop = "16px";
+    p.appendChild(el("div", "section-label", "No place on a clock"));
+    const ul = el("div", "muted");
+    ul.textContent = pollers.map(t => `${t.display_name} (${t.human_schedule})`).join(" · ");
+    p.appendChild(ul);
+    wrap.appendChild(p);
+  }
+  return wrap;
+}
+
+// ---------------------------------------------------------------- switcher
+const VARIANTS = [
+  ["A", "Owned rows", variantA],
+  ["B", "Two houses", variantB],
+  ["C", "The morning", variantC],
+  ["D", "Two houses, folded", variantD],
+];
+let DATA = null, ERR = null, STATS = {}, STAT_DAYS = 30;
+
+function current() {
+  const v = (new URLSearchParams(location.search).get("variant") || "A").toUpperCase();
+  return VARIANTS.some(x => x[0] === v) ? v : "A";
+}
+function go(key) {
+  const url = new URL(location.href);
+  url.searchParams.set("variant", key);
+  history.replaceState(null, "", url);
+  render();
+}
+function cycle(step) {
+  const i = VARIANTS.findIndex(x => x[0] === current());
+  go(VARIANTS[(i + step + VARIANTS.length) % VARIANTS.length][0]);
+}
+function render() {
+  const key = current();
+  const [, name, fn] = VARIANTS.find(x => x[0] === key);
+  const stage = document.getElementById("stage");
+  stage.textContent = "";
+  if (DATA) {
+    stage.appendChild(fn(DATA));
+  } else if (ERR) {
+    const box = el("div", "err");
+    box.appendChild(el("div", null, "Could not load /api/schedules (" + ERR + ")."));
+    box.appendChild(el("div", null,
+      "Open /dashboard first so the login cookie is set, then reload this page."));
+    stage.appendChild(box);
+  }
+
+  const bar = document.getElementById("bar");
+  bar.textContent = "";
+  const prev = el("button", null, "←"); prev.addEventListener("click", () => cycle(-1));
+  const next = el("button", null, "→"); next.addEventListener("click", () => cycle(1));
+  const lab = el("div", "lab");
+  lab.appendChild(document.createTextNode(`${key} — ${name}`));
+  lab.appendChild(el("em", null, `  ${DATA ? DATA.length : 0} tasks`));
+  bar.appendChild(prev); bar.appendChild(lab); bar.appendChild(next);
+}
+document.addEventListener("keydown", (e) => {
+  const t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+  if (e.key === "ArrowLeft") cycle(-1);
+  if (e.key === "ArrowRight") cycle(1);
+});
+
+Promise.all([
+  fetch("/api/schedules").then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }),
+  // Only D draws these, but fetching both up front keeps the switcher instant.
+  fetch("/api/run_stats").then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }),
+]).then(([sched, stats]) => {
+  DATA = sched.tasks || [];
+  STAT_DAYS = stats.days || 30;
+  (stats.tasks || []).forEach(t => { STATS[t.key] = t; });
+  render();
+}).catch(e => { ERR = e.message; render(); });
+</script>
+<script src="/static/nav.js"></script>
+</body>
+</html>
