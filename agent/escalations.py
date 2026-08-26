@@ -29,10 +29,19 @@ def record_escalation(
     backend: str,
     model: str,
     outcome: str,
+    trigger: str = "manual",
 ) -> dict:
     """Append one escalation record (newest last), pruning to MAX_RECORDS, and
     return it. `outcome` is 'ok' or 'error:<reason>'; `prompt_tokens` is the
-    approximate size shipped off-device."""
+    approximate size shipped off-device.
+
+    `trigger` says what caused it: 'manual' for the redo button (the user
+    judged the local answer too weak) or 'busy' for the offer chat makes when
+    the local model's one slot is already taken. The distinction is the point
+    of the field — an auto-router argued for by 'manual' records would be
+    routing on answer QUALITY, and one argued for by 'busy' records on
+    AVAILABILITY. Those are different features, and a log that mixed them
+    would support neither."""
     record = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "request": request,
@@ -41,6 +50,7 @@ def record_escalation(
         "backend": backend,
         "model": model,
         "outcome": outcome,
+        "trigger": trigger,
     }
     with locked(_STORE_PATH):
         data = load_json(_STORE_PATH, {"escalations": []})

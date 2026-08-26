@@ -371,6 +371,123 @@ def warm_model(
         return False
 
 
+def _resident_models(host: str) -> Optional[list[str]]:
+    """The models Ollama currently holds in memory, or None when Ollama itself
+    didn't answer. Empty list and None are different facts and must not be
+    collapsed: nothing loaded means Ollama is up and idle, no answer means it
+    is down."""
+    try:
+        resp = requests.get(f"{host}/api/ps", timeout=5)
+        resp.raise_for_status()
+        return [m.get("name", "?") for m in (resp.json().get("models") or [])]
+    except Exception:
+        return None
+
+
+def _same_model(configured: str, resident: str) -> bool:
+    """Whether a configured model name and a name from /api/ps are the same
+    model. Ollama reports the resolved tag, so a bare `gemma4` in .env comes
+    back as `gemma4:latest` — comparing the raw strings would never match, and
+    the caller would read every turn as a cold start."""
+    def tagged(name: str) -> str:
+        return name if ":" in name else f"{name}:latest"
+    return tagged(configured) == tagged(resident)
+
+
+def probe_local_model(
+    host: str = None,
+    timeout: float = None,
+    backend: Optional[str] = None,
+    logger: Optional[logging.Logger] = None,
+) -> tuple[bool, str]:
+    """Ask Ollama a throwaway one-token question to learn whether its single
+    request slot is free RIGHT NOW. Returns (True, "") when it answered, or
+    (False, reason) where reason is a sentence for the user.
+
+    Chat runs this BEFORE committing a turn to the local model, and the order
+    is the whole point. Ollama serves one request at a time and queues the rest
+    silently (docs/ollama-serving.md), so a turn sent while a background job
+    holds the slot just hangs — and it cannot be rescued afterwards, because
+    the cancel check in _ollama_chat only runs between received chunks and a
+    queued request receives none. Asking first is what makes the offer of a
+    frontier model possible at all: nothing local has started, so there is
+    nothing to cancel.
+
+    A no-op (True) for any non-Ollama backend — a cloud model has no slot to
+    contend for.
+
+    **/api/ps is consulted first, and a model that isn't resident reports FREE.**
+    Not a shortcut — the correctness of the whole thing. A cold model answers
+    nothing until it has loaded (measured 4.1s here with a warm page cache, and
+    the ~50s in CHAT_MODEL_TIMEOUT's note when it isn't), so probing a cold
+    Ollama times out and reads as busy when in fact the slot is empty and the
+    wait is a load. That false positive fires on the first turn after any idle
+    stretch, which is most of them. Contention is the thing being detected;
+    a cold start is a different problem and is left alone.
+
+    Sends the same num_ctx and keep_alive as a real call. Ollama keys the
+    loaded runner on its context length, so a probe with a different num_ctx
+    would evict the resident model and pay a ~17GB reload on every chat turn.
+
+    Costs ~0.05s against a resident, idle model, plus one /api/ps round trip
+    (measured 2026-08-26 on gemma4:26b-mlx). That is paid on every local chat
+    turn, which is what WREN_CHAT_BUSY_PROBE=0 exists to switch off."""
+    if _resolve_backend(backend) != "ollama":
+        return True, ""
+    model = os.getenv("OLLAMA_MODEL", "gemma4")
+    host = host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    if timeout is None:
+        timeout = float(os.getenv("WREN_CHAT_BUSY_PROBE_TIMEOUT", "3"))
+
+    t_start = time.monotonic()
+
+    def done(free: bool, verdict: str, reason: str = "") -> tuple[bool, str]:
+        """Log EVERY outcome, then return it. A probe that passes is otherwise
+        silent, which leaves 'is the check even running?' unanswerable from the
+        log — the only way to see the feature alive was to hold the slot by hand
+        and watch a decline appear."""
+        if logger:
+            logger.info("local model probe: %s in %.2fs", verdict,
+                        time.monotonic() - t_start)
+        return free, reason
+
+    resident = _resident_models(host)
+    if resident is None:
+        return done(False, "ollama not answering",
+                    f"Ollama at {host} isn't answering at all — it looks "
+                    f"down, so this turn has nowhere local to go.")
+    if not any(_same_model(model, name) for name in resident):
+        # Nothing to contend with: the slot is free and the only wait is a load,
+        # which is what the turn itself would do anyway. Proceed exactly as
+        # before this probe existed.
+        return done(True, "free, model not loaded")
+
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": "hi"}],
+        "stream": False,
+        # The content is thrown away; only its ARRIVAL is the signal. think off
+        # and a one-token budget so a healthy Ollama can't look slow by
+        # spending the probe on a scratchpad.
+        "think": False,
+        "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
+        "options": {"num_ctx": int(os.getenv("OLLAMA_NUM_CTX", "8192")),
+                    "num_predict": 1},
+    }
+    t0 = time.monotonic()
+    try:
+        resp = requests.post(f"{host}/api/chat", json=payload, timeout=timeout)
+        resp.raise_for_status()
+        return done(True, "free, slot answered")
+    except requests.exceptions.RequestException as e:
+        # The model is resident, so a free slot would have answered this in
+        # milliseconds. Silence means something else is holding it.
+        reason = (f"Wren is busy: {model} is loaded but its one request slot is "
+                  f"taken by another job (no answer in "
+                  f"{time.monotonic() - t0:.0f}s).")
+        return done(False, f"busy ({e.__class__.__name__})", reason)
+
+
 # --------------------------------------------------------------------------- #
 # Backend seam. Wren speaks one canonical message/tool shape internally (the
 # Ollama/OpenAI shape every caller already builds); _llm_chat dispatches to the

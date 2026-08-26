@@ -1322,3 +1322,223 @@ def test_the_last_ditch_answer_is_asked_for_with_no_tools(monkeypatch):
 
     assert sent[0].get("tools")           # the ordinary steps carry tools
     assert not sent[-1].get("tools")      # the last one cannot call anything
+
+
+# --------------------------------------------------------------------------- #
+# probe_local_model — "is the single Ollama slot free right now?", asked before
+# chat commits a turn to the local model. See docs/frontier-escalation.md.
+# --------------------------------------------------------------------------- #
+
+MODEL = "gemma4:26b-mlx"
+
+
+def _patch_probe_post(monkeypatch, captured, exc=None):
+    """Stand in for the probe's one-token /api/chat request."""
+    class _Resp:
+        def raise_for_status(self):
+            pass
+
+    def fake_post(url, json=None, timeout=None):
+        captured["url"] = url
+        captured["payload"] = json
+        captured["timeout"] = timeout
+        if exc:
+            raise exc
+        return _Resp()
+
+    monkeypatch.setattr(loop.requests, "post", fake_post)
+
+
+def _resident(monkeypatch, models):
+    """/api/ps reporting which models Ollama is holding in memory."""
+    _patch_ps(monkeypatch, models=models)
+
+
+def test_probe_reports_free_when_the_resident_model_answers(monkeypatch):
+    monkeypatch.setenv("OLLAMA_MODEL", MODEL)
+    _resident(monkeypatch, [MODEL])
+    captured = {}
+    _patch_probe_post(monkeypatch, captured)
+
+    free, reason = loop.probe_local_model()
+
+    assert free is True
+    assert reason == ""
+    assert captured["url"].endswith("/api/chat")
+
+
+def test_probe_asks_for_one_token_without_thinking(monkeypatch):
+    """Only the ARRIVAL of an answer is the signal, so the probe must not let
+    the model spend its budget reasoning — that would make a free Ollama look
+    busy, which is the exact false positive this feature can't afford."""
+    monkeypatch.setenv("OLLAMA_MODEL", MODEL)
+    _resident(monkeypatch, [MODEL])
+    captured = {}
+    _patch_probe_post(monkeypatch, captured)
+
+    loop.probe_local_model()
+
+    assert captured["payload"]["options"]["num_predict"] == 1
+    assert captured["payload"]["think"] is False
+    assert captured["payload"]["stream"] is False
+
+
+def test_probe_matches_the_real_calls_num_ctx(monkeypatch):
+    """Ollama keys the loaded runner on its context length, so a probe carrying
+    a DIFFERENT num_ctx from the real call would evict the resident model and
+    pay a ~17GB reload on every chat turn. Asserted against _ollama_chat's own
+    payload rather than a literal, so the two cannot drift apart."""
+    monkeypatch.setenv("OLLAMA_MODEL", MODEL)
+    monkeypatch.setenv("OLLAMA_NUM_CTX", "49152")
+    _resident(monkeypatch, [MODEL])
+    probe = {}
+    _patch_probe_post(monkeypatch, probe)
+    loop.probe_local_model()
+
+    real = {}
+    _patch_post(monkeypatch, real, {"message": {"role": "assistant", "content": "hi"}})
+    loop._ollama_chat([{"role": "user", "content": "hey"}])
+
+    assert probe["payload"]["options"]["num_ctx"] == real["payload"]["options"]["num_ctx"]
+    assert probe["payload"]["keep_alive"] == real["payload"]["keep_alive"]
+
+
+def test_probe_timeout_is_short_and_overridable(monkeypatch):
+    """The probe is paid on every local chat turn, so its ceiling is seconds —
+    a long one would reintroduce the wait it exists to avoid."""
+    monkeypatch.setenv("OLLAMA_MODEL", MODEL)
+    _resident(monkeypatch, [MODEL])
+    captured = {}
+    _patch_probe_post(monkeypatch, captured)
+    loop.probe_local_model()
+    assert captured["timeout"] == 3
+
+    monkeypatch.setenv("WREN_CHAT_BUSY_PROBE_TIMEOUT", "8")
+    loop.probe_local_model()
+    assert captured["timeout"] == 8
+
+
+def test_probe_says_busy_and_names_what_holds_the_slot(monkeypatch):
+    """The model is resident, so a free slot would have answered in
+    milliseconds. Silence therefore means contention, and the reason says so —
+    it is shown in chat."""
+    monkeypatch.setenv("OLLAMA_MODEL", MODEL)
+    _resident(monkeypatch, [MODEL])
+    _patch_probe_post(monkeypatch, {},
+                      exc=loop.requests.exceptions.ReadTimeout("timed out"))
+
+    free, reason = loop.probe_local_model()
+
+    assert free is False
+    assert "busy" in reason
+    assert MODEL in reason
+
+
+def test_a_cold_model_is_free_and_is_never_probed(monkeypatch):
+    """Measured 2026-08-26: a cold model takes 4.1s to answer its first request
+    with a warm page cache, well past the 3s ceiling — so probing a cold Ollama
+    would time out and report 'busy' when the slot is in fact empty. That false
+    positive would fire on the first turn after any idle stretch. Nothing is
+    holding the slot, so the turn proceeds and loads the model itself."""
+    monkeypatch.setenv("OLLAMA_MODEL", MODEL)
+    _resident(monkeypatch, [])
+
+    def boom(*a, **k):
+        raise AssertionError("a cold model must not be probed — it would just "
+                             "pay the load and time out")
+
+    monkeypatch.setattr(loop.requests, "post", boom)
+
+    assert loop.probe_local_model() == (True, "")
+
+
+def test_a_different_resident_model_also_counts_as_cold(monkeypatch):
+    """Another project's model holding memory is not OUR model being ready —
+    ours would still have to load, so there is nothing to contend for yet."""
+    monkeypatch.setenv("OLLAMA_MODEL", MODEL)
+    _resident(monkeypatch, ["qwen3.8:27b-mlx"])
+    monkeypatch.setattr(loop.requests, "post",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("probed")))
+
+    assert loop.probe_local_model() == (True, "")
+
+
+def test_an_untagged_model_name_still_matches_what_ollama_reports(monkeypatch):
+    """Ollama reports the resolved tag, so a bare `gemma4` in .env comes back as
+    `gemma4:latest`. Comparing raw strings would never match and every turn
+    would read as a cold start — silently disabling the whole feature."""
+    monkeypatch.setenv("OLLAMA_MODEL", "gemma4")
+    _resident(monkeypatch, ["gemma4:latest"])
+    _patch_probe_post(monkeypatch, {},
+                      exc=loop.requests.exceptions.ReadTimeout("timed out"))
+
+    free, reason = loop.probe_local_model()
+
+    assert free is False  # it WAS probed, and reported busy
+    assert "busy" in reason
+
+
+def test_probe_says_down_when_ollama_answers_nothing(monkeypatch):
+    """A down Ollama is not a cold one: there is no local turn to be had, so
+    the offer stands rather than sending the turn into a connection error."""
+    _patch_ps(monkeypatch, fail=True)
+    monkeypatch.setattr(loop.requests, "post",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("probed")))
+
+    free, reason = loop.probe_local_model()
+
+    assert free is False
+    assert "looks down" in reason
+    assert "busy" not in reason
+
+
+def test_probe_is_a_no_op_for_a_cloud_backend(monkeypatch):
+    """A cloud model has no slot to contend for, so the probe must not fire —
+    nor cost a local request on an install routed off-device."""
+    def boom(*a, **k):
+        raise AssertionError("probe must not touch Ollama for a cloud backend")
+
+    monkeypatch.setattr(loop.requests, "post", boom)
+    monkeypatch.setattr(loop.requests, "get", boom)
+
+    assert loop.probe_local_model(backend="gemini") == (True, "")
+
+
+def test_a_passing_probe_says_so_in_the_log(monkeypatch, caplog):
+    """The half that is easy to leave out. A decline logs a line, so the busy
+    path is provable from logs/wren.log; a PASS logging nothing left 'is the
+    check even running?' answerable only by holding the slot by hand. Every
+    outcome now writes one line."""
+    monkeypatch.setenv("OLLAMA_MODEL", MODEL)
+    _resident(monkeypatch, [MODEL])
+    _patch_probe_post(monkeypatch, {})
+    logger = logging.getLogger("test_loop.probe_pass")
+
+    with caplog.at_level(logging.INFO, logger=logger.name):
+        assert loop.probe_local_model(logger=logger) == (True, "")
+
+    assert "local model probe: free" in caplog.text
+
+
+def test_every_probe_outcome_writes_exactly_one_line(monkeypatch, caplog):
+    """Free, cold, busy and Ollama-down each account for themselves — and each
+    accounts once, so the line count is a turn count."""
+    monkeypatch.setenv("OLLAMA_MODEL", MODEL)
+    logger = logging.getLogger("test_loop.probe_every")
+    cases = {
+        "free, slot answered": ([MODEL], None, False),
+        "free, model not loaded": ([], None, False),
+        "busy": ([MODEL], loop.requests.exceptions.ReadTimeout("t"), False),
+        "ollama not answering": (None, None, True),
+    }
+    for verdict, (models, exc, ps_down) in cases.items():
+        caplog.clear()
+        _patch_ps(monkeypatch, models=models, fail=ps_down)
+        _patch_probe_post(monkeypatch, {}, exc=exc)
+
+        with caplog.at_level(logging.INFO, logger=logger.name):
+            loop.probe_local_model(logger=logger)
+
+        lines = [r for r in caplog.records if "local model probe:" in r.message]
+        assert len(lines) == 1, f"{verdict}: {[r.message for r in lines]}"
+        assert verdict in caplog.text

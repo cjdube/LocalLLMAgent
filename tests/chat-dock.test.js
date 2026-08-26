@@ -450,3 +450,68 @@ describe("frontier escalation", () => {
     expect(lastMessage()).toContain("couldn't reach Wren");
   });
 });
+
+describe("the busy offer", () => {
+  const BUSY = {
+    type: "busy",
+    reason: "Wren is busy: gemma4:26b-mlx holds the slot.",
+    escalate_to: "gemini-3.6-flash (gemini)",
+  };
+  const offerButtons = () =>
+    Array.from(document.querySelectorAll(".offer .escalate"));
+
+  async function offered() {
+    resolvesWith(BUSY);
+    submit("what's on today?");
+    await settle();
+  }
+
+  test("says why and offers both ways forward", async () => {
+    await offered();
+    expect(messages().querySelector(".msg.system").textContent)
+      .toBe(BUSY.reason);
+    expect(offerButtons().map((b) => b.textContent))
+      .toEqual(["Ask gemini-3.6-flash (gemini)", "Wait for Wren"]);
+  });
+
+  test("unlocks the composer — nothing is running", async () => {
+    await offered();
+    expect(dots()).toHaveLength(0);
+    expect(input().disabled).toBe(false);
+    expect(sendBtn().textContent).toBe("Send");
+  });
+
+  test("asking the frontier model re-sends the same message", async () => {
+    await offered();
+    resolvesWith({ type: "final", text: "frontier answer", escalated: true });
+    offerButtons()[0].click();
+    expect(global.fetch).toHaveBeenLastCalledWith("/chat", expect.objectContaining({
+      body: JSON.stringify({ message: "what's on today?", backend: "frontier" }),
+    }));
+  });
+
+  test("waiting re-sends the same message with the probe switched off", async () => {
+    await offered();
+    resolvesWith({ type: "final", text: "local answer" });
+    offerButtons()[1].click();
+    expect(global.fetch).toHaveBeenLastCalledWith("/chat", expect.objectContaining({
+      body: JSON.stringify({ message: "what's on today?", force_local: true }),
+    }));
+  });
+
+  test("the offer is spent on the first tap", async () => {
+    // The session allows one turn at a time, so a second tap on the other
+    // button would only earn a 409.
+    await offered();
+    pendingTurn();
+    offerButtons()[0].click();
+    expect(offerButtons()).toHaveLength(0);
+  });
+
+  test("a new typed message clears a stale offer", async () => {
+    await offered();
+    pendingTurn();
+    submit("never mind, something else");
+    expect(offerButtons()).toHaveLength(0);
+  });
+});

@@ -63,6 +63,12 @@
   .escalate { align-self: flex-start; margin: -6px 0 2px; padding: 5px 11px; font-size: 13px; background: #ffffff; color: #4b5563; border: 1px solid #d0d5dd; border-radius: 8px; cursor: pointer; }
   .escalate:hover { background: #f3f0fb; color: #7c3aed; border-color: #ddd0f5; }
   .escalate:disabled { opacity: 0.5; cursor: default; }
+  /* The busy offer: two .escalate buttons side by side rather than stacked,
+     centred under the .msg.system notice they belong to (which is centred too —
+     left-aligning them read as a stray pair of buttons). Wraps rather than
+     overflowing, since the frontier model's name goes in a button label. */
+  .offer { align-self: center; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: -2px 0 2px; }
+  .offer .escalate { margin: 0; }
   .msg.typing { display: flex; align-items: center; gap: 4px; padding: 14px; }
   .msg.typing .typing-dot {
     width: 6px;

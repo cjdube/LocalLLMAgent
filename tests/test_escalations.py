@@ -19,11 +19,18 @@ def _record(**over):
 def test_record_appends_a_fully_shaped_row():
     rec = _record()
     assert set(rec) == {"ts", "request", "local_reply", "prompt_tokens",
-                        "backend", "model", "outcome"}
+                        "backend", "model", "outcome", "trigger"}
     stored = load_json(escalations._STORE_PATH, {"escalations": []})["escalations"]
     assert stored == [rec]
     # ts is an ISO-8601 UTC stamp (the timestamp policy: store UTC, not a slice).
     assert rec["ts"].endswith("+00:00")
+
+
+def test_trigger_defaults_to_manual():
+    """The redo button predates the busy offer and doesn't pass a trigger, so
+    the default is what keeps its records readable rather than blank."""
+    assert _record()["trigger"] == "manual"
+    assert _record(trigger="busy")["trigger"] == "busy"
 
 
 def test_records_accumulate_newest_last():

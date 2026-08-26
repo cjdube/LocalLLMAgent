@@ -109,6 +109,16 @@ is the router, and every escalation is recorded to `config/escalations.json` as
 the paired dataset that would justify one later. See
 [docs/frontier-escalation.md](docs/frontier-escalation.md).
 
+**Chat also offers the frontier model when the local one is busy.** Ollama serves
+one request at a time, so a turn sent while a scheduled task holds the slot used
+to hang with no explanation. Chat now checks whether the slot is free before
+sending (~0.05s) and, when it isn't, says so and offers two buttons: ask the
+frontier model, or wait. Still one deliberate tap — detection only decides
+whether to *offer*. A model that isn't loaded yet counts as free, not busy, so a
+cold start is never mistaken for contention. The check runs only when
+`WREN_ESCALATION_BACKEND` is configured, and `WREN_CHAT_BUSY_PROBE=0` turns it
+off. Same doc.
+
 Every chat call sets the context window explicitly via `OLLAMA_NUM_CTX`
 (default 8192) rather than leaving it to Ollama's small default, which would
 silently truncate the front of the prompt (where the system prompt lives). Each

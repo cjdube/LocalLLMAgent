@@ -36,6 +36,7 @@ from agent.loop import (
     escalation_available,
     escalation_backend,
     load_persona,
+    probe_local_model,
     resolve,
     with_identity,
 )
@@ -102,6 +103,11 @@ SUMMARY_MESSAGE_CHARS = 600
 # waiting on their phone is better served by a fast, accurate "Ollama is busy"
 # than by a five-minute spinner — the value 300 gave us on 2026-08-03.
 CHAT_MODEL_TIMEOUT = float(os.getenv("WREN_CHAT_MODEL_TIMEOUT", "120"))
+# Before committing a turn to the local model, ask whether its one request slot
+# is free, and offer the frontier model instead when it isn't (probe_local_model
+# explains why the question has to come first). Costs ~0.3s per local turn
+# against a free, warm Ollama; WREN_CHAT_BUSY_PROBE=0 switches it off entirely.
+BUSY_PROBE_ENABLED = os.getenv("WREN_CHAT_BUSY_PROBE", "1") != "0"
 
 if not WREN_CHAT_TOKEN or not FLASK_SECRET_KEY:
     raise RuntimeError(
@@ -427,7 +433,8 @@ def _summary_transcript(dropped: list) -> str:
     return "\n".join(lines)[-SUMMARY_INPUT_CHARS:]
 
 
-def _summarize_dropped(dropped: list, previous: str) -> str:
+def _summarize_dropped(dropped: list, previous: str,
+                      backend: str | None = None) -> str:
     """Fold the evicted messages into the session's running summary, returning
     `previous` unchanged if the model can't produce one.
 
@@ -442,7 +449,13 @@ def _summarize_dropped(dropped: list, previous: str) -> str:
 
     SUMMARY_CHARS=0 turns the whole thing off, model call included — the escape
     hatch if compaction's latency on the shared Ollama slot ever costs more than
-    the memory is worth."""
+    the memory is worth.
+
+    `backend` follows the turn. A turn already routed to the frontier model
+    because the local one is busy would otherwise queue HERE instead, on the
+    same taken slot, and hang the escape hatch it was reaching for. Sending
+    the summary the same way exposes nothing new: it summarizes the very
+    conversation that turn is shipping off-device anyway."""
     if SUMMARY_CHARS <= 0:
         return ""  # compaction off — back to plain dropping, no model call
     transcript = _summary_transcript(dropped)
@@ -452,7 +465,8 @@ def _summarize_dropped(dropped: list, previous: str) -> str:
                                     transcript=transcript, limit=SUMMARY_CHARS)
     try:
         summary = complete_text(_SUMMARY_SYSTEM_PROMPT, prompt, think=False,
-                                timeout=CHAT_MODEL_TIMEOUT, logger=logger).strip()
+                                timeout=CHAT_MODEL_TIMEOUT, logger=logger,
+                                **({"backend": backend} if backend else {})).strip()
     except Exception as e:
         summary = ""
         logger.warning(f"compaction call failed ({e})")
@@ -594,9 +608,23 @@ def _warn_if_final_is_empty(stage: str, text: str, history: list, checkpoint: in
         )
 
 
+def _record_if_escalated(escalation: dict | None, outcome: str) -> None:
+    """Write the escalation log entry for a turn that went off-device, if this
+    was one. Best-effort: the turn already happened and its answer is on its
+    way to the user, so a store failure must not turn a good reply into a 500 —
+    it logs instead, because an audit trail that silently stops recording is
+    worse than one that says it broke."""
+    if not escalation:
+        return
+    try:
+        record_escalation(**escalation, outcome=outcome)
+    except Exception as e:
+        logger.warning("failed to record escalation (%s): %s", outcome, e)
+
+
 def _run_turn(sid: str, history: list, checkpoint: int, cancel: threading.Event,
               stage: str = "turn", backend: str | None = None,
-              compacted: bool = False):
+              compacted: bool = False, escalation: dict | None = None):
     """Advance the session's conversation and shape the HTTP response — the
     shared back half of /chat and /chat/confirm. On cancel or failure the
     history is rolled back to `checkpoint` so the next turn starts clean; for
@@ -611,7 +639,15 @@ def _run_turn(sid: str, history: list, checkpoint: int, cancel: threading.Event,
 
     `compacted` rides out on whatever this turn answers with, cancels and errors
     included: the history was already summarized away before advance() ran, so
-    the user is owed the notice regardless of how the turn itself ends."""
+    the user is owed the notice regardless of how the turn itself ends.
+
+    `escalation` is the half-filled record for a turn that went off-device
+    because the local model was busy. It is written HERE rather than in the
+    route so it carries the turn's real outcome — a record logged before
+    advance() would claim every escalation succeeded, including the ones that
+    failed to reach the provider at all. The audit trail is the reason the
+    store exists, so it is written on every path out of the turn, cancel and
+    error included."""
     # Chat sends only the always-loaded core plus this session's activated
     # groups, not the whole registry — keeps the small model's context lean. The
     # tools list is mutable so a mid-turn load_tools call can extend it (see
@@ -636,13 +672,17 @@ def _run_turn(sid: str, history: list, checkpoint: int, cancel: threading.Event,
     except TurnCancelled:
         del history[checkpoint:]  # discard the stopped turn so the next one starts clean
         logger.info(f"chat {stage} cancelled by user")
+        _record_if_escalated(escalation, "cancelled")
         return jsonify({**note, "type": "cancelled"})
     except Exception as e:
         del history[checkpoint:]  # roll back the failed turn so the next one starts clean
         logger.exception(f"chat {stage} failed: {e}")
+        _record_if_escalated(escalation, f"error:{e}")
         return jsonify({**note, "error": str(e)}), 500
     finally:
         cancel_events.pop(sid, None)
+
+    _record_if_escalated(escalation, "ok")
 
     if result["type"] == "confirm":
         pending_confirmations[sid] = result["call"]
@@ -699,16 +739,40 @@ def chat():
     if not _authenticated():
         return jsonify({"error": "not authenticated"}), 401
 
-    user_message = (request.get_json() or {}).get("message", "").strip()
+    payload = request.get_json() or {}
+    user_message = payload.get("message", "").strip()
     if not user_message:
         return jsonify({"error": "empty message"}), 400
     if len(user_message) > MAX_MESSAGE_CHARS:
         return jsonify({"error": "message too long"}), 400
+    # Both set by the two buttons on a "Wren is busy" answer: the client re-sends
+    # the same message, saying which way the user chose to go.
+    frontier = payload.get("backend") == "frontier"
+    force_local = bool(payload.get("force_local"))
+    if frontier and not escalation_available():
+        return jsonify({"error": "no frontier backend is configured"}), 400
 
     sid = _session_id()
     cancel = _begin_turn(sid)
     if cancel is None:
         return jsonify({"error": "a turn is already running for this session"}), 409
+
+    # Ask the local model whether its one slot is free before this turn is
+    # committed to it, and offer the frontier model instead when it isn't. This
+    # sits first because everything below can call the model too — the history
+    # trim summarizes through it — so a probe placed any later would already be
+    # queued behind the job it exists to detect.
+    #
+    # Nothing has been touched yet at this point: no history, no user message.
+    # A "busy" answer therefore leaves the session exactly as it found it, and
+    # the turn slot taken above is handed straight back.
+    if BUSY_PROBE_ENABLED and not frontier and not force_local and escalation_available():
+        free, reason = probe_local_model(logger=logger)
+        if not free:
+            cancel_events.pop(sid, None)  # release the slot; no turn ever ran
+            logger.info("chat turn offered the frontier model: %s", reason)
+            return jsonify({"type": "busy", "reason": reason,
+                            "escalate_to": active_model_label(escalation_backend())})
 
     _evict_idle_sessions()
     _session_last_active[sid] = time.time()
@@ -721,6 +785,10 @@ def chat():
     if pending is not None:
         pending_backends.pop(sid, None)
         resolve(history, pending, False, DISPATCH, logger=logger)
+
+    # Set only for a turn the user redirected off-device; None keeps advance()
+    # and the compaction call on their own local default.
+    turn_backend = escalation_backend() if frontier else None
 
     # (Re)build the system message every turn, not just on session start, so a
     # fact pinned or a skill saved mid-session takes effect on the very next
@@ -745,7 +813,8 @@ def chat():
             f"compacting {len(dropped)} oldest history messages to fit the context "
             f"budget ({MAX_HISTORY_CHARS} chars)"
         )
-        summaries[sid] = _summarize_dropped(dropped, summaries.get(sid, ""))
+        summaries[sid] = _summarize_dropped(dropped, summaries.get(sid, ""),
+                                            backend=turn_backend)
         history[0] = {"role": "system",
                       "content": _with_summary(base_system, summaries[sid])}
 
@@ -757,7 +826,21 @@ def chat():
 
     checkpoint = len(history)
     history.append({"role": "user", "content": user_message})
-    return _run_turn(sid, history, checkpoint, cancel, compacted=bool(dropped))
+    escalation = None
+    if turn_backend:
+        # local_reply is empty on purpose and not a missing value: the whole
+        # point of this path is that the local model never answered, so there is
+        # no rejected reply to pair the request with the way a manual redo has.
+        escalation = {
+            "request": user_message,
+            "local_reply": "",
+            "prompt_tokens": sum(_message_chars(m) for m in history) // _CHARS_PER_TOKEN,
+            "backend": turn_backend,
+            "model": active_model_label(turn_backend),
+            "trigger": "busy",
+        }
+    return _run_turn(sid, history, checkpoint, cancel, backend=turn_backend,
+                     compacted=bool(dropped), escalation=escalation)
 
 
 @app.route("/chat/confirm", methods=["POST"])

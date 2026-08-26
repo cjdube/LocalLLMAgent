@@ -45,6 +45,26 @@ def compaction_model(monkeypatch):
     return calls
 
 
+@pytest.fixture(autouse=True)
+def busy_probe(monkeypatch):
+    """Report the local model's slot as free for the whole file.
+
+    Autouse for the same reason as compaction_model above: /chat now asks
+    Ollama whether its one request slot is free before committing a turn to it,
+    which would be a real network call from every unrelated test here. The
+    busy-path tests below override the return value.
+
+    Returns the list of calls so a test can assert the probe was NOT made."""
+    calls = []
+
+    def fake_probe(**kwargs):
+        calls.append(kwargs)
+        return True, ""
+
+    monkeypatch.setattr(srv, "probe_local_model", fake_probe)
+    return calls
+
+
 @pytest.fixture
 def client():
     srv.app.config["TESTING"] = True
@@ -1553,3 +1573,181 @@ def test_local_final_omits_escalation_when_not_configured(auth_client, monkeypat
                         lambda *a, **k: {"type": "final", "text": "local answer"})
     resp = auth_client.post("/chat", json={"message": "hi"})
     assert "escalate_to" not in resp.get_json()
+
+
+# --------------------------------------------------------------------------- #
+# The busy offer — /chat asks whether the local slot is free BEFORE committing
+# the turn, and offers the frontier model when it isn't.
+# --------------------------------------------------------------------------- #
+
+def _probe_says_busy(monkeypatch, reason="Wren is busy: gemma4 holds the slot."):
+    monkeypatch.setattr(srv, "probe_local_model", lambda **k: (False, reason))
+
+
+def _refuse_advance(monkeypatch):
+    """advance() must never run on the busy path — that is the whole promise."""
+    def boom(*a, **k):
+        raise AssertionError("advance() ran on a turn that was never committed")
+    monkeypatch.setattr(srv, "advance", boom)
+    return boom
+
+
+def test_busy_offers_the_frontier_model_instead_of_waiting(
+        auth_client, monkeypatch, frontier_configured):
+    _probe_says_busy(monkeypatch)
+    _refuse_advance(monkeypatch)
+
+    resp = auth_client.post("/chat", json={"message": "what's on today?"})
+
+    body = resp.get_json()
+    assert resp.status_code == 200
+    assert body["type"] == "busy"
+    assert "busy" in body["reason"]
+    assert "gemini" in body["escalate_to"]
+
+
+def test_busy_leaves_the_session_exactly_as_it_found_it(
+        auth_client, monkeypatch, frontier_configured):
+    """Three halves to one promise, so all three are asserted: no turn ran, the
+    history is untouched, and the turn slot is handed back. A busy answer that
+    banked the user's message would replay it on the next turn; one that kept
+    the slot would 409 the very button it just offered."""
+    _probe_says_busy(monkeypatch)
+    _refuse_advance(monkeypatch)
+    srv.conversations[SID] = [{"role": "system", "content": "s"}]
+
+    auth_client.post("/chat", json={"message": "what's on today?"})
+
+    assert srv.conversations[SID] == [{"role": "system", "content": "s"}]
+    assert SID not in srv.cancel_events
+
+
+def test_busy_leaves_the_next_turn_free_to_run(
+        auth_client, monkeypatch, frontier_configured):
+    """The slot release above, proved from the outside: the follow-up request
+    the offer exists to make must not come back 409."""
+    _probe_says_busy(monkeypatch)
+    auth_client.post("/chat", json={"message": "what's on today?"})
+
+    monkeypatch.setattr(srv, "probe_local_model", lambda **k: (True, ""))
+    monkeypatch.setattr(srv, "advance",
+                        lambda *a, **k: {"type": "final", "text": "local answer"})
+    resp = auth_client.post("/chat", json={"message": "what's on today?"})
+
+    assert resp.status_code == 200
+    assert resp.get_json()["type"] == "final"
+
+
+def test_no_probe_when_there_is_nowhere_to_escalate(auth_client, monkeypatch, busy_probe):
+    """A local-only install must not pay the probe's round trip every turn:
+    with no frontier backend configured there is no offer to make."""
+    monkeypatch.setattr(srv, "advance",
+                        lambda *a, **k: {"type": "final", "text": "local answer"})
+    resp = auth_client.post("/chat", json={"message": "hi"})
+
+    assert resp.get_json()["type"] == "final"
+    assert busy_probe == []
+
+
+def test_probe_skipped_when_switched_off(auth_client, monkeypatch, busy_probe,
+                                         frontier_configured):
+    """WREN_CHAT_BUSY_PROBE=0 is the escape hatch if the probe ever misbehaves.
+    Read at import like every other setting here, so it is patched as one."""
+    monkeypatch.setattr(srv, "BUSY_PROBE_ENABLED", False)
+    monkeypatch.setattr(srv, "advance",
+                        lambda *a, **k: {"type": "final", "text": "local answer"})
+    resp = auth_client.post("/chat", json={"message": "hi"})
+
+    assert resp.get_json()["type"] == "final"
+    assert busy_probe == []
+
+
+def test_wait_for_wren_skips_the_probe_and_runs_locally(
+        auth_client, monkeypatch, frontier_configured):
+    """The second button. Waiting is the old behaviour, and re-probing would
+    just offer the same choice again in a loop."""
+    _probe_says_busy(monkeypatch)
+    seen = {}
+
+    def fake_advance(messages, tools, dispatch, backend=None, **k):
+        seen["backend"] = backend
+        return {"type": "final", "text": "local answer"}
+
+    monkeypatch.setattr(srv, "advance", fake_advance)
+    resp = auth_client.post("/chat", json={"message": "hi", "force_local": True})
+
+    assert resp.get_json()["type"] == "final"
+    assert seen["backend"] is None  # stayed on the local model
+
+
+def test_ask_the_frontier_model_runs_there_and_badges_it(
+        auth_client, monkeypatch, frontier_configured):
+    fake = _frontier_advance()
+    monkeypatch.setattr(srv, "advance", fake)
+
+    resp = auth_client.post("/chat", json={"message": "hi", "backend": "frontier"})
+
+    body = resp.get_json()
+    assert fake.backend == "gemini"
+    assert body["escalated"] is True
+    assert "gemini" in body["model_label"]
+
+
+def test_frontier_turn_from_busy_is_logged_as_such(
+        auth_client, monkeypatch, frontier_configured):
+    """The audit trail. `trigger` separates this from a manual redo, because a
+    router argued for by availability is a different feature from one argued
+    for by answer quality."""
+    monkeypatch.setattr(srv, "advance", _frontier_advance())
+
+    auth_client.post("/chat", json={"message": "what's on today?",
+                                    "backend": "frontier"})
+
+    row = _escalation_rows()[-1]
+    assert row["trigger"] == "busy"
+    assert row["request"] == "what's on today?"
+    assert row["local_reply"] == ""  # the local model never answered
+    assert row["outcome"] == "ok"
+    assert row["backend"] == "gemini"
+
+
+def test_a_failed_frontier_turn_is_logged_as_failed(
+        auth_client, monkeypatch, frontier_configured):
+    """A record written before the call would claim every escalation succeeded.
+    The off-device attempt happened either way, so it is logged either way."""
+    def boom(*a, **k):
+        raise RuntimeError("provider unreachable")
+
+    monkeypatch.setattr(srv, "advance", boom)
+    resp = auth_client.post("/chat", json={"message": "hi", "backend": "frontier"})
+
+    assert resp.status_code == 500
+    row = _escalation_rows()[-1]
+    assert row["trigger"] == "busy"
+    assert row["outcome"].startswith("error:")
+
+
+def test_frontier_turn_refused_when_no_backend_is_configured(auth_client, monkeypatch):
+    _refuse_advance(monkeypatch)
+    resp = auth_client.post("/chat", json={"message": "hi", "backend": "frontier"})
+
+    assert resp.status_code == 400
+    assert "no frontier backend" in resp.get_json()["error"]
+    assert SID not in srv.cancel_events
+
+
+def test_frontier_turn_compacts_off_device_too(
+        auth_client, monkeypatch, frontier_configured, compaction_model):
+    """A turn routed around a busy local model must not queue on that same
+    model to summarize its own history — that would hang the escape hatch on
+    the thing it is escaping."""
+    monkeypatch.setattr(srv, "advance", _frontier_advance())
+    monkeypatch.setattr(srv, "MAX_HISTORY_CHARS", 200)
+    srv.conversations[SID] = [{"role": "system", "content": "s"}] + [
+        {"role": "user", "content": "x" * 100} for _ in range(6)
+    ]
+
+    auth_client.post("/chat", json={"message": "hi", "backend": "frontier"})
+
+    assert compaction_model, "the history should have been compacted"
+    assert compaction_model[-1]["backend"] == "gemini"

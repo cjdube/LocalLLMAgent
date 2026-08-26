@@ -12,7 +12,8 @@
 // emits structure and class names and never touches presentation.
 //
 // Class names to style: .msg.user / .msg.wren / .msg.system, .msg.typing with
-// .typing-dot children, and .confirm with .detail / .actions / .yes / .no.
+// .typing-dot children, .confirm with .detail / .actions / .yes / .no, and
+// .offer (a row of .escalate buttons, used for the busy offer).
 // Note .typing-dot, not .dot — a host page may already use .dot for something
 // else (the dashboard's run-history status dots), and that collision is what
 // forced the copies apart before.
@@ -91,11 +92,13 @@
     scrollToEnd();
   }
 
-  // The escalate button ("Redo with the frontier model") lives on the most
-  // recent local reply only — a new turn or an escalation clears any previous
-  // one, so exactly one is ever present.
-  function clearEscalateButtons() {
-    messagesEl.querySelectorAll(".escalate").forEach((b) => b.remove());
+  // An offer to use the frontier model — the "Redo with" button on the most
+  // recent local reply, or the pair on a busy notice — lives on the newest
+  // message only. A new turn or an escalation clears any previous one, so
+  // exactly one is ever present. The .offer wrapper goes too, or a busy notice
+  // leaves an empty row behind it.
+  function clearOffers() {
+    messagesEl.querySelectorAll(".escalate, .offer").forEach((b) => b.remove());
   }
 
   // Set while an escalation is in flight so a failure (or a cancel) can re-enable
@@ -137,6 +140,42 @@
     }
   }
 
+  // The local model's one request slot was taken, so this turn was never
+  // started — see probe_local_model. Nothing was sent and nothing needs
+  // cancelling: whichever button is tapped just re-sends the same message,
+  // saying which way to go.
+  //
+  // Two buttons because the choice is real. The frontier model sends this
+  // conversation off the Mac mini, and some questions are not for that; waiting
+  // is what would have happened anyway, and it stays one tap away.
+  function renderBusy(result, message) {
+    addMessage("system", result.reason);
+    const offer = document.createElement("div");
+    offer.className = "offer";
+    const ask = document.createElement("button");
+    ask.className = "escalate";
+    ask.textContent = "Ask " + (result.escalate_to || "the frontier model");
+    const wait = document.createElement("button");
+    wait.className = "escalate";
+    wait.textContent = "Wait for Wren";
+    offer.appendChild(ask);
+    offer.appendChild(wait);
+
+    // Spend the offer on the first tap. The session allows one turn at a time,
+    // so a second tap on the other button would only earn a 409.
+    const resend = (extra) => {
+      if (busy) return;
+      offer.remove();
+      setBusy(true);
+      postTurn("/chat", Object.assign({ message: message }, extra), addTyping());
+    };
+    ask.onclick = () => resend({ backend: "frontier" });
+    wait.onclick = () => resend({ force_local: true });
+
+    messagesEl.appendChild(offer);
+    scrollToEnd();
+  }
+
   // While a turn is running the Send button becomes a Stop button (it stays
   // enabled so it can cancel); the input is disabled until the turn ends.
   let busy = false;
@@ -159,16 +198,19 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      return handleResult(await resp.json(), typingEl);
+      return handleResult(await resp.json(), typingEl, body);
     } catch (err) {
       handleResult(
         { error: `couldn't reach Wren (${err.message}). Your message wasn't sent — try again.` },
         typingEl,
+        body,
       );
     }
   }
 
-  function handleResult(result, typingEl) {
+  // `body` is what was posted; a busy answer re-sends its .message, so the
+  // text survives without a second copy of it living outside the turn.
+  function handleResult(result, typingEl, body) {
     if (typingEl) typingEl.remove();
     // The server summarized this session's oldest turns away before answering.
     // Said here rather than in any one branch: it happened before the turn ran,
@@ -187,6 +229,9 @@
     if (result.type === "final") {
       pendingEscalateBtn = null;  // a successful escalation leaves its button spent
       renderFinal(result);
+      setBusy(false);
+    } else if (result.type === "busy") {
+      renderBusy(result, (body || {}).message || "");
       setBusy(false);
     } else if (result.type === "cancelled") {
       if (pendingEscalateBtn) { pendingEscalateBtn.disabled = false; pendingEscalateBtn = null; }
@@ -213,7 +258,7 @@
     }
     const message = input.value.trim();
     if (!message) return;
-    clearEscalateButtons();  // a new turn supersedes the last reply's redo offer
+    clearOffers();  // a new turn supersedes the last reply's redo offer
     addMessage("user", message);
     input.value = "";
     setBusy(true);
