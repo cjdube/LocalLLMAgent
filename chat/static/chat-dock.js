@@ -9,7 +9,11 @@
 //
 // The contract is the markup, not a config object: a page supplies #messages,
 // #composer, #input, #send, and #newChat, and owns all the CSS — this file
-// emits structure and class names and never touches presentation.
+// emits structure and class names and never touches presentation. The one
+// exception is #input's height: it is a <textarea> that grows with what is
+// typed, and only script can measure the content, so this file writes
+// style.height on it. The page still owns the cap (max-height) and the
+// overflow behaviour past it.
 //
 // Class names to style: .msg.user / .msg.wren / .msg.system, .msg.typing with
 // .typing-dot children, .confirm with .detail / .actions / .yes / .no, and
@@ -31,6 +35,36 @@
   function scrollToEnd() {
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
+
+  // Grow the composer to fit the message so a long one stays readable while
+  // it is written. Reset to "auto" first — scrollHeight never shrinks below
+  // the height already set, so without it the box only ever gets taller.
+  //
+  // scrollHeight leaves out the border, and the page styles #input as
+  // border-box, so handing it back as the height loses those pixels and
+  // leaves the box permanently one scrollbar short of its own text.
+  // offsetHeight - clientHeight is that border, measured at "auto".
+  function autoGrow() {
+    input.style.height = "auto";
+    const border = input.offsetHeight - input.clientHeight;
+    input.style.height = input.scrollHeight + border + "px";
+  }
+
+  function resetInput() {
+    input.value = "";
+    input.style.height = "auto";
+  }
+
+  input.addEventListener("input", autoGrow);
+
+  // A textarea takes Enter as a newline, so the send key has to be rebound:
+  // Enter sends, Shift+Enter (and Ctrl/Cmd+Enter) starts a new line.
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      form.requestSubmit ? form.requestSubmit() : sendBtn.click();
+    }
+  });
 
   function addMessage(role, text) {
     const div = document.createElement("div");
@@ -260,7 +294,7 @@
     if (!message) return;
     clearOffers();  // a new turn supersedes the last reply's redo offer
     addMessage("user", message);
-    input.value = "";
+    resetInput();
     setBusy(true);
     postTurn("/chat", { message }, addTyping());
   });
@@ -273,6 +307,7 @@
     // landing, or a slow/failed request reintroduces the same stuck dock.
     fetch("/chat/new", { method: "POST" }).catch(() => {});
     setBusy(false);
+    resetInput();
     messagesEl.replaceChildren();
     addMessage("wren", GREETING);
   });

@@ -115,20 +115,37 @@
   .confirm .yes { background: #16a34a; color: white; }
   .confirm .no { background: #e5e7eb; color: #1f2328; }
   form#composer {
+    /* The height of #input holding a single line: line-height, plus its
+       padding, plus its border. The row is bottom-aligned rather than
+       stretched — a stretched Send button would grow into a tall bar as the
+       message does — so the button needs this height to keep matching the
+       one-line box instead of collapsing to the height of its label. */
+    --composer-row: calc(16px * 1.4 + 24px + 2px);
     display: flex;
+    align-items: flex-end;
     gap: 8px;
     padding: 12px;
     background: #ffffff;
     border-top: 1px solid #e5e7eb;
   }
+  /* A textarea, not an input, so a long message wraps into view instead of
+     scrolling sideways. chat-dock.js sets the height from the content on
+     every keystroke; max-height is what stops it from eating the page. */
   #input {
     flex: 1;
     padding: 12px 14px;
     border-radius: 20px;
     border: 1px solid #d0d5dd;
     font-size: 16px;
+    font-family: inherit;
+    line-height: 1.4;
+    resize: none;
+    overflow-y: auto;
+    min-height: var(--composer-row);
+    max-height: 40vh;
   }
   #send {
+    height: var(--composer-row);
     padding: 0 18px;
     border-radius: 20px;
     border: none;
@@ -151,7 +168,7 @@
   </header>
   <div id="messages"></div>
   <form id="composer">
-    <input id="input" autocomplete="off" placeholder="Ask Wren anything..." autofocus>
+    <textarea id="input" rows="1" autocomplete="off" placeholder="Ask Wren anything..." autofocus></textarea>
     <button id="send" type="submit">Send</button>
   </form>
 

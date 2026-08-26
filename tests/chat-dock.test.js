@@ -24,7 +24,7 @@ const DOCK_SRC = fs.readFileSync(
 const MARKUP = `
   <div id="messages"></div>
   <form id="composer">
-    <input id="input">
+    <textarea id="input" rows="1"></textarea>
     <button id="send" type="submit">Send</button>
   </form>
   <button id="newChat">New chat</button>
@@ -70,6 +70,80 @@ describe("boot", () => {
     const wren = messages().querySelectorAll(".msg.wren");
     expect(wren).toHaveLength(1);
     expect(wren[0].textContent).toContain("Hi —");
+  });
+});
+
+describe("the growing composer", () => {
+  // The composer is a <textarea> so a long message wraps into view instead of
+  // scrolling out of sight sideways. That costs the free Enter-to-send an
+  // <input> gave us, and needs the height driven from the content, since CSS
+  // cannot measure it. jsdom has no layout, so scrollHeight is stubbed: what
+  // is asserted is that the dock reads it and writes it back as the height.
+  // content is what the text needs; border is what box-sizing: border-box
+  // leaves out of scrollHeight, and what the dock has to add back.
+  function stubMetrics({ content, border = 0 }) {
+    const el = input();
+    const define = (prop, value) => Object.defineProperty(el, prop, {
+      configurable: true, get: () => value,
+    });
+    define("scrollHeight", content);
+    define("clientHeight", content);
+    define("offsetHeight", content + border);
+  }
+
+  function press(key, opts = {}) {
+    input().dispatchEvent(new KeyboardEvent("keydown",
+      { key, bubbles: true, cancelable: true, ...opts }));
+  }
+
+  test("grows to fit the content as it is typed", () => {
+    stubMetrics({ content: 72 });
+    input().value = "a long message that wraps";
+    input().dispatchEvent(new Event("input", { bubbles: true }));
+    expect(input().style.height).toBe("72px");
+  });
+
+  test("adds the border the content measurement leaves out", () => {
+    // Without this the box is two pixels short of its own last line, and
+    // shows a scrollbar it should never have needed.
+    stubMetrics({ content: 72, border: 2 });
+    input().value = "a long message that wraps";
+    input().dispatchEvent(new Event("input", { bubbles: true }));
+    expect(input().style.height).toBe("74px");
+  });
+
+  test("Enter sends the message", () => {
+    resolvesWith({ type: "final", text: "ok" });
+    input().value = "hello";
+    press("Enter");
+    expect(global.fetch).toHaveBeenCalledWith("/chat", expect.objectContaining({
+      body: JSON.stringify({ message: "hello" }),
+    }));
+  });
+
+  test("Shift+Enter does not send — it is a new line", () => {
+    input().value = "line one";
+    press("Enter", { shiftKey: true });
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(input().value).toBe("line one");  // left for the browser to extend
+  });
+
+  test("shrinks back to one line after the message is sent", () => {
+    resolvesWith({ type: "final", text: "ok" });
+    stubMetrics({ content: 72 });
+    input().value = "a long message that wraps";
+    input().dispatchEvent(new Event("input", { bubbles: true }));
+    submit();
+    expect(input().style.height).toBe("auto");
+  });
+
+  test("shrinks back to one line on a new chat", () => {
+    stubMetrics({ content: 72 });
+    input().value = "a long message that wraps";
+    input().dispatchEvent(new Event("input", { bubbles: true }));
+    document.getElementById("newChat").click();
+    expect(input().value).toBe("");
+    expect(input().style.height).toBe("auto");
   });
 });
 
