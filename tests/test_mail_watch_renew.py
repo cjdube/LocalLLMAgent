@@ -129,3 +129,41 @@ def test_the_watch_is_not_recorded_when_the_call_failed(gmail, alerts):
     mail_watch_renew.main()
 
     assert mail_state.load_state()["watch_expiration"] is None
+
+
+def test_the_dashboard_sees_a_successful_run(gmail, alerts):
+    """The renewal ran daily and the dashboard still read "has not run".
+
+    /map and /schedules do not look at the plist or at exit codes — they group
+    the task's own log lines into runs, and a run only exists between a
+    "Starting ... run" line and a "... run complete" one. This task logged
+    neither, so parse_runs returned no runs at all and a healthy task was
+    indistinguishable from a dead one. Assert both halves: that a run is found,
+    and that it is marked a success.
+    """
+    from tasks import _common
+    from chat.insights import parse_runs
+
+    assert mail_watch_renew.main() == 0
+
+    runs = parse_runs(_common.LOGS_DIR / "mail_watch_renew.log")
+
+    assert len(runs) == 1
+    assert runs[0]["status"] == "success"
+
+
+def test_a_failed_run_is_visible_as_a_failure_not_as_silence(gmail, alerts):
+    """The other half of the same guarantee: a run that fails must still be a
+    run on the dashboard. Without the start line a failure parses as nothing at
+    all, which is the same shape as a task that never fired."""
+    from tasks import _common
+    from chat.insights import parse_runs
+
+    gmail["watch"] = {"error": "403 the topic is not accessible"}
+
+    assert mail_watch_renew.main() == 1
+
+    runs = parse_runs(_common.LOGS_DIR / "mail_watch_renew.log")
+
+    assert len(runs) == 1
+    assert runs[0]["status"] == "failure"

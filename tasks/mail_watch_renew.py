@@ -46,6 +46,11 @@ def topic_name() -> str:
 
 def main() -> int:
     logger = setup_logger("mail_watch_renew")
+    # The dashboard groups log lines into runs by these two boundary messages
+    # (chat/insights.py:_is_run_start / _is_run_success). Without them a run
+    # that succeeded is indistinguishable from one that never fired, and the
+    # task read as "has not run" for as long as it has existed.
+    logger.info("Starting Gmail watch renewal run")
 
     try:
         if not os.getenv("MAIL_PUBSUB_PROJECT"):
@@ -85,6 +90,7 @@ def main() -> int:
                 "notifications are about to stop silently",
                 logger,
             )
+        logger.info("Gmail watch renewal run complete")
         return 0
     except Exception as e:
         logger.exception(f"Gmail watch renewal failed: {e}")
