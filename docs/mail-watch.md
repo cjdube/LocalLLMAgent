@@ -484,6 +484,7 @@ is lost, which is the lesser failure and is at least audible in the log.
 | `no Gmail label named "Wren/Watch"` | The label does not exist, or is spelled differently. Create it in desktop Gmail; it is matched case-insensitively but the words must match. |
 | First run pushed nothing and warned "no stored history id" | Expected on a cold start. Walking history from nothing would report the whole mailbox as new. Run `tasks.mail_watch_renew` so the watch and the watermark are registered together. |
 | The alert text is just the Gmail snippet | The model returned an empty summary — logged as a WARNING with the body length. Usually the thinking budget; see [docs/model-constraints.md](model-constraints.md). |
+| `history.list failed: [Errno 32] Broken pipe` | Google closed the daemon's idle connection. `list_history` is the first Gmail call after every quiet gap, so it is the one that finds the dead socket — it now reconnects and retries once, logging a WARNING when it does. Two in a row (it happened on 2026-08-25, five minutes apart) was httplib2 handing the *same* dead connection back; see `google_auth.reset_service`. A second failure after a reconnect is a real outage. |
 | Alerts stopped after a `brew python` upgrade | Same as every other launchd job here — re-bootstrap the agent with `./launchd/install.sh launchd/local.wren.mailwatcher.plist`, which boots it out first. |
 
 ## Replying on a thread

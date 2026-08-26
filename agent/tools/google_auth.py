@@ -159,6 +159,22 @@ def build_service(api: str, version: str):
         return service
 
 
+def reset_service(api: str, version: str):
+    """Drop the cached client for (api, version) and build a fresh one.
+
+    For a **long-lived process only**. The cached service owns an httplib2
+    connection pool, and Google closes an idle connection without telling us.
+    httplib2 does not recover from that: on EPIPE it re-raises without calling
+    conn.close(), so the dead socket stays in the pool and every later call
+    fails the same way — which is how tasks/mail_watcher.py logged two "Broken
+    pipe" failures five minutes apart. A new client means a new pool, which is
+    the only thing that actually reconnects. See gmail_read.list_history.
+    """
+    with _LOCK:
+        _SERVICES.pop((api, version), None)
+    return build_service(api, version)
+
+
 if __name__ == "__main__":
     get_credentials()
     print("Google OAuth token cached successfully.")

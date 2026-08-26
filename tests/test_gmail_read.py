@@ -66,6 +66,11 @@ class _FakeGmail:
         self.profile_history_id = profile_history_id
         self.watch_calls = []
         self.search_results = []
+        # Exceptions for history().list() to raise, one per call, before it
+        # starts returning pages. Lets a test reproduce the dead-connection
+        # failure the mail_watcher daemon hits after an idle gap.
+        self.history_errors = []
+        self.history_calls = 0
 
     # The client is service.users().messages().get(...).execute()
     def users(self):
@@ -143,6 +148,9 @@ class _FakeHistory:
 
     def list(self, userId=None, startHistoryId=None, historyTypes=None,
              labelId=None, pageToken=None):
+        self.gmail.history_calls += 1
+        if self.gmail.history_errors:
+            return _Exec(self.gmail.history_errors.pop(0))
         self.gmail.last_history_call = {
             "startHistoryId": startHistoryId,
             "historyTypes": historyTypes,
@@ -858,3 +866,63 @@ def test_the_newest_message_is_never_a_half_typed_draft(gmail):
     result = gmail_read.list_history("100", ["Label_9"])
 
     assert result["threads"]["t1"]["newest"] == "tm0"
+
+
+# --------------------------------------------------------------------------- #
+# The dead-connection retry (mail_watcher only)
+# --------------------------------------------------------------------------- #
+
+def test_a_broken_pipe_reconnects_and_the_retry_succeeds(gmail, monkeypatch):
+    """"[Errno 32] Broken pipe", three times in two days on the mail_watcher
+    daemon. Google closes an idle connection, and the cached Gmail client is
+    still holding it — so the first call after every quiet gap dies.
+
+    Assert the whole guarantee, not just "it didn't raise": a new client was
+    asked for, the call was retried, the real history came back, and the
+    recovery was logged rather than swallowed.
+    """
+    gmail.history_errors = [BrokenPipeError(32, "Broken pipe")]
+    gmail.history_pages = [{
+        "history": [{"messagesAdded": [{"message": {"id": "m1", "threadId": "t1"}}]}],
+        "historyId": "500",
+    }]
+    reconnects = []
+    monkeypatch.setattr(gmail_read, "_reconnect",
+                        lambda: (reconnects.append(1), gmail)[1])
+    logger = _Recorder()
+
+    result = gmail_read.list_history("100", logger=logger)
+
+    assert reconnects == [1]
+    assert gmail.history_calls == 2
+    assert result["message_ids"] == ["m1"]
+    assert len(logger.warnings) == 1
+    assert "Broken pipe" in logger.warnings[0]
+
+
+def test_a_second_broken_pipe_is_an_error_not_another_retry(gmail, monkeypatch):
+    """One retry only. A fresh connection that also dies is a real outage, and
+    retrying forever would hang the watcher's callback instead of reporting it.
+    """
+    gmail.history_errors = [BrokenPipeError(32, "Broken pipe"),
+                            BrokenPipeError(32, "Broken pipe")]
+    monkeypatch.setattr(gmail_read, "_reconnect", lambda: gmail)
+
+    result = gmail_read.list_history("100")
+
+    assert "error" in result
+    assert "Broken pipe" in result["error"]
+    assert gmail.history_calls == 2
+
+
+def test_a_broken_pipe_does_not_move_the_watermark(gmail, monkeypatch):
+    """The caller acks a raise, so a failure that reported a history id would
+    lose that mail for good. A give-up returns an error and nothing else —
+    no history_id for mail_watcher to commit."""
+    gmail.history_errors = [BrokenPipeError(32, "Broken pipe"),
+                            BrokenPipeError(32, "Broken pipe")]
+    monkeypatch.setattr(gmail_read, "_reconnect", lambda: gmail)
+
+    result = gmail_read.list_history("100")
+
+    assert "history_id" not in result

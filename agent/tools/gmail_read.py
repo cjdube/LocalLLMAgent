@@ -35,7 +35,7 @@ from googleapiclient.errors import HttpError
 
 from agent import prefs
 from agent.dates import local_timezone
-from agent.tools.google_auth import build_service
+from agent.tools.google_auth import build_service, reset_service
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(_ROOT / "config" / ".env")
@@ -86,6 +86,11 @@ _KEEP_HEADERS = ("From", "To", "Cc", "Subject", "Date",
 
 def _service():
     return build_service("gmail", "v1")
+
+
+def _reconnect():
+    """A fresh Gmail client on a fresh connection. See list_history's retry."""
+    return reset_service("gmail", "v1")
 
 
 # The mailbox owner's own address, once resolved. Only a success is cached: a
@@ -535,11 +540,33 @@ def list_history(start_history_id: str, watch_label_id=None,
     service = _service()
     candidates, labelled_threads = [], set()
     latest, page_token = str(start_history_id), None
+    reconnected = False
     while True:
         try:
             page = service.users().history().list(
                 **params, **({"pageToken": page_token} if page_token else {})
             ).execute()
+        except ConnectionError as e:
+            # "[Errno 32] Broken pipe", three times in two days. Only
+            # tasks/mail_watcher.py sees this: it is a daemon, the Gmail client
+            # is cached for the life of the process, and Google closes an idle
+            # connection silently. This is the FIRST Gmail call after every
+            # quiet gap, which is why it is the only one that ever breaks.
+            #
+            # Retry once on a NEW connection, because httplib2 cannot recover
+            # on its own — it re-raises EPIPE without closing the socket, so
+            # the same dead connection is handed to the next call too (see
+            # google_auth.reset_service). Once only: a second failure is a real
+            # outage, not a stale socket, and must be reported as an error.
+            if reconnected:
+                return {"error": str(e)}
+            reconnected = True
+            if logger:
+                logger.warning(
+                    f"Gmail connection was dead ({e}) — reconnecting and "
+                    "retrying history.list once")
+            service = _reconnect()
+            continue
         except HttpError as e:
             if getattr(e, "resp", None) is not None and e.resp.status == 404:
                 fresh = current_history_id()
