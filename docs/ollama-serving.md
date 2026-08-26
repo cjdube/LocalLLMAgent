@@ -15,6 +15,15 @@ Ollama runs with **`OLLAMA_NUM_PARALLEL=1`** and `OLLAMA_MAX_QUEUE=512`: one
 request at a time, everything else queued **silently** — the socket is
 accepted and no bytes flow.
 
+Neither is configured anywhere: both are Ollama's own defaults. There is no
+`OLLAMA_NUM_PARALLEL` in `launchctl setenv`, the shell profile,
+`~/.ollama/config.json`, or the app's plist — don't go looking for the file
+that sets it. Read the live values out of the server's own startup line:
+
+```bash
+grep -o 'OLLAMA_NUM_PARALLEL:[0-9]*' ~/.ollama/logs/server.log | tail -1
+```
+
 That last detail is the whole problem. A queued request and a dead server look
 identical from the client: nothing on the wire either way. Wren streams, so her
 read timeout is a *between-chunks* timeout, which cannot tell them apart on its
