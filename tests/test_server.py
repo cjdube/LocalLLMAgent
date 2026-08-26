@@ -927,8 +927,10 @@ def test_api_system_map_shape(auth_client, tmp_path, monkeypatch):
     resp = auth_client.get("/api/system_map")
     assert resp.status_code == 200
     data = resp.get_json()
-    assert set(data) == {"identity", "services", "routines", "memory", "skills"}
-    assert data["identity"]["name"] == "Wren"
+    assert set(data) == {"agents", "services", "routines", "memory", "skills"}
+    # Both agents ship in every payload — /map draws one at a time from them.
+    assert data["agents"]["wren"]["name"] == "Wren"
+    assert data["agents"]["scribe"]["name"] == "Scribe"
     # Every registered chat tool lands in exactly one service group.
     grouped = [t["name"] for s in data["services"] for t in s["tools"]]
     registered = [t["function"]["name"] for t in srv.TOOLS]
@@ -938,7 +940,9 @@ def test_api_system_map_shape(auth_client, tmp_path, monkeypatch):
     assert [m["text"] for m in data["memory"]["entries"]] == ["Crows can recognize human faces"]
     assert data["skills"] == []
     for rt in data["routines"]:
-        assert set(rt) == {"key", "display_name", "human_schedule", "next_run", "last_run", "uses"}
+        assert set(rt) == {"key", "display_name", "human_schedule", "next_run",
+                           "last_run", "uses", "agent", "writes"}
+        assert rt["agent"] in {"wren", "scribe", "external"}
 
 
 # --------------------------------------------------------------------------- #

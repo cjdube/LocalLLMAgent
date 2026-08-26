@@ -325,11 +325,13 @@ def test_parse_runs_invalidates_when_log_changes(tmp_path):
 # discover_tasks caching (signature-keyed on the plist directory)
 # --------------------------------------------------------------------------- #
 
-def _write_plist(path, sci):
+def _write_plist(path, sci, label=None, stdout=None):
+    # label/stdout are optional because the task key comes from StandardOutPath
+    # and the owning agent comes from Label — tests about either pass their own.
     data = {
-        "Label": f"com.test.{path.stem}",
+        "Label": label or f"com.test.{path.stem}",
         "ProgramArguments": ["python", "-m", f"tasks.{path.stem}"],
-        "StandardOutPath": str(path.parent / f"{path.stem}.launchd.log"),
+        "StandardOutPath": stdout or str(path.parent / f"{path.stem}.launchd.log"),
         "StartCalendarInterval": sci,
     }
     with open(path, "wb") as fh:
@@ -691,14 +693,110 @@ def test_routine_uses_reference_defined_services():
             assert key in insights.TOOL_SERVICES, f"{task_key} uses unknown service {key!r}"
 
 
-def test_every_scheduled_routine_has_routine_uses():
+_REPO_LAUNCHD = Path(insights.__file__).resolve().parent.parent / "launchd"
+
+
+def _real_launchd(monkeypatch):
+    """Point task discovery back at this checkout's own launchd/ plists.
+
+    conftest.py has an autouse fixture that pins LAUNCHD_DIR at an empty tmp
+    dir, for determinism. The drift guards below are the one place that must
+    NOT have it: their whole job is to compare the hand-maintained tables in
+    insights.py against the plists actually installed here, and over an empty
+    dir they compare nothing and pass. That is how claude_time_blocks sat with
+    no ROUTINE_USES entry at all — drawing zero edges on /map — while this file
+    reported green. Read-only: discover_tasks() only parses plists.
+    """
+    monkeypatch.setattr(insights, "LAUNCHD_DIR", _REPO_LAUNCHD)
+    insights._TASKS_CACHE.clear()
+
+
+def _scheduled_tasks(monkeypatch):
+    _real_launchd(monkeypatch)
+    tasks = [t for t in insights.discover_tasks() if not t["is_daemon"]]
+    # The redirect is worthless if it finds nothing, which is exactly the
+    # failure mode these guards had. Assert it bit.
+    assert tasks, "no scheduled plists found — the LAUNCHD_DIR redirect failed"
+    return tasks
+
+
+def test_every_scheduled_routine_has_routine_uses(monkeypatch):
     # Drift guard for the hand-maintained ROUTINE_USES map: adding a scheduled
     # task (a non-daemon launchd plist) without declaring the services it touches
-    # here leaves it floating with no edges on the /map view. Reads the real
-    # launchd/ plists — no production runtime state is touched.
-    scheduled = {t["key"] for t in insights.discover_tasks() if not t["is_daemon"]}
+    # here leaves it floating with no edges on the /map view.
+    scheduled = {t["key"] for t in _scheduled_tasks(monkeypatch)}
     undeclared = scheduled - set(insights.ROUTINE_USES)
     assert not undeclared, f"routines missing from ROUTINE_USES: {sorted(undeclared)}"
+
+
+def test_every_scribe_routine_declares_what_it_writes(monkeypatch):
+    # Scribe's /map draws ROUTINE_WRITES where Wren's draws her memory band, so
+    # a journaling task added without an entry silently leaves a gap in the ring.
+    scribe = {t["key"] for t in _scheduled_tasks(monkeypatch)
+              if insights._agent_of(t) == "scribe"}
+    assert scribe, "no local.scribe.* plists found"
+    undeclared = scribe - set(insights.ROUTINE_WRITES)
+    assert not undeclared, f"Scribe routines missing from ROUTINE_WRITES: {sorted(undeclared)}"
+
+
+def test_routine_writes_has_no_entries_for_tasks_that_do_not_exist(monkeypatch):
+    keys = {t["key"] for t in _scheduled_tasks(monkeypatch)}
+    stale = set(insights.ROUTINE_WRITES) - keys
+    assert not stale, f"ROUTINE_WRITES names tasks that no longer exist: {sorted(stale)}"
+
+
+def test_agent_of_reads_the_launchd_label_not_the_module(monkeypatch):
+    # The label is what launchd actually runs, and it is what the /map toggle
+    # filters on. Both halves asserted: a scribe label AND a wren label.
+    scribe = {"label": "local.scribe.dailychromelearnings", "external": False}
+    wren = {"label": "local.wren.morningbrief", "external": False}
+    external = {"label": "local.wikiagent.learnings-ingest", "external": True}
+    assert insights._agent_of(scribe) == "scribe"
+    assert insights._agent_of(wren) == "wren"
+    # An external root belongs to neither agent even if its label says otherwise.
+    assert insights._agent_of(external) == "external"
+    assert insights._agent_of({"label": "local.scribe.x", "external": True}) == "external"
+
+
+def test_system_map_tags_routines_with_agent_and_output(tmp_path, monkeypatch):
+    _isolate_map_sources(tmp_path, monkeypatch)
+    _write_plist(tmp_path / "a.plist", {"Hour": 6, "Minute": 0},
+                 label="local.scribe.dailychromelearnings",
+                 stdout=str(tmp_path / "daily_chrome_learnings.log"))
+    _write_plist(tmp_path / "b.plist", {"Hour": 7, "Minute": 0},
+                 label="local.wren.morningbrief",
+                 stdout=str(tmp_path / "morning_brief.log"))
+    out = insights.system_map(SAMPLE_TOOLS, write_tools=[])
+    by_key = {rt["key"]: rt for rt in out["routines"]}
+    assert by_key["daily_chrome_learnings"]["agent"] == "scribe"
+    assert by_key["daily_chrome_learnings"]["writes"] == "daily browsing page"
+    assert by_key["morning_brief"]["agent"] == "wren"
+    # Wren's routines have no "writes" label — only Scribe's map draws that band.
+    assert by_key["morning_brief"]["writes"] is None
+
+
+def test_system_map_describes_both_agents(tmp_path, monkeypatch):
+    _isolate_map_sources(tmp_path, monkeypatch)
+    monkeypatch.setenv("SCRIBE_LLM_BACKEND", "gemini")
+    monkeypatch.setenv("WREN_LLM_BACKEND", "ollama")
+    out = insights.system_map(SAMPLE_TOOLS, write_tools=[])
+    assert out["agents"]["wren"]["name"] == "Wren"
+    assert out["agents"]["scribe"]["name"] == "Scribe"
+    # Each agent reports the model IT would use, from its own env chain.
+    assert "(ollama)" in out["agents"]["wren"]["model"]
+    assert "(gemini)" in out["agents"]["scribe"]["model"]
+
+
+def test_scribe_model_does_not_fall_back_to_wrens_backend(tmp_path, monkeypatch):
+    # SCRIBE_* has no WREN_* fallback on purpose (docs/scribe.md). With only
+    # WREN_LLM_BACKEND set, the map must still show Scribe on the local model —
+    # otherwise it would advertise a cloud backend Scribe never uses.
+    _isolate_map_sources(tmp_path, monkeypatch)
+    monkeypatch.delenv("SCRIBE_LLM_BACKEND", raising=False)
+    monkeypatch.setenv("WREN_LLM_BACKEND", "gemini")
+    out = insights.system_map(SAMPLE_TOOLS, write_tools=[])
+    assert "(gemini)" in out["agents"]["wren"]["model"]
+    assert "(ollama)" in out["agents"]["scribe"]["model"]
 
 
 def test_every_registered_chat_tool_is_mapped_to_a_service():

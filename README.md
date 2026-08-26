@@ -628,14 +628,30 @@ See [docs/wiki-lint.md](docs/wiki-lint.md).
 ### System map
 
 `http://127.0.0.1:8420/map` is an explorable radial visualization of the whole
-agent (same auth as the dashboard) — Wren at the center, then concentric rings
-working outward:
+agent (same auth as the dashboard) — one agent at the center, then concentric
+rings working outward.
+
+**One agent at a time.** A `Wren` / `Scribe` toggle at the top left redraws the
+whole map from the selected agent's point of view, rather than trying to show
+both at once; the choice lives in the URL (`/map?agent=scribe`) so a view can be
+linked to. Ownership comes from the launchd label (`local.wren.*` /
+`local.scribe.*`), so a task moving between agents needs no map edit. Wren's view
+also carries the routines federated in from other repos, drawn in purple.
+
+Scribe's rings come back mostly empty, which is the point: **0 chat tools, 0
+memories, 0 skills**, because it is a pipeline agent with no tool registry. Its
+applications draw as bare hexagons with no tool satellites, its memory band is
+replaced by a **writes** band naming what each routine leaves behind, and the
+skills ring reads `SKILLS — NONE` and explains itself when clicked.
+
+The rings, on either view:
 
 - **Skills** — one node per `skills/*.md` procedure, on a slowly rotating
   dotted ring; click for the full step-by-step body.
-- **Memory** — a dot field grouped and color-coded by memory category, plus a
-  dimmer band of learnings-wiki page names (empty if the vault dir is
-  missing); click a dot for the fact.
+- **Memory** (Wren) / **Writes** (Scribe) — for Wren, a dot field grouped and
+  color-coded by memory category, plus a dimmer band of learnings-wiki page
+  names (empty if the vault dir is missing); click a dot for the fact. For
+  Scribe, one node per routine naming what it produces.
 - **Routines** — the scheduled tasks, each with its schedule and a last-run
   status dot; hovering one lights up gold edges to the applications it talks to.
 - **Applications** — hexagons for the external services the chat tools are
@@ -646,11 +662,15 @@ Clicking any node fills the detail panel, with links into `/dashboard` and
 `/memories`. Backed by `GET /api/system_map`, aggregated in
 `chat/insights.py:system_map()`.
 
-**Maintenance note:** two hand-maintained maps in `chat/insights.py` need a
-one-line update when the agent grows — `TOOL_SERVICES` (tool → service grouping)
-and `ROUTINE_USES` (routine → services edges). A drift-guard test fails if a
-registered tool is unmapped; an unmapped one would otherwise just land under
-"Other".
+**Maintenance note:** three hand-maintained maps in `chat/insights.py` need a
+one-line update when the agent grows — `TOOL_SERVICES` (tool → service grouping),
+`ROUTINE_USES` (routine → services edges) and `ROUTINE_WRITES` (what each of
+Scribe's routines produces). Drift-guard tests fail if a registered tool is
+unmapped, if a scheduled routine has no `ROUTINE_USES` entry, or if a Scribe
+routine has no `ROUTINE_WRITES` entry. Those guards read this checkout's real
+`launchd/` plists, so they must opt out of the autouse `LAUNCHD_DIR` redirect in
+`tests/conftest.py` — see `_real_launchd` in `tests/test_insights.py`. Without
+that opt-out they compare an empty set and pass over anything.
 
 ## Scheduling — launchd
 

@@ -636,6 +636,8 @@ ROUTINE_USES = {
     "morning_brief": ["google_calendar", "gmail", "github", "google_tasks", "weather", "ntfy"],
     "strava_download": ["google_calendar", "strava", "ntfy"],
     "calendar_colorizer": ["google_calendar", "gmail", "ntfy"],
+    # calendar = the time blocks it writes; ntfy = notify_failure.
+    "claude_time_blocks": ["google_calendar", "ntfy"],
     "daily_chrome_learnings": ["chrome", "gmail", "ntfy"],
     "daily_youtube_learnings": ["youtube", "gmail", "ntfy"],
     # Cross-source: yesterday's browsing + Likes matched against the wiki and the
@@ -667,6 +669,32 @@ ROUTINE_USES = {
     "wiki-learnings-lint": ["wiki"],  # report-only; no push, no vault writes without --fix
     "wiki-learnings-snapshot": ["wiki", "github"],
 }
+
+# What a journaling routine leaves behind, in a handful of words. Only Scribe's
+# routines have one: its map draws these where Wren's draws her memory band,
+# because "what did this write?" is the whole question you ask of a journal.
+# A drift-guard test asserts every Scribe routine appears here.
+ROUTINE_WRITES = {
+    "strava_download": "rides → calendar",
+    "calendar_colorizer": "event colours",
+    "claude_time_blocks": "Claude Code time blocks",
+    "daily_chrome_learnings": "daily browsing page",
+    "daily_youtube_learnings": "daily YouTube page",
+    "ai_chat_learnings": "daily AI-chat page",
+}
+
+
+def _agent_of(task: dict) -> str:
+    """Which agent owns a routine — what /map's agent toggle filters on.
+
+    The launchd Label is the source of truth, not the module path: launchd runs
+    the label, and the labels were renamed to local.scribe.* in the same commit
+    that created scribe/. An external root is a third repo federated in
+    (docs/external-tasks.md), so it belongs to neither agent.
+    """
+    if task["external"]:
+        return "external"
+    return "scribe" if task["label"].startswith("local.scribe.") else "wren"
 
 # Keep the payload bounded: memory texts are truncated for the map (the detail
 # panel links to /memories for the full store) and the wiki band is capped.
@@ -710,6 +738,8 @@ def system_map(tools: list[dict], write_tools) -> dict:
                 "status": last["status"], "start": last["start"],
                 "duration_s": last["duration_s"]},
             "uses": ROUTINE_USES.get(task["key"], []),
+            "agent": _agent_of(task),
+            "writes": ROUTINE_WRITES.get(task["key"]),
         })
 
     entries = []
@@ -740,7 +770,18 @@ def system_map(tools: list[dict], write_tools) -> dict:
                        "body": detail.get("body", "")})
 
     return {
-        "identity": {"name": "Wren", "model": active_model_label()},
+        "agents": {
+            "wren": {"name": "Wren", "model": active_model_label(),
+                     "role": "reads the record, acts on request"},
+            # Scribe's model dial is its own chain (SCRIBE_<TASK>_BACKEND →
+            # SCRIBE_LLM_BACKEND → ollama) with NO fallback to WREN_*, so the
+            # default is spelled out here rather than left to _resolve_backend.
+            # Read from the environment instead of importing scribe.model:
+            # chat/ must not import scribe.* (CLAUDE.md).
+            "scribe": {"name": "Scribe",
+                       "model": active_model_label(os.getenv("SCRIBE_LLM_BACKEND", "ollama")),
+                       "role": "writes the record"},
+        },
         "services": services,
         "routines": routines,
         "memory": {"entries": entries, "wiki_pages": wiki_pages,
