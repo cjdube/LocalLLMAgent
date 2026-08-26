@@ -468,27 +468,39 @@ chat/
 
 It's a single scrollable page (no tabs). Chat lives at `/`, not here:
 
-- **Run duration** (top of the page) — one small chart per task, plotting how
+- **Scheduled tasks** (top of the page) — **one box per agent**, not one table:
+  Wren, Scribe, Federated (another repo's jobs) and Always-on, each in its
+  owner's colour, matching `/map`. Ownership comes from the launchd `Label`
+  (`local.wren.*` / `local.scribe.*`), so a task that changes hands needs no
+  table anywhere. Inside a box: that agent's **run-duration charts**, then its
+  task table — name, schedule, next run, last-run status (✓/✗/running) with a
+  dot-strip of recent runs, and **Run now** / **See runs**. Nothing new is
+  persisted: schedules are read live from `launchd/*.plist` and run history is
+  parsed from `logs/<task>.log` (rotated backups included) using the loggers'
+  own `Starting … run` / `… run complete` / `… run failed` markers. External
+  tasks report here but have no Run now button
+  ([docs/external-tasks.md](docs/external-tasks.md)); Always-on holds the
+  daemons, which have no schedule and no run history, and starts folded.
+- **Folding** — clicking a box's header folds it away, and "collapse all" folds
+  every box down to four header rows: the whole system on one screen. A folded
+  header still has to answer "is this one healthy", so it carries the job count,
+  the failure tally, the hours that agent's day spans, and its **slowest job**
+  with that job's median and max — the one thing worth unfolding the box for.
+  Fold state survives the re-render that follows a **Run now**.
+- **Run duration** (inside each box) — one small chart per task, plotting how
   long each of its runs took over the last 30 days (capped at the 30 most recent
   runs, past which the points overlap into a smear), with the median as a dashed
-  reference line and failures in red. This is the question the dot-strip below
-  can't answer: a task's runs are near-uniformly green, but `morning_brief` has
-  taken 8 seconds and it has taken 25 minutes, and `ai_chat_learnings` once ran
-  for 56 — all of them "success". Hand-rolled SVG in
-  `chat/static/run-chart.js` (no charting library, so the page still draws
-  itself offline), on a log scale because durations span three orders of
-  magnitude within a single task. See [docs/run-charts.md](docs/run-charts.md).
-- **Scheduled tasks** (below it) — a table, one row per task: name, schedule,
-  next run, last-run status (✓/✗/running) with a dot-strip of recent runs, and
-  **Run now** / **See runs**. Nothing new is persisted: schedules are read live
-  from `launchd/*.plist` and run history is parsed from `logs/<task>.log`
-  (rotated backups included) using the loggers' own `Starting … run` /
-  `… run complete` / `… run failed` markers. The always-on chat server is a
-  muted last row (no Run now). The table also carries the three
-  ObsidianWikiAgent jobs that maintain the learnings wiki — they run from a
-  sibling repo, so they report here but have no Run now button. See
-  [docs/external-tasks.md](docs/external-tasks.md).
-- **Learnings wiki** (below the table) — page count, how many raw sources are
+  reference line and failures in red. This is the question the dot-strip can't
+  answer: a task's runs are near-uniformly green, but `morning_brief` has taken
+  8 seconds and it has taken 25 minutes, and `ai_chat_learnings` once ran for
+  56 — all of them "success". Hand-rolled SVG in `chat/static/run-chart.js` (no
+  charting library, so the page still draws itself offline), on a log scale
+  because durations span three orders of magnitude within a single task. The
+  file draws either way: give it a `#runChart` mount and it fetches and draws
+  one grid itself; the dashboard instead calls
+  `WrenRunCharts.render(mount, tasks, days)` once per agent so each chart sits
+  with the agent that owns the job. See [docs/run-charts.md](docs/run-charts.md).
+- **Learnings wiki** (below the boxes) — page count, how many raw sources are
   waiting to be filed and how long the oldest has waited, and the vault's last
   backup with any unpushed commits. This is the question the task rows can't
   answer: an ingest that skips a source still logs `run complete` and still

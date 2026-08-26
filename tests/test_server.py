@@ -13,6 +13,7 @@ two required secrets are stubbed into the environment before the import.
 import json
 import logging
 import os
+import pathlib
 import threading
 import time
 
@@ -1323,6 +1324,44 @@ def test_health_ntfy_passes_probe_result_through(auth_client, monkeypatch, healt
     resp = auth_client.get("/api/health/ntfy")
     assert resp.status_code == 200
     assert resp.get_json() == health
+
+
+# --------------------------------------------------------------------------- #
+# /api/schedules (the dashboard's task boxes)
+# --------------------------------------------------------------------------- #
+
+def _fake_task(key, label, external=False, is_daemon=False):
+    return {
+        "key": key, "display_name": key.title(), "label": label,
+        "module": f"tasks.{key}", "schedule": {"Hour": 6, "Minute": 0},
+        "human_schedule": "Daily 6:00 AM", "log_path": pathlib.Path("/nonexistent") / f"{key}.log",
+        "is_daemon": is_daemon, "external": external,
+    }
+
+
+def test_api_schedules_says_which_agent_owns_each_task(auth_client, monkeypatch):
+    # The dashboard groups tasks into one box per agent, so every row has to
+    # carry its owner. Real _agent_of runs here on purpose: stubbing it would
+    # prove only that the key is copied, not that the label decides it.
+    from chat import routes_dashboard
+    monkeypatch.setattr(routes_dashboard, "discover_tasks", lambda: [
+        _fake_task("brief", "local.wren.brief"),
+        _fake_task("strava_download", "local.scribe.stravadownload"),
+        _fake_task("wiki_ingest", "local.wiki.ingest", external=True),
+        _fake_task("bg_worker", "local.wren.bgworker", is_daemon=True),
+    ])
+    tasks = auth_client.get("/api/schedules").get_json()["tasks"]
+    assert {t["key"]: t["agent"] for t in tasks} == {
+        "brief": "wren",
+        # A scribe.* label is the whole difference — the module path above still
+        # says tasks.*, and the answer must not come from it.
+        "strava_download": "scribe",
+        "wiki_ingest": "external",
+        "bg_worker": "wren",
+    }
+    # Every row carries it, daemons included; a box with no agent has nowhere
+    # to be drawn.
+    assert all("agent" in t for t in tasks)
 
 
 # --------------------------------------------------------------------------- #

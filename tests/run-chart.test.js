@@ -239,3 +239,77 @@ describe("degrading", () => {
     expect(cells()).toHaveLength(1);
   });
 });
+
+// The dashboard draws one grid per agent inside that agent's box, which the
+// single #runChart mount cannot express — so the renderer also exposes
+// render(mount, tasks, days). These pin that second contract: a page driving it
+// supplies both the mounts and the data, and the file must not fetch anything.
+describe("driven by the page", () => {
+  function load(markup = `<div>no auto mount</div>`) {
+    global.fetch = jest.fn(() => Promise.resolve({ json: async () => ({}) }));
+    document.body.innerHTML = markup;
+    new Function(CHART_SRC)();
+    return window.WrenRunCharts;
+  }
+
+  test("exposes render and caption even when the page has no auto mount", () => {
+    const api = load();
+    expect(typeof api.render).toBe("function");
+    expect(typeof api.caption).toBe("function");
+    // The whole point of the driven path: the page already has the data.
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test("draws into the mount it is handed, not into #runChart", () => {
+    const api = load(`<div id="runChart"></div><div id="mine"></div>`);
+    const mine = document.getElementById("mine");
+    api.render(mine, [task({ runs: [run(5), run(9)] })], 30);
+    // Both halves: the given mount filled AND the auto mount left alone. A test
+    // that checked only the first would pass on a renderer that ignored its
+    // argument and drew everywhere.
+    expect(mine.querySelectorAll(".chart-cell")).toHaveLength(1);
+    expect(mine.querySelectorAll("circle")).toHaveLength(2);
+    expect(document.getElementById("runChart").querySelectorAll(".chart-cell")).toHaveLength(0);
+  });
+
+  test("two mounts each get only their own tasks", () => {
+    const api = load(`<div id="a"></div><div id="b"></div>`);
+    api.render(document.getElementById("a"),
+      [task({ key: "w1", display_name: "Wren job", runs: [run(5)] })], 30);
+    api.render(document.getElementById("b"),
+      [task({ key: "s1", display_name: "Scribe job", runs: [run(5)] }),
+       task({ key: "s2", display_name: "Scribe job 2", runs: [run(5)] })], 30);
+    const names = (id) => [...document.getElementById(id).querySelectorAll(".chart-name")]
+      .map((n) => n.textContent);
+    expect(names("a")).toEqual(["Wren job"]);
+    expect(names("b")).toEqual(["Scribe job", "Scribe job 2"]);
+  });
+
+  test("re-rendering a mount replaces its grid rather than stacking a second", () => {
+    // loadTasks() runs again every time a "Run now" finishes, into the same box.
+    const api = load(`<div id="mine"></div>`);
+    const mine = document.getElementById("mine");
+    api.render(mine, [task({ runs: [run(5)] })], 30);
+    api.render(mine, [task({ runs: [run(5)] })], 30);
+    expect(mine.querySelectorAll(".chart-grid")).toHaveLength(1);
+    expect(mine.querySelectorAll(".chart-cell")).toHaveLength(1);
+  });
+
+  test("an agent with no charted tasks says so instead of leaving a blank box", () => {
+    const api = load();
+    const mine = document.createElement("div");
+    api.render(mine, [], 30);
+    expect(mine.textContent).toContain("No scheduled tasks to chart");
+  });
+
+  test("caption returns the same string the auto path writes to the hint", () => {
+    const api = load();
+    const tasks = [task({ runs: [run(5), run(6)] })];
+    expect(api.caption(tasks, 30, 40)).toBe(
+      "2 runs · last 30 days · one point per run, oldest left · log scale");
+    // A trimmed series must say so — 30 days would be a claim the chart cannot
+    // support.
+    expect(api.caption([task({ runs: [run(5)], count: 40, total: 500 })], 30, 40))
+      .toContain("40 of 500 runs · newest 40 per chart");
+  });
+});

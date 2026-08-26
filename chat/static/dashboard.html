@@ -100,18 +100,48 @@
   button.btn.primary { background: #1f2328; color: #fff; border-color: #1f2328; }
   button.btn:disabled { opacity: 0.5; cursor: default; }
 
+  /* --- agent identity ---------------------------------------------------
+     One colour per owner, matching /map: Wren blue, Scribe teal, a federated
+     repo purple. Everything below — the chart line, the card tint, the header
+     band — reads its colour from whichever of these the enclosing .house sets,
+     so ownership is carried by the palette rather than restated in every row. */
+  .ag-wren     { --ag: #3b6fd4; --ag-bg: #eff4ff; --ag-fg: #1d4ed8; }
+  .ag-scribe   { --ag: #0d9488; --ag-bg: #effcfa; --ag-fg: #0f766e; }
+  .ag-external { --ag: #7c5cd6; --ag-bg: #f5f2ff; --ag-fg: #6d28d9; }
+  .ag-daemon   { --ag: #98a2b3; --ag-bg: #f2f4f7; --ag-fg: #667085; }
+
+  /* --- one box per agent ------------------------------------------------
+     The header is the whole control: click it to fold the agent away. Folded,
+     the header is all that is left, so it has to answer "is this one healthy"
+     on its own — hence the counts, the failure tally and the slowest job all
+     live in the header rather than in the body it hides. */
+  .house { border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden; background: #fff; margin-bottom: 16px; }
+  .house-head { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; background: var(--ag-bg); border-bottom: 1px solid #e5e7eb; cursor: pointer; user-select: none; }
+  .house-head:hover { filter: brightness(0.985); }
+  .house-head .caret { font-size: 15px; line-height: 1; color: var(--ag-fg); width: 15px; flex-shrink: 0; padding-top: 10px; opacity: .8; }
+  .house-head .mark { width: 34px; height: 34px; border-radius: 9px; background: var(--ag); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 15px; flex-shrink: 0; }
+  .house-head h3 { margin: 0; font-size: 15px; color: var(--ag-fg); }
+  .house-head .role { font-size: 12px; color: #4b5563; margin-top: 2px; }
+  .house-head .slow { font-size: 11px; color: #6b7280; margin-top: 3px; }
+  .house-head .facts { margin-left: auto; text-align: right; font-size: 12px; color: #4b5563; white-space: nowrap; }
+  .house-head .facts b { font-size: 18px; color: #111827; display: block; line-height: 1.15; }
+  .house-body[hidden] { display: none; }
+  .house-charts { padding: 14px 16px; border-bottom: 1px solid #e5e7eb; }
+  .house table { border: none; border-radius: 0; }
+  .house table thead th:first-child, .house table td.name { padding-left: 16px; }
+  .foldall { font-weight: 500; font-size: 12px; color: #6b7280; background: none; border: none; cursor: pointer; padding: 0; text-decoration: underline; }
+
   /* Run-duration charts (rendered by run-chart.js) */
   /* Below desktop, as many 250px columns as fit — two on a tablet, one on a
-     phone. At desktop width it's pinned to four, which with today's 12 tasks
-     reads as three rows. The row count is left to fall out of the task count
-     rather than being pinned too, so a 13th task wraps instead of squashing. */
+     phone. At desktop width it's pinned to four. The row count is left to fall
+     out of the task count rather than being pinned too, so an extra task wraps
+     instead of squashing. One grid per agent, so the counts are per-agent. */
   .chart-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; }
   @media (min-width: 1100px) { .chart-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
   /* Each chart is its own card. Sharing one panel, twelve sparklines ran
-     together — a neighbour's line reads as a continuation of your own. The
-     section itself is therefore NOT a .panel: cards inside a card double every
-     border. */
-  .chart-cell { min-width: 0; background: #fffbeb; border: 1px solid #f2e7c3; border-radius: 12px; padding: 12px 14px; }
+     together — a neighbour's line reads as a continuation of your own. Tinted
+     to the owning agent, so a card says whose job it is before you read it. */
+  .chart-cell { min-width: 0; background: var(--ag-bg, #fffbeb); border: 1px solid #e9ecf0; border-radius: 12px; padding: 12px 14px; }
   .chart-head { display: flex; align-items: baseline; gap: 8px; }
   /* One line, always: a name that wraps pushes its chart out of alignment with
      the rest of its row. Truncated names keep their full text in a tooltip. */
@@ -120,8 +150,8 @@
   .chart-empty { font-size: 11px; color: #9ca3af; padding: 16px 0; }
   .chart-svg { width: 100%; height: auto; display: block; }
   .chart-median { stroke: #e5e7eb; stroke-width: 1; stroke-dasharray: 3 3; }
-  .chart-line { fill: none; stroke: #2e90fa; stroke-width: 1.4; stroke-linejoin: round; }
-  .pt { fill: #2e90fa; }
+  .chart-line { fill: none; stroke: var(--ag, #2e90fa); stroke-width: 1.4; stroke-linejoin: round; }
+  .pt { fill: var(--ag, #2e90fa); }
   .pt.fail { fill: #f04438; }
 
   /* Run-detail slide-over */
@@ -159,12 +189,11 @@
   <main>
     <div class="content">
       <section>
-        <div class="section-label">Run duration <span id="runChartHint" class="hint"></span></div>
-        <div id="runChart" class="muted">Loading…</div>
-      </section>
-      <section>
-        <div class="section-label">Scheduled tasks <span id="taskHint" class="hint"></span></div>
-        <div id="tasksWrap"></div>
+        <div class="section-label">
+          <span>Scheduled tasks <span id="taskHint" class="hint"></span></span>
+          <button id="foldAll" class="foldall" type="button">collapse all</button>
+        </div>
+        <div id="tasksWrap" class="muted">Loading…</div>
       </section>
       <section>
         <div class="section-label">Learnings wiki <span id="vaultHint" class="hint"></span></div>
@@ -186,6 +215,7 @@
     <div id="drawerBody" class="drawer-body"></div>
   </div>
 
+<script src="/static/run-chart.js"></script>
 <script>
 // --- helpers ------------------------------------------------------------- //
 async function api(path, opts) { return (await fetch(path, opts)).json(); }
@@ -361,28 +391,150 @@ async function loadVaultHealth() {
   }
 }
 
-// --- scheduled tasks table ---------------------------------------------- //
+// --- scheduled tasks, one box per agent --------------------------------- //
+// Two agents live in this repo and a third is federated in, so a single table
+// sorted by time said nothing about who owns what. Each owner gets a box
+// holding its own duration charts and its own table, foldable down to a header.
+const AGENTS = {
+  wren:     { name: "Wren",   letter: "W", role: "reads the record, acts on request" },
+  scribe:   { name: "Scribe", letter: "S", role: "writes the record — journaling only" },
+  external: { name: "Federated", letter: "F", role: "another repo's jobs, reported here only" },
+  daemon:   { name: "Always-on", letter: "∞", role: "daemons and pollers — no schedule, no run history" },
+};
+const AGENT_ORDER = ["wren", "scribe", "external", "daemon"];
+
+// Which box a task belongs in. Daemons share one box whoever owns them: they
+// have no schedule and no run history, so there is nothing per-agent to show.
+function boxOf(task) { return task.is_daemon ? "daemon" : (AGENTS[task.agent] ? task.agent : "wren"); }
+
+// Folded boxes, kept across re-renders. loadTasks() runs again every time a
+// "Run now" finishes; without this, finishing a job would pop every box open.
+const folded = new Set(["daemon"]);
+// One redraw function per box on screen, so "collapse all" folds them in place
+// rather than re-fetching the whole section to change a caret.
+let boxes = [];
+
+// The time of day a job fires, read off next_run rather than parsed out of the
+// human_schedule prose — "2026-08-27T04:15" is structured, "Sundays 8:00 PM"
+// is not.
+function hourOf(task) {
+  const m = /T(\d{2}):(\d{2})/.exec(task.next_run || "");
+  return m ? (+m[1]) + (+m[2]) / 60 : null;
+}
+function clockOf(f) {
+  const hh = Math.floor(f), mm = Math.round((f - hh) * 60);
+  return `${hh % 12 === 0 ? 12 : hh % 12}:${String(mm).padStart(2, "0")} ${hh < 12 ? "AM" : "PM"}`;
+}
+
 async function loadTasks() {
   const wrap = document.getElementById("tasksWrap");
-  const data = await api("/api/schedules");
+  // Both in one go: the charts are drawn inside the boxes, so a box cannot be
+  // built until its series are in hand.
+  const [data, stats] = await Promise.all([api("/api/schedules"), api("/api/run_stats")]);
   const tasks = data.tasks || [];
+  const statTasks = (stats && !stats.error && stats.tasks) ? stats.tasks : [];
+  const byKey = {};
+  statTasks.forEach(t => { byKey[t.key] = t; });
+
   const scheduled = tasks.filter(t => !t.is_daemon).length;
   const daemons = tasks.length - scheduled;
-  document.getElementById("taskHint").textContent =
-    `${scheduled} scheduled${daemons ? ` · ${daemons} always-on` : ""}`;
+  let hint = `${scheduled} scheduled${daemons ? ` · ${daemons} always-on` : ""}`;
+  if (statTasks.length && window.WrenRunCharts) {
+    hint += " · " + window.WrenRunCharts.caption(statTasks, stats.days, stats.limit);
+  }
+  document.getElementById("taskHint").textContent = hint;
 
   wrap.textContent = "";
+  boxes = [];
+  AGENT_ORDER.forEach(key => {
+    const mine = tasks.filter(t => boxOf(t) === key);
+    if (mine.length) wrap.appendChild(agentBox(key, mine, byKey, stats.days));
+  });
+  syncFoldAll();
+}
+
+function agentBox(key, tasks, statsByKey, days) {
+  const meta = AGENTS[key];
+  const stats = tasks.map(t => statsByKey[t.key]).filter(Boolean);
+  const house = el("div", "house ag-" + key);
+
+  const head = el("div", "house-head");
+  const caret = el("div", "caret");
+  head.appendChild(caret);
+  head.appendChild(el("div", "mark", meta.letter));
+
+  const who = el("div");
+  who.appendChild(el("h3", null, meta.name));
+  who.appendChild(el("div", "role", meta.role));
+  // Folded, this is the only trace of the charts left — so it names the one
+  // job worth unfolding the box for.
+  const slowest = stats.filter(x => x.median_s != null)
+                       .sort((a, b) => b.median_s - a.median_s)[0];
+  if (slowest) {
+    who.appendChild(el("div", "slow",
+      `slowest: ${slowest.display_name} — median ${fmtDur(slowest.median_s)}, max ${fmtDur(slowest.max_s)}`));
+  }
+  head.appendChild(who);
+
+  const facts = el("div", "facts");
+  facts.appendChild(el("b", null, String(tasks.length)));
+  if (key === "daemon") {
+    facts.appendChild(el("div", null, "always running"));
+  } else {
+    const failing = tasks.filter(t => t.last_run && t.last_run.status === "failure").length;
+    facts.appendChild(el("div", null, failing ? `${failing} failing` : "all green"));
+    const times = tasks.map(hourOf).filter(v => v !== null).sort((a, b) => a - b);
+    if (times.length) {
+      facts.appendChild(el("div", null, `${clockOf(times[0])} – ${clockOf(times[times.length - 1])}`));
+    }
+  }
+  head.appendChild(facts);
+  house.appendChild(head);
+
+  const body = el("div", "house-body");
+  if (stats.length && window.WrenRunCharts) {
+    const charts = el("div", "house-charts");
+    window.WrenRunCharts.render(charts, stats, days);
+    body.appendChild(charts);
+  }
   const table = el("table");
-  const thead = el("thead");
-  const htr = el("tr");
+  const thead = el("thead"), htr = el("tr");
   ["Task", "Schedule", "Next run", "Last status", ""].forEach(h => htr.appendChild(el("th", null, h)));
   thead.appendChild(htr);
   table.appendChild(thead);
   const tbody = el("tbody");
   tasks.forEach(t => tbody.appendChild(taskRow(t)));
   table.appendChild(tbody);
-  wrap.appendChild(table);
+  body.appendChild(table);
+  house.appendChild(body);
+
+  function apply() {
+    const open = !folded.has(key);
+    body.hidden = !open;
+    caret.textContent = open ? "▾" : "▸";
+    head.setAttribute("aria-expanded", String(open));
+  }
+  head.addEventListener("click", () => {
+    if (folded.has(key)) folded.delete(key); else folded.add(key);
+    apply();
+    syncFoldAll();
+  });
+  apply();
+  boxes.push({ key, apply });
+  return house;
 }
+
+const foldAllBtn = document.getElementById("foldAll");
+function syncFoldAll() {
+  foldAllBtn.textContent =
+    (boxes.length && boxes.every(b => folded.has(b.key))) ? "expand all" : "collapse all";
+}
+foldAllBtn.addEventListener("click", () => {
+  if (boxes.every(b => folded.has(b.key))) folded.clear();
+  else boxes.forEach(b => folded.add(b.key));
+  boxes.forEach(b => b.apply());
+  syncFoldAll();
+});
 
 function taskRow(task) {
   const tr = el("tr", task.is_daemon ? "daemon" : "task-row");
@@ -540,7 +692,6 @@ loadTasks();
 loadVaultHealth();
 loadPushHealth();
 </script>
-<script src="/static/run-chart.js"></script>
 <script src="/static/nav.js"></script>
 </body>
 </html>

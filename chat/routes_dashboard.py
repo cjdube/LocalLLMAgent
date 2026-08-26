@@ -16,6 +16,7 @@ from agent.tools.notify import ntfy_health
 from chat.auth import _authenticated
 from chat.insights import (
     RunManager,
+    _agent_of,
     describe_tools,
     discover_tasks,
     next_run,
@@ -55,6 +56,10 @@ def api_schedules():
             "human_schedule": task["human_schedule"],
             "is_daemon": task["is_daemon"],
             "external": task["external"],
+            # Which agent owns the job — the dashboard groups by it, the same
+            # way /map filters by it. Derived from the launchd Label, so a task
+            # that moves between agents needs no table here.
+            "agent": _agent_of(task),
             "next_run": next_run(task["schedule"]),
             "last_run": _run_summary(runs[0] if runs else None),
             "recent_statuses": [r["status"] for r in runs],

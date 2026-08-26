@@ -1,10 +1,20 @@
 // Run-duration charts for the dashboard: one small chart per scheduled task,
 // plotting how long each of its runs took.
 //
-// Included as <script src="/static/run-chart.js"></script>. Like nav.js, its
-// contract is page-supplied mounts: <div id="runChart"> (required — the grid)
-// and <span id="runChartHint"> (optional — the caption). The page owns all CSS;
-// this file emits structure and class names only.
+// Included as <script src="/static/run-chart.js"></script>. Two ways to drive it:
+//
+//   Auto — supply the mounts and it fetches and draws itself: <div id="runChart">
+//   (the grid) and <span id="runChartHint"> (optional caption). Nothing to call.
+//
+//   Driven — the page owns the data and the grouping, and calls
+//   WrenRunCharts.render(mount, tasks, days) once per mount with its own slice
+//   of /api/run_stats. dashboard.html does this: it draws one grid per agent
+//   inside that agent's box, so a chart sits with the agent that owns the job.
+//   WrenRunCharts.caption(tasks, days, limit) returns the same caption string
+//   the auto path writes.
+//
+// Either way the page owns all CSS; this file emits structure and class names
+// only.
 //
 // Class names to style: .chart-grid, .chart-cell, .chart-head with
 // .chart-name / .chart-stat, .chart-empty, and inside the SVG .chart-svg,
@@ -31,9 +41,6 @@
 //   real time axis would bunch those into an unreadable clump. The per-point
 //   tooltip carries the actual timestamp, and the caption says so.
 (() => {
-  const mount = document.getElementById("runChart");
-  if (!mount) return;                                    // degrade, don't throw
-
   const W = 280, H = 72;                                 // cell viewBox
   const PAD = { top: 8, right: 6, bottom: 8, left: 6 };
   const PLOT_W = W - PAD.left - PAD.right;
@@ -130,6 +137,37 @@
     return cell;
   }
 
+  // Draw one grid of cells into `mount`. Replaces whatever was there, so a
+  // caller re-rendering after a task ran does not stack two grids.
+  function renderGrid(mount, tasks, days) {
+    mount.textContent = "";
+    if (!tasks || !tasks.length) {
+      mount.appendChild(el("div", "chart-empty", "No scheduled tasks to chart."));
+      return;
+    }
+    const grid = el("div", "chart-grid");
+    tasks.forEach((task) => grid.appendChild(renderCell(task, days)));
+    mount.appendChild(grid);
+  }
+
+  // Say what's plotted, not what was asked for. The server caps each series at
+  // its most recent N runs, so on a busy task "last 30 days" would be a claim
+  // the chart doesn't support — name the trim when one happened.
+  function caption(tasks, days, limit) {
+    const shown = tasks.reduce((n, t) => n + t.count, 0);
+    const inWindow = tasks.reduce((n, t) => n + (t.total ?? t.count), 0);
+    const scope = shown < inWindow
+      ? `${shown} of ${inWindow} runs · newest ${limit} per chart`
+      : `${shown} runs · last ${days} days`;
+    return `${scope} · one point per run, oldest left · log scale`;
+  }
+
+  window.WrenRunCharts = { render: renderGrid, caption };
+
+  // --- auto path: a page that supplies #runChart gets one grid, fetched here.
+  const mount = document.getElementById("runChart");
+  if (!mount) return;                                    // degrade, don't throw
+
   async function load() {
     let data;
     try {
@@ -149,28 +187,10 @@
     }
 
     const tasks = data.tasks || [];
-    mount.textContent = "";
-    if (!tasks.length) {
-      mount.appendChild(el("div", "chart-empty", "No scheduled tasks to chart."));
-      return;
-    }
-
-    const grid = el("div", "chart-grid");
-    tasks.forEach((task) => grid.appendChild(renderCell(task, data.days)));
-    mount.appendChild(grid);
+    renderGrid(mount, tasks, data.days);
 
     const hint = document.getElementById("runChartHint");
-    if (hint) {
-      // Say what's plotted, not what was asked for. The server caps each series
-      // at its most recent N runs, so on a busy task "last 30 days" would be a
-      // claim the chart doesn't support — name the trim when one happened.
-      const shown = tasks.reduce((n, t) => n + t.count, 0);
-      const inWindow = tasks.reduce((n, t) => n + (t.total ?? t.count), 0);
-      const scope = shown < inWindow
-        ? `${shown} of ${inWindow} runs · newest ${data.limit} per chart`
-        : `${shown} runs · last ${data.days} days`;
-      hint.textContent = `${scope} · one point per run, oldest left · log scale`;
-    }
+    if (hint && tasks.length) hint.textContent = caption(tasks, data.days, data.limit);
   }
 
   load();

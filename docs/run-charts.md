@@ -116,9 +116,19 @@ shows.
   because that's the order a chart plots.
 - `chat/routes_dashboard.py` — `GET /api/run_stats`. `?days=` is clamped rather
   than validated: a nonsense window should narrow the chart, not 400 the page.
-- `chat/static/run-chart.js` — the renderer. Contract is two page-supplied
-  mounts, `#runChart` (required) and `#runChartHint` (optional caption).
-- `chat/static/dashboard.html` — the section markup and all the CSS.
+- `chat/static/run-chart.js` — the renderer, drivable two ways:
+  - **Auto** — a page supplies `#runChart` (the grid) and optionally
+    `#runChartHint` (the caption), and the file fetches `/api/run_stats` and
+    draws itself. Nothing to call.
+  - **Driven** — the page owns the data and the grouping and calls
+    `WrenRunCharts.render(mount, tasks, days)` once per mount, plus
+    `WrenRunCharts.caption(tasks, days, limit)` for the same caption string.
+    The dashboard uses this: one grid per agent, drawn inside that agent's box,
+    so a chart sits with the agent that owns the job. A page with no `#runChart`
+    never fetches — the driven caller already has the data.
+- `chat/static/dashboard.html` — the agent boxes, the fold behaviour, and all
+  the CSS. The chart line and card tint read `--ag` / `--ag-bg` off the
+  enclosing `.house`, so a chart is drawn in its owner's colour.
 
 ## Testing notes
 
