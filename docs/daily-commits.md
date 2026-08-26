@@ -91,6 +91,18 @@ WARNING and contributes nothing; the rest of the day still gets written.
 .venv/bin/python -m scribejay.daily_commits
 ```
 
+`--date 2026-08-25` writes one named day; `--backfill 14` writes each of the last
+14 days, oldest first.
+
+A backfill is **one run**, not N runs: the boundary lines the dashboard parses are
+logged once around the whole loop, so a fortnight reads as a single row in the run
+history rather than fourteen half-runs ([logs.md](logs.md)). The model is warmed on
+the first day that actually has commits, so a backfill over a quiet stretch never
+loads it at all.
+
+Re-running a day overwrites that day's file — `write_entry` is keyed on the date —
+so a backfill is safe to repeat.
+
 ## Related
 
 - [docs/scribejay.md](scribejay.md) — the agent this belongs to, and its model dial

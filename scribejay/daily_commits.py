@@ -12,11 +12,16 @@ small on purpose: group related commits and say what the work was. The totals li
 under the draft is arithmetic, and is computed in Python.
 
 Usage:
-    python -m scribejay.daily_commits
+    python -m scribejay.daily_commits                 # yesterday
+    python -m scribejay.daily_commits --date 2026-08-25
+    python -m scribejay.daily_commits --backfill 14   # each of the last 14 days
 """
 
+import argparse
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -24,6 +29,7 @@ from agent.loop import complete_text, warm_model
 from scribejay.model import backend as scribejay_backend, log_backend
 from agent import prefs
 from agent.activity_log import persist_or_email, prior_day
+from agent.tools.calendar import _local_timezone
 from scribejay.git_activity import collect_commits, compact_commits, render_commits
 from scribejay.journal import commit_totals_line, has_substantive_content
 from tasks._common import notify_failure, setup_logger
@@ -77,57 +83,95 @@ Output ONLY the filled-in template text, nothing else — no preamble, no explan
 """
 
 
+def _run_for_day(start, end, day, backend, warm, logger) -> None:
+    """Gather, draft and persist one day. Raises on failure — main() owns the
+    run boundary and the alert, so a backfill of 14 days is still one run in the
+    dashboard's history rather than 14 half-runs."""
+    result = collect_commits(start, end, logger=logger)
+    logger.info(f"collect_commits -> {result['total_commits']} commits across "
+                f"{len(result['repos'])} of {result['repos_scanned']} checkouts: {result['repos']}")
+
+    # A day with no commits is an ordinary day, not a failure — don't wake the
+    # model or write an empty file for it.
+    if not result["commits"]:
+        logger.info(f"No commits on {day}; nothing to write")
+        return
+
+    rows = compact_commits(result["commits"], logger=logger)
+    commit_block = render_commits(rows, logger=logger)
+    user_prompt = (
+        f"day: {day:%B %-d, %Y}\n"
+        f"commits:\n{commit_block}\n"
+    )
+
+    warm()
+    entry_text = complete_text(
+        system_prompt=DRAFT_SYSTEM_PROMPT, user_prompt=user_prompt, logger=logger,
+        backend=backend, think=False,
+    )
+    logger.info(f"Drafted entry:\n{entry_text}")
+
+    # An all-"None" draft off a day that HAD commits is the model failing, not an
+    # empty day — the empty day already returned above. Say so, because the
+    # symptom otherwise is just a missing file nobody looks for.
+    if not has_substantive_content(entry_text):
+        logger.warning(f"Draft for {day} had no bullets despite {result['total_commits']} "
+                       f"commits ({len(entry_text)} chars); nothing to write")
+        return
+
+    entry_text = f"{entry_text.rstrip()}\n\n{commit_totals_line(result['commits'])}\n"
+
+    persist_or_email(
+        entry_text, "Daily-Commits", day,
+        subject=f"Daily Commits (needs manual paste) - {day:%Y-%m-%d}",
+        task_name="daily_commits", logger=logger,
+    )
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--date", default=None,
+                        help="write a single day YYYY-MM-DD")
+    parser.add_argument("--backfill", type=int, default=0,
+                        help="write each of the last N days; default 0 = just yesterday")
+    args = parser.parse_args()
+
     logger = setup_logger("daily_commits")
     logger.info("Starting daily commits run")
 
     try:
-        start, end, day = prior_day()
-        logger.info(f"Day: {day}")
-
-        result = collect_commits(start, end, logger=logger)
-        logger.info(f"collect_commits -> {result['total_commits']} commits across "
-                    f"{len(result['repos'])} of {result['repos_scanned']} checkouts: {result['repos']}")
-
-        # A day with no commits is an ordinary day, not a failure — don't warm the
-        # model or write an empty file for it.
-        if not result["commits"]:
-            logger.info("No commits yesterday; nothing to write")
-            logger.info("Daily commits run complete")
-            return 0
-
-        rows = compact_commits(result["commits"], logger=logger)
-        commit_block = render_commits(rows, logger=logger)
-        user_prompt = (
-            f"day: {day:%B %-d, %Y}\n"
-            f"commits:\n{commit_block}\n"
-        )
-
         backend = scribejay_backend("daily_commits")
         log_backend(logger, "daily_commits", backend)
-        warm_model(logger=logger, backend=backend)
-        entry_text = complete_text(
-            system_prompt=DRAFT_SYSTEM_PROMPT, user_prompt=user_prompt, logger=logger,
-            backend=backend, think=False,
-        )
-        logger.info(f"Drafted entry:\n{entry_text}")
 
-        # An all-"None" draft off a day that HAD commits is the model failing, not
-        # an empty day — the empty day already returned above. Say so, because the
-        # symptom otherwise is just a missing file nobody looks for.
-        if not has_substantive_content(entry_text):
-            logger.warning(f"Draft had no bullets despite {result['total_commits']} "
-                           f"commits ({len(entry_text)} chars); nothing to write")
-            logger.info("Daily commits run complete")
-            return 0
+        # Warmed on the first day that actually has commits, not up front: a
+        # backfill over a quiet fortnight would otherwise load the model to do
+        # nothing with it, and so would most 4:55 AM runs.
+        warmed = []
 
-        entry_text = f"{entry_text.rstrip()}\n\n{commit_totals_line(result['commits'])}\n"
+        def warm():
+            if not warmed:
+                warm_model(logger=logger, backend=backend)
+                warmed.append(True)
 
-        persist_or_email(
-            entry_text, "Daily-Commits", day,
-            subject=f"Daily Commits (needs manual paste) - {day:%Y-%m-%d}",
-            task_name="daily_commits", logger=logger,
-        )
+        if args.date:
+            tz = ZoneInfo(_local_timezone())
+            start = datetime.strptime(args.date, "%Y-%m-%d").replace(tzinfo=tz)
+            end = start.replace(hour=23, minute=59, second=59)
+            logger.info(f"Single day: {start.date()}")
+            _run_for_day(start, end, start.date(), backend, warm, logger)
+        elif args.backfill > 0:
+            tz = ZoneInfo(_local_timezone())
+            today = datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0)
+            # Oldest day first, so the log reads chronologically as files land.
+            for k in range(args.backfill, 0, -1):
+                start, end, day = prior_day(today - timedelta(days=k - 1))
+                logger.info(f"Backfill day {day}")
+                _run_for_day(start, end, day, backend, warm, logger)
+        else:
+            start, end, day = prior_day()
+            logger.info(f"Day: {day}")
+            _run_for_day(start, end, day, backend, warm, logger)
+
         logger.info("Daily commits run complete")
         return 0
     except Exception as e:
