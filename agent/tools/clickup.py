@@ -45,6 +45,7 @@ import argparse
 import re
 import sys
 from datetime import date, datetime, timedelta
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import requests
@@ -112,9 +113,10 @@ def _get(path: str, token: str, **params) -> dict:
 
 
 def _write(method: str, path: str, token: str, payload: dict) -> dict:
-    """POST/PUT with the same raw-token header and explicit timeout as _get.
-    Separate from _get so every call site that CHANGES something in ClickUp is
-    greppable — these are the only three lines in this module that do."""
+    """POST/PUT/DELETE with the same raw-token header and explicit timeout as
+    _get. Separate from _get so every call site that CHANGES something in
+    ClickUp is greppable — these are the only lines in this module that do.
+    payload is None for DELETE, which sends no body."""
     resp = requests.request(
         method,
         f"{API_ROOT}{path}",
@@ -253,7 +255,8 @@ def _resolve_status(chosen: list, status: str) -> str:
 
 
 def _fetch_tasks(token: str, team_id: str, space_ids: list, include_done: bool,
-                 updated_after_ms: int = None, list_ids: list = None) -> list:
+                 updated_after_ms: int = None, list_ids: list = None,
+                 tags: list = None) -> list:
     """Every task in the given Spaces, paged. ClickUp excludes its Closed
     status group by default and that is not a rounding error here — 21 of this
     account's 57 items are shipped — so include_done is the difference between
@@ -267,6 +270,11 @@ def _fetch_tasks(token: str, team_id: str, space_ids: list, include_done: bool,
             params["date_updated_gt"] = int(updated_after_ms)
         if list_ids:
             params["list_ids[]"] = list_ids
+        if tags:
+            # Verified live against the real workspace: several tags[] values
+            # are OR-ed, not AND-ed, so one call covers every watched tag no
+            # matter how many there are. Do not "fix" this into a loop.
+            params["tags[]"] = tags
         body = _get(f"/team/{team_id}/task", token, **params)
         batch = body.get("tasks", [])
         tasks.extend(batch)
@@ -783,6 +791,69 @@ def clickup_digest(since_ms: int = None, api_key: str = None) -> dict:
         "stalest": _stalest(in_flight),
         "checked_ms": checked_ms,
     }
+
+
+def tagged_clickup_tasks(tags: list, api_key: str = None) -> dict:
+    """Tasks currently carrying any of `tags`. A **library function, not a chat
+    tool** — no TOOL_SCHEMA, because the only caller is tasks/clickup_watcher.py
+    and the model has list_clickup_tasks for the same question in words.
+
+    Several tags[] values are OR-ed by ClickUp (verified live), so this is one
+    GET however many tags are watched.
+
+    Unlike every other function here it returns the ClickUp task **id**. That is
+    deliberate and it is why this is not a tool: the watcher removes the tag by
+    id, and an id must never reach the model (docs/opaque-identifiers.md).
+    Closed tasks are included — a tag on a shipped Task is still a request.
+    """
+    token, err = _client(api_key)
+    if err:
+        return err
+    try:
+        team_id = _team_id(token)
+        spaces = _spaces(token, team_id)
+        if not spaces:
+            return {"tasks": []}
+        raw = _fetch_tasks(token, team_id, [a["id"] for a in spaces],
+                           include_done=True, tags=tags)
+    except _ClickUpError as e:
+        return {"error": str(e)}
+    except Exception as e:
+        return http_error(e)
+
+    space_by_id = {a["id"]: a["space"] for a in spaces}
+    wanted = {t.lower() for t in tags}
+    out = []
+    for t in raw:
+        row = _row(t, space_by_id)
+        row["id"] = t["id"]
+        # Which of the watched tags this Task carries, in the order given, so a
+        # Task wearing two of them gets one job under a settled first tag rather
+        # than whichever ClickUp happened to list first.
+        carried = {name.lower() for name in row["tags"]}
+        row["watched"] = [tag for tag in tags if tag.lower() in carried and tag.lower() in wanted]
+        row["description"], _ = _trim(t.get("description") or "", _MAX_DESCRIPTION_CHARS)
+        out.append(row)
+    return {"tasks": out}
+
+
+def remove_clickup_tag(task_id: str, tag: str, api_key: str = None) -> dict:
+    """Take one tag off one Task. A **library function, not a chat tool**, for
+    the same reason as above — it takes an id.
+
+    This is what stops the watcher acting on the same Task twice: the tag is the
+    request, so removing it is how the request is marked as taken. It is a write
+    but it carries no free text and no model-chosen value, which is the same
+    reason move_clickup_task is allowed in unattended runs.
+    """
+    token, err = _client(api_key)
+    if err:
+        return err
+    try:
+        _write("DELETE", f"/task/{task_id}/tag/{quote(tag, safe='')}", token, None)
+    except Exception as e:
+        return http_error(e)
+    return {"removed": tag, "task_id": task_id}
 
 
 # ClickUp's own three nouns, used exactly as ClickUp uses them, because the

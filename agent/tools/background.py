@@ -155,9 +155,10 @@ def run_in_background(task: str) -> dict:
 
 def start_job(task: str, origin: str = "chat") -> dict:
     """Queue a background job. `origin` is a provenance flag, not a policy: the
-    worker hands it to toolset.confirm_set_for(), which alone decides what a
-    "mail" job may do without a tap. Passing a tool list in from the caller
-    instead would put that policy in two files, and they drift."""
+    worker hands it to toolset.confirm_set_for() and toolset.excluded_for(),
+    which alone decide what a "mail" or "clickup" job may do without a tap and
+    what it may not do at all. Passing a tool list in from the caller instead
+    would put that policy in two files, and they drift."""
     task = (task or "").strip()
     if not task:
         return {"error": "task description was empty"}

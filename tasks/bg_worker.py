@@ -4,17 +4,19 @@ at once, so a long job just delays the next poll rather than overlapping).
 
 Execution posture "A + push-to-approve": the job runs the agent tool loop, but
 a gated tool pauses the run — the job is saved as awaiting_approval and the user
-gets a tap-to-approve push. The next poll resumes it once he's decided. Tools in
-toolset.UNATTENDED_EXCLUDED_TOOLS (memory/skill writers — prompt-visible state —
-and the bg-management tools) are stripped from the toolset entirely, so injected
-text in content fetched mid-job can't plant a durable instruction.
+gets a tap-to-approve push. The next poll resumes it once he's decided. Tools
+that write prompt-visible state (memories, skills) and the bg-management tools
+are stripped from the toolset entirely, so injected text in content fetched
+mid-job can't plant a durable instruction.
 
-*Which* tools are gated depends on the job's origin, via
-toolset.confirm_set_for(). A chat job was typed by the user, so only
-CONSEQUENTIAL_TOOLS pause and everything else (reads, reversible internal
-writes) runs unattended. A job whose text came out of an email — origin "mail",
-see tasks/mail_watcher.py — is driven by a stranger's words, so it gates
-everything outside toolset.MAIL_JOB_SAFE_TOOLS instead.
+Both halves of that policy are keyed to the job's ORIGIN and both live in
+agent/toolset.py — this module passes the provenance and never a tool list.
+toolset.confirm_set_for() says what pauses: a chat job was typed by the user,
+so only CONSEQUENTIAL_TOOLS pause; a job built from an email (origin "mail",
+tasks/mail_watcher.py) is driven by a stranger's words, so everything outside
+MAIL_JOB_SAFE_TOOLS pauses; a job raised by a ClickUp tag (origin "clickup",
+tasks/clickup_watcher.py) pauses on every write, because the user tagged and
+walked away. toolset.excluded_for() says what is absent entirely.
 
 Reuses agent.loop.advance()/resolve() exactly as chat/server.py does; the only
 difference is the decision arrives via a persisted approval, not a live web tap.
@@ -158,7 +160,7 @@ def _make_load_tools(tools: list[dict], excluded: frozenset):
     return load_tools
 
 
-def _bg_tools_and_dispatch(task_text: str, logger):
+def _bg_tools_and_dispatch(task_text: str, origin: str, logger):
     """The tools one job is offered, and how to run them.
 
     **Selected by keyword, not handed over whole.** A job used to get every
@@ -171,11 +173,12 @@ def _bg_tools_and_dispatch(task_text: str, logger):
 
     Keyword selection can miss, so `load_tools` stays available and the prompt
     names the groups: a job that needs the web group asks for it, one step and
-    no code change. What is *excluded* is unchanged — that is policy, and it
-    still comes from toolset.UNATTENDED_EXCLUDED_TOOLS.
+    no code change. What is *excluded* is policy, and still comes from
+    agent/toolset.py — via excluded_for(origin), which like confirm_set_for is
+    handed the provenance and never a tool list.
     """
     _load_agent_stack()
-    excluded = toolset.UNATTENDED_EXCLUDED_TOOLS
+    excluded = toolset.excluded_for(origin)
     groups = toolset.groups_for_message(task_text)
     tools = [t for t in toolset.tools_for(groups)
              if t["function"]["name"] not in excluded]
@@ -290,7 +293,8 @@ def main() -> int:
         if job is None:
             _repush_stale_approvals(logger)
             return 0
-        tools, dispatch = _bg_tools_and_dispatch(job["task_text"], logger)
+        tools, dispatch = _bg_tools_and_dispatch(
+            job["task_text"], job.get("origin"), logger)
         _run_job(job, tools, dispatch, logger)
         return 0
     except _transient_exceptions() as e:

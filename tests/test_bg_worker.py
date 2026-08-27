@@ -57,7 +57,7 @@ def test_prompt_state_writers_are_excluded_from_unattended_runs():
                             "write_skill", "delete_skill"}
     assert prompt_state_writers <= toolset.UNATTENDED_EXCLUDED_TOOLS
 
-    tools, dispatch = bg_worker._bg_tools_and_dispatch("research X", logger=None)
+    tools, dispatch = bg_worker._bg_tools_and_dispatch("research X", "chat", logger=None)
     offered = {t["function"]["name"] for t in tools}
     assert not (toolset.UNATTENDED_EXCLUDED_TOOLS & offered)
     assert not (toolset.UNATTENDED_EXCLUDED_TOOLS & set(dispatch))
@@ -406,7 +406,7 @@ _TAKEOUT = ("An email arrived on a thread Craig labelled for you to handle.\n"
 
 
 def test_a_job_is_not_offered_every_tool_in_the_registry():
-    tools, _ = bg_worker._bg_tools_and_dispatch(_TAKEOUT, logger=None)
+    tools, _ = bg_worker._bg_tools_and_dispatch(_TAKEOUT, "chat", logger=None)
     offered = {t["function"]["name"] for t in tools}
     everything = {t["function"]["name"] for t in toolset.TOOLS
                   if t["function"]["name"] not in toolset.UNATTENDED_EXCLUDED_TOOLS}
@@ -422,7 +422,7 @@ def test_a_job_is_not_offered_every_tool_in_the_registry():
 def test_a_job_can_still_reach_a_group_the_keywords_missed():
     """Keyword selection misses, so a narrower menu must not be a dead end.
     Both halves: the tool is absent to begin with, and load_tools brings it in."""
-    tools, dispatch = bg_worker._bg_tools_and_dispatch(_TAKEOUT, logger=None)
+    tools, dispatch = bg_worker._bg_tools_and_dispatch(_TAKEOUT, "chat", logger=None)
     assert "fetch_webpage" not in {t["function"]["name"] for t in tools}
 
     result = dispatch["load_tools"]("web")
@@ -435,7 +435,7 @@ def test_a_job_can_still_reach_a_group_the_keywords_missed():
 
 def test_load_tools_cannot_reach_a_tool_unattended_runs_must_not_have():
     """The narrower menu must not become a way around the exclusion policy."""
-    tools, dispatch = bg_worker._bg_tools_and_dispatch("write a skill", logger=None)
+    tools, dispatch = bg_worker._bg_tools_and_dispatch("write a skill", "chat", logger=None)
     for group in toolset.TOOL_GROUPS:
         dispatch["load_tools"](group)
 
@@ -444,7 +444,7 @@ def test_load_tools_cannot_reach_a_tool_unattended_runs_must_not_have():
 
 
 def test_an_unknown_group_is_refused_by_name():
-    _, dispatch = bg_worker._bg_tools_and_dispatch(_TAKEOUT, logger=None)
+    _, dispatch = bg_worker._bg_tools_and_dispatch(_TAKEOUT, "chat", logger=None)
 
     result = dispatch["load_tools"]("nonsense")
 

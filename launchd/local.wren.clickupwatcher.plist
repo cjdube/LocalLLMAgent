@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.wren.clickupwatcher</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__WREN_ROOT__/.venv/bin/python</string>
+        <string>-m</string>
+        <string>tasks.clickup_watcher</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__WREN_ROOT__</string>
+
+    <!-- Five minutes. A tag is a "when you get to it" request, not a reminder,
+         and launchd never runs two copies of one job at once, so a slow poll
+         delays the next rather than overlapping it. -->
+    <key>StartInterval</key>
+    <integer>300</integer>
+
+    <key>StandardOutPath</key>
+    <string>__WREN_ROOT__/logs/clickup_watcher.launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>__WREN_ROOT__/logs/clickup_watcher.launchd.log</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>

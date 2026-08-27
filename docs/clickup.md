@@ -241,6 +241,104 @@ of the tool-calling loop, so the iteration budget resets on every continuation �
 naming the tool in its own result is what stops one request producing four cards
 ([docs/limits.md](limits.md)).
 
+## The tag watcher
+
+Put `wren/research` or `wren/context` on any Task and Wren answers it. The answer
+arrives as a comment on that Task. `tasks/clickup_watcher.py` polls every five
+minutes; nothing tagged means nothing happens and nothing is logged.
+
+| Tag | What she does | What she must not do |
+| --- | --- | --- |
+| `wren/research` | Searches the web, fetches the two or three most useful pages, comments what she found with the URL for each point | — |
+| `wren/context` | Searches your wiki and reads the pages it finds, comments what your notes already say and names each page | Search the web |
+
+They are ordinary ClickUp tags. Type one onto a Task once and it exists.
+
+### Three stages, and why they are three
+
+**Notice** — `tasks/clickup_watcher.py`. One `GET /team/{id}/task` with the tag
+filter. **It never calls the model.** Ollama serves one request at a time and a
+queued request cannot be cancelled ([docs/model-constraints.md](model-constraints.md)),
+so a poller that called the model would silently starve chat every five minutes,
+and the symptom would be "Wren is slow this afternoon", not "the watcher is
+wrong". Several `tags[]` values are OR-ed by ClickUp — verified against the live
+workspace — so this is one call however many tags are watched.
+
+**Decide** — there is no decide stage, on purpose. Compare
+`tasks/_mail_action.py`, which needs a whole tool-free classify step because an
+email arrives with no instruction attached. Here **the tag is the decision**: the
+user chose `wren/research` over `wren/context` with his own hands, and a model
+asked to re-derive that choice can only get it wrong. Python fills in a per-tag
+template with the Task's title and description and hands the text to
+`background.start_job(..., origin="clickup")`.
+
+**Act** — `tasks/bg_worker.py`, the one place already allowed to hold the model
+slot for a long time. It runs the job, pauses on the comment, pushes it to the
+phone, and writes it once the tap comes back.
+
+### Why the tag comes off first
+
+Removing the tag is what stops the same Task being picked up twice, and it
+happens **before** the job is queued, not after.
+
+The other order looks safer and is not. If the removal fails, a queue-first
+watcher has both queued the job *and* left the tag on, so it queues that same
+Task again on the next poll, and on every poll after that — each one taking the
+model slot. Tag-first, a crash in the gap loses one request: no comment appears,
+which the user can see, and re-tagging is one click. **A lost request is cheaper
+than a loop that spends the model slot**, so that is the trade taken.
+
+### What the origin buys
+
+`origin="clickup"` is provenance, not policy — the policy is two functions in
+`agent/toolset.py`, and the daemon passes the origin and never a tool list.
+
+- `confirm_set_for("clickup")` returns `CONSEQUENTIAL_TOOLS | WRITE_TOOLS`:
+  **every write pauses.** The user tagged a Task and walked away, so nothing he
+  has not read may be written. In practice that is the one comment.
+- `excluded_for("clickup")` hands `comment_on_clickup_task` back, which every
+  other origin is denied outright.
+
+That carve-out is the one judgement call in this feature, so it is worth being
+explicit about. `comment_on_clickup_task` is excluded from background runs
+because `read_clickup_task` renders comments into a later prompt, so text a job
+wrote unattended becomes prompt-visible state it authored itself. That reason
+still holds here. It is answered differently rather than waived: **excluded**
+means the model may not do this; **gated** means the user does it and the model
+drafts it. A tagged Task exists to get a comment, so denying the tool would make
+the feature silently do nothing — and gating it puts the text in front of the
+user before it lands. `add_clickup_task` is *not* handed back: a tagged Task asks
+for an answer on itself, and a job that can create Tasks can grow the workspace
+while nobody is looking.
+
+### A dead network is one push, not 288
+
+`notify_failure` does not dedupe, and at a five-minute interval a push per failed
+poll is roughly 288 phone alerts a day for one dead router. So the watcher counts
+consecutive failures in `config/clickup_watcher_state.json` and pushes once, when
+the count reaches 10 — about fifty minutes. A blip is invisible; a real outage is
+one alert. The count resets on the first success, which is logged too, so the log
+says when it came back.
+
+A failed poll exits 0. A poller that cannot reach a third-party service is not a
+broken poller, and launchd is the wrong place to say so.
+
+The watcher is a polling job (`StartInterval`, no `StartCalendarInterval`), so it
+is excluded from the `/map` dashboard's run history on purpose and needs no
+`Starting …` / `… run complete` log lines.
+
+### The two library functions
+
+`tagged_clickup_tasks()` and `remove_clickup_tag()` live in
+`agent/tools/clickup.py` but are **not** chat tools and have no schema. They are
+the only functions in that module that take a ClickUp **id**, which is exactly
+why: an id must never reach the model
+([docs/opaque-identifiers.md](opaque-identifiers.md)). Everything the model can
+call takes a title.
+
+`tagged_clickup_tasks` sets `include_closed`: a tag on a shipped Task is still a
+request.
+
 ## Three things that would each have been a silent bug
 
 **Statuses are per-Space, and they differ.** `--status parked` against the Blog
@@ -281,9 +379,11 @@ and says how much it left out.
   a maintenance cost. Wren's value is connecting the backlog to what else she
   knows, not showing it back — which is what the morning brief's Backlog section
   does instead.
-- **No polling and no scheduled task of its own.** The tools read on demand and
-  the digest rides the morning brief's existing run. The only stored state is
-  the one cursor in `config/clickup_state.json`.
+- **No scheduled task for the *reads*.** The tools read on demand and the digest
+  rides the morning brief's existing run; the only state that costs is the one
+  cursor in `config/clickup_state.json`. The tag watcher above does poll, but it
+  polls for a *request the user made* rather than for news, and it costs one GET
+  every five minutes and no model time at all.
 - **No webhooks.** They need a public HTTPS endpoint; Wren binds `127.0.0.1`
   behind `tailscale serve`.
 - **No ClickUp MCP server.** It is OAuth-only and capped at 50 calls per 24

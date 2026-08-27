@@ -34,9 +34,10 @@ job replicate.
 
 Reversible, *internal* writes to the user's own account (creating a task, recoloring
 an event) do run unattended — a deliberate, bounded exception. The whole policy
-is three editable sets in `agent/toolset.py`: `CONSEQUENTIAL_TOOLS` (require
+is a few editable sets in `agent/toolset.py`: `CONSEQUENTIAL_TOOLS` (require
 approval), `UNATTENDED_EXCLUDED_TOOLS` (don't offer at all), and
-`MAIL_JOB_SAFE_TOOLS` below.
+`MAIL_JOB_SAFE_TOOLS` below — reached through the two origin functions below,
+never read directly by the worker.
 
 ## Where the job came from changes what is gated
 
@@ -45,15 +46,18 @@ an email is not: the words were written by a stranger, so a reversible internal
 write is no longer harmless — an injected email could plant a calendar entry
 silently.
 
-So a job carries an `origin`, set at queue time (`background.start_job`), and the
-worker asks `toolset.confirm_set_for(origin)` which tools to pause on:
+So a job carries an `origin`, set at queue time (`background.start_job`). The
+worker passes it to **two** functions in `agent/toolset.py` and never a tool
+list: `confirm_set_for(origin)` says what pauses for a tap, and
+`excluded_for(origin)` says what is not offered at all.
 
-| Origin | Set at | Gates |
-| --- | --- | --- |
-| `"chat"` (default) | the user asking Wren, via `run_in_background` | `CONSEQUENTIAL_TOOLS` |
-| `"mail"` | `tasks/mail_watcher.py`, on a `Wren/Do` email | everything except `MAIL_JOB_SAFE_TOOLS` |
+| Origin | Set at | Gates | Not offered |
+| --- | --- | --- | --- |
+| `"chat"` (default) | the user asking Wren, via `run_in_background` | `CONSEQUENTIAL_TOOLS` | `UNATTENDED_EXCLUDED_TOOLS` |
+| `"mail"` | `tasks/mail_watcher.py`, on a `Wren/Do` email | everything except `MAIL_JOB_SAFE_TOOLS` | `UNATTENDED_EXCLUDED_TOOLS` |
+| `"clickup"` | `tasks/clickup_watcher.py`, on a `wren/*` tag | every write (`CONSEQUENTIAL_TOOLS \| WRITE_TOOLS`) | the same, less `comment_on_clickup_task` |
 
-Two design points worth keeping:
+Three design points worth keeping:
 
 - **`run_in_background` has no `origin` parameter.** It is the model-facing tool,
   and text in the model's context must not be able to choose its own gates.
@@ -61,6 +65,12 @@ Two design points worth keeping:
   added later is gated for mail jobs until someone classifies it, so forgetting
   costs an extra tap rather than an ungated write. See
   [mail-watch.md](mail-watch.md) for what earns a place on that list.
+- **Excluded and gated are different answers, not degrees of the same one.**
+  Excluded means the model may not do this; gated means the user does it and the
+  model drafts it. The ClickUp row is the only place they diverge: leaving a
+  comment is the entire job, so denying the tool would make the feature silently
+  do nothing — it is gated instead, and the text is on the phone before it
+  lands. See [clickup.md](clickup.md#what-the-origin-buys).
 
 ## Job lifecycle
 

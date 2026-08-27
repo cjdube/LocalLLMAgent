@@ -364,9 +364,38 @@ def confirm_set_for(origin: str) -> frozenset:
     job is driven by text a stranger wrote, so it gates everything not named in
     MAIL_JOB_SAFE_TOOLS — tools registered after this line included. The daemon
     passes an origin, never a tool list: policy that lives in two files drifts."""
-    if origin != "mail":
-        return CONSEQUENTIAL_TOOLS
-    return frozenset(t["function"]["name"] for t in TOOLS) - MAIL_JOB_SAFE_TOOLS
+    if origin == "mail":
+        return frozenset(t["function"]["name"] for t in TOOLS) - MAIL_JOB_SAFE_TOOLS
+    if origin == "clickup":
+        # A tag on a ClickUp Task is a standing request, not a typed sentence:
+        # the user applied it and walked away, so nothing he has not seen may be
+        # written while he is away. Every write pauses, which in practice is the
+        # single comment the job exists to leave.
+        return CONSEQUENTIAL_TOOLS | WRITE_TOOLS
+    return CONSEQUENTIAL_TOOLS
+
+
+def excluded_for(origin: str) -> frozenset:
+    """Which tools a background job may not have AT ALL, given where it came from.
+
+    UNATTENDED_EXCLUDED_TOOLS for everything, with one carve-out:
+    comment_on_clickup_task is given back to a "clickup" job, because leaving
+    that comment is the entire job — the user tagged a Task to get an answer
+    written on it. The reason it is excluded elsewhere still holds (a comment is
+    read back into a later prompt by read_clickup_task), and it is answered a
+    different way here rather than waived: confirm_set_for("clickup") gates
+    every write, so the comment cannot reach ClickUp without the user reading
+    the text on his phone and tapping. Excluded is "the model may not do this";
+    gated is "the user does this, the model drafts it". This is the second.
+
+    add_clickup_task is NOT given back. A tagged Task asks for an answer on
+    itself; a job that can create Tasks can grow the workspace unattended.
+
+    Origin, never a tool list — the same reason confirm_set_for takes one.
+    """
+    if origin != "clickup":
+        return UNATTENDED_EXCLUDED_TOOLS
+    return UNATTENDED_EXCLUDED_TOOLS - {"comment_on_clickup_task"}
 
 
 # --------------------------------------------------------------------------- #

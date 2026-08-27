@@ -132,6 +132,7 @@ from evals import run_eval as _run_eval
 from scribejay import transcripts as _chat_transcripts
 from tasks import _common
 from scribejay import ai_chat_learnings as _ai_chat_learnings
+from tasks import clickup_watcher as _clickup_watcher
 from tasks import mail_watcher as _mail_watcher
 from tasks import morning_brief as _morning_brief
 from tasks import opportunity_digest as _opportunity_digest
@@ -345,6 +346,10 @@ def _isolate_remaining_config_stores(tmp_path, monkeypatch):
     # agent/tools/mail_state.py resolves _STORE_PATH at call time, so this one
     # redirect covers the tasks, their tests, and the CLI.
     monkeypatch.setattr(_mail_state, "_STORE_PATH", tmp_path / "mail_state.json")
+    # The ClickUp tag watcher's consecutive-failure counter. Nothing in it is
+    # precious, but a test that leaves it at 9 makes the next real poll push a
+    # spurious "ClickUp unreachable" to the phone.
+    monkeypatch.setattr(_clickup_watcher, "_STATE_PATH", tmp_path / "clickup_watcher_state.json")
     # wiki.py resolves this env on every _vault() call. the user's real vault is a
     # readable path on this machine, so without the redirect a wiki test that
     # forgets to stub reads his actual notes into a fixture assertion.

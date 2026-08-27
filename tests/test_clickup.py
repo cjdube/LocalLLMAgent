@@ -953,3 +953,99 @@ def test_the_text_being_written_is_shown_before_it_is_approved():
     assert detail("comment_on_clickup_task", title="X", comment="Piper needs 2GB.") == "Piper needs 2GB."
     assert detail("add_clickup_task", title="X", space="wren",
                   description="Rotate the logs.") == "Rotate the logs."
+
+
+# --------------------------------------------------------------------------- #
+# The tag watcher's two library functions. Both take a ClickUp id, which is why
+# neither is a chat tool — see docs/opaque-identifiers.md.
+# --------------------------------------------------------------------------- #
+
+def test_tagged_tasks_asks_for_every_watched_tag_in_one_call(stub):
+    _set_tasks(stub, [_task("Do the thing", tags=["wren/research"])])
+    clickup.tagged_clickup_tasks(["wren/research", "wren/context"])
+    task_calls = [p for path, p in stub.calls if path.endswith("/task")]
+    assert len(task_calls) == 1, "one GET should cover every tag — tags[] is OR-ed"
+    assert task_calls[0]["tags[]"] == ["wren/research", "wren/context"]
+
+
+def test_tagged_tasks_include_shipped_ones(stub):
+    """A tag on a finished Task is still a request. ClickUp hides its Closed
+    group unless asked, so this is the difference between working and silently
+    ignoring anything already marked shipped."""
+    _set_tasks(stub, [_task("Shipped but asked about", status="shipped",
+                            tags=["wren/context"])])
+    found = clickup.tagged_clickup_tasks(["wren/context"])
+    task_calls = [p for path, p in stub.calls if path.endswith("/task")]
+    assert task_calls[0].get("include_closed") == "true"
+    assert [t["title"] for t in found["tasks"]] == ["Shipped but asked about"]
+
+
+def test_tagged_tasks_carry_the_id_the_watcher_needs(stub):
+    _set_tasks(stub, [_task("Do the thing", tags=["wren/research"], task_id="86bbzzz")])
+    found = clickup.tagged_clickup_tasks(["wren/research"])
+    assert found["tasks"][0]["id"] == "86bbzzz"
+
+
+def test_tagged_tasks_report_which_watched_tags_a_task_carries(stub):
+    """`watched` is the watched tags only, in the order given — a Task also
+    wearing unrelated tags must not have them treated as requests, and a Task
+    wearing both watched tags must not depend on ClickUp's ordering."""
+    _set_tasks(stub, [_task("Both", tags=["urgent", "wren/context", "wren/research"])])
+    found = clickup.tagged_clickup_tasks(["wren/research", "wren/context"])
+    assert found["tasks"][0]["watched"] == ["wren/research", "wren/context"]
+
+
+def test_tagged_tasks_ignore_a_tag_that_is_not_watched(stub):
+    _set_tasks(stub, [_task("Other", tags=["urgent"])])
+    found = clickup.tagged_clickup_tasks(["wren/research"])
+    assert found["tasks"][0]["watched"] == []
+
+
+def test_tagged_tasks_carry_the_description_the_job_prompt_needs(stub):
+    _set_tasks(stub, [_task("Do the thing", tags=["wren/research"],
+                            description="Compare the two SDKs")])
+    found = clickup.tagged_clickup_tasks(["wren/research"])
+    assert found["tasks"][0]["description"] == "Compare the two SDKs"
+
+
+def test_tagged_tasks_trim_a_long_description(stub):
+    _set_tasks(stub, [_task("Long", tags=["wren/research"],
+                            description="x " * 4000)])
+    found = clickup.tagged_clickup_tasks(["wren/research"])
+    assert len(found["tasks"][0]["description"]) <= clickup._MAX_DESCRIPTION_CHARS + 1
+
+
+def test_tagged_tasks_degrade_to_an_error_rather_than_raising(stub, monkeypatch):
+    """A dead network must read as an error to the watcher, never as "no tags"
+    — reading it as empty would look like a working, quiet poller forever."""
+    monkeypatch.setattr(clickup, "_get", lambda *a, **k: (_ for _ in ()).throw(
+        requests.ConnectionError("no route to host")))
+    found = clickup.tagged_clickup_tasks(["wren/research"])
+    assert "error" in found
+    assert "tasks" not in found
+
+
+def test_remove_tag_deletes_exactly_that_tag_on_that_task(stub):
+    clickup.remove_clickup_tag("86bbnfav7", "wren/research")
+    assert stub.writes == [("DELETE", "/task/86bbnfav7/tag/wren%2Fresearch", None)]
+
+
+def test_remove_tag_escapes_the_slash_rather_than_making_a_new_path_segment(stub):
+    """`wren/research` unescaped would DELETE /task/<id>/tag/wren/research —
+    a different endpoint that does not exist."""
+    clickup.remove_clickup_tag("86bbnfav7", "wren/research")
+    _, path, _ = stub.writes[0]
+    assert path.count("/") == 4 and "%2F" in path
+
+
+def test_remove_tag_reports_a_failure_instead_of_claiming_success(stub, monkeypatch):
+    monkeypatch.setattr(clickup, "_write", lambda *a, **k: (_ for _ in ()).throw(
+        requests.HTTPError("404 Not Found")))
+    assert "error" in clickup.remove_clickup_tag("86bbnfav7", "wren/research")
+
+
+def test_the_tag_functions_are_not_offered_to_the_model():
+    """They take ClickUp ids. Every model-facing tool here takes a title."""
+    names = {s["function"]["name"] for s in clickup.CLICKUP_TOOL_SCHEMAS}
+    assert "tagged_clickup_tasks" not in names
+    assert "remove_clickup_tag" not in names

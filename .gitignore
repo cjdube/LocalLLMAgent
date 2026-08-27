@@ -25,6 +25,7 @@ config/ai_chat_learnings_state.json
 config/projects.json
 config/mail_state.json
 config/clickup_state.json
+config/clickup_watcher_state.json
 config/.interpreter_id
 config/*.lock
 config/*.corrupt-*
