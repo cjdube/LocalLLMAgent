@@ -9,6 +9,8 @@ returns. No test here makes a network call — `_get` is stubbed in every case.
 """
 
 import json
+import time
+from datetime import datetime, timedelta
 
 import pytest
 import requests
@@ -72,7 +74,11 @@ def stub(monkeypatch):
         if path.endswith("/space"):
             return SPACES
         if path.endswith("/task"):
-            pages = routes["tasks"]
+            # backlog_digest makes two task calls with different windows. The
+            # one that asks for closed items reads its own route when a test
+            # sets one, so a test can give the two calls different answers.
+            key = "tasks_with_done" if params.get("include_closed") and "tasks_with_done" in routes else "tasks"
+            pages = routes[key]
             return pages[min(params.get("page", 0), len(pages) - 1)]
         if "/comment" in path:
             return routes.get("comments", {"comments": []})
@@ -85,6 +91,16 @@ def stub(monkeypatch):
 
 def _set_tasks(stub, tasks, last_page=True):
     stub.routes["tasks"] = [{"tasks": tasks, "last_page": last_page}]
+
+
+def _set_moved(stub, tasks):
+    """The answer to the include_closed call only — what backlog_digest sees as
+    "moved", as opposed to what it sees as currently open."""
+    stub.routes["tasks_with_done"] = [{"tasks": tasks, "last_page": True}]
+
+
+def _ms_days_ago(n: int) -> int:
+    return int((datetime.now() - timedelta(days=n)).timestamp() * 1000)
 
 
 # --------------------------------------------------------------------------- #
@@ -403,3 +419,179 @@ def test_tool_descriptions_deny_pretraining():
     for schema in clickup.BACKLOG_TOOL_SCHEMAS:
         text = schema["function"]["description"].lower()
         assert "not something you know" in text or "only items list_backlog returns exist" in text
+
+
+# --------------------------------------------------------------------------- #
+# backlog_digest — the morning brief's two lists.
+#
+# The status GROUP is read off the Space, never off the task. Every fixture
+# below leans on that: _task() stamps a wrong `type` on the task itself, so a
+# test that passes here can only be reading the Space's status table.
+# --------------------------------------------------------------------------- #
+
+def test_digest_asks_for_closed_items_only_in_the_moved_window(stub):
+    """Two calls, deliberately different: "moved" must include shipped items,
+    "in flight" must not. One filtered call could not do both."""
+    _set_tasks(stub, [])
+    _set_moved(stub, [])
+    clickup.backlog_digest(since_ms=1787000000000)
+
+    task_calls = [params for path, params in stub.calls if path.endswith("/task")]
+    assert len(task_calls) == 2
+    moved, current = task_calls
+    assert moved["include_closed"] == "true"
+    assert moved["date_updated_gt"] == 1787000000000
+    assert "include_closed" not in current
+    assert "date_updated_gt" not in current
+
+
+def test_digest_skips_the_moved_call_entirely_without_a_cursor(stub):
+    """No cursor, no window: asking ClickUp for "everything ever" and calling it
+    yesterday's news is worse than reporting nothing moved."""
+    _set_tasks(stub, [])
+    clickup.backlog_digest(since_ms=None)
+
+    task_calls = [params for path, params in stub.calls if path.endswith("/task")]
+    assert len(task_calls) == 1
+    assert "date_updated_gt" not in task_calls[0]
+
+
+def test_digest_change_labels(stub):
+    """An item created AND shipped inside one window is news because it
+    shipped. Checking "created since" first would label it "added"."""
+    _set_tasks(stub, [])
+    _set_moved(stub, [
+        # Created inside the window and already closed — both rules match.
+        _task("Ship it", status="shipped", updated=str(_ms_days_ago(0)), task_id="a"),
+        _task("Brand new", status="idea", updated=str(_ms_days_ago(0)), task_id="b"),
+        _task("Older, moved on", status="building", updated=str(_ms_days_ago(0)), task_id="c"),
+    ])
+    # date_created on the fixtures is 1787826125157; put the cursor either side.
+    stub.routes["tasks_with_done"][0]["tasks"][2]["date_created"] = "1000000000000"
+    out = clickup.backlog_digest(since_ms=1787826125000)
+
+    by_title = {r["title"]: r["change"] for r in out["moved"]}
+    assert by_title["Ship it"] == "shipped"
+    assert by_title["Brand new"] == "added"
+    assert by_title["Older, moved on"] == "now building"
+
+
+def test_digest_in_flight_is_the_active_group_per_space(stub):
+    """"Active" is ClickUp's own status type, read off each Space. Blog's "in
+    progress" and Wren's "building" are both custom; "idea" and "to do" are
+    not. Matching on status NAMES would need an edit per Space."""
+    _set_tasks(stub, [
+        _task("Wren building", status="building", updated=str(_ms_days_ago(1)), task_id="a"),
+        _task("Wren idea", status="idea", updated=str(_ms_days_ago(1)), task_id="b"),
+        _task("Blog in progress", status="in progress", space="90147349460",
+              updated=str(_ms_days_ago(1)), task_id="c"),
+        _task("Blog to do", status="to do", space="90147349460",
+              updated=str(_ms_days_ago(1)), task_id="d"),
+    ])
+    out = clickup.backlog_digest()
+
+    assert sorted(r["title"] for r in out["in_flight"]) == ["Blog in progress", "Wren building"]
+    assert out["in_flight_total"] == 2
+
+
+def test_digest_caps_both_lists_and_reports_the_true_totals(stub):
+    """The caps are for a human reading over coffee, so the "+N more" line has
+    to come off the real count, not off the capped list."""
+    _set_tasks(stub, [
+        _task(f"Building {i}", status="building", updated=str(_ms_days_ago(i)), task_id=f"c{i}")
+        for i in range(clickup._MAX_IN_FLIGHT + 4)
+    ])
+    _set_moved(stub, [
+        _task(f"Moved {i}", status="shipped", updated=str(_ms_days_ago(i)), task_id=f"m{i}")
+        for i in range(clickup._MAX_MOVED + 3)
+    ])
+    out = clickup.backlog_digest(since_ms=1787826125000)
+
+    assert len(out["moved"]) == clickup._MAX_MOVED
+    assert out["moved_total"] == clickup._MAX_MOVED + 3
+    assert len(out["in_flight"]) == clickup._MAX_IN_FLIGHT
+    assert out["in_flight_total"] == clickup._MAX_IN_FLIGHT + 4
+
+
+def test_digest_sorts_freshest_first(stub):
+    _set_tasks(stub, [
+        _task("Stale", status="building", updated=str(_ms_days_ago(9)), task_id="a"),
+        _task("Fresh", status="building", updated=str(_ms_days_ago(0)), task_id="b"),
+        _task("Middling", status="building", updated=str(_ms_days_ago(3)), task_id="c"),
+    ])
+    out = clickup.backlog_digest()
+    assert [r["title"] for r in out["in_flight"]] == ["Fresh", "Middling", "Stale"]
+
+
+def test_digest_stalest_names_the_quiet_one(stub):
+    _set_tasks(stub, [
+        _task("Fresh", status="building", updated=str(_ms_days_ago(0)), task_id="a"),
+        _task("Forgotten", status="building", updated=str(_ms_days_ago(clickup._STALE_DAYS + 2)),
+              task_id="b"),
+    ])
+    out = clickup.backlog_digest()
+    assert out["stalest"]["title"] == "Forgotten"
+    assert out["stalest"]["days_since_update"] >= clickup._STALE_DAYS
+
+
+def test_digest_stays_quiet_when_nothing_has_actually_gone_stale(stub):
+    """Without the threshold this would name the oldest of three items touched
+    this week — a nag every morning that means nothing."""
+    _set_tasks(stub, [
+        _task("A", status="building", updated=str(_ms_days_ago(0)), task_id="a"),
+        _task("B", status="building", updated=str(_ms_days_ago(2)), task_id="b"),
+    ])
+    assert clickup.backlog_digest()["stalest"] is None
+
+
+def test_digest_does_not_call_a_lone_in_flight_item_stale(stub):
+    """The section has already printed it; naming it again as "untouched
+    longest" is the same line twice."""
+    _set_tasks(stub, [
+        _task("Only one", status="building", updated=str(_ms_days_ago(60)), task_id="a"),
+    ])
+    out = clickup.backlog_digest()
+    assert len(out["in_flight"]) == 1
+    assert out["stalest"] is None
+
+
+def test_digest_stalest_can_be_an_item_the_capped_list_never_showed(stub):
+    """The cap hides the oldest rows, which is exactly where a stalled item
+    hides. Taking the tail before slicing is what makes the callout useful."""
+    _set_tasks(stub, [
+        _task(f"Item {i}", status="building", updated=str(_ms_days_ago(i)), task_id=f"c{i}")
+        for i in range(clickup._MAX_IN_FLIGHT + 3)
+    ])
+    out = clickup.backlog_digest()
+    stalest = out["stalest"]["title"]
+    assert stalest == f"Item {clickup._MAX_IN_FLIGHT + 2}"
+    assert stalest not in [r["title"] for r in out["in_flight"]]
+
+
+def test_digest_cursor_is_taken_before_the_fetch(stub, monkeypatch):
+    """Persisting a cursor stamped AFTER the fetch silently drops anything
+    changed while the brief was running. Never seen again, no error."""
+    seen = {}
+    real = clickup._get
+
+    def _get(path, token, **params):
+        if path.endswith("/task"):
+            # A real fetch takes time; without it both stamps land in the same
+            # millisecond and the assertion below passes either way.
+            time.sleep(0.01)
+            seen["at_fetch"] = int(datetime.now().timestamp() * 1000)
+        return real(path, token, **params)
+
+    monkeypatch.setattr(clickup, "_get", _get)
+    _set_tasks(stub, [])
+    out = clickup.backlog_digest()
+    assert out["checked_ms"] < seen["at_fetch"]
+
+
+def test_digest_degrades_to_an_error_rather_than_killing_the_brief(stub, monkeypatch):
+    """One dead source must never take the whole morning brief with it."""
+    monkeypatch.setattr(clickup, "_get", lambda *a, **k: (_ for _ in ()).throw(
+        requests.exceptions.Timeout("slow")))
+    out = clickup.backlog_digest(since_ms=1787826125000)
+    assert "error" in out
+    assert not out.get("moved")

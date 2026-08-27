@@ -74,6 +74,54 @@ picking one, the same posture as `read_project`.
 It reads finished items too. The listing hides them; a finished item is still a
 perfectly normal thing to ask about.
 
+## The morning brief's Backlog section
+
+`backlog_digest(since_ms)` is a **library function, not a chat tool** — no
+`TOOL_SCHEMA`, deliberately. In chat the same question is answered better by
+`list_backlog`, which can be asked follow-ups; the digest exists to give
+`tasks/morning_brief.py` everything it needs in one call.
+
+It returns two lists, stacked in one section, because each is thin on its own:
+
+- **`moved`** — what changed since the cursor. This is the news, and it is
+  silent on a quiet day. It includes finished items, because "X shipped" is the
+  most interesting thing that can happen to a backlog item and ClickUp's default
+  filter would drop exactly that.
+- **`in_flight`** — what is in ClickUp's **Active** status group right now,
+  freshest first. This reads the same every morning until something changes,
+  which is the point: it is the standing answer to "what am I in the middle
+  of?".
+
+Plus **`stalest`**: the in-flight item untouched longest. It is taken from the
+tail of the sort *before* the cap, so it can name something the visible list
+never showed — which is exactly where a stalled item hides. It is suppressed
+below `_STALE_DAYS` (7) and for a single-item list, so the line only appears
+when it means something rather than nagging about last Friday's work.
+
+**Two fetches, not one filtered locally.** The moved window needs closed items
+and the in-flight list must not have them, so they cannot share a call.
+
+**Active is read off the Space, never off the task.** The status *group* comes
+from each Space's own status table (`open` = Not Started, `custom` = Active,
+`closed` = Done). Matching on status *names* would need an edit here every time
+a Space's workflow changes — and the Wren Space (idea/designed/building/parked/
+shipped) and the others (to do/in progress/complete) already disagree.
+
+**The cursor is stamped before the fetch.** `checked_ms` is taken at the top of
+`backlog_digest`, not after. A cursor stamped afterwards silently drops anything
+changed while the brief was running — never seen again, and no error. It is
+persisted to `config/clickup_state.json` only after the email actually sends,
+and **independently of the starred-repo cursor**: a GitHub outage must not skip a
+day of ClickUp activity, or the other way round. The first ever run has no
+state, so it looks back 24 hours rather than reporting the whole backlog's
+history as "moved yesterday".
+
+**No model call.** The lists are facts and the labels are written in Python, so
+a quiet day produces a short section rather than a paraphrase of nothing. The
+caps (`_MAX_MOVED` 8, `_MAX_IN_FLIGHT` 6) are readability caps for a human
+reading over coffee, not context budgets — and the "+N more" line is counted off
+the true total, so a capped list never reads as the whole backlog.
+
 ## Three things that would each have been a silent bug
 
 **Statuses are per-Space, and they differ.** `--status parked` against the Blog
@@ -112,11 +160,11 @@ and says how much it left out.
 - **No `/backlog` dashboard page.** ClickUp's own interface is better than
   anything rendered here, and a page that re-displays it is duplicated work with
   a maintenance cost. Wren's value is connecting the backlog to what else she
-  knows, not showing it back.
-- **No polling, no watermark, no store, no scheduled task.** These tools read on
-  demand. Change detection is only needed by a later step that reports *what
-  moved since yesterday*; building it now would be a store, a `.gitignore` line,
-  a conftest redirect and a plist earning nothing.
+  knows, not showing it back — which is what the morning brief's Backlog section
+  does instead.
+- **No polling and no scheduled task of its own.** The tools read on demand and
+  the digest rides the morning brief's existing run. The only stored state is
+  the one cursor in `config/clickup_state.json`.
 - **No webhooks.** They need a public HTTPS endpoint; Wren binds `127.0.0.1`
   behind `tailscale serve`.
 - **No ClickUp MCP server.** It is OAuth-only and capped at 50 calls per 24

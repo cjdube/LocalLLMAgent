@@ -34,6 +34,7 @@ from agent.dates import local_timezone
 from agent.loop import complete_text, resolve_backend, warm_model
 from agent.store import atomic_write_json, load_json
 from agent.tools.calendar import get_upcoming_events
+from agent.tools.clickup import backlog_digest
 from agent.tools.email import send_email
 from agent.tools.github_starred import fetch_starred_repos
 from agent.tools.google_tasks import get_tasks_due_soon
@@ -50,6 +51,7 @@ DEFAULT_LOCATION = os.getenv("DEFAULT_LOCATION") or prefs.PREFS.get("location", 
 # How far ahead the Calendar section looks, from config/preferences.json.
 CALENDAR_HOURS_AHEAD = prefs.brief_calendar_hours()
 STARRED_STATE_PATH = _ROOT / "config" / "github_starred_state.json"
+CLICKUP_STATE_PATH = _ROOT / "config" / "clickup_state.json"
 
 # The user's name, for the model-facing send_morning_brief description below.
 _NAME = prefs.user_name()
@@ -81,6 +83,18 @@ def _write_starred_state(last_checked: str) -> None:
     # Atomic write via agent.store — a crash mid-write can't leave a truncated
     # state file behind.
     atomic_write_json(STARRED_STATE_PATH, {"last_checked": last_checked})
+
+
+def _read_clickup_state() -> Optional[int]:
+    # Same single-writer, atomic-write shape as the starred cursor above. Unix
+    # milliseconds, because that is the unit ClickUp's date_updated_gt takes —
+    # stored in the API's own unit so nothing has to convert it back.
+    value = load_json(CLICKUP_STATE_PATH, {}).get("last_checked_ms")
+    return int(value) if value else None
+
+
+def _write_clickup_state(last_checked_ms: int) -> None:
+    atomic_write_json(CLICKUP_STATE_PATH, {"last_checked_ms": int(last_checked_ms)})
 
 _STYLE = """
   <style>
@@ -294,6 +308,55 @@ def _starred_repos_html(repos: list, intro_text: str, error: str = None) -> str:
     return intro_html + "<ul>" + "".join(items) + "</ul>"
 
 
+def _backlog_html(digest: dict, error: str = None) -> str:
+    """Two stacked lists: what moved in ClickUp since the last brief, then what
+    is in flight right now. Both, because they answer different questions and
+    each is thin on its own — "what moved" is silent on a quiet day, and "in
+    flight" reads the same every morning until something changes.
+
+    No model call. The lists are facts and the labels are written here, so a
+    quiet day produces a short section rather than a paraphrase of nothing."""
+    if error:
+        return f'<span class="empty">Backlog unavailable: {html.escape(error)}</span>'
+
+    moved = digest.get("moved") or []
+    in_flight = digest.get("in_flight") or []
+    if not moved and not in_flight:
+        return '<span class="empty">Nothing in flight and nothing moved since yesterday.</span>'
+
+    parts = []
+    if moved:
+        rows = "".join(
+            f'<li>{html.escape(r.get("title", ""))} — '
+            f'<strong>{html.escape(r.get("change", ""))}</strong> '
+            f'<span class="empty">({html.escape(r.get("area", ""))})</span></li>'
+            for r in moved
+        )
+        extra = digest.get("moved_total", len(moved)) - len(moved)
+        more = f'<p class="intro empty">+{extra} more moved.</p>' if extra > 0 else ""
+        parts.append(f'<p class="intro">Moved since yesterday:</p><ul>{rows}</ul>{more}')
+
+    if in_flight:
+        rows = "".join(
+            f'<li>{html.escape(r.get("title", ""))} — '
+            f'{html.escape(r.get("status", ""))} '
+            f'<span class="empty">({html.escape(r.get("area", ""))})</span></li>'
+            for r in in_flight
+        )
+        extra = digest.get("in_flight_total", len(in_flight)) - len(in_flight)
+        more = f'<p class="intro empty">+{extra} more in flight.</p>' if extra > 0 else ""
+        parts.append(f'<p class="intro">In flight:</p><ul>{rows}</ul>{more}')
+
+    stalest = digest.get("stalest")
+    if stalest:
+        days = stalest.get("days_since_update")
+        parts.append(
+            f'<p class="intro overdue">Untouched longest: '
+            f'{html.escape(stalest.get("title", ""))} ({days} days).</p>'
+        )
+    return "".join(parts)
+
+
 def render_brief_html(
     weather: dict,
     events: list,
@@ -305,6 +368,8 @@ def render_brief_html(
     tasks_error: str = None,
     scores: list = None,
     scores_errors: dict = None,
+    backlog: dict = None,
+    backlog_error: str = None,
 ) -> str:
     date_str = datetime.now().strftime("%A, %B %-d")
     # Scores sit with Tasks (what happened) rather than Calendar (what's coming),
@@ -315,6 +380,7 @@ def render_brief_html(
         _section("☀️", "Today at a Glance", html.escape(glance_text) or "No summary available.")
         + _section("\U0001F4C5", "Calendar", _events_html(events))
         + _section("✅", "Tasks Due Soon", _tasks_html(tasks, tasks_error))
+        + _section("\U0001F5C2️", "Backlog", _backlog_html(backlog or {}, backlog_error))
         + (_section("\U0001F3C6", "Scores", scores_body) if scores_body else "")
         + _section("\U0001F324️", "Weather", _weather_html(weather))
         + _section("⭐", "Starred Repos", _starred_repos_html(starred_repos, starred_intro, starred_error))
@@ -436,6 +502,17 @@ def build_and_send_brief(logger: Optional[logging.Logger] = None) -> dict:
             if logger:
                 logger.info(f"starred repos intro -> {starred_intro}")
 
+        # Same cursor shape as the starred window above: the first ever run has
+        # no state, so it looks back 24h rather than reporting the whole
+        # backlog's history as "moved yesterday".
+        backlog_since = _read_clickup_state() or int(
+            (datetime.now(timezone.utc) - timedelta(hours=24)).timestamp() * 1000
+        )
+        backlog = backlog_digest(since_ms=backlog_since)
+        if logger:
+            logger.info(f"backlog_digest(since_ms={backlog_since}) -> {backlog}")
+        backlog_error = backlog.get("error")
+
         body_html = render_brief_html(
             weather,
             events,
@@ -447,6 +524,8 @@ def build_and_send_brief(logger: Optional[logging.Logger] = None) -> dict:
             tasks_error,
             scores,
             scores_errors,
+            backlog,
+            backlog_error,
         )
         result = send_email(
             subject=f"Morning Brief - {today_str()}",
@@ -458,6 +537,10 @@ def build_and_send_brief(logger: Optional[logging.Logger] = None) -> dict:
 
         if "error" not in result and not starred_error:
             _write_starred_state(starred_check_time)
+        # Advanced independently of the starred cursor: a GitHub outage must not
+        # skip a day of ClickUp activity, or the other way round.
+        if "error" not in result and not backlog_error and backlog.get("checked_ms"):
+            _write_clickup_state(backlog["checked_ms"])
 
         if logger:
             logger.info("Morning brief run complete")

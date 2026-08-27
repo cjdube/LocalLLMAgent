@@ -260,3 +260,111 @@ def test_starred_state_round_trips_and_leaves_no_temp_files(tmp_path, monkeypatc
 
     assert mb._read_starred_state() == "2026-07-07T12:00:00+00:00"
     assert list(tmp_path.glob("*.tmp")) == []
+
+
+# --------------------------------------------------------------------------- #
+# Backlog section: two stacked lists, no model call
+# --------------------------------------------------------------------------- #
+
+def _row(title, area="Wren", status="building", change=None, days=1):
+    row = {"title": title, "area": area, "status": status,
+           "updated": "2026-08-26", "days_since_update": days}
+    if change:
+        row["change"] = change
+    return row
+
+
+def test_backlog_html_empty_state_covers_both_halves():
+    """One empty state, not two: a quiet day should read as one short line."""
+    out = mb._backlog_html({})
+    assert "Nothing in flight and nothing moved" in out
+    assert "<ul>" not in out
+
+
+def test_backlog_html_stacks_moved_above_in_flight():
+    out = mb._backlog_html({
+        "moved": [_row("Shipped thing", change="shipped")],
+        "moved_total": 1,
+        "in_flight": [_row("Being built")],
+        "in_flight_total": 1,
+    })
+    assert out.index("Moved since yesterday") < out.index("In flight")
+    assert "Shipped thing" in out and "shipped" in out
+    assert "Being built" in out
+
+
+def test_backlog_html_shows_one_half_when_the_other_is_empty():
+    """A quiet night still has work in flight, and a day with no active items
+    can still have shipped something. Neither heading may appear empty."""
+    moved_only = mb._backlog_html({"moved": [_row("Landed", change="shipped")], "moved_total": 1})
+    assert "Moved since yesterday" in moved_only
+    assert "In flight" not in moved_only
+
+    flight_only = mb._backlog_html({"in_flight": [_row("Building")], "in_flight_total": 1})
+    assert "In flight" in flight_only
+    assert "Moved since yesterday" not in flight_only
+
+
+def test_backlog_html_admits_what_the_caps_dropped():
+    """The counts come from the digest's totals, so a capped list says how much
+    it is hiding instead of reading as the whole backlog."""
+    out = mb._backlog_html({
+        "moved": [_row("A", change="added")],
+        "moved_total": 5,
+        "in_flight": [_row("B")],
+        "in_flight_total": 3,
+    })
+    assert "+4 more moved" in out
+    assert "+2 more in flight" in out
+
+
+def test_backlog_html_omits_the_more_line_when_nothing_was_dropped():
+    out = mb._backlog_html({"in_flight": [_row("B")], "in_flight_total": 1})
+    assert "more in flight" not in out
+
+
+def test_backlog_html_names_the_stalled_item_with_its_age():
+    out = mb._backlog_html({
+        "in_flight": [_row("Fresh", days=0), _row("Forgotten", days=19)],
+        "in_flight_total": 2,
+        "stalest": _row("Forgotten", days=19),
+    })
+    assert "Untouched longest: Forgotten (19 days)" in out
+
+
+def test_backlog_html_has_no_stale_line_when_the_digest_sent_none():
+    out = mb._backlog_html({"in_flight": [_row("Fresh", days=0)], "in_flight_total": 1})
+    assert "Untouched longest" not in out
+
+
+def test_backlog_html_escapes_titles_from_clickup():
+    """Item titles are typed by hand into ClickUp and land in an HTML email."""
+    out = mb._backlog_html({
+        "in_flight": [_row("<script>alert(1)</script>")],
+        "in_flight_total": 1,
+    })
+    assert "<script>" not in out
+    assert "&lt;script&gt;" in out
+
+
+def test_backlog_html_surfaces_a_fetch_error_instead_of_faking_a_quiet_day():
+    """"Nothing moved" and "ClickUp is down" must never look the same."""
+    out = mb._backlog_html({}, error="timeout")
+    assert "Backlog unavailable" in out
+    assert "timeout" in out
+    assert "Nothing in flight" not in out
+
+
+def test_render_brief_always_carries_a_backlog_section():
+    args = ({"error": "n/a"}, [], [], "glance", [], "")
+    assert "Backlog" in mb.render_brief_html(*args)
+
+
+def test_clickup_state_round_trips_and_leaves_no_temp_files(tmp_path, monkeypatch):
+    monkeypatch.setattr(mb, "CLICKUP_STATE_PATH", tmp_path / "clickup_state.json")
+    assert mb._read_clickup_state() is None
+
+    mb._write_clickup_state(1787826143872)
+
+    assert mb._read_clickup_state() == 1787826143872
+    assert list(tmp_path.glob("*.tmp")) == []

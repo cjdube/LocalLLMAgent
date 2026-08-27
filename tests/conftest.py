@@ -307,6 +307,11 @@ def _isolate_remaining_config_stores(tmp_path, monkeypatch):
     monkeypatch.setattr(_push_log, "_STORE_PATH", tmp_path / "push_log.json")
     monkeypatch.setattr(_morning_brief, "STARRED_STATE_PATH",
                         tmp_path / "github_starred_state.json")
+    # The brief's ClickUp cursor. Same shape and same reason as the starred one
+    # above: a test that writes it would move the production window forward, and
+    # the next real brief would silently skip a day of backlog activity.
+    monkeypatch.setattr(_morning_brief, "CLICKUP_STATE_PATH",
+                        tmp_path / "clickup_state.json")
     # The /starred view's cached blurbs. server.py reads this path off the
     # starred_blurbs module at call time, so this one redirect covers both the
     # task that writes it and the API route that reads it.

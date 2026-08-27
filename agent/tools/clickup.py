@@ -21,6 +21,7 @@ Usage:
     python -m agent.tools.clickup areas
     python -m agent.tools.clickup list [--area wren] [--status parked] [--include-done]
     python -m agent.tools.clickup read --title "starred releases"
+    python -m agent.tools.clickup digest [--since-days 1]
 
 Key resolution order: --api-key arg > config/.env file > CLICKUP_API_TOKEN env var
 """
@@ -28,7 +29,7 @@ Key resolution order: --api-key arg > config/.env file > CLICKUP_API_TOKEN env v
 import argparse
 import re
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import requests
@@ -154,7 +155,8 @@ def _resolve_status(chosen: list, status: str) -> str:
     raise _ClickUpError(f"no status '{status}' in {where}. Statuses: {', '.join(known)}")
 
 
-def _fetch_tasks(token: str, team_id: str, space_ids: list, include_done: bool) -> list:
+def _fetch_tasks(token: str, team_id: str, space_ids: list, include_done: bool,
+                 updated_after_ms: int = None) -> list:
     """Every task in the given Spaces, paged. ClickUp excludes its Closed
     status group by default and that is not a rounding error here — 21 of this
     account's 57 items are shipped — so include_done is the difference between
@@ -164,6 +166,8 @@ def _fetch_tasks(token: str, team_id: str, space_ids: list, include_done: bool) 
         params = {"page": page, "space_ids[]": space_ids}
         if include_done:
             params["include_closed"] = "true"
+        if updated_after_ms is not None:
+            params["date_updated_gt"] = int(updated_after_ms)
         body = _get(f"/team/{team_id}/task", token, **params)
         batch = body.get("tasks", [])
         tasks.extend(batch)
@@ -361,6 +365,108 @@ def read_backlog_item(title: str, api_key: str = None) -> dict:
     return item
 
 
+# How many rows the morning brief's two lists are allowed to run to. Both are
+# read by eye over coffee, not by the model, so these are readability caps
+# rather than context budgets — with an honest "+N more" when they bite.
+_MAX_MOVED = 8
+_MAX_IN_FLIGHT = 6
+
+# How long an in-flight item has to sit before the brief calls it out by name.
+# A week: short enough to catch something quietly stalling, long enough that a
+# thing worked on last Friday isn't nagged about on Monday. Below this the
+# callout is omitted entirely rather than repeating the freshest item back.
+_STALE_DAYS = 7
+
+
+def _stalest(in_flight: list) -> dict | None:
+    """The in-flight item untouched longest, but only once it has been quiet for
+    _STALE_DAYS. Returns None below that, and None for a single-item list whose
+    one entry the section has already printed."""
+    if len(in_flight) < 2:
+        return None
+    oldest = in_flight[-1]
+    return oldest if (oldest.get("days_since_update") or 0) >= _STALE_DAYS else None
+
+
+def backlog_digest(since_ms: int = None, api_key: str = None) -> dict:
+    """What the morning brief needs, in one call. A **library function, not a
+    chat tool** — deliberately no TOOL_SCHEMA, because in chat the same question
+    is answered better by list_backlog, which can be asked follow-ups.
+
+    Two halves, because they answer different questions:
+
+    - `moved`: what changed since `since_ms` — the news. Includes finished
+      items, since "X shipped" is the most interesting thing that can happen to
+      a backlog item and excluding the Closed group would drop exactly that.
+    - `in_flight`: what sits in ClickUp's **Active** status group right now,
+      freshest first, plus `stalest` — the one that has gone longest untouched.
+      Active is read from the Space's own status types rather than matched on
+      status names, so this needs no edit when a Space's workflow changes.
+
+    `checked_ms` is the cursor the caller persists after a successful send; it
+    is captured BEFORE the fetch, so activity during the run is never skipped.
+    """
+    token, err = _client(api_key)
+    if err:
+        return err
+
+    checked_ms = int(datetime.now().timestamp() * 1000)
+    try:
+        team_id = _team_id(token)
+        areas = _areas(token, team_id)
+        if not areas:
+            return {"moved": [], "in_flight": [], "stalest": None, "checked_ms": checked_ms}
+        space_ids = [a["id"] for a in areas]
+        # Two calls, not one filtered locally: the moved window needs closed
+        # items and the in-flight list must not have them.
+        moved_raw = _fetch_tasks(token, team_id, space_ids, include_done=True,
+                                 updated_after_ms=since_ms) if since_ms is not None else []
+        current = _fetch_tasks(token, team_id, space_ids, include_done=False)
+    except _ClickUpError as e:
+        return {"error": str(e)}
+    except Exception as e:
+        return http_error(e)
+
+    area_by_id = {a["id"]: a["area"] for a in areas}
+    # ClickUp's own grouping, read off each Space rather than matched on status
+    # names: "open" is Not Started, "custom" is Active, "closed" is Done.
+    group = {(a["id"], st["status"]): st["type"] for a in areas for st in a["statuses"]}
+
+    def _group_of(task):
+        return group.get(((task.get("space") or {}).get("id"),
+                          (task.get("status") or {}).get("status")))
+
+    moved = []
+    for t in moved_raw:
+        row = _row(t, area_by_id)
+        # Finishing beats being created: an item added and shipped inside the
+        # same window is news because it shipped, and "added" would bury that.
+        if _group_of(t) == "closed":
+            row["change"] = row["status"]
+        elif int(t.get("date_created") or 0) > (since_ms or 0):
+            row["change"] = "added"
+        else:
+            row["change"] = f"now {row['status']}"
+        moved.append(row)
+    moved.sort(key=lambda r: r["updated"] or "0000-01-01", reverse=True)
+
+    in_flight = [_row(t, area_by_id) for t in current if _group_of(t) == "custom"]
+    in_flight.sort(key=lambda r: r["updated"] or "0000-01-01", reverse=True)
+
+    return {
+        "moved": moved[:_MAX_MOVED],
+        "moved_total": len(moved),
+        "in_flight": in_flight[:_MAX_IN_FLIGHT],
+        "in_flight_total": len(in_flight),
+        # The tail of the same sort, so it is always one of the in-flight items
+        # even when the list above was capped — and only once it has actually
+        # gone quiet, so the callout means something rather than naming the
+        # thing worked on yesterday.
+        "stalest": _stalest(in_flight),
+        "checked_ms": checked_ms,
+    }
+
+
 LIST_BACKLOG_SCHEMA = {
     "type": "function",
     "function": {
@@ -434,16 +540,21 @@ BACKLOG_TOOL_SCHEMAS = [LIST_BACKLOG_SCHEMA, READ_BACKLOG_ITEM_SCHEMA]
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["areas", "list", "read"])
+    parser.add_argument("command", choices=["areas", "list", "read", "digest"])
     parser.add_argument("--area", default=None)
     parser.add_argument("--status", default=None)
     parser.add_argument("--include-done", dest="include_done", action="store_true")
     parser.add_argument("--title", default=None)
+    parser.add_argument("--since-days", dest="since_days", type=int, default=1,
+                        help="digest: how far back the 'what moved' window looks")
     parser.add_argument("--api-key", dest="api_key", default=None)
     args = parser.parse_args()
 
     if args.command == "areas":
         return print_result(list_areas(args.api_key))
+    if args.command == "digest":
+        since_ms = int((datetime.now() - timedelta(days=args.since_days)).timestamp() * 1000)
+        return print_result(backlog_digest(since_ms, args.api_key))
     if args.command == "read":
         if not args.title:
             parser.error("read needs --title")
