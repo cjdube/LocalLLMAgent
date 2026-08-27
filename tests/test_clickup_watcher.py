@@ -28,6 +28,7 @@ def stub(monkeypatch):
     the ordering IS the guarantee here, so a stub that only recorded counts
     would let the dangerous order pass."""
     events = []
+    prefixes = []
     state = {"tasks": [], "remove_fails": False, "queue_fails": False}
 
     def _tagged(tags, api_key=None):
@@ -42,8 +43,9 @@ def stub(monkeypatch):
             return {"error": "403 Forbidden"}
         return {"removed": tag, "task_id": task_id}
 
-    def _start(task, origin="chat"):
+    def _start(task, origin="chat", comment_prefix=None):
         events.append(("queue", origin, task))
+        prefixes.append(comment_prefix)
         if state["queue_fails"]:
             return {"error": "store is full"}
         return {"id": "job1"}
@@ -64,7 +66,8 @@ def stub(monkeypatch):
         return logger
 
     monkeypatch.setattr(clickup_watcher, "setup_logger", _logger)
-    return type("Stub", (), {"events": events, "state": state})()
+    return type("Stub", (), {"events": events, "state": state,
+                             "prefixes": prefixes})()
 
 
 def _tagged_task(title="Compare the two SDKs", tag="wren-research",
@@ -311,3 +314,34 @@ def test_the_clickup_origin_did_not_loosen_the_other_two():
     assert "comment_on_clickup_task" in toolset.excluded_for("mail")
     assert "comment_on_clickup_task" in toolset.excluded_for("chat")
     assert toolset.confirm_set_for("chat") == toolset.CONSEQUENTIAL_TOOLS
+
+
+# --------------------------------------------------------------------------- #
+# The comment prefix. The comment lands under Craig's own name (it is his
+# token) and the tag that asked for it is gone by then, so without this he
+# cannot tell his own note from Wren's answer.
+# --------------------------------------------------------------------------- #
+
+def test_the_prefix_is_the_tag_that_was_removed():
+    assert clickup_watcher.comment_prefix("wren-research") == "wren-research:"
+    assert clickup_watcher.comment_prefix("wren-context") == "wren-context:"
+
+
+def test_every_watched_tag_can_be_a_prefix():
+    for tag in WATCHED_TAGS:
+        assert clickup_watcher.comment_prefix(tag).startswith(tag)
+
+
+def test_the_job_carries_the_prefix_so_python_can_enforce_it(stub):
+    """Asked for in the prompt AND stamped on in Python. The prompt half is so
+    the approval card shows the line he will actually see; the Python half is
+    what makes it true when the model leaves it out."""
+    stub.state["tasks"] = [_tagged_task()]
+    clickup_watcher.main()
+    assert stub.prefixes == ["wren-research:"]
+
+
+def test_every_template_asks_the_model_for_the_prefix_too():
+    for tag in WATCHED_TAGS:
+        text = " ".join(clickup_watcher.job_text(_tagged_task(tag=tag), tag).split())
+        assert f'STARTS with "{tag}:"' in text

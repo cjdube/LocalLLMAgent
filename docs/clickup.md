@@ -276,6 +276,24 @@ template with the Task's title and description and hands the text to
 slot for a long time. It runs the job, pauses on the comment, pushes it to the
 phone, and writes it once the tap comes back.
 
+### Every comment starts with the tag that asked for it
+
+`wren-research: …` or `wren-context: …`. The comment goes into ClickUp under the
+user's own name — it is his personal token — and by the time it lands the tag is
+already off the Task, so without the prefix there is nothing to tell his own note
+from Wren's answer.
+
+It is done **twice on purpose**. The job prompt asks the model to start with it,
+so the approval card on the phone shows the line that will actually appear. Then
+`tasks/bg_worker.py` stamps it on anyway, case-insensitively and only when it is
+missing. A prefix the model was merely asked for is a prefix the model can drop,
+and the whole point is that it is always there.
+
+The prefix rides on the job (`background.start_job(..., comment_prefix=...)`), so
+it survives the store and is still correct on the poll *after* the approval — a
+different job record by then, rewritten twice. Chat and mail jobs pass nothing
+and their comments are untouched.
+
 ### Why the tag comes off first
 
 Removing the tag is what stops the same Task being picked up twice, and it

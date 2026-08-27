@@ -459,3 +459,58 @@ def test_the_job_tells_the_loop_which_tools_change_state(monkeypatch):
 
     assert bg_worker.main() == 0
     assert seen["stateful_tools"] == toolset.WRITE_TOOLS
+
+
+# --------------------------------------------------------------------------- #
+# The ClickUp comment prefix. A prefix the model was merely ASKED for is a
+# prefix the model can drop, and the comment lands under the user's own name.
+# --------------------------------------------------------------------------- #
+
+def _comment_dispatch(monkeypatch, prefix):
+    """The dispatch bg_worker would use for a clickup job, with the real
+    ClickUp call swapped for a recorder."""
+    written = []
+    monkeypatch.setitem(toolset.DISPATCH, "comment_on_clickup_task",
+                        lambda title=None, comment=None, **kw:
+                        written.append((title, comment)) or {"commented": True})
+    _, dispatch = bg_worker._bg_tools_and_dispatch(
+        "comment on the clickup task", "clickup", None, prefix)
+    return dispatch["comment_on_clickup_task"], written
+
+
+def test_a_comment_the_model_did_not_prefix_gets_the_prefix(monkeypatch):
+    call, written = _comment_dispatch(monkeypatch, "wren-research:")
+    call(title="Blog writer", comment="Found three options.")
+    assert written == [("Blog writer", "wren-research: Found three options.")]
+
+
+def test_a_comment_the_model_did_prefix_is_not_prefixed_twice(monkeypatch):
+    """The job prompt asks for the prefix so the approval card shows the real
+    line, so the common case is that it is already there."""
+    call, written = _comment_dispatch(monkeypatch, "wren-research:")
+    call(title="Blog writer", comment="wren-research: Found three options.")
+    assert written == [("Blog writer", "wren-research: Found three options.")]
+
+
+def test_the_prefix_check_ignores_case(monkeypatch):
+    call, written = _comment_dispatch(monkeypatch, "wren-research:")
+    call(title="Blog writer", comment="Wren-Research: Found three options.")
+    assert written == [("Blog writer", "Wren-Research: Found three options.")]
+
+
+def test_the_title_still_reaches_the_real_tool(monkeypatch):
+    call, written = _comment_dispatch(monkeypatch, "wren-context:")
+    call(title="Some task", comment="Your notes say nothing.")
+    assert written[0][0] == "Some task"
+
+
+def test_a_job_with_no_prefix_uses_the_tool_untouched(monkeypatch):
+    """Chat and mail jobs must not gain a prefix."""
+    written = []
+    monkeypatch.setitem(toolset.DISPATCH, "comment_on_clickup_task",
+                        lambda title=None, comment=None, **kw:
+                        written.append((title, comment)) or {"commented": True})
+    _, dispatch = bg_worker._bg_tools_and_dispatch(
+        "comment on the clickup task", "chat", None, None)
+    assert "comment_on_clickup_task" not in dispatch, \
+        "a chat job should not have this tool at all"

@@ -160,7 +160,24 @@ def _make_load_tools(tools: list[dict], excluded: frozenset):
     return load_tools
 
 
-def _bg_tools_and_dispatch(task_text: str, origin: str, logger):
+def _prefixed_comment(prefix: str):
+    """comment_on_clickup_task, with the job's prefix stamped on the front.
+
+    Idempotent: the job prompt also asks the model for the prefix, so the
+    approval card shows the line the user will actually see. This is what makes
+    it true when the model leaves it out, reformats it, or writes it twice.
+    """
+    def _dispatch(title=None, comment=None, **kw):
+        text = (comment or "").strip()
+        if not text.lower().startswith(prefix.lower()):
+            text = f"{prefix} {text}"
+        return toolset.DISPATCH["comment_on_clickup_task"](title=title, comment=text, **kw)
+
+    return _dispatch
+
+
+def _bg_tools_and_dispatch(task_text: str, origin: str, logger,
+                           comment_prefix: str = None):
     """The tools one job is offered, and how to run them.
 
     **Selected by keyword, not handed over whole.** A job used to get every
@@ -185,6 +202,8 @@ def _bg_tools_and_dispatch(task_text: str, origin: str, logger):
     dispatch = {k: v for k, v in toolset.DISPATCH.items() if k not in excluded}
     dispatch["send_morning_brief"] = brief_dispatch(logger)
     dispatch["load_tools"] = _make_load_tools(tools, excluded)
+    if comment_prefix and "comment_on_clickup_task" in dispatch:
+        dispatch["comment_on_clickup_task"] = _prefixed_comment(comment_prefix)
     if logger:
         logger.info(f"{len(tools)} tools offered"
                     + (f" (groups: {', '.join(sorted(groups))})" if groups else ""))
@@ -294,7 +313,7 @@ def main() -> int:
             _repush_stale_approvals(logger)
             return 0
         tools, dispatch = _bg_tools_and_dispatch(
-            job["task_text"], job.get("origin"), logger)
+            job["task_text"], job.get("origin"), logger, job.get("comment_prefix"))
         _run_job(job, tools, dispatch, logger)
         return 0
     except _transient_exceptions() as e:

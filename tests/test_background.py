@@ -154,3 +154,29 @@ def test_approval_actions_requires_public_url(monkeypatch):
     # The two buttons carry distinct approve/deny tokens.
     assert background.read_approval_token(acts[0]["url"].split("token=")[1])["decision"] == "approve"
     assert background.read_approval_token(acts[1]["url"].split("token=")[1])["decision"] == "deny"
+
+
+def test_comment_prefix_survives_the_store():
+    """The watcher sets it and bg_worker reads it back off the job a poll later,
+    so the round trip through the JSON store is the whole point — passing it
+    into start_job and never persisting it would leave every other test green."""
+    background.start_job("research it", origin="clickup",
+                         comment_prefix="wren-research:")
+    assert background.next_actionable()["comment_prefix"] == "wren-research:"
+
+
+def test_comment_prefix_survives_an_approval_pause():
+    """A clickup job always pauses for a tap before it comments, so the prefix
+    has to still be there on the poll AFTER the approval — which is a different
+    job record, rewritten twice by then."""
+    jid = background.start_job("research it", origin="clickup",
+                               comment_prefix="wren-research:")["id"]
+    background.save_awaiting(jid, [{"role": "user", "content": "x"}],
+                             {"function": {"name": "comment_on_clickup_task"}})
+    background.resolve_job(jid, True)
+    assert background.next_actionable()["comment_prefix"] == "wren-research:"
+
+
+def test_an_ordinary_job_has_no_comment_prefix():
+    background.run_in_background("do a thing")
+    assert background.next_actionable()["comment_prefix"] is None

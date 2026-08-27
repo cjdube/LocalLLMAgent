@@ -625,7 +625,9 @@ searches the web, reads the best two or three pages and comments what she found
 with a URL per point. Put `wren-context` on it and she reads your own wiki notes
 instead and comments what you already have written down, naming the pages. Wren
 takes the tag off when she picks the Task up, which is what stops her doing it
-twice; the answer arrives as a comment after a tap on your phone, so nothing is
+twice, and **every comment she writes starts with the tag that asked for it**
+(`wren-research: …`) — the comment lands under your own name, so without that
+there is nothing to tell your note from her answer; the answer arrives as a comment after a tap on your phone, so nothing is
 written while you are away. Checked every five minutes by
 `tasks/clickup_watcher.py`, which never calls the model — it only notices, and
 hands the work to the background worker. Both tags are ordinary ClickUp tags:

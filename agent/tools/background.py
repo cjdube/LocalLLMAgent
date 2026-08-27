@@ -153,12 +153,19 @@ def run_in_background(task: str) -> dict:
     return start_job(task)
 
 
-def start_job(task: str, origin: str = "chat") -> dict:
+def start_job(task: str, origin: str = "chat", comment_prefix: str = None) -> dict:
     """Queue a background job. `origin` is a provenance flag, not a policy: the
     worker hands it to toolset.confirm_set_for() and toolset.excluded_for(),
     which alone decide what a "mail" or "clickup" job may do without a tap and
     what it may not do at all. Passing a tool list in from the caller instead
-    would put that policy in two files, and they drift."""
+    would put that policy in two files, and they drift.
+
+    `comment_prefix` is stamped on the front of any ClickUp comment the job
+    writes. The comment goes in under the user's own name — it is his token —
+    so without it he cannot tell his own note from Wren's answer, and the tag
+    that would have told him is removed by then. The caller supplies the text
+    and the worker applies it, because a prefix the model was merely asked for
+    is a prefix the model can drop."""
     task = (task or "").strip()
     if not task:
         return {"error": "task description was empty"}
@@ -166,6 +173,7 @@ def start_job(task: str, origin: str = "chat") -> dict:
         "id": uuid4().hex[:8],
         "task_text": task,
         "origin": origin,
+        "comment_prefix": comment_prefix,
         "status": "pending",
         "messages": None,
         "pending_call": None,
