@@ -793,6 +793,58 @@ def clickup_digest(since_ms: int = None, api_key: str = None) -> dict:
     }
 
 
+def backlog_anchors(api_key: str = None) -> dict:
+    """Open items that carry enough text to be matched against, for
+    tasks/daily_synthesis.py. A **library function, not a chat tool** — same
+    reason as clickup_digest: in chat the question is answered better by
+    list_clickup_tasks, which can be asked follow-ups.
+
+    One request no matter how big the backlog is. ClickUp returns a task's
+    description on the list endpoint, so reading each item individually would
+    cost one call per item against a 100/minute budget and learn nothing extra.
+
+    **An item with no description is left out, and `skipped` counts them.** A
+    bare title is not an anchor: it can only match its own spelling, which is
+    the tautology gather_project_anchors already skips a name-only project for.
+    It is worse than useless here — a two-word title is a two-token anchor, and
+    short anchors win that matcher's normalized score, so bare titles would
+    outrank the wiki while saying nothing. 25 of this account's 37 open items
+    were bare when this was written, which is why the count is returned rather
+    than swallowed: a backlog of nothing but titles makes this source contribute
+    nothing, and that reads exactly like a broken matcher.
+
+    Done items are excluded. A shipped idea is not something to be nudged
+    toward."""
+    token, err = _client(api_key)
+    if err:
+        return err
+
+    try:
+        team_id = _team_id(token)
+        spaces = _spaces(token, team_id)
+        if not spaces:
+            return {"items": [], "skipped": 0}
+        tasks = _fetch_tasks(token, team_id, [a["id"] for a in spaces],
+                             include_done=False)
+    except _ClickUpError as e:
+        return {"error": str(e)}
+    except Exception as e:
+        return http_error(e)
+
+    items, skipped = [], 0
+    for task in tasks:
+        description = (task.get("description") or "").strip()
+        if not description:
+            skipped += 1
+            continue
+        items.append({
+            "title": task.get("name", "(no title)"),
+            "description": description[:_MAX_DESCRIPTION_CHARS],
+            "tags": [t.get("name", "") for t in task.get("tags", [])],
+        })
+    return {"items": items, "skipped": skipped}
+
+
 def tagged_clickup_tasks(tags: list, api_key: str = None) -> dict:
     """Tasks currently carrying any of `tags`. A **library function, not a chat
     tool** — no TOOL_SCHEMA, because the only caller is tasks/clickup_watcher.py

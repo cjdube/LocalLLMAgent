@@ -376,6 +376,28 @@ therefore **unremovable**, which meant the watcher warned every five minutes and
 queued nothing, forever. Two guards now: `remove_clickup_tag` refuses a slashed
 name with a message that says why, and a test asserts no watched tag has one.
 
+## The backlog as synthesis anchors
+
+`backlog_anchors()` is the third library function here, alongside `clickup_digest`
+and `tagged_clickup_tasks`, and like them it has no `TOOL_SCHEMA` — in chat the same
+question is answered better by `list_clickup_tasks`, which can be asked follow-ups.
+
+Its one caller is `tasks/daily_synthesis.py`, which matches yesterday's browsing
+against the things he parked: *"you read about columnar storage last night, that is
+the idea you wrote down three weeks ago."* It returns title, description and tags for
+every open item that has a description, plus `skipped` — the count of items that
+have none.
+
+Two facts shape it. **ClickUp returns a task's description on the list endpoint**, so
+the whole backlog costs one request; reading each item individually would be one call
+per item against a 100/minute budget to learn nothing extra. And **an item with no
+description is not an anchor** — 25 of the 37 open items were bare when this shipped,
+and each would have been a two-token anchor outranking the entire vault while saying
+nothing. Why the count is returned rather than swallowed is in
+[daily-synthesis.md](daily-synthesis.md#bare-titles-are-not-anchors).
+
+Done items are excluded. A shipped idea is not something to be nudged toward.
+
 ## Three things that would each have been a silent bug
 
 **Statuses are per-Space, and they differ.** `--status parked` against the Blog

@@ -5,7 +5,8 @@ tasks have populated the day's signals.
 
 The design follows the small-local-model constraint (see CLAUDE.md): Python owns
 the structure. It reads yesterday's browsing + YouTube Likes + AI-agent chats (the
-"signals") and the user's wiki pages + watched/interesting companies (the "anchors"),
+"signals") and the user's projects + wiki pages + parked ClickUp items + watched or
+interesting companies (the "anchors"),
 and does the matching itself via token overlap — the model never rummages through
 everything looking for connections (a small model manufactures those). The model's
 only job is a bounded pass over a short, pre-matched candidate list: keep the
@@ -44,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from agent.loop import complete_text, resolve_backend, warm_model
 from agent import prefs
 from agent.tools.chrome_history import fetch_chrome_history
+from agent.tools.clickup import backlog_anchors
 from agent.tools.learnings_file import read_entry
 from agent.tools.notify import notify
 from agent.tools.nudges import _synthesis_dir, list_nudges
@@ -338,7 +340,12 @@ def _project_tokens(name: str, summary: str, topics: list) -> set:
     never the name.
 
     With `_summary_head` bounding the middle term, a typical project lands near
-    30 and the cap is a backstop rather than the thing doing the work."""
+    30 and the cap is a backstop rather than the thing doing the work.
+
+    Also used by gather_backlog_anchors, where the three terms are a ClickUp
+    task's title, description and tags. Nothing in here is project-specific —
+    it is "identity first, then what it is, then what it is about", which is the
+    same shape both sources have."""
     tokens = []
     for text in (name.replace("-", " "), _summary_head(summary), " ".join(topics)):
         for token in sorted(_tokenize(text)):
@@ -405,10 +412,54 @@ def gather_project_anchors(logger) -> tuple[list, set]:
     return anchors, absorbed
 
 
+def gather_backlog_anchors(logger) -> list:
+    """Parked ClickUp items as anchors. Returns [] on any failure — same
+    per-source guard as every other source here.
+
+    Where gather_project_anchors knows what he *is* building, this knows what he
+    *meant to* build, and that is a different set: an article on columnar
+    storage has nothing to say to a repo that does not exist yet, and plenty to
+    say to the idea he wrote down for it three weeks ago and stopped touching.
+
+    Items with no description never arrive — agent/tools/clickup.py drops them
+    and says how many, for the reason spelled out there. The count is logged
+    rather than ignored, because a backlog of bare titles makes this source
+    contribute nothing at all, and silence here is indistinguishable from a
+    matcher that has broken.
+
+    A description is collapsed to one line before it is used as a summary. Every
+    other source here supplies a one-line summary already; a ClickUp description
+    is whatever he typed into the box, which for a parked idea is usually a
+    multi-paragraph design note. Its newlines land in a prompt whose candidates
+    are one per line, so an unflattened one turns a single numbered candidate
+    into what reads like several, and the last of them is a fragment. Cut with
+    _summary_head for the same reason it exists for wiki pages: a mid-word slice
+    leaves a real token behind."""
+    try:
+        result = backlog_anchors()
+    except Exception as e:
+        logger.warning(f"backlog anchors unavailable: {e}")
+        return []
+    if "error" in result:
+        logger.warning(f"backlog anchors unavailable: {result['error']}")
+        return []
+
+    anchors = []
+    for item in result.get("items", []):
+        description = " ".join(item["description"].split())
+        anchors.append({"kind": "idea you parked", "label": item["title"],
+                        "summary": _summary_head(description),
+                        "tokens": _project_tokens(item["title"], description,
+                                                  item["tags"])})
+    logger.info(f"{len(anchors)} backlog anchor(s), "
+                f"{result.get('skipped', 0)} skipped for having no description")
+    return anchors
+
+
 def gather_anchors(logger) -> list:
     """The user's existing world as {label, summary, tokens} rows: his own projects,
-    wiki pages, and the companies he watches or has marked interesting. Same
-    per-source guard.
+    the ClickUp items he parked, wiki pages, and the companies he watches or has
+    marked interesting. Same per-source guard.
 
     A page contributes its `**Summary**:` line as well as its name. Matching on the
     name alone can only find lexical identity — "the thing you looked at is spelled
@@ -416,6 +467,9 @@ def gather_anchors(logger) -> list:
     reason the early nudges only ever restated the day back at him. The summary is
     what lets "columnar store" reach a page called `duckdb-analytics`."""
     anchors, absorbed = gather_project_anchors(logger)
+    # Next to the projects on purpose: the two answer "building" and "meant to
+    # build", and reading them together is what makes the pairing obvious.
+    anchors += gather_backlog_anchors(logger)
 
     try:
         result = page_summaries()

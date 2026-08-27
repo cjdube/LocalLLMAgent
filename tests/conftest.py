@@ -127,6 +127,7 @@ from agent.tools import projects as _projects_tool
 from agent.tools import push_log as _push_log
 from agent.tools import reminders as _reminders
 from chat import insights as _insights
+from agent.tools import clickup as _clickup
 from chat import wikilint as _wikilint
 from evals import run_eval as _run_eval
 from scribejay import transcripts as _chat_transcripts
@@ -380,6 +381,47 @@ def _block_ntfy_egress(monkeypatch):
     """
     monkeypatch.setattr(_notify.requests, "post", lambda *a, **k: _StubNtfyResponse())
     monkeypatch.setattr(_notify.requests, "get", lambda *a, **k: _StubNtfyResponse())
+
+
+class _ClickUpEgress(BaseException):
+    """Deliberately NOT an Exception. Every function in agent/tools/clickup.py
+    ends in `except Exception: return http_error(e)` — the degrade-don't-crash
+    rule — so an ordinary error raised by the guard below is caught by the very
+    code it is guarding and returned as a tidy {"error": ...}. The test would
+    then pass, having proved nothing, and a real run would still have gone to
+    the network. Inheriting from BaseException is what makes the guard reach the
+    test runner."""
+
+
+@pytest.fixture(autouse=True)
+def _block_clickup_egress(monkeypatch):
+    """Every ClickUp call reaches api.clickup.com with the user's REAL personal
+    token, because _client() loads config/.env at call time and no test
+    environment can spoof that away.
+
+    This raises rather than returning a stub response, which is the opposite of
+    the ntfy guard above and deliberate: ntfy has one shape of reply, ClickUp
+    has a different one per endpoint, so a fake would let a test pass on a fetch
+    it never actually described. Loud is the point — the message names the fix.
+
+    Patched at _get/_write rather than at `requests`, and that is not a style
+    choice: _block_ntfy_egress below patches `_notify.requests`, which is the
+    same module object, and autouse fixtures apply in name order — so a guard
+    written against `_clickup.requests.get` is silently overwritten by the ntfy
+    stub before any test runs. _get/_write belong to this module alone.
+
+    test_clickup.py and test_clickup_watcher.py re-patch these two per test, so
+    neither notices this. It catches what those files cannot: a NEW caller
+    (tasks/daily_synthesis.py was one) whose own test file forgets to stub the
+    source it just added."""
+    def _blocked(*a, **k):
+        raise _ClickUpEgress(
+            "a test reached the live ClickUp API. Stub the caller's clickup "
+            "function (e.g. monkeypatch.setattr(mod, 'backlog_anchors', ...)) "
+            "or clickup._get/_write."
+        )
+    monkeypatch.setattr(_clickup, "_get", _blocked)
+    monkeypatch.setattr(_clickup, "_write", _blocked)
 
 
 @pytest.fixture(autouse=True)

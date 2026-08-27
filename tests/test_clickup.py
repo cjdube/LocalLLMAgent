@@ -1062,3 +1062,81 @@ def test_the_tag_functions_are_not_offered_to_the_model():
     names = {s["function"]["name"] for s in clickup.CLICKUP_TOOL_SCHEMAS}
     assert "tagged_clickup_tasks" not in names
     assert "remove_clickup_tag" not in names
+
+
+# ---- backlog_anchors: the one call tasks/daily_synthesis.py makes ----
+
+
+def test_backlog_anchors_returns_the_three_fields_the_matcher_tokenizes(stub):
+    """title, description and tags — nothing else. The consumer feeds exactly
+    these three into _project_tokens, in that priority order."""
+    _set_tasks(stub, [_task("Blog writer", description="Draft posts from the vault.",
+                            tags=("writing", "llm"))])
+    result = clickup.backlog_anchors()
+    assert result["items"] == [{
+        "title": "Blog writer",
+        "description": "Draft posts from the vault.",
+        "tags": ["writing", "llm"],
+    }]
+
+
+def test_an_item_with_no_description_is_dropped_and_counted(stub):
+    """Both halves matter. Dropping it is the point — a bare title is a
+    two-token anchor that outranks the wiki while saying nothing. Counting it
+    is what stops an all-bare backlog reading as a broken matcher."""
+    _set_tasks(stub, [_task("Blog writer", description="Draft posts."),
+                      _task("Fix logging", description=""),
+                      _task("Another idea", description="   ")])
+    result = clickup.backlog_anchors()
+    assert [i["title"] for i in result["items"]] == ["Blog writer"]
+    assert result["skipped"] == 2, "whitespace-only counts as no description"
+
+
+def test_backlog_anchors_never_asks_for_done_items(stub):
+    """A shipped idea is not something to be nudged toward. ClickUp excludes
+    its Closed group unless asked, so the assertion is that we never ask."""
+    _set_tasks(stub, [_task("Blog writer", description="Draft posts.")])
+    clickup.backlog_anchors()
+    task_calls = [p for path, p in stub.calls if path.endswith("/task")]
+    assert task_calls, "it should have fetched tasks"
+    assert all("include_closed" not in p for p in task_calls)
+
+
+def test_backlog_anchors_reads_every_item_in_one_request(stub):
+    """ClickUp returns the description on the list endpoint. Reading each item
+    individually would be one call per item against a 100/minute budget."""
+    _set_tasks(stub, [_task(f"Idea {n}", description=f"About thing {n}.",
+                            task_id=f"id{n}") for n in range(20)])
+    result = clickup.backlog_anchors()
+    assert len(result["items"]) == 20
+    assert len([p for path, p in stub.calls if path.endswith("/task")]) == 1
+
+
+def test_a_long_description_is_trimmed(stub):
+    _set_tasks(stub, [_task("Blog writer", description="x" * 5000)])
+    assert len(clickup.backlog_anchors()["items"][0]["description"]) == \
+        clickup._MAX_DESCRIPTION_CHARS
+
+
+def test_backlog_anchors_reports_a_failure_instead_of_looking_empty(stub, monkeypatch):
+    """An empty result and a dead API must not look the same to the caller —
+    one is a quiet day, the other is a source that stopped working."""
+    monkeypatch.setattr(clickup, "_get", lambda *a, **k: (_ for _ in ()).throw(
+        requests.HTTPError("500 Server Error")))
+    assert "error" in clickup.backlog_anchors()
+
+
+def test_backlog_anchors_is_not_offered_to_the_model():
+    """Same reason as clickup_digest: in chat, list_clickup_tasks answers this
+    better because it can be asked follow-ups."""
+    names = {s["function"]["name"] for s in clickup.CLICKUP_TOOL_SCHEMAS}
+    assert "backlog_anchors" not in names
+
+
+def test_the_suite_cannot_reach_the_live_clickup_api(monkeypatch):
+    """The conftest backstop, asserted rather than assumed. It fires below
+    _get/_write, so a new caller whose test file forgets to stub its source
+    fails loudly instead of hitting api.clickup.com with the real token."""
+    monkeypatch.setattr(clickup, "resolve_key", lambda name, arg=None: "pk_test")
+    with pytest.raises(BaseException, match="live ClickUp API"):
+        clickup.backlog_anchors()

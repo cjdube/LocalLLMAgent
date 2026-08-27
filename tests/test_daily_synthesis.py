@@ -2,7 +2,7 @@
 main()'s branches: a genuine overlap pushes one nudge, no overlap or a NONE
 model reply pushes nothing, and a dead source degrades instead of crashing.
 
-Every external source (Chrome history, YouTube Likes, wiki, opportunities) and
+Every external source (Chrome history, YouTube Likes, wiki, ClickUp, opportunities) and
 the model/warm/notify calls are stubbed — no Chrome DB, no Google, no model, no
 push. TIMEZONE is pinned so the prior-day window is deterministic, not the
 host's zone (CLAUDE.md: UTC→local day windows)."""
@@ -47,6 +47,7 @@ def stub_sources(monkeypatch):
     monkeypatch.setattr(ds, "fetch_chrome_history", lambda *a, **k: {"sites": []})
     monkeypatch.setattr(ds, "fetch_liked_videos", lambda *a, **k: {"videos": []})
     monkeypatch.setattr(ds, "page_summaries", lambda: {"pages": []})
+    monkeypatch.setattr(ds, "backlog_anchors", lambda: {"items": [], "skipped": 0})
     monkeypatch.setattr(ds, "get_watchlist", lambda: [])
     monkeypatch.setattr(ds, "list_opportunities", lambda **k: {"opportunities": []})
     monkeypatch.setattr(ds, "warm_model", lambda **k: None)
@@ -287,6 +288,7 @@ def test_render_candidates_labels_both_kinds():
 def stub_anchors(monkeypatch):
     monkeypatch.setattr(ds, "get_watchlist", lambda: [])
     monkeypatch.setattr(ds, "list_opportunities", lambda **k: {"opportunities": []})
+    monkeypatch.setattr(ds, "backlog_anchors", lambda: {"items": [], "skipped": 0})
 
 
 def test_gather_anchors_tokenizes_the_page_summary(stub_anchors, monkeypatch):
@@ -327,6 +329,7 @@ def test_company_anchor_needs_its_whole_name(monkeypatch):
     monkeypatch.setattr(ds, "page_summaries", lambda: {"pages": []})
     monkeypatch.setattr(ds, "get_watchlist", lambda: [{"company": "Planet Fitness"}])
     monkeypatch.setattr(ds, "list_opportunities", lambda **k: {"opportunities": []})
+    monkeypatch.setattr(ds, "backlog_anchors", lambda: {"items": [], "skipped": 0})
     anchors = ds.gather_anchors(_LOG)
 
     partial = _sig("chrome", "UX Planet article", {"planet", "article"})
@@ -925,3 +928,128 @@ def test_summary_head_cuts_at_a_word_boundary():
 
 def test_summary_head_leaves_a_short_summary_alone():
     assert ds._summary_head("A cooperative word game.") == "A cooperative word game."
+
+
+# ---- backlog anchors: what he meant to build, not what he is building ----
+
+
+def _backlog(title, description, tags=()):
+    return {"title": title, "description": description, "tags": list(tags)}
+
+
+def test_a_parked_item_becomes_an_anchor_with_all_four_fields(monkeypatch):
+    monkeypatch.setattr(ds, "backlog_anchors", lambda: {"items": [
+        _backlog("Blog writer", "Draft posts from the vault in my own voice.",
+                 ("writing",))], "skipped": 0})
+
+    anchor = ds.gather_backlog_anchors(_LOG)[0]
+    assert anchor["kind"] == "idea you parked"
+    assert anchor["label"] == "Blog writer"
+    assert anchor["summary"] == "Draft posts from the vault in my own voice."
+    assert "vault" in anchor["tokens"]
+
+
+def test_backlog_tokens_come_from_the_title_the_description_and_the_tags(monkeypatch):
+    """All three, in that priority order. The description is what lets the
+    matcher reach an item whose title says nothing — the whole reason bare
+    titles are dropped upstream."""
+    monkeypatch.setattr(ds, "backlog_anchors", lambda: {"items": [
+        _backlog("Blog writer", "Columnar storage for the archive.",
+                 ("duckdb",))], "skipped": 0})
+
+    tokens = ds.gather_backlog_anchors(_LOG)[0]["tokens"]
+    assert "writer" in tokens, "the title"
+    assert "columnar" in tokens, "the description"
+    assert "duckdb" in tokens, "the tags"
+
+
+def test_a_long_backlog_description_is_bounded_in_the_summary(monkeypatch):
+    """The summary is rendered into the model's prompt by render_candidates, so
+    it takes the same bound every other anchor's summary takes — and the same
+    word-boundary cut, so the last thing in the prompt is not half a word."""
+    monkeypatch.setattr(ds, "backlog_anchors",
+                        lambda: {"items": [_backlog("Blog writer", "word " * 400)],
+                                 "skipped": 0})
+
+    summary = ds.gather_backlog_anchors(_LOG)[0]["summary"]
+    assert len(summary) <= ds.MAX_ANCHOR_SUMMARY_CHARS
+    assert summary.endswith("word")
+
+
+def test_a_multi_paragraph_description_is_collapsed_to_one_line(monkeypatch):
+    """render_candidates writes one candidate per line. A ClickUp description is
+    whatever he typed into the box, and for a parked idea that is usually a
+    multi-paragraph design note — its newlines would make one numbered candidate
+    read as several, the last of them a fragment."""
+    monkeypatch.setattr(ds, "backlog_anchors", lambda: {"items": [_backlog(
+        "Wren acts on labeled emails",
+        "The use case this delivers\n\nCraig is in Gmail on his phone.\nHe drags "
+        "one label onto it.\n\nSeconds later Wren replies.")], "skipped": 0})
+
+    summary = ds.gather_backlog_anchors(_LOG)[0]["summary"]
+    assert "\n" not in summary
+    assert "delivers Craig" in summary, "the paragraph break became one space"
+
+
+def test_the_count_of_skipped_bare_titles_is_logged(monkeypatch, caplog):
+    """A backlog of nothing but titles makes this source contribute nothing,
+    which looks exactly like a broken matcher. The count is the only thing that
+    tells those two apart afterwards."""
+    monkeypatch.setattr(ds, "backlog_anchors",
+                        lambda: {"items": [], "skipped": 25})
+
+    with caplog.at_level(logging.INFO):
+        assert ds.gather_backlog_anchors(_LOG) == []
+    assert "0 backlog anchor(s)" in caplog.text
+    assert "25 skipped" in caplog.text
+
+
+def test_an_unreachable_clickup_costs_only_the_backlog_anchors(monkeypatch, caplog):
+    monkeypatch.setattr(ds, "backlog_anchors", lambda: {"error": "HTTP 500"})
+
+    with caplog.at_level(logging.WARNING):
+        assert ds.gather_backlog_anchors(_LOG) == []
+    assert "backlog anchors unavailable" in caplog.text
+    assert "HTTP 500" in caplog.text
+
+
+def test_a_raising_clickup_costs_only_the_backlog_anchors(monkeypatch, caplog):
+    """The error dict is the documented failure, but a source that raises must
+    not take the whole synthesis run down with it."""
+    def _boom():
+        raise RuntimeError("connection reset")
+    monkeypatch.setattr(ds, "backlog_anchors", _boom)
+
+    with caplog.at_level(logging.WARNING):
+        assert ds.gather_backlog_anchors(_LOG) == []
+    assert "backlog anchors unavailable" in caplog.text
+
+
+def test_gather_anchors_includes_the_parked_items(stub_anchors, stub_projects,
+                                                  monkeypatch):
+    monkeypatch.setattr(ds, "page_summaries", lambda: {"pages": []})
+    monkeypatch.setattr(ds, "backlog_anchors", lambda: {"items": [
+        _backlog("Blog writer", "Draft posts from the vault.")], "skipped": 0})
+
+    kinds = [a["kind"] for a in ds.gather_anchors(_LOG)]
+    assert kinds == ["idea you parked"]
+
+
+def test_yesterday_s_reading_reaches_a_parked_idea(stub_anchors, stub_projects,
+                                                   monkeypatch):
+    """The point of the whole step. An article on columnar storage has nothing
+    to say to a repo he has not started, and plenty to say to the idea he wrote
+    down for it and stopped touching."""
+    monkeypatch.setattr(ds, "page_summaries", lambda: {"pages": []})
+    monkeypatch.setattr(ds, "backlog_anchors", lambda: {"items": [
+        _backlog("Archive search", "Columnar storage for the learnings archive.")],
+        "skipped": 0})
+
+    anchors = ds.gather_anchors(_LOG)
+    signal = _sig("chrome", "Why columnar storage is fast",
+                  {"columnar", "storage", "fast"})
+
+    pairs = ds.candidate_pairs([signal], anchors)
+    assert len(pairs) == 1
+    assert pairs[0]["anchor"]["label"] == "Archive search"
+    assert "columnar" in pairs[0]["overlap"]

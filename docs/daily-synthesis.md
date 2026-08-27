@@ -36,6 +36,16 @@ model told to "find connections across everything" manufactures them):
      whose name ends in a date are skipped: those are ObsidianWikiAgent's write-ups of
      the daily logs (49 of 203 pages), so matching yesterday's activity against them
      matches it against the record of itself.
+   - **Parked ClickUp items** (`gather_backlog_anchors` → `backlog_anchors` in
+     `agent/tools/clickup.py`), contributing title, description and tags — the same
+     identity-then-substance shape a project gets, through the same
+     `_project_tokens`. Where the project anchors know what he *is* building, these
+     know what he *meant to* build, and that is a different set: an article on
+     columnar storage has nothing to say to a repo that does not exist yet, and
+     plenty to say to the idea he wrote down for it and stopped touching.
+     One request covers the whole backlog — ClickUp returns a task's description on
+     the list endpoint. Done items are excluded; a shipped idea is not something to
+     be nudged toward. See [Bare titles are not anchors](#bare-titles-are-not-anchors).
    - Companies he watches or has marked *interested* (`get_watchlist`,
      `list_opportunities`), matched on their **whole** name — "Planet Fitness" hit the
      publication "UX Planet" on `planet` and, being a short anchor, outranked the
@@ -197,6 +207,31 @@ real data did, not in anticipation:
   the day's browsing too; before this filter all three echo slots went to one video
   and one article matched against themselves. And a repo page paired with the bullet
   "Committed all changes to `main`" is not a theme.
+
+## Bare titles are not anchors
+
+`backlog_anchors` drops any ClickUp item whose description is empty, and returns the
+count of what it dropped. Both halves matter.
+
+Dropping is the point. A bare title can only match its own spelling — the same
+tautology `gather_project_anchors` skips a name-only project for. It is worse here:
+a two-word title is a two-token anchor, and the score normalizes by the *smaller*
+side, so bare titles would outrank the entire vault while saying nothing. This is the
+"Planet Fitness" failure again, arriving through a new door.
+
+Counting is what stops the silence being ambiguous. 25 of the 37 open items were bare
+when this shipped. A backlog that is all bare titles makes this source contribute
+nothing, which reads exactly like a matcher that has broken — so the count goes in the
+log next to the anchor count, per the degrade-loudly rule in CLAUDE.md.
+
+The practical consequence is a habit, not a setting: **write the description when you
+park something.** An item titled "better logging" gives the matcher nothing; the same
+item describing log rotation, launchd stderr and the 8 MB cap gives it plenty.
+
+Measured over seven real days after it shipped: 6–26 raw pairs a day involve a parked
+idea, of which one reaches the model's shortlist on three of the seven. It neither
+floods the shortlist nor never appears — which is what the two caps ahead of it
+(`_one_per_side`, then `MAX_ANCHOR_CANDIDATES`) are for.
 
 ## Tuning
 
