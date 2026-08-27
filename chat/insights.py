@@ -44,6 +44,31 @@ LAUNCHD_DIR = _ROOT / "launchd"
 LOGS_DIR = _ROOT / "logs"
 VENV_PYTHON = _ROOT / ".venv" / "bin" / "python"
 
+# launchd hands the chat server the bare default PATH (/usr/bin:/bin:/usr/sbin:
+# /sbin), and a run-now child (RunManager.start) inherits it — so a task that
+# shells out to a tool installed under Homebrew, Cargo, or ~/.local/bin failed
+# on demand while the identical scheduled run succeeded, because each task's own
+# plist sets PATH and the server's does not. tasks/starred_installed.py resolved
+# every version command to FileNotFoundError this way. Prepend the same bin dirs
+# the task plists list so run-now matches the scheduled run.
+_CHILD_PATH_DIRS = (
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    str(Path.home() / ".cargo" / "bin"),
+    str(Path.home() / ".local" / "bin"),
+)
+
+
+def _child_env() -> dict:
+    """This process's environment with _CHILD_PATH_DIRS prepended to PATH.
+    Prepended rather than replaced so nothing the server already has is lost."""
+    env = dict(os.environ)
+    current = [p for p in env.get("PATH", "").split(os.pathsep) if p]
+    env["PATH"] = os.pathsep.join(
+        [d for d in _CHILD_PATH_DIRS if d not in current] + current
+    )
+    return env
+
 # A log line the task loggers emit, e.g.
 #   2026-07-06 06:11:41,889 [INFO] Starting morning brief run
 _LINE_RE = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d+) \[(\w+)\] (.*)$")
@@ -948,6 +973,7 @@ class RunManager:
                     cwd=str(_ROOT),
                     stdout=out,
                     stderr=subprocess.STDOUT,
+                    env=_child_env(),
                 )
             self._procs[task_key] = proc
         return {"ok": True, "running": True}

@@ -509,6 +509,49 @@ def test_external_plist_change_invalidates_the_tasks_cache(tmp_path, monkeypatch
     insights._TASKS_CACHE.clear()
 
 
+def test_child_env_prepends_shell_bin_dirs_to_path(monkeypatch):
+    # launchd gives the server a bare PATH; a run-now child that inherited it
+    # could not find a tool under Homebrew or ~/.local/bin, so the same task
+    # failed on demand and succeeded on schedule.
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    dirs = insights._child_env()["PATH"].split(os.pathsep)
+    for d in insights._CHILD_PATH_DIRS:
+        assert d in dirs
+    # Prepended, and nothing the server already had is dropped.
+    assert dirs.index("/opt/homebrew/bin") < dirs.index("/usr/bin")
+    assert "/bin" in dirs
+
+
+def test_child_env_does_not_duplicate_dirs_already_on_path(monkeypatch):
+    monkeypatch.setenv("PATH", f"/opt/homebrew/bin{os.pathsep}/usr/bin")
+    dirs = insights._child_env()["PATH"].split(os.pathsep)
+    assert dirs.count("/opt/homebrew/bin") == 1
+
+
+def test_run_manager_spawns_child_with_the_wider_path(tmp_path, monkeypatch):
+    # The other half of the guarantee: _child_env is right AND start() uses it.
+    _write_plist(tmp_path / "toy.plist", {"Hour": 6, "Minute": 0})
+    monkeypatch.setattr(insights, "LAUNCHD_DIR", tmp_path)
+    monkeypatch.setattr(insights, "LOGS_DIR", tmp_path)
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    insights._TASKS_CACHE.clear()
+
+    seen = {}
+
+    class _FakeProc:
+        def poll(self):
+            return None
+
+    def _fake_popen(args, **kwargs):
+        seen.update(kwargs)
+        return _FakeProc()
+
+    monkeypatch.setattr(insights.subprocess, "Popen", _fake_popen)
+    assert insights.RunManager().start("toy")["ok"] is True
+    assert "/opt/homebrew/bin" in seen["env"]["PATH"].split(os.pathsep)
+    insights._TASKS_CACHE.clear()
+
+
 def test_run_manager_refuses_external_tasks(tmp_path, monkeypatch):
     root = _make_external_root(tmp_path)
     monkeypatch.setattr(insights, "LAUNCHD_DIR", tmp_path / "empty")

@@ -103,12 +103,13 @@ is the *awareness* layer, not an installer.
 The "Installed" column answers the other half of the question — *"and am I behind
 it?"* Only the repos the user actually has installed are tracked, and only because they
 lists them: `config/starred_installed.json` (hand-edited, gitignored) maps a repo
-`full_name` to how to read its installed version. Each entry is one of two shapes:
+`full_name` to how to read its installed version. Each entry is one of three shapes:
 
 ```json
 {
   "rtk-ai/rtk":        {"version_cmd": "rtk --version"},
-  "mattpocock/skills": {"version": "v1.1.0"}
+  "mattpocock/skills": {"plugin": "mattpocock-skills@claude-plugins-official"},
+  "some/thing":        {"version": "v1.1.0"}
 }
 ```
 
@@ -116,8 +117,18 @@ lists them: `config/starred_installed.json` (hand-edited, gitignored) maps a rep
   task runs it (no shell, split with `shlex`, 10-second timeout) and extracts the
   first version-looking token from its output (stdout *or* stderr). The command
   string comes from the user's own config, not from any model or web content.
-- **`version`** — a static version the user maintains by hand. The only option for
-  file-based skills or hosted services with no version command.
+- **`plugin`** — a Claude Code plugin, named by its fully qualified
+  `<plugin>@<marketplace>` key. The version is read straight out of
+  `~/.claude/plugins/installed_plugins.json`, the record Claude Code writes when
+  it installs or updates a plugin (honouring `CLAUDE_CONFIG_DIR` if that is set).
+  Nothing is executed, so there is no `PATH` to go wrong and no timeout to hit —
+  prefer this wherever a starred repo is consumed as a plugin. That file belongs
+  to another program, so every step of the lookup is shape-checked: an unexpected
+  schema degrades to an error string, never a traceback.
+- **`version`** — a static version the user maintains by hand. The last resort,
+  for anything with neither a version command nor an installer record. It goes
+  stale silently — nothing can detect that a hand-typed number is wrong — so
+  reach for one of the two above first.
 
 `tasks/starred_installed.py` resolves every entry and caches
 `{version, source, error, checked_at}` in `config/starred_installed_versions.json`
@@ -134,12 +145,24 @@ it's behind the latest release, and a muted **⚠ check failed** (with the error
 its tooltip) when a `version_cmd` didn't resolve. Repos with no entry simply show
 a blank cell — the column is opt-in per repo.
 
+A failed check does **not** erase a version an earlier run measured. The cache is
+rewritten whole each run, so one bad run — a tool briefly missing from `PATH`,
+say — would otherwise blank every good value at once. The last known version is
+carried over with `"stale": true` beside the error, and the page renders it with
+a muted **⚠** whose tooltip names the failure, so a carried-over number never
+reads as a fresh measurement. The flag clears as soon as the command works again.
+
 `config/starred_installed.example.json` is a copy-and-edit starting point. The
 whole cache is rewritten from the source each run, so removing a repo from the
 config prunes it. Runs **daily** at 8:10 PM via
 `launchd/local.wren.starredinstalled.plist`. The plist sets a
 `PATH` covering Homebrew/Cargo/`~/.local/bin` because launchd's default `PATH` is
 minimal; a tool outside those dirs can be given by absolute path in the config.
+The dashboard's **Run now** does not read that plist — it spawns the task from
+the chat server, whose own plist sets no `PATH` — so `chat/insights.py:_child_env`
+prepends the same bin dirs to every run-now child. Without it, on-demand runs
+failed with `FileNotFoundError` on the very commands the 8:10 PM run resolved
+fine, and (before the carry-over above) blanked the whole column doing it.
 No model, so no backend knob.
 
 ```

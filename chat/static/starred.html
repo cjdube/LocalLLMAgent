@@ -145,7 +145,8 @@ function repoRow(r) {
 // starred_installed.json have one). An amber "update available" badge shows
 // when the server placed that version behind the latest release; a resolution
 // failure (e.g. a broken version command) shows a muted warning with the
-// server-side error as its tooltip. textContent only, never innerHTML.
+// server-side error as its tooltip — or, when a previous run had measured a
+// version, that version plus a stale marker. textContent only, never innerHTML.
 function installedCell(r) {
   const td = el("td", "installed");
   td.dataset.label = "Installed";
@@ -161,6 +162,13 @@ function installedCell(r) {
     return td;
   }
   td.appendChild(document.createTextNode(v));
+  if (r.installed_stale) {
+    // Carried over from the last successful check — say so rather than let a
+    // stale number read as a fresh reading.
+    const w = el("span", "warn", "⚠");
+    w.title = "Last known version; latest check failed: " + (r.installed_error || "");
+    td.appendChild(w);
+  }
   if (r.update_available === true) td.appendChild(el("span", "badge update", "update available"));
   return td;
 }

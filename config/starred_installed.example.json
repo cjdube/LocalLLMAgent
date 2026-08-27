@@ -1,6 +1,6 @@
 {
-  "_comment": "The repos you actually have installed, keyed by GitHub full_name. Copy this to starred_installed.json and edit. Each entry is EITHER a version_cmd Wren runs to read the version, OR a static version you maintain by hand. Only repos listed here get an 'Installed' column on /starred. Delete the _comment key. A command not on the launchd PATH (see the plist) can be an absolute path.",
+  "_comment": "The repos you actually have installed, keyed by GitHub full_name. Copy this to starred_installed.json and edit. Each entry is ONE of: a version_cmd Wren runs to read the version; a plugin key naming a Claude Code plugin ('<plugin>@<marketplace>', read from ~/.claude/plugins/installed_plugins.json, no command run); or a static version you maintain by hand, which goes stale silently — use it only when neither of the others fits. Only repos listed here get an 'Installed' column on /starred. Delete the _comment key. A command not on the launchd PATH (see the plist) can be an absolute path.",
   "rtk-ai/rtk": {"version_cmd": "rtk --version"},
   "colbymchenry/codegraph": {"version_cmd": "codegraph --version"},
-  "mattpocock/skills": {"version": "v1.1.0"}
+  "mattpocock/skills": {"plugin": "mattpocock-skills@claude-plugins-official"}
 }

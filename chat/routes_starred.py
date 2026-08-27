@@ -118,6 +118,7 @@ def api_starred():
         inst = installed.get(r["full_name"]) or {}
         r["installed_version"] = inst.get("version")
         r["installed_error"] = inst.get("error")
+        r["installed_stale"] = bool(inst.get("stale"))
         r["update_available"] = compare_versions(inst.get("version"), (release or {}).get("tag"))
     body = {"repos": repos}
     if fetched_at is not None:
