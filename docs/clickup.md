@@ -243,14 +243,14 @@ naming the tool in its own result is what stops one request producing four cards
 
 ## The tag watcher
 
-Put `wren/research` or `wren/context` on any Task and Wren answers it. The answer
+Put `wren-research` or `wren-context` on any Task and Wren answers it. The answer
 arrives as a comment on that Task. `tasks/clickup_watcher.py` polls every five
 minutes; nothing tagged means nothing happens and nothing is logged.
 
 | Tag | What she does | What she must not do |
 | --- | --- | --- |
-| `wren/research` | Searches the web, fetches the two or three most useful pages, comments what she found with the URL for each point | — |
-| `wren/context` | Searches your wiki and reads the pages it finds, comments what your notes already say and names each page | Search the web |
+| `wren-research` | Searches the web, fetches the two or three most useful pages, comments what she found with the URL for each point | — |
+| `wren-context` | Searches your wiki and reads the pages it finds, comments what your notes already say and names each page | Search the web |
 
 They are ordinary ClickUp tags. Type one onto a Task once and it exists.
 
@@ -267,7 +267,7 @@ workspace — so this is one call however many tags are watched.
 **Decide** — there is no decide stage, on purpose. Compare
 `tasks/_mail_action.py`, which needs a whole tool-free classify step because an
 email arrives with no instruction attached. Here **the tag is the decision**: the
-user chose `wren/research` over `wren/context` with his own hands, and a model
+user chose `wren-research` over `wren-context` with his own hands, and a model
 asked to re-derive that choice can only get it wrong. Python fills in a per-tag
 template with the Task's title and description and hands the text to
 `background.start_job(..., origin="clickup")`.
@@ -338,6 +338,25 @@ call takes a title.
 
 `tagged_clickup_tasks` sets `include_closed`: a tag on a shipped Task is still a
 request.
+
+### The tag name may not contain a slash
+
+The first spelling was `wren/research`, and it shipped broken. ClickUp's **router**
+rejects a slash in this path — `%2F` or raw — with a plain-text `404 page not
+found` that never reaches their code. Measured live on 2026-08-27:
+
+| Tag name | `DELETE /task/{id}/tag/{name}` |
+| --- | --- |
+| `zzznotatag` | 200 |
+| `wren%2Fresearch` | 404 |
+| `wren/research` | 404 |
+| `wren-research`, `wren_research`, `wren:research`, `wren.research` | 200 |
+
+A slash cannot live inside one path segment, so encoding is not a workaround, and
+there is no other endpoint — ClickUp has no "set all tags" call. A slashed tag is
+therefore **unremovable**, which meant the watcher warned every five minutes and
+queued nothing, forever. Two guards now: `remove_clickup_tag` refuses a slashed
+name with a message that says why, and a test asserts no watched tag has one.
 
 ## Three things that would each have been a silent bug
 

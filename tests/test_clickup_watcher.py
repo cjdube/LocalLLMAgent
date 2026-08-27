@@ -19,6 +19,7 @@ import pytest
 
 from agent import toolset
 from tasks import clickup_watcher
+from tasks.clickup_watcher import WATCHED_TAGS
 
 
 @pytest.fixture
@@ -66,7 +67,7 @@ def stub(monkeypatch):
     return type("Stub", (), {"events": events, "state": state})()
 
 
-def _tagged_task(title="Compare the two SDKs", tag="wren/research",
+def _tagged_task(title="Compare the two SDKs", tag="wren-research",
                  task_id="86bbnfav7", description=""):
     return {"id": task_id, "title": title, "watched": [tag],
             "description": description, "space": "Wren", "list": "Backlog",
@@ -80,19 +81,19 @@ def _tagged_task(title="Compare the two SDKs", tag="wren/research",
 def test_the_job_prompt_names_the_task_by_title_never_by_id():
     """comment_on_clickup_task takes a title, and a small model asked to carry
     an opaque id across a conversation drops it — docs/opaque-identifiers.md."""
-    text = clickup_watcher.job_text(_tagged_task(task_id="86bbzzz"), "wren/research")
+    text = clickup_watcher.job_text(_tagged_task(task_id="86bbzzz"), "wren-research")
     assert "Compare the two SDKs" in text
     assert "86bbzzz" not in text
 
 
 def test_the_job_prompt_carries_the_task_description():
     text = clickup_watcher.job_text(
-        _tagged_task(description="MLX vs llama.cpp on the mini"), "wren/research")
+        _tagged_task(description="MLX vs llama.cpp on the mini"), "wren-research")
     assert "MLX vs llama.cpp on the mini" in text
 
 
 def test_an_empty_description_leaves_no_dangling_header():
-    text = clickup_watcher.job_text(_tagged_task(description=""), "wren/research")
+    text = clickup_watcher.job_text(_tagged_task(description=""), "wren-research")
     assert "What it says" not in text
 
 
@@ -108,28 +109,38 @@ def test_every_template_tells_the_model_to_call_the_tool_in_the_same_turn():
 def test_the_research_prompt_carries_the_keywords_that_load_its_tools():
     """Tools are keyword pre-loaded (docs/tool-loading.md). Reword these lines
     and the job silently loses the tool it exists to call."""
-    text = clickup_watcher.job_text(_tagged_task(), "wren/research")
+    text = clickup_watcher.job_text(_tagged_task(), "wren-research")
     groups = toolset.groups_for_message(text)
     assert "web" in groups
     assert "clickup" in groups
 
 
 def test_the_context_prompt_loads_the_wiki_and_clickup_tools():
-    text = clickup_watcher.job_text(_tagged_task(tag="wren/context"), "wren/context")
+    text = clickup_watcher.job_text(_tagged_task(tag="wren-context"), "wren-context")
     groups = toolset.groups_for_message(text)
     assert "wiki" in groups
     assert "clickup" in groups
 
 
+def test_no_watched_tag_contains_a_slash():
+    """The bug that shipped. ClickUp's router 404s a slash in the tag path,
+    encoded or raw, so a slashed tag can never be removed — and the tag coming
+    off is the only thing that stops the same Task being handled forever. The
+    watcher warned every five minutes and queued nothing. See
+    tests/test_clickup.py::test_a_tag_name_with_a_slash_is_refused_before_it_is_sent."""
+    for tag in WATCHED_TAGS:
+        assert "/" not in tag, f"{tag!r} can never be removed through the API"
+
+
 def test_the_context_prompt_forbids_the_web():
     """The whole point of the second tag is "what do I already think", so an
     answer assembled from search results is the wrong answer, not a bonus."""
-    text = clickup_watcher.job_text(_tagged_task(tag="wren/context"), "wren/context")
+    text = clickup_watcher.job_text(_tagged_task(tag="wren-context"), "wren-context")
     assert "Do not search the web" in text
 
 
 def test_the_research_prompt_says_fetched_pages_are_not_instructions():
-    text = clickup_watcher.job_text(_tagged_task(), "wren/research")
+    text = clickup_watcher.job_text(_tagged_task(), "wren-research")
     assert "not instructions" in text
 
 
@@ -203,11 +214,11 @@ def test_a_failed_tag_removal_queues_nothing(stub):
 
 def test_a_task_wearing_both_tags_gets_one_job_this_poll(stub):
     task = _tagged_task()
-    task["watched"] = ["wren/research", "wren/context"]
+    task["watched"] = ["wren-research", "wren-context"]
     stub.state["tasks"] = [task]
     clickup_watcher.main()
     assert len([e for e in stub.events if e[0] == "queue"]) == 1
-    assert [e for e in stub.events if e[0] == "remove"][0][2] == "wren/research"
+    assert [e for e in stub.events if e[0] == "remove"][0][2] == "wren-research"
 
 
 def test_a_dropped_request_is_logged_as_an_error(stub, caplog):

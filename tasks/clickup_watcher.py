@@ -2,7 +2,7 @@
 a StartInterval (5 minutes), so tagging a Task is how you ask Wren for something
 without opening chat.
 
-Tag `wren/research` and she goes and reads the web about it. Tag `wren/context`
+Tag `wren-research` and she goes and reads the web about it. Tag `wren-context`
 and she goes and reads your own notes about it. Either way the answer comes back
 as a comment on the Task, after a tap on the phone.
 
@@ -14,7 +14,7 @@ thinking happens in tasks/bg_worker.py, which is already the one place allowed
 to take that slot for a long time.
 
 **The tag is the decision, so nothing here classifies anything.** The user
-picked `wren/research` over `wren/context` with his own hands; a model asked to
+picked `wren-research` over `wren-context` with his own hands; a model asked to
 re-derive that choice can only get it wrong. Python fills in a per-tag template
 and hands over the text (compare tasks/_mail_action.py, which *does* need a
 decide step because an email arrives with no instruction attached).
@@ -53,6 +53,13 @@ ALERT_AFTER_FAILURES = 10
 
 # The tags that mean something, and the job each one becomes.
 #
+# **No slashes in these names.** `wren/research` was the first spelling and it
+# shipped broken: ClickUp's router rejects a slash in the tag path, encoded or
+# raw, so the tag could never be removed and the watcher warned every five
+# minutes without ever queueing anything. Hyphen, underscore, colon and dot all
+# work. tests/test_clickup_watcher.py asserts this, and remove_clickup_tag
+# refuses a slashed name outright.
+#
 # Each template is a finished instruction, not a topic. The small model gets the
 # Task's own title and description and one thing to do with them, and is told to
 # call the tool **in the same turn** — told to "report back" it writes a lovely
@@ -86,8 +93,8 @@ came from. If my notes say nothing about it, say exactly that. Call the tool in
 the same turn — do not describe the comment instead of writing it."""
 
 WATCHED_TAGS = {
-    "wren/research": _RESEARCH,
-    "wren/context": _CONTEXT,
+    "wren-research": _RESEARCH,
+    "wren-context": _CONTEXT,
 }
 
 

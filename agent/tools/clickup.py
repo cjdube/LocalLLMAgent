@@ -845,7 +845,18 @@ def remove_clickup_tag(task_id: str, tag: str, api_key: str = None) -> dict:
     request, so removing it is how the request is marked as taken. It is a write
     but it carries no free text and no model-chosen value, which is the same
     reason move_clickup_task is allowed in unattended runs.
+
+    **A tag name may not contain a slash.** ClickUp's router rejects it in this
+    path — encoded as %2F or raw — with a plain-text "404 page not found" that
+    never reaches their code, while hyphen, underscore, colon and dot all return
+    200 (measured live 2026-08-27). There is no other way round it: ClickUp has
+    no "set all tags" endpoint. This cost real time as a mystery 404 from a
+    running watcher, so it is refused here with a message that says why rather
+    than sent and lost.
     """
+    if "/" in tag:
+        return {"error": f"ClickUp cannot remove a tag with a slash in it ({tag!r}); "
+                         "rename it to use a hyphen"}
     token, err = _client(api_key)
     if err:
         return err
