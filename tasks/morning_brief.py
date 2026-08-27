@@ -34,7 +34,7 @@ from agent.dates import local_timezone
 from agent.loop import complete_text, resolve_backend, warm_model
 from agent.store import atomic_write_json, load_json
 from agent.tools.calendar import get_upcoming_events
-from agent.tools.clickup import backlog_digest
+from agent.tools.clickup import clickup_digest
 from agent.tools.email import send_email
 from agent.tools.github_starred import fetch_starred_repos
 from agent.tools.google_tasks import get_tasks_due_soon
@@ -329,7 +329,7 @@ def _backlog_html(digest: dict, error: str = None) -> str:
         rows = "".join(
             f'<li>{html.escape(r.get("title", ""))} — '
             f'<strong>{html.escape(r.get("change", ""))}</strong> '
-            f'<span class="empty">({html.escape(r.get("area", ""))})</span></li>'
+            f'<span class="empty">({html.escape(r.get("space", ""))})</span></li>'
             for r in moved
         )
         extra = digest.get("moved_total", len(moved)) - len(moved)
@@ -340,7 +340,7 @@ def _backlog_html(digest: dict, error: str = None) -> str:
         rows = "".join(
             f'<li>{html.escape(r.get("title", ""))} — '
             f'{html.escape(r.get("status", ""))} '
-            f'<span class="empty">({html.escape(r.get("area", ""))})</span></li>'
+            f'<span class="empty">({html.escape(r.get("space", ""))})</span></li>'
             for r in in_flight
         )
         extra = digest.get("in_flight_total", len(in_flight)) - len(in_flight)
@@ -508,9 +508,9 @@ def build_and_send_brief(logger: Optional[logging.Logger] = None) -> dict:
         backlog_since = _read_clickup_state() or int(
             (datetime.now(timezone.utc) - timedelta(hours=24)).timestamp() * 1000
         )
-        backlog = backlog_digest(since_ms=backlog_since)
+        backlog = clickup_digest(since_ms=backlog_since)
         if logger:
-            logger.info(f"backlog_digest(since_ms={backlog_since}) -> {backlog}")
+            logger.info(f"clickup_digest(since_ms={backlog_since}) -> {backlog}")
         backlog_error = backlog.get("error")
 
         body_html = render_brief_html(

@@ -41,7 +41,15 @@ from agent.tools.email import (
     reply_to_thread_tool,
     send_email_tool,
 )
-from agent.tools.clickup import BACKLOG_TOOL_SCHEMAS, list_backlog, read_backlog_item
+from agent.tools.clickup import (
+    CLICKUP_TOOL_SCHEMAS,
+    add_clickup_task,
+    comment_on_clickup_task,
+    list_clickup_spaces,
+    list_clickup_tasks,
+    move_clickup_task,
+    read_clickup_task,
+)
 from agent.tools.evaluate_app import TOOL_SCHEMA as EVALUATE_APP_SCHEMA, evaluate_app
 from agent.tools.evaluate_against import TOOL_SCHEMA as EVALUATE_AGAINST_SCHEMA, evaluate_against
 from agent.tools.games import TOOL_SCHEMA as GAMES_SCHEMA, list_games
@@ -159,7 +167,7 @@ TOOLS = [
     *PROJECT_TOOL_SCHEMAS,
     NUDGES_SCHEMA,
     *MAIL_TOOL_SCHEMAS,
-    *BACKLOG_TOOL_SCHEMAS,
+    *CLICKUP_TOOL_SCHEMAS,
 ]
 
 DISPATCH = {
@@ -228,10 +236,18 @@ DISPATCH = {
     "read_project": read_project,
     # Read-only: reads the dated nudge archive daily_synthesis wrote. Writes nothing.
     "list_nudges": list_nudges,
-    # Read-only against ClickUp. Writes are a later step and will be gated;
-    # nothing here can change anything in the workspace.
-    "list_backlog": list_backlog,
-    "read_backlog_item": read_backlog_item,
+    # Read-only against ClickUp.
+    "list_clickup_spaces": list_clickup_spaces,
+    "list_clickup_tasks": list_clickup_tasks,
+    "read_clickup_task": read_clickup_task,
+    # ClickUp writes. All three in WRITE_TOOLS; the two that write FREE TEXT are
+    # also in UNATTENDED_EXCLUDED_TOOLS, because read_clickup_task hands
+    # descriptions and comments back to the model — so text a background job
+    # writes to ClickUp is read into a future prompt. move_clickup_task writes one value
+    # from a fixed list the Space defines and carries no text, so it stays.
+    "add_clickup_task": add_clickup_task,
+    "move_clickup_task": move_clickup_task,
+    "comment_on_clickup_task": comment_on_clickup_task,
     # Read-only against the mailbox (gmail.readonly). Ungated for the same
     # reason search_web is — but note what they return is untrusted text a
     # stranger wrote, so nothing downstream may treat it as instruction.
@@ -263,6 +279,7 @@ WRITE_TOOLS = frozenset({
     "write_skill", "delete_skill", "set_reminder", "cancel_reminder",
     "run_in_background", "update_opportunity", "watch_company",
     "unwatch_company", "send_opportunity_digest",
+    "add_clickup_task", "move_clickup_task", "comment_on_clickup_task",
 })
 
 # The subset a background run must get phone approval for: external/irreversible
@@ -296,6 +313,13 @@ UNATTENDED_EXCLUDED_TOOLS = frozenset({
     "run_in_background", "list_background_jobs", "get_job_result",
     "remember", "pin", "recategorize", "archive", "forget",
     "write_skill", "delete_skill",
+    # Same criterion as the memory tools, one hop further out: read_clickup_task
+    # renders a ClickUp description and its comments straight into a later Wren
+    # prompt, so free text a background job writes there is durable,
+    # prompt-visible state it authored itself. move_clickup_task is NOT here — it writes
+    # one value out of a fixed list the Space defines, so there is no text to
+    # plant. It stays approval-gated like every other write.
+    "add_clickup_task", "comment_on_clickup_task",
 })
 
 # What a MAIL-originated background job may call without a tap. Everything else
@@ -402,7 +426,8 @@ TOOL_GROUP_NAMES = {
     "projects": ["list_projects", "read_project"],
     "nudges": ["list_nudges"],
     "mail": ["search_mail", "read_email", "reply_to_thread"],
-    "backlog": ["list_backlog", "read_backlog_item"],
+    "clickup": ["list_clickup_spaces", "list_clickup_tasks", "read_clickup_task",
+                "add_clickup_task", "move_clickup_task", "comment_on_clickup_task"],
 }
 
 # One-line "when to load it" blurb per group, rendered into the chat prompt so
@@ -428,11 +453,12 @@ _GROUP_BLURBS = {
     "mail": f"{_NAME}'s email — search his mailbox, read a conversation, and "
             "reply on one. His mail is not something you know: only the messages "
             "the tools return exist, and if a search finds nothing, say so.",
-    "backlog": f"{_NAME}'s backlog in ClickUp — the ideas, bugs and features he is "
-               "tracking per project, what state each one is in, and what has been "
-               "parked. Load this for any ask about his backlog, his ideas, what is "
-               "next, or what he has shipped; the items that exist are only the ones "
-               "the tools return, never ones you recall or would expect.",
+    "clickup": f"{_NAME}'s ClickUp workspace — Spaces, the Lists inside them, and the "
+               "Tasks on those Lists: the ideas, bugs and features he tracks, what "
+               "state each one is in, and what has been parked. Load this for any ask "
+               "about ClickUp, his backlog, his ideas, what is next, or what he has "
+               "shipped; the Spaces, Lists and Tasks that exist are only the ones the "
+               "tools return, never ones you recall or would expect.",
 }
 
 # Case-insensitive word-boundary cues that pre-load a group before the model
@@ -471,9 +497,11 @@ GROUP_KEYWORDS = {
              "message from", "hear back", "heard from"],
     # Deliberately NOT "task": Google Tasks owns that word and its tools are
     # core, so the cue would pre-load this group on every dated-chore question.
-    # "idea" covers ideas, "feature" covers features — cues match as prefixes.
-    "backlog": ["backlog", "clickup", "idea", "parked", "shipped", "roadmap",
-                "feature", "ticket"],
+    # Saying "ClickUp" is the reliable way in, and every tool here is named
+    # for it; the rest are the words he uses for the same things. Cues match
+    # as prefixes, so "idea" covers ideas and "feature" covers features.
+    "clickup": ["clickup", "backlog", "space", "idea", "parked", "shipped",
+                "roadmap", "feature", "ticket"],
 }
 
 # The meta-tool. Not in TOOLS/DISPATCH — its callable is bound per session in
@@ -637,6 +665,17 @@ def describe_call(call: dict) -> str:
         if len(task) > 120:
             task = task[:120].rstrip() + "…"
         return f'Run in the background: "{task}"'
+    if name == "add_clickup_task":
+        where = args.get("space", "?")
+        if args.get("list"):
+            where += f' / {args["list"]}'
+        return f'Add "{args.get("title", "")}" to {where} in ClickUp'
+    if name == "move_clickup_task":
+        return f'Move "{args.get("title", "")}" to {args.get("status", "?")} in ClickUp'
+    if name == "comment_on_clickup_task":
+        # The comment itself is the thing worth approving, so it goes on the
+        # detail line below rather than being truncated into this one.
+        return f'Comment on "{args.get("title", "")}" in ClickUp'
     return f"{name}({json.dumps(args)})"
 
 
@@ -664,4 +703,11 @@ def describe_call_detail(call: dict) -> str | None:
     args = call["function"].get("arguments", {}) or {}
     if name in ("send_email", "reply_to_thread"):
         return _body_preview(args.get("body"))
+    # Same reasoning as the mail sends: the text is the part worth reading
+    # before approving, and for a backlog item the description is what makes it
+    # findable later, so show it rather than only its title.
+    if name == "comment_on_clickup_task":
+        return _body_preview(args.get("comment"))
+    if name == "add_clickup_task":
+        return _body_preview(args.get("description"))
     return None

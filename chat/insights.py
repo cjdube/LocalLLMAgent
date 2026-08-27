@@ -649,7 +649,9 @@ TOOL_SERVICES = {
     "nudges": ("Synthesis Nudges", ["list_nudges"]),
     # Read-only today: the backlog tools only read. Writes are a later step and
     # will land on this same node. See docs/clickup.md.
-    "clickup": ("ClickUp", ["list_backlog", "read_backlog_item"]),
+    "clickup": ("ClickUp", ["list_clickup_spaces", "list_clickup_tasks",
+                           "read_clickup_task", "add_clickup_task",
+                           "move_clickup_task", "comment_on_clickup_task"]),
     "background": ("Background Tasks", ["run_in_background", "list_background_jobs", "get_job_result"]),
     "opportunities": ("Opportunity Scout", ["list_opportunities", "update_opportunity",
                                             "watch_company", "unwatch_company",

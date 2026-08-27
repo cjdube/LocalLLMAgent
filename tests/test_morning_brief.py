@@ -266,8 +266,8 @@ def test_starred_state_round_trips_and_leaves_no_temp_files(tmp_path, monkeypatc
 # Backlog section: two stacked lists, no model call
 # --------------------------------------------------------------------------- #
 
-def _row(title, area="Wren", status="building", change=None, days=1):
-    row = {"title": title, "area": area, "status": status,
+def _row(title, space="Wren", status="building", change=None, days=1):
+    row = {"title": title, "space": space, "status": status,
            "updated": "2026-08-26", "days_since_update": days}
     if change:
         row["change"] = change
