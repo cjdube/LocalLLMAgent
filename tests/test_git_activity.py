@@ -302,3 +302,106 @@ def test_no_resolvable_author_warns_that_everyone_counts(projects, monkeypatch):
 def test_author_prefers_the_configured_identity(monkeypatch):
     monkeypatch.setenv("SCRIBEJAY_GIT_AUTHOR", "work@example.com")
     assert ga.author() == "work@example.com"
+
+
+# --------------------------------------------------------------------------- #
+# Fetching — the commit made on another machine
+#
+# "Another machine" is a second clone of the same bare remote. Nothing here
+# touches the network: every remote is a path under tmp_path.
+# --------------------------------------------------------------------------- #
+
+def _bare(path):
+    path.mkdir(parents=True)
+    _run("git", "init", "-q", "--bare", "-b", "main", cwd=path)
+    return path
+
+
+@pytest.fixture
+def pushed(projects, tmp_path):
+    """One repo under PROJECTS_DIR and one "laptop" clone, sharing a bare remote.
+
+    Each has committed once on the same day, and both have pushed. PROJECTS_DIR's
+    copy has never fetched, so the laptop's commit exists on the remote and
+    nowhere on this disk — exactly the state a 4:55 AM run finds."""
+    bare = _bare(tmp_path / "origin.git")
+    alpha = _repo(projects, "alpha")
+    _commit_at(alpha, "here.py", "x\n", "2026-08-25T10:00:00-04:00")
+    _run("git", "remote", "add", "origin", str(bare), cwd=alpha)
+    _run("git", "push", "-q", "origin", "main", cwd=alpha)
+
+    laptop = tmp_path / "laptop"
+    _run("git", "clone", "-q", str(bare), str(laptop), cwd=tmp_path)
+    _commit_at(laptop, "laptop.py", "y\n", "2026-08-25T18:00:00-04:00")
+    _run("git", "push", "-q", "origin", "main", cwd=laptop)
+    return alpha
+
+
+def test_a_commit_pushed_from_another_machine_is_missed_until_fetch(pushed):
+    # Both halves: the gap is real, and fetch_repos is what closes it. Asserting
+    # only the second half would stay green if the scan had never needed a fetch.
+    before = ga.collect_commits(YESTERDAY, YESTERDAY_END)
+    assert [c["subject"] for c in before["commits"]] == ["add here.py"]
+
+    assert ga.fetch_repos() == {"repos": 1, "failed": 0}
+
+    after = ga.collect_commits(YESTERDAY, YESTERDAY_END)
+    assert sorted(c["subject"] for c in after["commits"]) == ["add here.py", "add laptop.py"]
+
+
+def test_a_commit_on_both_head_and_the_remote_is_counted_once(pushed):
+    # here.py is reachable from HEAD and from origin/main. Scanning both refs must
+    # not double the day's totals.
+    ga.fetch_repos()
+    out = ga.collect_commits(YESTERDAY, YESTERDAY_END)
+    assert out["total_commits"] == 2
+    assert out["repos"] == {"alpha": 2}
+
+
+def test_a_repo_with_no_remote_is_a_no_op_not_a_failure(projects):
+    # Several of the user's checkouts have never been pushed anywhere.
+    repo = _repo(projects, "alpha")
+    _commit_at(repo, "a.py", "x\n", "2026-08-25T10:00:00-04:00")
+
+    logger = _Recorder()
+    assert ga.fetch_repos(logger=logger) == {"repos": 1, "failed": 0}
+    assert logger.warnings == []
+
+
+def test_an_unreachable_remote_fails_without_raising(projects, tmp_path):
+    repo = _repo(projects, "alpha")
+    _commit_at(repo, "a.py", "x\n", "2026-08-25T10:00:00-04:00")
+    _run("git", "remote", "add", "origin", str(tmp_path / "nowhere.git"), cwd=repo)
+
+    logger = _Recorder()
+    assert ga.fetch_repos(logger=logger) == {"repos": 1, "failed": 1}
+    assert any("alpha" in w for w in logger.warnings), logger.warnings
+
+
+def test_a_failed_fetch_still_leaves_the_day_readable(projects, monkeypatch):
+    # GitHub being down must cost the newest commits, never the whole entry.
+    repo = _repo(projects, "alpha")
+    _commit_at(repo, "a.py", "x\n", "2026-08-25T10:00:00-04:00")
+    monkeypatch.setattr(ga, "_fetch", lambda path: False)
+
+    logger = _Recorder()
+    assert ga.fetch_repos(logger=logger)["failed"] == 1
+    assert ga.collect_commits(YESTERDAY, YESTERDAY_END)["total_commits"] == 1
+
+
+def test_fetch_can_never_sit_waiting_for_a_password(projects, monkeypatch):
+    # A 4:55 AM run has no terminal. Without these, a remote asking for a password
+    # or an unknown host key blocks until FETCH_TIMEOUT every single morning.
+    repo = _repo(projects, "alpha")
+    seen = {}
+
+    def fake_run(cmd, **kwargs):
+        seen["env"] = kwargs.get("env") or {}
+        seen["timeout"] = kwargs.get("timeout")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(ga.subprocess, "run", fake_run)
+    assert ga._fetch(repo) is True
+    assert seen["env"]["GIT_TERMINAL_PROMPT"] == "0"
+    assert "BatchMode=yes" in seen["env"]["GIT_SSH_COMMAND"]
+    assert seen["timeout"] == ga.FETCH_TIMEOUT

@@ -1,17 +1,24 @@
-"""Yesterday's commits, read straight out of the local checkouts under PROJECTS_DIR.
+"""Yesterday's commits, read out of the checkouts under PROJECTS_DIR.
 
 The record already said WHEN the user worked (scribejay/claude_time_blocks.py) and
 what he READ (scribejay/daily_chrome_learnings.py). It did not say what he shipped.
-Git is the only source that does, and it is entirely local: no API, no token, no
-network, nothing to rate-limit or fall foul of a terms of service.
+Git is the only source that does.
+
+Reading is local `git log`. One network call sits in front of it: fetch_repos()
+runs `git fetch`, so a commit made on another machine and pushed is on this disk
+before the day is scanned. Without it, work done anywhere but this Mac is absent
+from the page and nothing says so — a quiet day and a lost day look identical.
+The fetch is best-effort: an unreachable remote logs a WARNING and the day is
+still written from what is already here.
 
 Gather-only, the way agent/tools/chrome_history.py is for browsing. No model call
 lives here (that is scribejay/daily_commits.py), and no TOOL_SCHEMA: Wren reads the
 record ScribeJay writes, not the repos themselves.
 
-Scope, deliberately narrow:
-- `HEAD` only, not `--all`. The user commits straight to main; scanning every ref
-  would fold in fetched branches and rebase duplicates for commits he never made.
+Scope:
+- `HEAD` plus the remote-tracking branches (`--remotes`) — where a commit fetched
+  from another machine lands. Not `--all`, which would also fold in stale local
+  branches and tags, whose rebase copies are commits nobody made that day.
 - Merge commits are skipped — they carry no message worth journaling.
 - Author-filtered, because a shared checkout's other contributors are not his day.
 """
@@ -23,6 +30,10 @@ from pathlib import Path
 DEFAULT_PROJECTS_DIR = str(Path.home() / "Projects")
 
 GIT_TIMEOUT = 15
+# Fetching talks to a remote, so it gets its own, longer budget. That budget is
+# the safety net for an unattended 4:55 AM run: with the non-interactive
+# environment in _fetch, a remote that wants a password fails instead of hanging.
+FETCH_TIMEOUT = 30
 
 # Prompt-bounding caps. A heavy day is ~10 commits, so these rarely bind — they
 # exist because one `git log` over a repo with a vendored dependency tree can
@@ -88,6 +99,46 @@ def _repos(root: Path) -> list[Path]:
     return sorted((p for p in root.iterdir() if (p / ".git").exists()), key=lambda p: p.name)
 
 
+def _fetch(path: Path) -> bool:
+    """`git fetch` one repo. True if git returned 0.
+
+    The environment is the whole point. An unattended run must fail rather than
+    block, so terminal prompts are off and ssh runs in batch mode; without those a
+    remote asking for a password or an unknown host key would sit there until the
+    timeout, every single morning. `--no-tags` because nothing here reads tags."""
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    env.setdefault("GIT_SSH_COMMAND", "ssh -oBatchMode=yes")
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(path), "fetch", "--all", "--quiet", "--no-tags"],
+            capture_output=True, text=True, timeout=FETCH_TIMEOUT, env=env,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return proc.returncode == 0
+
+
+def fetch_repos(logger=None) -> dict:
+    """Bring every checkout under PROJECTS_DIR up to date with its remote, so a
+    commit pushed from another machine is on this disk before any day is scanned.
+
+    Returns {"repos": n, "failed": n}. Never raises and never fatal: a repo with no
+    remote is a no-op costing milliseconds, and an unreachable remote logs a
+    WARNING and leaves that checkout exactly as it was — the day is still written
+    from what is already here, which is what the task did before this existed.
+
+    Called once per run rather than once per day: a fortnight backfill needs the
+    objects fetched one time, not fourteen."""
+    repos = _repos(_projects_dir())
+    failed = [repo.name for repo in repos if not _fetch(repo)]
+    if failed and logger:
+        logger.warning(
+            f"git fetch failed in {len(failed)} of {len(repos)} repos "
+            f"({', '.join(failed)}); scanning what is already on disk"
+        )
+    return {"repos": len(repos), "failed": len(failed)}
+
+
 def _parse_log(output: str, repo: str) -> list[dict]:
     """`git log --numstat` output for one repo -> one row per commit.
 
@@ -135,7 +186,10 @@ def collect_commits(start, end, logger=None) -> dict:
 
     Returns {"commits": [...], "repos": {name: count}, "total_commits": n,
     "repos_scanned": n}. A repo whose `git log` fails contributes nothing rather
-    than failing the run — one broken checkout must not cost the whole journal."""
+    than failing the run — one broken checkout must not cost the whole journal.
+
+    Reads only. Getting other machines' commits onto this disk first is
+    fetch_repos()' job, called once per run by scribejay/daily_commits.py."""
     root = _projects_dir()
     repos = _repos(root)
     who = author()
@@ -146,7 +200,10 @@ def collect_commits(start, end, logger=None) -> dict:
         )
 
     args = [
-        "log", "--no-merges",
+        # HEAD and the remote-tracking branches: a commit pushed from another
+        # machine is on origin/<branch> after fetch_repos() and on no local branch
+        # at all. git log de-duplicates, so a commit on both is counted once.
+        "log", "--no-merges", "HEAD", "--remotes",
         f"--since={start.isoformat()}", f"--until={end.isoformat()}",
         f"--pretty=format:{_REC}%h{_FIELD}%aI{_FIELD}%s", "--numstat",
     ]

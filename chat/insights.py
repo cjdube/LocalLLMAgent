@@ -639,9 +639,12 @@ ROUTINE_USES = {
     # calendar = the time blocks it writes; ntfy = notify_failure.
     "claude_time_blocks": ["google_calendar", "ntfy"],
     "daily_chrome_learnings": ["chrome", "gmail", "ntfy"],
-    # Source is the local checkouts under PROJECTS_DIR — the same service node
-    # project_scan reads, and no network at all. gmail = persist_or_email fallback.
-    "daily_commits": ["projects", "gmail", "ntfy"],
+    # projects = the local checkouts it reads, the same node project_scan reads.
+    # github = the `git fetch` in front of that read, which is how a commit pushed
+    # from another machine reaches this disk; the remotes are GitHub, so a dead
+    # GitHub is a real way this task comes up short (it warns and still writes the
+    # day). gmail = persist_or_email fallback.
+    "daily_commits": ["projects", "github", "gmail", "ntfy"],
     # gmail twice over: the SENT metadata is the source, and it is also
     # persist_or_email's fallback. No model, so no other service.
     "daily_correspondence": ["gmail", "ntfy"],

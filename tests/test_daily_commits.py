@@ -24,11 +24,16 @@ def _commit(repo="LocalLLMAgent", subject="Answer an email from the phone"):
 def stubbed_run(monkeypatch):
     """Stub every collaborator for a happy-path run: commits yesterday and a draft
     with a real bullet, so both the pre-check and the all-None post-check pass."""
-    seen = {"persists": [], "drafted": 0, "prompts": [], "warms": 0}
+    seen = {"persists": [], "drafted": 0, "prompts": [], "warms": 0, "fetches": 0}
     monkeypatch.setattr(sys, "argv", ["daily_commits"])  # argparse must not see pytest's argv
     monkeypatch.setattr(dc, "collect_commits",
                         lambda *a, **k: {"commits": [_commit()], "repos": {"LocalLLMAgent": 1},
                                          "total_commits": 1, "repos_scanned": 12})
+    # The one network call in the task. Stubbed here rather than left to run
+    # against the tmp PROJECTS_DIR, so a test can never reach a real remote.
+    monkeypatch.setattr(dc, "fetch_repos",
+                        lambda logger=None: seen.update(fetches=seen["fetches"] + 1)
+                        or {"repos": 12, "failed": 0})
     monkeypatch.setattr(dc, "scribejay_backend", lambda key: None)
     monkeypatch.setattr(dc, "warm_model", lambda **k: seen.update(warms=seen["warms"] + 1))
 
@@ -170,6 +175,30 @@ def test_backfill_is_one_run_in_the_dashboard_history(stubbed_run, monkeypatch, 
     lines = capsys.readouterr().out.splitlines()
     assert sum(1 for line in lines if "Starting daily commits run" in line) == 1
     assert sum(1 for line in lines if _is_run_success(line)) == 1
+
+
+def test_a_run_fetches_before_it_reads(stubbed_run, monkeypatch):
+    # Both halves of the guarantee: the fetch happens at all, and it happens
+    # BEFORE the first collect_commits. Fetching after the read would update the
+    # disk for tomorrow and still write today's page from stale objects.
+    order = []
+    monkeypatch.setattr(dc, "fetch_repos",
+                        lambda logger=None: order.append("fetch") or {"repos": 1, "failed": 0})
+    monkeypatch.setattr(dc, "collect_commits",
+                        lambda *a, **k: order.append("collect") or
+                        {"commits": [_commit()], "repos": {"LocalLLMAgent": 1},
+                         "total_commits": 1, "repos_scanned": 12})
+    assert dc.main() == 0
+    assert order == ["fetch", "collect"]
+
+
+def test_backfill_fetches_once_not_per_day(stubbed_run, monkeypatch):
+    # A fortnight backfill needs the objects on disk one time. Fetching per day
+    # would be fourteen round trips to every remote for identical results.
+    monkeypatch.setattr(sys, "argv", ["daily_commits", "--backfill", "5"])
+    assert dc.main() == 0
+    assert stubbed_run["drafted"] == 5
+    assert stubbed_run["fetches"] == 1
 
 
 def test_backfill_warms_the_model_once_not_per_day(stubbed_run, monkeypatch):

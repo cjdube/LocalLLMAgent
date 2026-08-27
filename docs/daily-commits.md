@@ -6,9 +6,8 @@ the local checkouts under `PROJECTS_DIR`, has the model group them into a short
 
 **Why it exists.** The rest of the record covered time and reading: Claude Code
 hours as calendar blocks, browsing and Likes as daily pages. Nothing said what
-was actually *made*. Git is the only source that does, and unlike every other
-integration here it needs no API, no token and no network — which is also why it
-cannot be rate-limited, deprecated, or fall foul of a terms of service.
+was actually *made*. Git is the only source that does, it needs no API and no
+token, and it cannot be rate-limited or fall foul of a terms of service.
 
 ## What it reads
 
@@ -16,14 +15,38 @@ cannot be rate-limited, deprecated, or fall foul of a terms of service.
 under `PROJECTS_DIR`. Per commit: subject, ISO timestamp, the paths changed, and
 the insertion/deletion counts.
 
-Scope is deliberately narrow:
+Scope:
 
 | Choice | Why |
 |---|---|
-| `HEAD` only, not `--all` | Commits go straight to `main` here. Scanning every ref folds in fetched branches and rebase duplicates for commits nobody made that day. |
+| `HEAD` **and** `--remotes` | A commit pushed from another machine lands on `origin/<branch>` and on no local branch. Not `--all`, which would also fold in stale local branches and tags, whose rebase copies are commits nobody made that day. `git log` de-duplicates, so a commit on both refs is counted once. |
 | `--no-merges` | A merge commit's subject describes bookkeeping, not work. |
 | Author-filtered | A shared checkout's other contributors are not the user's day. |
 | One level under `PROJECTS_DIR` | The same shallow scan `tasks/project_scan.py` does. A nested monorepo checkout is not found. |
+
+## The fetch in front of the read
+
+`fetch_repos()` runs `git fetch --all --quiet --no-tags` in every checkout before
+any day is scanned. This is the task's only network call, and the reason **GitHub**
+appears as an application on ScribeJay's `/map` — the remotes here are GitHub.
+
+It exists because the read is otherwise blind to any machine but this one. Work
+committed and pushed elsewhere — a cloud session, a second Mac, an edit through
+the GitHub web UI — is simply not in the local object store at 4:55 AM, and the
+page that results is indistinguishable from a genuinely quiet day. Nothing alerts
+on it, because nothing failed.
+
+| Property | Behavior |
+|---|---|
+| Once per **run**, not per day | A fortnight backfill fetches one time. Fourteen round trips to every remote would return identical objects. |
+| Never fatal | An unreachable remote logs a WARNING naming the repos and the day is still written from what is on disk. A dead GitHub costs the newest commits, never the entry. |
+| Never blocks | `GIT_TERMINAL_PROMPT=0` and ssh `BatchMode=yes`, plus a `FETCH_TIMEOUT` of 30s per repo. An unattended run has no terminal; without these a remote wanting a password would hang until the timeout every morning. |
+| Read-only where it matters | `fetch` updates remote-tracking refs. It never touches the working tree, a local branch, or an in-progress rebase. |
+
+**Known edge.** A commit that is rebased or cherry-picked, where the pre-rebase
+copy still sits on a local branch and the post-rebase copy on the remote, counts
+twice — two distinct commits, same work. Rare here, since commits go straight to
+`main`, and visible in the page rather than silent.
 
 **Whose commits count.** `SCRIBEJAY_GIT_AUTHOR`, else the machine's global
 `git config user.email`. Set it explicitly when the identity on the commits
@@ -84,6 +107,9 @@ journaling tasks (`persist_or_email`).
 
 **A broken checkout is skipped, not fatal.** One repo whose `git log` fails logs a
 WARNING and contributes nothing; the rest of the day still gets written.
+
+**A failed fetch is warned, not fatal.** See the fetch table above: the day is
+written from the objects already on disk.
 
 ## Running it by hand
 

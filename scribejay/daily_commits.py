@@ -30,7 +30,8 @@ from scribejay.model import backend as scribejay_backend, log_backend
 from agent import prefs
 from agent.activity_log import persist_or_email, prior_day
 from agent.tools.calendar import _local_timezone
-from scribejay.git_activity import collect_commits, compact_commits, render_commits
+from scribejay.git_activity import (collect_commits, compact_commits, fetch_repos,
+                                    render_commits)
 from scribejay.journal import commit_totals_line, has_substantive_content
 from tasks._common import notify_failure, setup_logger
 
@@ -142,6 +143,13 @@ def main() -> int:
     try:
         backend = scribejay_backend("daily_commits")
         log_backend(logger, "daily_commits", backend)
+
+        # Before any day is scanned, and once for the whole run even when that run
+        # is a fortnight backfill. Work done on another machine only reaches this
+        # disk here; without it a day spent elsewhere reads as a quiet day.
+        fetch = fetch_repos(logger=logger)
+        logger.info(f"git fetch: {fetch['repos'] - fetch['failed']} of "
+                    f"{fetch['repos']} repos up to date")
 
         # Warmed on the first day that actually has commits, not up front: a
         # backfill over a quiet fortnight would otherwise load the model to do
