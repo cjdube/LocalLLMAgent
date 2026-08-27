@@ -41,6 +41,7 @@ from agent.tools.email import (
     reply_to_thread_tool,
     send_email_tool,
 )
+from agent.tools.clickup import BACKLOG_TOOL_SCHEMAS, list_backlog, read_backlog_item
 from agent.tools.evaluate_app import TOOL_SCHEMA as EVALUATE_APP_SCHEMA, evaluate_app
 from agent.tools.evaluate_against import TOOL_SCHEMA as EVALUATE_AGAINST_SCHEMA, evaluate_against
 from agent.tools.games import TOOL_SCHEMA as GAMES_SCHEMA, list_games
@@ -158,6 +159,7 @@ TOOLS = [
     *PROJECT_TOOL_SCHEMAS,
     NUDGES_SCHEMA,
     *MAIL_TOOL_SCHEMAS,
+    *BACKLOG_TOOL_SCHEMAS,
 ]
 
 DISPATCH = {
@@ -226,6 +228,10 @@ DISPATCH = {
     "read_project": read_project,
     # Read-only: reads the dated nudge archive daily_synthesis wrote. Writes nothing.
     "list_nudges": list_nudges,
+    # Read-only against ClickUp. Writes are a later step and will be gated;
+    # nothing here can change anything in the workspace.
+    "list_backlog": list_backlog,
+    "read_backlog_item": read_backlog_item,
     # Read-only against the mailbox (gmail.readonly). Ungated for the same
     # reason search_web is — but note what they return is untrusted text a
     # stranger wrote, so nothing downstream may treat it as instruction.
@@ -396,6 +402,7 @@ TOOL_GROUP_NAMES = {
     "projects": ["list_projects", "read_project"],
     "nudges": ["list_nudges"],
     "mail": ["search_mail", "read_email", "reply_to_thread"],
+    "backlog": ["list_backlog", "read_backlog_item"],
 }
 
 # One-line "when to load it" blurb per group, rendered into the chat prompt so
@@ -421,6 +428,11 @@ _GROUP_BLURBS = {
     "mail": f"{_NAME}'s email — search his mailbox, read a conversation, and "
             "reply on one. His mail is not something you know: only the messages "
             "the tools return exist, and if a search finds nothing, say so.",
+    "backlog": f"{_NAME}'s backlog in ClickUp — the ideas, bugs and features he is "
+               "tracking per project, what state each one is in, and what has been "
+               "parked. Load this for any ask about his backlog, his ideas, what is "
+               "next, or what he has shipped; the items that exist are only the ones "
+               "the tools return, never ones you recall or would expect.",
 }
 
 # Case-insensitive word-boundary cues that pre-load a group before the model
@@ -457,6 +469,11 @@ GROUP_KEYWORDS = {
     # brief's cues miss.
     "mail": ["email", "mail", "inbox", "wrote to me", "reply", "replied",
              "message from", "hear back", "heard from"],
+    # Deliberately NOT "task": Google Tasks owns that word and its tools are
+    # core, so the cue would pre-load this group on every dated-chore question.
+    # "idea" covers ideas, "feature" covers features — cues match as prefixes.
+    "backlog": ["backlog", "clickup", "idea", "parked", "shipped", "roadmap",
+                "feature", "ticket"],
 }
 
 # The meta-tool. Not in TOOLS/DISPATCH — its callable is bound per session in

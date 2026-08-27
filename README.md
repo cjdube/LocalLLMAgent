@@ -237,6 +237,7 @@ in — nothing new inherits it automatically.
 | `nudges.py` | Read back the suggestions the daily synthesis has pushed (`list_nudges`, default the last 14 days, capped for the model but always stating the true total — the rendered summary used to count the rows it had already sliced, so it reported the shown count as the real one) from the dated archive in `SYNTHESIS_DIR` — so "what have you been suggesting lately?" is answerable in chat rather than only on the phone push that scrolls away. Read-only. Returns the list already formatted (`summary`) for the model to relay, because asked to retype it the local model paraphrased a nudge that was never sent. Most days produce no nudge at all, so an empty answer is normal, not a fault. Also owns `SYNTHESIS_DIR` for `daily_synthesis`, which writes the archive and reads it back to avoid repeating itself. See [docs/daily-synthesis.md](docs/daily-synthesis.md) |
 | `projects.py` | The user's local checkouts under `PROJECTS_DIR` — `list_projects` and `read_project`. Deterministic, model-free scan of git freshness plus each project's README, CLAUDE.md/AGENTS.md and `docs/` headings, **and nothing else** (never `.env`). Both scan live and merge the nightly cache, so quoted git facts are current, not a day stale. See [docs/projects.md](docs/projects.md) |
 | `google_tasks.py` | Google Tasks read/write (`get_tasks`, `get_tasks_due_soon`, `create_task`, `update_task_due_date`, `complete_task`). The read pages through every list — `maxResults` is a page size, not a total, and unpaged it reported one page as the whole list — then reports the true `task_count` and caps what it hands the model, saying so when it does |
+| `clickup.py` | Read the ClickUp backlog — `list_backlog` (filterable by area and status) and `read_backlog_item` (one item with its description and comments). **Read-only**; nothing here changes anything in ClickUp. An *area* is a ClickUp Space addressed by a slug of its name (`wren`, `vibefoundry`, `blog`), discovered on every call rather than pinned in config, so adding or renaming a Space needs no edit and no restart — and the model never sees a ClickUp id. Statuses are per-Space and really do differ, so a status filter is validated against the chosen area and the error names the ones that exist; without that, `--status parked` against the Blog space returned an empty list, which reads as "nothing is parked". Finished items are excluded by default because ClickUp excludes its Closed group by default (21 of 57 items here), and the result says so. See [docs/clickup.md](docs/clickup.md) |
 | `chrome_history.py` | Read Chrome's local history DB for a date range (`fetch_chrome_history`). A **library module, not a chat tool** — ScribeJay's daily tasks and `daily_synthesis` call it directly with `max_sites=None` for the whole day. It kept the size-budgeted chat shape for those callers, but there is deliberately no `TOOL_SCHEMA`: raw capture is ScribeJay's job now |
 | `youtube.py` | List videos Liked on the authorized YouTube channel in a date range (`fetch_liked_videos`) — title, channel, and description per video, via the YouTube Data API v3 and the shared Google OAuth token. A **library module, not a chat tool**, feeding `scribejay/daily_youtube_learnings.py` and `daily_synthesis` |
 | `memory.py` | Persistent long-term memory in two tiers — `remember` (archival, search-only) and `pin` (active, injected into every system prompt), plus `recall`, `recategorize`, `archive`, `forget`. Stored in `config/wren_memory.json`; the writes are confirmation-gated. See [docs/memory.md](docs/memory.md) |
@@ -588,6 +589,18 @@ same `agent/tools/opportunities.py` store functions the chat tools use, so the
 page and chat can't drift apart; each digest email footer links here via
 `WREN_PUBLIC_URL`. Triage semantics, how retired openings are handled, and the
 rest of the scout's lifecycle: [docs/opportunity-scout.md](docs/opportunity-scout.md).
+
+### Backlog
+
+Wren can read the ClickUp backlog — the ideas, bugs and features tracked per
+project — from chat: "what's parked on the Wren backlog?", "what did I ship this
+week?", "read me the Gemini notebook one". Two read-only tools (`list_backlog`,
+`read_backlog_item`) in the deferred `backlog` tool group; set
+`CLICKUP_API_TOKEN` in `config/.env` and nothing else. There is deliberately **no
+`/backlog` page** — ClickUp's own interface is better than anything rendered
+here, and Wren's value is connecting the backlog to what else she knows.
+Writing to ClickUp is a separate, later step and will be confirmation-gated.
+See [docs/clickup.md](docs/clickup.md).
 
 ### Starred
 

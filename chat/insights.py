@@ -647,6 +647,9 @@ TOOL_SERVICES = {
     # A vault directory (SYNTHESIS_DIR), not a hosted service. Written by
     # daily_synthesis, read back by list_nudges.
     "nudges": ("Synthesis Nudges", ["list_nudges"]),
+    # Read-only today: the backlog tools only read. Writes are a later step and
+    # will land on this same node. See docs/clickup.md.
+    "clickup": ("ClickUp", ["list_backlog", "read_backlog_item"]),
     "background": ("Background Tasks", ["run_in_background", "list_background_jobs", "get_job_result"]),
     "opportunities": ("Opportunity Scout", ["list_opportunities", "update_opportunity",
                                             "watch_company", "unwatch_company",
