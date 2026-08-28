@@ -1140,3 +1140,104 @@ def test_the_suite_cannot_reach_the_live_clickup_api(monkeypatch):
     monkeypatch.setattr(clickup, "resolve_key", lambda name, arg=None: "pk_test")
     with pytest.raises(BaseException, match="live ClickUp API"):
         clickup.backlog_anchors()
+
+
+# ---- closed_tasks: the day's record of work that leaves no commit ----
+
+
+from datetime import date as _date
+from zoneinfo import ZoneInfo
+from agent import toolset
+
+DAY = _date(2026, 8, 26)
+
+
+def _closed_task(name="Proposal for Acme", space_id="s1", status="complete",
+                 status_type="closed", closed="2026-08-26T14:00:00-04:00",
+                 updated=None):
+    def _ms(iso):
+        return None if iso is None else int(
+            datetime.fromisoformat(iso).timestamp() * 1000)
+    return {"name": name, "space": {"id": space_id},
+            "list": {"name": "Backlog"},
+            "status": {"status": status, "type": status_type},
+            "date_closed": _ms(closed),
+            "date_updated": _ms(updated or closed)}
+
+
+def _stub_clickup(monkeypatch, tasks, spaces=(("s1", "Vibe Foundry"),)):
+    """Stub the two helpers closed_tasks reaches through, and hand back the
+    params the task fetch was called with so a test can assert on them."""
+    seen = {}
+    monkeypatch.setattr(clickup, "_client", lambda k: ("pk_x", None))
+    monkeypatch.setattr(clickup, "_team_id", lambda t: "team1")
+    monkeypatch.setattr(clickup, "_spaces",
+                        lambda t, tid: [{"id": i, "name": n} for i, n in spaces])
+
+    def _fetch(token, team_id, space_ids, include_done, updated_after_ms=None, **k):
+        seen.update(include_done=include_done, updated_after_ms=updated_after_ms,
+                    space_ids=space_ids)
+        return tasks
+    monkeypatch.setattr(clickup, "_fetch_tasks", _fetch)
+    return seen
+
+
+def test_a_task_closed_that_day_is_returned_with_its_space_and_status(monkeypatch):
+    _stub_clickup(monkeypatch, [_closed_task()])
+    items = clickup.closed_tasks(DAY)["items"]
+    assert items == [{"title": "Proposal for Acme", "space": "Vibe Foundry",
+                      "status": "complete"}]
+
+
+def test_a_task_closed_on_another_day_is_left_out(monkeypatch):
+    _stub_clickup(monkeypatch, [_closed_task(closed="2026-08-25T14:00:00-04:00")])
+    assert clickup.closed_tasks(DAY)["items"] == []
+
+
+def test_an_old_task_merely_edited_that_day_is_not_reported_as_closed(monkeypatch):
+    """The whole reason this filters on date_closed. Editing a Task months after
+    shipping it bumps date_updated; the two disagree on 2 of this account's 26
+    closed Tasks, and using date_updated would invent work he did not do."""
+    _stub_clickup(monkeypatch, [_closed_task(closed="2026-06-01T09:00:00-04:00",
+                                             updated="2026-08-26T14:00:00-04:00")])
+    assert clickup.closed_tasks(DAY)["items"] == []
+
+
+def test_an_open_task_updated_that_day_is_left_out(monkeypatch):
+    """The fetch is deliberately wide — it asks for everything touched since the
+    day began — so the status-group filter is what makes the answer right."""
+    _stub_clickup(monkeypatch, [_closed_task(status="building", status_type="custom")])
+    assert clickup.closed_tasks(DAY)["items"] == []
+
+
+def test_the_fetch_includes_done_and_starts_at_the_local_day(monkeypatch):
+    """include_done because ClickUp excludes its Closed group by default, which
+    is the only group this asks about. And date_updated_gt at the start of the
+    LOCAL day, never a slice of a UTC stamp (docs/timezones.md)."""
+    seen = _stub_clickup(monkeypatch, [])
+    clickup.closed_tasks(DAY)
+    assert seen["include_done"] is True
+    started = datetime.fromtimestamp(seen["updated_after_ms"] / 1000,
+                                     ZoneInfo(clickup.local_timezone()))
+    assert started.date() == DAY
+    assert (started.hour, started.minute) == (0, 0)
+
+
+def test_a_failure_degrades_to_an_error_dict(monkeypatch):
+    """One dead source must never kill the day's entry."""
+    _stub_clickup(monkeypatch, [])
+    monkeypatch.setattr(clickup, "_team_id",
+                        lambda t: (_ for _ in ()).throw(clickup._ClickUpError("no workspace")))
+    assert "error" in clickup.closed_tasks(DAY)
+
+
+def test_no_spaces_is_an_empty_day_not_an_error(monkeypatch):
+    _stub_clickup(monkeypatch, [], spaces=())
+    assert clickup.closed_tasks(DAY) == {"items": []}
+
+
+def test_closed_tasks_is_not_offered_to_the_model():
+    """A library function like clickup_digest and backlog_anchors. ScribeJay calls
+    it directly; in chat the question is answered better by list_clickup_tasks."""
+    assert not hasattr(clickup, "CLOSED_TASKS_SCHEMA")
+    assert "closed_tasks" not in {t["function"]["name"] for t in toolset.TOOLS}

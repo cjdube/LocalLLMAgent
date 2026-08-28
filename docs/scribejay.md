@@ -96,10 +96,23 @@ ScribeJay may import only this list from the rest of the repo:
 ```
 agent.prefs, agent.store, agent.activity_log
 agent.loop            -- complete_text and warm_model only, never advance()
-agent.tools.{calendar, email, chrome_history, youtube, strava}
+agent.tools.{calendar, email, chrome_history, youtube, strava,
+             gmail_read, clickup}
 tasks._common         -- setup_logger / notify_failure
 tasks._urls           -- safe_url
 ```
+
+Three of those modules — `calendar`, `gmail_read` and `clickup` — are Wren's, and
+ScribeJay reaches only for their **library functions**, the ones carrying no
+`TOOL_SCHEMA`: `get_events_in_range` / `set_event_color`, `fetch_sent_metadata` /
+`my_address`, and `closed_tasks`. Never the model-facing halves. Reading a
+mailbox or a backlog *on request* is Wren's job; ScribeJay only ever asks the one
+narrow question its page needs.
+
+For `clickup` (added 2026-08-27 for `daily_commits`) the alternative on the table
+was a small ClickUp fetch of ScribeJay's own. It was rejected: duplicating an HTTP
+layer, its paging, its timeouts and its timezone conversion is precisely what the
+porch exists to prevent.
 
 ScribeJay must **not** import `agent.toolset` or anything under `chat/`. Nothing
 under `agent/`, `chat/` or `tasks/` may import `scribejay.*`. `evals/` is the one

@@ -1,13 +1,39 @@
 # Daily commits — what got shipped
 
-`scribejay/daily_commits.py`, daily at 4:55 AM. Reads yesterday's commits out of
-the local checkouts under `PROJECTS_DIR`, has the model group them into a short
-"what I built" page, and writes `Daily-Commits-<date>.md` into `LEARNINGS_DIR`.
+`scribejay/daily_commits.py`, daily at 4:55 AM. Writes `Daily-Work-<date>.md`
+into `LEARNINGS_DIR` from two sources: yesterday's commits in the checkouts under
+`PROJECTS_DIR`, grouped by the model into a short "what I built" page, and the
+ClickUp Tasks that reached a Done status that day, listed by Python.
 
 **Why it exists.** The rest of the record covered time and reading: Claude Code
 hours as calendar blocks, browsing and Likes as daily pages. Nothing said what
-was actually *made*. Git is the only source that does, it needs no API and no
-token, and it cannot be rate-limited or fall foul of a terms of service.
+was actually *made*. Git says it for code, needs no API and no token, and cannot
+be rate-limited or fall foul of a terms of service.
+
+**Why git alone was not enough.** Git is only a witness to work that touches a
+repository. The Vibe Foundry Space holds business and contract work; the Blog
+Space holds research and content. Neither advances by a commit, so before the
+ClickUp source those days read as quiet ones — and nothing alerted, because
+nothing had failed. See [The ClickUp half](#the-clickup-half) below.
+
+## The ClickUp half
+
+`closed_tasks(day)` in `agent/tools/clickup.py`, rendered by
+`closed_tasks_section()` in `scribejay/journal.py`.
+
+| Choice | Why |
+|---|---|
+| **`date_closed`, never `date_updated`** | Editing a Task months after shipping it bumps `date_updated`, which would file old work under today. They disagree on 2 of this account's 26 closed Tasks — 8% of the record wrong, in the direction that invents work. |
+| **Rendered by Python, not the model** | The draft prompt is written for commits ("several commits are often one piece of work"), which says nothing true about a contract being signed. It is also what let this ship before the Foundry and Blog Spaces held a single closed Task: there is no wording to tune on data that does not exist yet. |
+| **The Space leads each line** | It is the part git cannot say. A Wren Task mostly restates a commit two sections above it; a Vibe Foundry one is the only record of that day's work anywhere. |
+| **`date_updated_gt` at the start of the local day** | Bounds the fetch against the `_MAX_PAGES` ceiling as the workspace grows. Safe rather than lucky: closing a Task *is* an update, so anything closed that day carries a `date_updated` at or after the day's start. |
+| **A day of pure non-code work never wakes the model** | Ollama has one slot ([docs/ollama.md](ollama.md)); loading it to render a list nobody drafted would starve chat for nothing. |
+| **A ClickUp outage costs the section, not the page** | The standing degrade-don\'t-crash rule. It is logged at WARNING, so a silently missing section is still visible in the 8am log sweep. |
+
+A day that *had* commits but whose draft came back empty writes **nothing at all**,
+even when ClickUp closed Tasks that day. That is the model failing, and a page
+carrying only the ClickUp list would look plausible enough that nobody would ever
+look at it twice.
 
 ## What it reads
 

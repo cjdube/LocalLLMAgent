@@ -1,17 +1,31 @@
 """Tests for scribejay/daily_commits.py — that main() drafts and persists a
-Daily-Commits entry, and that --backfill writes each day separately. All
-collaborators are monkeypatched; nothing touches the model, git, the vault, or
-Gmail."""
+Daily-Work entry from its two sources (commits, drafted by the model; ClickUp
+Tasks closed that day, listed by Python), and that --backfill writes each day
+separately. All collaborators are monkeypatched; nothing touches the model, git,
+ClickUp, the vault, or Gmail."""
 
 import sys
 
 import pytest
 
 from chat.insights import _is_run_success
+from agent.activity_log import prior_day
 from scribejay import daily_commits as dc
 
-DRAFT = ("## Daily Commits: August 25, 2026\n\n### What I Built\n"
+# No title line: the model stopped owning the heading when the page grew a second
+# source, and Python writes the date (CLAUDE.md — never ask the model for one).
+DRAFT = ("### What I Built\n"
          "- **Labelled-email actions:** Wren can now act on a labelled email.")
+
+
+def _closed(title="Proposal for Acme", space="Vibe Foundry", status="complete"):
+    return {"title": title, "space": space, "status": status}
+
+
+def _yesterday():
+    """The day a plain run covers. Derived, never hardcoded — a literal date here
+    passes today and fails tomorrow."""
+    return prior_day()[2]
 
 
 def _commit(repo="LocalLLMAgent", subject="Answer an email from the phone"):
@@ -34,6 +48,9 @@ def stubbed_run(monkeypatch):
     monkeypatch.setattr(dc, "fetch_repos",
                         lambda logger=None: seen.update(fetches=seen["fetches"] + 1)
                         or {"repos": 12, "failed": 0})
+    # ClickUp quiet by default: the suite-wide egress guard would otherwise fire
+    # here, since every run now asks what closed.
+    monkeypatch.setattr(dc, "closed_tasks", lambda day: {"items": []})
     monkeypatch.setattr(dc, "scribejay_backend", lambda key: None)
     monkeypatch.setattr(dc, "warm_model", lambda **k: seen.update(warms=seen["warms"] + 1))
 
@@ -49,12 +66,22 @@ def stubbed_run(monkeypatch):
     return seen
 
 
-def test_happy_path_persists_daily_commits(stubbed_run):
+def test_happy_path_persists_daily_work(stubbed_run):
     assert dc.main() == 0
     assert len(stubbed_run["persists"]) == 1
     prefix, subject, content = stubbed_run["persists"][0]
-    assert prefix == "Daily-Commits"
-    assert "Daily Commits" in content
+    assert prefix == "Daily-Work"
+    assert content.startswith(f"## Daily Work: {_yesterday():%B %-d, %Y}")
+
+
+def test_python_writes_the_heading_not_the_model(stubbed_run, monkeypatch):
+    """The date in it is date formatting, which the model is never asked for. It
+    also has to survive a day with no commits, where the model is not called."""
+    monkeypatch.setattr(dc, "complete_text",
+                        lambda **k: "### What I Built\n- **A thing:** happened.")
+    assert dc.main() == 0
+    assert stubbed_run["persists"][0][2].startswith(
+        f"## Daily Work: {_yesterday():%B %-d, %Y}")
 
 
 def test_the_totals_line_is_appended_in_python(stubbed_run):
@@ -243,3 +270,105 @@ def test_date_writes_that_day_and_only_that_day(stubbed_run, monkeypatch):
                         days.append(day) or {"written": True})
     assert dc.main() == 0
     assert [str(d) for d in days] == ["2026-08-25"]
+
+
+# ---- the ClickUp half: work that leaves no commit behind ----
+
+
+def test_a_day_of_pure_non_code_work_still_writes_an_entry(stubbed_run, monkeypatch):
+    """The reason this source exists. A contract advanced in the Vibe Foundry
+    Space or a post researched in the Blog Space touches no repository, so the
+    old commits-only gate dropped exactly the days it was extended to catch."""
+    monkeypatch.setattr(dc, "collect_commits",
+                        lambda *a, **k: {"commits": [], "repos": {},
+                                         "total_commits": 0, "repos_scanned": 12})
+    monkeypatch.setattr(dc, "closed_tasks", lambda day: {"items": [_closed()]})
+
+    assert dc.main() == 0
+    assert len(stubbed_run["persists"]) == 1
+    assert "Proposal for Acme" in stubbed_run["persists"][0][2]
+
+
+def test_a_day_of_pure_non_code_work_never_wakes_the_model(stubbed_run, monkeypatch):
+    """Python renders the ClickUp half, so there is nothing to ask. Ollama has one
+    slot and loading the model to render a list nobody drafted would starve chat."""
+    monkeypatch.setattr(dc, "collect_commits",
+                        lambda *a, **k: {"commits": [], "repos": {},
+                                         "total_commits": 0, "repos_scanned": 12})
+    monkeypatch.setattr(dc, "closed_tasks", lambda day: {"items": [_closed()]})
+
+    assert dc.main() == 0
+    assert stubbed_run["drafted"] == 0
+    assert stubbed_run["warms"] == 0
+
+
+def test_a_day_with_neither_source_writes_nothing(stubbed_run, monkeypatch):
+    """Still the ordinary quiet day. BOTH have to be empty now."""
+    monkeypatch.setattr(dc, "collect_commits",
+                        lambda *a, **k: {"commits": [], "repos": {},
+                                         "total_commits": 0, "repos_scanned": 12})
+
+    assert dc.main() == 0
+    assert stubbed_run["persists"] == []
+    assert stubbed_run["drafted"] == 0
+
+
+def test_both_sources_appear_in_one_entry(stubbed_run, monkeypatch):
+    """The commits half is drafted, the ClickUp half is listed, and they share a
+    page. Asserting both halves, not just the new one — a two-part promise tested
+    on one part stays green forever."""
+    monkeypatch.setattr(dc, "closed_tasks", lambda day: {"items": [_closed()]})
+
+    assert dc.main() == 0
+    content = stubbed_run["persists"][0][2]
+    assert "Labelled-email actions" in content, "the model's half"
+    assert "### Closed in ClickUp" in content, "the Python half"
+    assert "**Vibe Foundry:** Proposal for Acme *(complete)*" in content
+
+
+def test_clickup_being_down_costs_the_section_not_the_entry(stubbed_run, monkeypatch,
+                                                            capsys):
+    """Degrade, don't crash — one dead source must never kill the day's entry.
+    Read off capsys, not caplog: setup_logger sets propagate=False, so caplog
+    sees nothing these tasks log."""
+    monkeypatch.setattr(dc, "closed_tasks",
+                        lambda day: {"error": "HTTP 503 from ClickUp"})
+
+    assert dc.main() == 0
+    assert "Labelled-email actions" in stubbed_run["persists"][0][2]
+    assert "ClickUp closed Tasks unavailable" in capsys.readouterr().out
+
+
+def test_clickup_raising_costs_the_section_not_the_entry(stubbed_run, monkeypatch):
+    """The other half of the guard: closed_tasks returns error dicts, but a
+    caller that trusts only that path dies on the first ConnectionError."""
+    def _boom(day):
+        raise RuntimeError("connection reset")
+    monkeypatch.setattr(dc, "closed_tasks", _boom)
+
+    assert dc.main() == 0
+    assert "Labelled-email actions" in stubbed_run["persists"][0][2]
+
+
+def test_a_failed_model_draft_writes_nothing_even_with_closed_tasks(stubbed_run,
+                                                                    monkeypatch):
+    """A day that HAD commits and produced no prose is the model failing. Writing
+    the ClickUp list alone would turn that failure into a plausible-looking page
+    nobody would ever look at twice."""
+    monkeypatch.setattr(dc, "complete_text", lambda **k: "")
+    monkeypatch.setattr(dc, "closed_tasks", lambda day: {"items": [_closed()]})
+
+    assert dc.main() == 0
+    assert stubbed_run["persists"] == []
+
+
+def test_the_day_asked_of_clickup_is_the_day_being_written(stubbed_run, monkeypatch):
+    """A backfill writes 14 days; asking ClickUp for "yesterday" every time would
+    stamp today's closures onto all of them."""
+    asked = []
+    monkeypatch.setattr(dc, "closed_tasks",
+                        lambda day: asked.append(day) or {"items": []})
+    monkeypatch.setattr(sys, "argv", ["daily_commits", "--date", "2026-08-20"])
+
+    assert dc.main() == 0
+    assert [d.isoformat() for d in asked] == ["2026-08-20"]

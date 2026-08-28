@@ -2,10 +2,17 @@
 (one file per day). Non-interactive — run by launchd every morning, covering the
 prior day.
 
-Draws on the commits in the local checkouts under PROJECTS_DIR. The rest of the
-record covers time spent and pages read; this is the only source that says what
-was actually built. Falls back to emailing the draft if the vault write fails, so
-an entry is never silently lost.
+Two sources, and they answer different halves of the question:
+
+- **Commits** in the local checkouts under PROJECTS_DIR, drafted by the model.
+- **ClickUp Tasks closed that day**, listed by Python. This is the half that
+  records work leaving no commit behind: a contract advanced in the Vibe Foundry
+  Space, a post researched in the Blog Space. Without it those days read as empty
+  ones, because git is the only other witness this task has.
+
+The rest of the record covers time spent and pages read; this is the only source
+that says what was actually done. Falls back to emailing the draft if the vault
+write fails, so an entry is never silently lost.
 
 The commit subjects in these repos are written as sentences, so the model's job is
 small on purpose: group related commits and say what the work was. The totals line
@@ -32,7 +39,9 @@ from agent.activity_log import persist_or_email, prior_day
 from agent.tools.calendar import _local_timezone
 from scribejay.git_activity import (collect_commits, compact_commits, fetch_repos,
                                     render_commits)
-from scribejay.journal import commit_totals_line, has_substantive_content
+from agent.tools.clickup import closed_tasks
+from scribejay.journal import (closed_tasks_section, commit_totals_line,
+                               has_substantive_content)
 from tasks._common import notify_failure, setup_logger
 
 DRAFT_SYSTEM_PROMPT = f"""You are {prefs.user_name()}'s personal executive assistant. You write a \
@@ -40,9 +49,7 @@ short daily log of what he BUILT on the day just completed, from the commit data
 running unattended — infer everything from the data and write your best draft.
 
 Use EXACTLY this template, filling in the bracketed parts (do not add extra sections, do not
-include the literal brackets):
-
-## Daily Commits: [Month Date, Year]
+include the literal brackets). Do NOT write a title or a date line — the page already has one:
 
 ### What I Built
 - **[Name of the change]:** [What it does and why it matters, in one or two sentences]
@@ -84,6 +91,23 @@ Output ONLY the filled-in template text, nothing else — no preamble, no explan
 """
 
 
+def _closed_clickup(day, logger) -> list:
+    """ClickUp Tasks closed on `day`, or [] on any failure. ClickUp being
+    unreachable must cost the ClickUp section, never the day's entry — the same
+    per-source guard every other gather in this repo uses."""
+    try:
+        result = closed_tasks(day)
+    except Exception as e:
+        logger.warning(f"ClickUp closed Tasks unavailable: {e}")
+        return []
+    if "error" in result:
+        logger.warning(f"ClickUp closed Tasks unavailable: {result['error']}")
+        return []
+    items = result.get("items", [])
+    logger.info(f"{len(items)} ClickUp Task(s) closed on {day}")
+    return items
+
+
 def _run_for_day(start, end, day, backend, warm, logger) -> None:
     """Gather, draft and persist one day. Raises on failure — main() owns the
     run boundary and the alert, so a backfill of 14 days is still one run in the
@@ -91,13 +115,41 @@ def _run_for_day(start, end, day, backend, warm, logger) -> None:
     result = collect_commits(start, end, logger=logger)
     logger.info(f"collect_commits -> {result['total_commits']} commits across "
                 f"{len(result['repos'])} of {result['repos_scanned']} checkouts: {result['repos']}")
+    closed = _closed_clickup(day, logger)
 
-    # A day with no commits is an ordinary day, not a failure — don't wake the
-    # model or write an empty file for it.
-    if not result["commits"]:
-        logger.info(f"No commits on {day}; nothing to write")
+    # A day with neither is an ordinary day, not a failure — don't wake the model
+    # or write an empty file for it. **Both** have to be empty: a day spent on a
+    # contract or a blog draft produces no commit at all, and gating on commits
+    # alone is what would drop exactly the work this task was extended to catch.
+    if not result["commits"] and not closed:
+        logger.info(f"No commits and no ClickUp Tasks closed on {day}; nothing to write")
         return
 
+    # The model is only worth waking for commits; the ClickUp half is rendered by
+    # Python either way. A day of pure non-code work skips it entirely.
+    built = _draft_commits(result, day, backend, warm, logger) if result["commits"] else ""
+    if result["commits"] and not built:
+        return
+
+    body = "\n\n".join(part for part in (
+        f"## Daily Work: {day:%B %-d, %Y}",
+        built,
+        closed_tasks_section(closed),
+        commit_totals_line(result["commits"]) if result["commits"] else "",
+    ) if part)
+
+    persist_or_email(
+        body + "\n", "Daily-Work", day,
+        subject=f"Daily Work (needs manual paste) - {day:%Y-%m-%d}",
+        task_name="daily_commits", logger=logger,
+    )
+
+
+def _draft_commits(result, day, backend, warm, logger) -> str:
+    """The model's half: the commits, grouped and described. Returns "" when the
+    draft came back empty or all-"None", which the caller treats as a reason to
+    write nothing at all — a day that HAD commits and produced no prose is the
+    model failing, and writing only the ClickUp list would hide that."""
     rows = compact_commits(result["commits"], logger=logger)
     commit_block = render_commits(rows, logger=logger)
     user_prompt = (
@@ -118,15 +170,8 @@ def _run_for_day(start, end, day, backend, warm, logger) -> None:
     if not has_substantive_content(entry_text):
         logger.warning(f"Draft for {day} had no bullets despite {result['total_commits']} "
                        f"commits ({len(entry_text)} chars); nothing to write")
-        return
-
-    entry_text = f"{entry_text.rstrip()}\n\n{commit_totals_line(result['commits'])}\n"
-
-    persist_or_email(
-        entry_text, "Daily-Commits", day,
-        subject=f"Daily Commits (needs manual paste) - {day:%Y-%m-%d}",
-        task_name="daily_commits", logger=logger,
-    )
+        return ""
+    return entry_text.rstrip()
 
 
 def main() -> int:

@@ -28,6 +28,36 @@ def videos_section(videos: list) -> str:
     return "\n".join(lines)
 
 
+def closed_tasks_section(items: list) -> str:
+    """Deterministic Markdown listing what reached Done in ClickUp, one line per
+    Task, grouped by Space.
+
+    Written in Python and never asked of the model. The draft prompt beside it is
+    written for commits — "several commits are often one piece of work" — which
+    says nothing true about a contract being signed or a post being researched.
+    Keeping this half deterministic is also what let it ship before the Vibe
+    Foundry and Blog Spaces had a single closed Task to verify against: there is
+    no wording to tune and nothing to get wrong on data that does not exist yet.
+
+    The Space leads each line because it is the part git cannot say. A Wren Task
+    mostly restates a commit two sections above it; a Vibe Foundry one is the
+    only record of that day's work anywhere.
+
+    Titles are collapsed to one line — a Task name should not contain a newline,
+    but one pasted in would silently break the list into fragments, which is the
+    same bug a multi-paragraph description caused in daily_synthesis."""
+    lines = ["### Closed in ClickUp"]
+    if not items:
+        lines.append("- **None:** [No ClickUp Tasks closed this day]")
+        return "\n".join(lines)
+    for item in sorted(items, key=lambda i: (i.get("space", ""), i.get("title", ""))):
+        title = " ".join((item.get("title") or "(no title)").split())
+        space = " ".join((item.get("space") or "").split())
+        status = " ".join((item.get("status") or "").split())
+        lines.append(f"- **{space}:** {title}" + (f" *({status})*" if status else ""))
+    return "\n".join(lines)
+
+
 def has_substantive_content(text: str) -> bool:
     """True if the draft has at least one real bullet — i.e. a bullet that isn't
     the template's "**None:**" empty-section marker. Lets a task skip writing a

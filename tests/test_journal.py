@@ -74,3 +74,60 @@ def test_commit_totals_line_with_no_commits():
     # The task skips the write on an empty day, so this is a guard rather than a
     # path anyone renders — it must not raise.
     assert lc.commit_totals_line([]) == "*No commits.*"
+
+
+# ---- closed_tasks_section: the half git cannot witness ----
+
+
+def _closed(title, space, status="complete"):
+    return {"title": title, "space": space, "status": status}
+
+
+def test_a_closed_task_renders_with_its_space_and_status():
+    out = lc.closed_tasks_section([_closed("Proposal for Acme", "Vibe Foundry")])
+    assert out.splitlines()[0] == "### Closed in ClickUp"
+    assert "- **Vibe Foundry:** Proposal for Acme *(complete)*" in out
+
+
+def test_the_space_leads_the_line():
+    """It is the part git cannot say. A Wren Task restates a commit two sections
+    up; a Vibe Foundry one is the only record of that day's work anywhere."""
+    line = lc.closed_tasks_section([_closed("X", "Blog")]).splitlines()[1]
+    assert line.startswith("- **Blog:**")
+
+
+def test_tasks_are_grouped_by_space():
+    out = lc.closed_tasks_section([
+        _closed("Zebra", "Wren"), _closed("Apple", "Blog"), _closed("Beta", "Wren")])
+    spaces = [ln.split("**")[1] for ln in out.splitlines()[1:]]
+    assert spaces == ["Blog:", "Wren:", "Wren:"]
+
+
+def test_an_empty_day_renders_the_none_marker():
+    """has_substantive_content reads "**None:**" as an empty section, which is how
+    a day with commits but no closures still reads as a real entry."""
+    out = lc.closed_tasks_section([])
+    assert "**None:**" in out
+    assert not lc.has_substantive_content(out)
+
+
+def test_a_rendered_task_list_counts_as_substantive_content():
+    """The other half of the promise above — a day of pure non-code work must not
+    look empty to the same check."""
+    assert lc.has_substantive_content(
+        lc.closed_tasks_section([_closed("Proposal for Acme", "Vibe Foundry")]))
+
+
+def test_a_title_with_a_newline_cannot_break_the_list():
+    """A Task name should not contain one, but a pasted title would silently split
+    one bullet into fragments — the same bug a multi-paragraph description caused
+    in daily_synthesis."""
+    out = lc.closed_tasks_section([_closed("Call notes\n\nsecond para", "Blog")])
+    assert len(out.splitlines()) == 2
+    assert "Call notes second para" in out
+
+
+def test_a_task_with_no_status_still_renders():
+    out = lc.closed_tasks_section([{"title": "X", "space": "Blog", "status": ""}])
+    assert "- **Blog:** X" in out
+    assert "*()*" not in out

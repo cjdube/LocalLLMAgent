@@ -26,7 +26,8 @@ ScribeJay may import ONLY these from the rest of the repo:
 
     agent.prefs, agent.store, agent.activity_log
     agent.loop            -- complete_text and warm_model only, never advance()
-    agent.tools.{calendar, email, chrome_history, youtube, strava, gmail_read}
+    agent.tools.{calendar, email, chrome_history, youtube, strava, gmail_read,
+                 clickup}
     tasks._common         -- setup_logger / notify_failure
     tasks._urls           -- safe_url
 
@@ -40,6 +41,15 @@ model-facing. It is the same arrangement agent.tools.calendar already has, where
 `get_events_in_range` and `set_event_color` back the colorizer without being
 registered tools. ScribeJay must not reach for the model-facing halves of that
 module (`search_mail`, `read_email`): reading a mailbox on request is Wren's job.
+
+clickup was added on 2026-08-27 for daily_commits, and only for `closed_tasks` —
+again a library function with no TOOL_SCHEMA, the same arrangement as the two
+above. The alternative on the table was giving ScribeJay its own small ClickUp
+fetch, and it was rejected: duplicating an HTTP layer, its paging, its timeouts
+and its timezone conversion is exactly what the porch exists to avoid. ScribeJay
+must not reach for the six registered tools in that module — reading or writing a
+backlog on request is Wren's job. What ScribeJay wants is narrower than any of
+them anyway: what reached Done yesterday, which nothing asks a model about.
 
 ScribeJay must NOT import `agent.toolset` or anything under `chat/`. Nothing under
 `agent/`, `chat/` or `tasks/` may import `scribejay.*`. `evals/` is the one
