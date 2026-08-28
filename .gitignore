@@ -56,4 +56,5 @@ docs/reviews/
 evals/results/
 .DS_Store
 .claude/
+.codex/
 scratchpad
