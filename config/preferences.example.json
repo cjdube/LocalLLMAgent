@@ -5,6 +5,10 @@
     "positioning": "a fractional product/engineering leader",
     "engagement_model": "steps into tech companies under ~100 people for 1-2 days a week to clear roadmaps, stabilize teams, and build AI-accelerated delivery workflows"
   },
+  "projects": {
+    "_comment": "Ordered root-level instruction filenames used when scanning local projects. The first existing file wins.",
+    "instruction_files": ["AGENTS.md"]
+  },
   "calendar": {
     "categories": [
       {"name": "Work", "color_id": "1", "color_name": "Lavender", "role": "work"},

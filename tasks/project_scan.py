@@ -13,8 +13,8 @@ same way: a blurb is regenerated only when the project's docs actually change
 
 Why a distillation rather than the raw docs: daily_synthesis matches by token
 overlap, normalized by the *smaller* token set. An anchor carrying a whole
-README plus a CLAUDE.md would be thousands of tokens, share something with every
-signal, and outrank every real pair — the exact bug documented on
+README plus project instructions would be thousands of tokens, share something
+with every signal, and outrank every real pair — the exact bug documented on
 daily_synthesis._ai_chat_signals, which reads the distilled chat log instead of
 raw transcripts for this reason. So the model returns a one-line summary and a
 short topic list, and the anchor built from them stays the same size class as a
@@ -40,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dotenv import load_dotenv
 
+from agent import prefs
 from agent.loop import complete_text, resolve_backend, warm_model
 from agent.store import atomic_write_json, locked
 from agent.tools import projects as projects_tool
@@ -81,7 +82,8 @@ _TOPICS_RE = re.compile(r"^\s*topics\s*:\s*(.+?)\s*$", re.IGNORECASE | re.MULTIL
 
 def has_docs(row: dict) -> bool:
     """Whether a scanned project has anything for the model to read."""
-    return bool(row.get("readme") or row.get("claude_md") or row.get("doc_titles"))
+    return bool(row.get("readme") or row.get("agent_instructions")
+                or row.get("doc_titles"))
 
 
 def render_prompt(row: dict) -> str:
@@ -90,10 +92,8 @@ def render_prompt(row: dict) -> str:
     parts = [f"project: {row['name']}"]
     if row.get("readme"):
         parts.append(f"README:\n{row['readme']}")
-    if row.get("claude_md"):
-        # Labelled by what it is, not by filename: the field holds CLAUDE.md or
-        # AGENTS.md, and naming the wrong one is a false statement in the prompt.
-        parts.append(f"agent instructions:\n{row['claude_md']}")
+    if row.get("agent_instructions"):
+        parts.append(f"agent instructions:\n{row['agent_instructions']}")
     if row.get("doc_titles"):
         parts.append("docs pages: " + ", ".join(row["doc_titles"]))
     return "\n\n".join(parts)
@@ -102,8 +102,8 @@ def render_prompt(row: dict) -> str:
 def parse_distillation(raw: str) -> dict:
     """{"summary": str, "topics": [str]} from the model's two lines. Either
     field may come back empty — the caller decides what that means, and logs
-    it. Defensive by design: this is a fixed-format parse of small-model output
-    (CLAUDE.md), so a missing line is an expected outcome, not an exception."""
+    it. Defensive by design: this is a fixed-format parse of small-model output,
+    so a missing line is an expected outcome, not an exception."""
     text = raw or ""
     summary_match = _SUMMARY_RE.search(text)
     topics_match = _TOPICS_RE.search(text)
@@ -174,9 +174,11 @@ def main(argv=None) -> int:
             # Not a failure — but it IS why those projects will never surface in a
             # synthesis nudge, and that would otherwise be invisible. Naming them
             # makes the fix obvious (add a README to that repo).
+            allowed = ", ".join(prefs.project_instruction_files())
             logger.warning(
-                f"{len(undocumented)} project(s) have no README, CLAUDE.md/AGENTS.md "
-                f"or docs/ and so get no anchor: {', '.join(undocumented)}"
+                f"{len(undocumented)} project(s) have no README, configured project "
+                f"instructions ({allowed}), or docs/ and so get no anchor: "
+                f"{', '.join(undocumented)}"
             )
 
         # Same reasoning one step further in: a project whose docs/ outgrew
@@ -209,7 +211,7 @@ def main(argv=None) -> int:
             prior = cached.get(row["name"], {})
             fresh = distilled.get(row["name"])
             entry = {k: v for k, v in row.items()
-                     if k not in ("readme", "claude_md")}
+                     if k not in ("readme", "agent_instructions")}
             if fresh is not None:
                 entry["summary"] = fresh["summary"]
                 entry["topics"] = fresh["topics"]
@@ -222,8 +224,8 @@ def main(argv=None) -> int:
 
         # A thin topics list is the silent degradation this task is most prone
         # to: the project still appears, still has a summary, and simply stops
-        # matching anything. Report it with counts (CLAUDE.md) rather than
-        # letting the anchor quietly shrink.
+        # matching anything. Report it with counts rather than letting the
+        # anchor quietly shrink.
         thin = [e["name"] for e in out
                 if e["name"] in distilled and len(e["topics"]) < 4]
         if thin:

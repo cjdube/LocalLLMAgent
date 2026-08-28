@@ -102,6 +102,33 @@ def test_followed_teams_absent_or_unusable_is_empty(monkeypatch):
         assert prefs.followed_teams() == []
 
 
+# ---- projects.instruction_files --------------------------------------------
+
+def test_project_instruction_files_default_to_agents_md(monkeypatch):
+    monkeypatch.setattr(prefs, "PREFS", {})
+    assert prefs.project_instruction_files() == ("AGENTS.md",)
+
+
+def test_project_instruction_files_preserve_order_and_remove_duplicates(monkeypatch):
+    monkeypatch.setattr(prefs, "PREFS", {"projects": {"instruction_files": [
+        "PRIMARY.md", "SECONDARY.md", "PRIMARY.md",
+    ]}})
+    assert prefs.project_instruction_files() == ("PRIMARY.md", "SECONDARY.md")
+
+
+def test_project_instruction_files_reject_paths_and_malformed_entries(monkeypatch):
+    monkeypatch.setattr(prefs, "PREFS", {"projects": {"instruction_files": [
+        "../outside.md", "nested/file.md", "nested\\file.md", "", None, "SAFE.md",
+    ]}})
+    assert prefs.project_instruction_files() == ("SAFE.md",)
+
+
+def test_project_instruction_files_fall_back_when_no_entry_is_safe(monkeypatch):
+    for value in (None, "AGENTS.md", [], ["../outside.md"]):
+        monkeypatch.setattr(prefs, "PREFS", {"projects": {"instruction_files": value}})
+        assert prefs.project_instruction_files() == ("AGENTS.md",)
+
+
 # ---- loader degradation -----------------------------------------------------
 
 def test_load_missing_file_returns_empty(tmp_path):
@@ -131,6 +158,7 @@ def test_helpers_degrade_on_empty_prefs(monkeypatch):
     assert prefs.calendar_categories() == []
     assert prefs.category_color_by_role("fallback", "11") == "11"
     assert prefs.job_search() == {}
+    assert prefs.project_instruction_files() == ("AGENTS.md",)
 
 
 def test_category_color_by_role():

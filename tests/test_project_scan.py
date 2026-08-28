@@ -46,7 +46,7 @@ def stub(monkeypatch):
 
 def _row(name, **over):
     row = {"name": name, "path": f"/p/{name}", "readme": f"# {name}\nDoes things.",
-           "claude_md": "", "doc_titles": [], "content_hash": f"hash-{name}",
+           "agent_instructions": "", "doc_titles": [], "content_hash": f"hash-{name}",
            "remote": None, "branch": None, "last_commit": None,
            "commits_30d": None, "dirty": None}
     row.update(over)
@@ -78,8 +78,7 @@ def test_parse_distillation_tolerates_preamble_and_dupes():
 
 
 def test_parse_distillation_of_empty_output_is_empty_not_an_exception():
-    # The failure mode CLAUDE.md pins: a call that reasons too long returns
-    # empty content, not a truncated answer.
+    # A call that reasons too long returns empty content, not a truncated answer.
     assert ps.parse_distillation("") == {"summary": "", "topics": []}
     assert ps.parse_distillation(None) == {"summary": "", "topics": []}
 
@@ -106,8 +105,7 @@ def test_distils_each_documented_project_once(stub, monkeypatch):
 
 def test_passes_think_false_and_a_logger(stub, monkeypatch):
     # A fixed two-line template: thinking tokens share the num_predict budget, so
-    # leaving it on returns empty content (CLAUDE.md). The logger is what surfaces
-    # loop.py's cut-off warning.
+    # leaving it on returns empty content. The logger surfaces the cut-off warning.
     _scan(monkeypatch, _row("Alpha"))
 
     assert ps.main([]) == 0
@@ -115,8 +113,8 @@ def test_passes_think_false_and_a_logger(stub, monkeypatch):
     assert stub["kwargs"][0]["logger"] is not None
 
 
-def test_the_prompt_carries_readme_claude_md_and_doc_titles(stub, monkeypatch):
-    _scan(monkeypatch, _row("Alpha", claude_md="House rules.",
+def test_the_prompt_carries_readme_agent_instructions_and_doc_titles(stub, monkeypatch):
+    _scan(monkeypatch, _row("Alpha", agent_instructions="House rules.",
                             doc_titles=["Design", "Security"]))
 
     assert ps.main([]) == 0
@@ -159,14 +157,16 @@ def test_a_project_with_no_docs_gets_a_row_but_no_blurb(stub, monkeypatch, caplo
     # AgenticOS, my-agent-hq, AIChatScraper and SortOfCardGame are all in this
     # state on the real machine. They must not silently vanish: the reason they
     # will never surface in a nudge is that they have no README to read.
-    _scan(monkeypatch, _row("Empty", readme="", claude_md="", doc_titles=[]))
+    monkeypatch.setattr(ps.prefs, "project_instruction_files", lambda: ("CUSTOM.md",))
+    _scan(monkeypatch, _row("Empty", readme="", agent_instructions="", doc_titles=[]))
 
     with caplog.at_level(logging.WARNING):
         assert ps.main([]) == 0
     assert stub["complete"] == []
     stored = _stored()["Empty"]
     assert stored["summary"] == "" and stored["topics"] == []
-    assert "no README" in caplog.text and "Empty" in caplog.text
+    assert "no README" in caplog.text and "CUSTOM.md" in caplog.text
+    assert "Empty" in caplog.text
 
 
 def test_reports_a_project_whose_docs_outgrew_the_cap(stub, monkeypatch, caplog):
@@ -236,11 +236,11 @@ def test_deleted_projects_are_pruned(stub, monkeypatch):
 def test_the_store_does_not_carry_the_document_bodies(stub, monkeypatch):
     # The registry is read every morning; there is no reason to persist 2000
     # chars of README per project once it has been distilled.
-    _scan(monkeypatch, _row("Alpha", claude_md="House rules."))
+    _scan(monkeypatch, _row("Alpha", agent_instructions="House rules."))
 
     assert ps.main([]) == 0
     assert "readme" not in _stored()["Alpha"]
-    assert "claude_md" not in _stored()["Alpha"]
+    assert "agent_instructions" not in _stored()["Alpha"]
 
 
 def test_a_failing_scan_notifies_and_exits_nonzero(stub, monkeypatch):

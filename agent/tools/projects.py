@@ -8,16 +8,15 @@ been heard of, and the pages that do exist freeze at whatever the last log said
 reads the repos themselves.
 
 Deterministic and model-free by design — every field here is a fact Python can
-read off the disk, and CLAUDE.md's small-local-model rule is that Python owns
-structure. The model's only job (in tasks/project_scan.py) is distilling this
-into a blurb.
+read off the disk. The model's only job (in tasks/project_scan.py) is distilling
+this into a blurb.
 
 Only three things are read out of each checkout: its README, its agent
-instructions (CLAUDE.md, or AGENTS.md where that is the project's spelling), and
-the headings of docs/*.md. Nothing else — emphatically not config/.env,
-config/*.json, or any other file that happens to sit in a project directory.
-The registry is written to a store that a scheduled task refreshes and
-tasks/daily_synthesis.py reads, so anything picked up here travels.
+instructions (the first filename allowed by personal preferences), and the
+headings of docs/*.md. Nothing else — emphatically not config/.env, config/*.json,
+or any other file that happens to sit in a project directory. The registry is
+written to a store that a scheduled task refreshes and tasks/daily_synthesis.py
+reads, so anything picked up here travels.
 
 A checkout that fails any step degrades to a row with null fields rather than
 raising: one broken or half-cloned directory must not cost the other eleven.
@@ -74,11 +73,6 @@ GIT_TIMEOUT = 10
 # directory is off limits (see the module docstring); keep this list exhaustive
 # rather than reaching for a glob.
 _README_NAMES = ("README.md", "README.rst", "README.txt", "readme.md")
-# The agent-instruction file, whatever the project's tooling calls it. AGENTS.md
-# is the cross-tool spelling of the same thing; AgenticDevelopment has one and no
-# README, so it scanned as undocumented and got no anchor at all. First match
-# wins — a project carrying both is a Claude project first.
-_AGENT_DOC_NAMES = ("CLAUDE.md", "AGENTS.md")
 
 
 def _projects_dir() -> Path:
@@ -111,8 +105,8 @@ def _git_facts(path: Path) -> dict:
     return {
         "remote": _git(path, "remote", "get-url", "origin"),
         "branch": _git(path, "rev-parse", "--abbrev-ref", "HEAD"),
-        # %cs is the committer date as a bare ISO day — no parsing, no timezone
-        # slicing (CLAUDE.md's rule about never truncating an ISO stamp).
+        # %cs is the committer date as a bare ISO day — no parsing or timezone
+        # slicing needed.
         "last_commit": _git(path, "log", "-1", "--format=%cs"),
         "commits_30d": int(count) if count and count.isdigit() else None,
         # --porcelain prints nothing for a clean tree, so "" means clean and
@@ -147,9 +141,8 @@ def _doc_titles(path: Path) -> tuple:
     documents is the part that discriminates.
 
     The count is returned rather than discarded so tasks/project_scan.py can say
-    that a project outgrew the cap. A slice that silently drops the tail is the
-    "degrade without logging" failure CLAUDE.md warns about: the blurb just
-    quietly stops reflecting part of what the project documents."""
+    that a project outgrew the cap. A slice that silently drops the tail would
+    let the blurb quietly stop reflecting part of what the project documents."""
     docs = path / "docs"
     if not docs.is_dir():
         return [], 0
@@ -168,14 +161,14 @@ def _doc_titles(path: Path) -> tuple:
     return titles, len(found)
 
 
-def _content_hash(readme: str, claude_md: str, doc_titles: list) -> str:
+def _content_hash(readme: str, agent_instructions: str, doc_titles: list) -> str:
     """Fingerprint of the three model-facing fields, so tasks/project_scan.py
     can skip regenerating a blurb for a project whose docs haven't changed. Git
     facts are deliberately excluded: a commit that touches no documentation
     doesn't change what the project *is*."""
     digest = hashlib.sha256()
     digest.update(readme.encode("utf-8"))
-    digest.update(claude_md.encode("utf-8"))
+    digest.update(agent_instructions.encode("utf-8"))
     digest.update("\n".join(doc_titles).encode("utf-8"))
     return digest.hexdigest()[:16]
 
@@ -183,19 +176,19 @@ def _content_hash(readme: str, claude_md: str, doc_titles: list) -> str:
 def _scan_one(path: Path) -> dict:
     """One checkout -> one row. Wrapped by scan_projects' per-directory guard."""
     readme = _read_first(path, _README_NAMES)
-    claude_md = _read_first(path, _AGENT_DOC_NAMES)
+    agent_instructions = _read_first(path, prefs.project_instruction_files())
     doc_titles, docs_found = _doc_titles(path)
     return {
         "name": path.name,
         "path": str(path),
         "readme": readme,
-        "claude_md": claude_md,
+        "agent_instructions": agent_instructions,
         "doc_titles": doc_titles,
         # Pre-cap count, so the task can warn when the tail was dropped. Kept
         # out of content_hash: outgrowing the cap doesn't change what the
         # project *is*, and shouldn't cost every project a re-distillation.
         "docs_found": docs_found,
-        "content_hash": _content_hash(readme, claude_md, doc_titles),
+        "content_hash": _content_hash(readme, agent_instructions, doc_titles),
         **_git_facts(path),
     }
 
@@ -211,7 +204,7 @@ def scan_projects() -> dict:
     rows = []
     for entry in sorted(root.iterdir(), key=lambda p: p.name.lower()):
         # Directories only: the user keeps stray files in here (a blog draft, a
-        # .DS_Store), and dotted dirs are tooling (.claude), not projects.
+        # .DS_Store), and dotted dirs are tooling rather than projects.
         if not entry.is_dir() or entry.name.startswith("."):
             continue
         try:
@@ -220,7 +213,7 @@ def scan_projects() -> dict:
             # One unreadable checkout must not cost the rest. The row still
             # exists so the caller can see the project and say what went wrong.
             rows.append({"name": entry.name, "path": str(entry), "readme": "",
-                         "claude_md": "", "doc_titles": [], "docs_found": 0,
+                         "agent_instructions": "", "doc_titles": [], "docs_found": 0,
                          "content_hash": "",
                          "remote": None, "branch": None, "last_commit": None,
                          "commits_30d": None, "dirty": None,
@@ -254,7 +247,8 @@ def _slug(text: str) -> str:
 def _merge(row: dict, cached: dict) -> dict:
     """One scanned row plus its cached distillation, without the document
     bodies (the model has no use for 2000 chars of README here)."""
-    merged = {k: v for k, v in row.items() if k not in ("readme", "claude_md")}
+    merged = {k: v for k, v in row.items()
+              if k not in ("readme", "agent_instructions")}
     merged["summary"] = cached.get("summary", "")
     merged["topics"] = cached.get("topics", [])
     return merged
@@ -363,7 +357,7 @@ def main() -> int:
     sub = parser.add_subparsers(dest="cmd")
     p_scan = sub.add_parser("scan", help="Raw scan, as the nightly task sees it.")
     p_scan.add_argument("--brief", action="store_true",
-                        help="Omit the readme/claude_md bodies from the output.")
+                        help="Omit the README and agent-instruction bodies from the output.")
     sub.add_parser("list", help="The list_projects tool.")
     p_read = sub.add_parser("read", help="The read_project tool.")
     p_read.add_argument("name")
@@ -377,7 +371,7 @@ def main() -> int:
     result = scan_projects()
     if getattr(args, "brief", False) and "projects" in result:
         result = {"projects": [{k: v for k, v in row.items()
-                                if k not in ("readme", "claude_md")}
+                                if k not in ("readme", "agent_instructions")}
                                for row in result["projects"]]}
     return print_result(result)
 

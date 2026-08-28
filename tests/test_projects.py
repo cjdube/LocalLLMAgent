@@ -58,17 +58,17 @@ def test_missing_projects_dir_is_an_error_not_a_raise(tmp_path, monkeypatch):
     assert "error" in projects.scan_projects()
 
 
-def test_reads_readme_claude_md_and_doc_headings(root):
+def test_reads_readme_agent_instructions_and_doc_headings(root):
     _repo(root, "Alpha", {
         "README.md": "# Alpha\nDoes alpha things.",
-        "CLAUDE.md": "Alpha's house rules.",
+        "AGENTS.md": "Alpha's house rules.",
         "docs/design.md": "# The design of Alpha\n\nbody",
         "docs/no-heading.md": "just a body",
     })
 
     row = _by_name(projects.scan_projects())["Alpha"]
     assert "Does alpha things." in row["readme"]
-    assert row["claude_md"] == "Alpha's house rules."
+    assert row["agent_instructions"] == "Alpha's house rules."
     # First heading when there is one, the filename stem when there isn't.
     assert row["doc_titles"] == ["The design of Alpha", "no-heading"]
 
@@ -79,15 +79,17 @@ def test_agents_md_counts_as_agent_instructions(root):
     # synthesis could never nudge about.
     _repo(root, "Agentic", {"AGENTS.md": "Agentic's house rules."}, commit=False)
 
-    assert _by_name(projects.scan_projects())["Agentic"]["claude_md"] \
+    assert _by_name(projects.scan_projects())["Agentic"]["agent_instructions"] \
         == "Agentic's house rules."
 
 
-def test_claude_md_wins_over_agents_md(root):
-    _repo(root, "Both", {"CLAUDE.md": "the Claude one",
-                         "AGENTS.md": "the generic one"}, commit=False)
+def test_configured_instruction_filenames_use_declared_order(root, monkeypatch):
+    monkeypatch.setattr(projects.prefs, "project_instruction_files",
+                        lambda: ("SECOND.md", "FIRST.md"))
+    _repo(root, "Both", {"FIRST.md": "first file",
+                         "SECOND.md": "second file"}, commit=False)
 
-    assert _by_name(projects.scan_projects())["Both"]["claude_md"] == "the Claude one"
+    assert _by_name(projects.scan_projects())["Both"]["agent_instructions"] == "second file"
 
 
 def test_reports_git_freshness(root):
@@ -122,18 +124,19 @@ def test_a_directory_with_no_docs_still_produces_a_row(root):
     _repo(root, "Bare", {"main.py": "print(1)"}, commit=False)
 
     row = _by_name(projects.scan_projects())["Bare"]
-    assert row["readme"] == "" and row["claude_md"] == "" and row["doc_titles"] == []
+    assert row["readme"] == "" and row["agent_instructions"] == ""
+    assert row["doc_titles"] == []
 
 
 def test_stray_files_and_dot_dirs_are_not_projects(root):
     _repo(root, "Alpha", {"README.md": "# Alpha"}, commit=False)
     (root / "notes.md").write_text("a blog draft the user keeps here")
-    (root / ".claude").mkdir()
+    (root / ".tooling").mkdir()
 
     assert list(_by_name(projects.scan_projects())) == ["Alpha"]
 
 
-def test_never_reads_anything_but_readme_claude_md_and_docs(root):
+def test_never_reads_anything_but_readme_configured_instructions_and_docs(root):
     # The registry is written to a store and travels into prompts. A project
     # directory routinely holds secrets (SortOfCardGame has a .env), so the read
     # list is exhaustive on purpose — this pins it.
@@ -212,6 +215,23 @@ def test_content_hash_tracks_the_docs_not_the_commits(root):
     assert _by_name(projects.scan_projects())["Alpha"]["content_hash"] == before
 
     (path / "README.md").write_text("# Alpha\nNow it does something else.")
+    assert _by_name(projects.scan_projects())["Alpha"]["content_hash"] != before
+
+
+def test_content_hash_tracks_instruction_content_not_its_filename(root, monkeypatch):
+    path = _repo(root, "Alpha", {
+        "FIRST.md": "Same guidance.",
+        "SECOND.md": "Same guidance.",
+    }, commit=False)
+    monkeypatch.setattr(projects.prefs, "project_instruction_files",
+                        lambda: ("FIRST.md", "SECOND.md"))
+    before = _by_name(projects.scan_projects())["Alpha"]["content_hash"]
+
+    monkeypatch.setattr(projects.prefs, "project_instruction_files",
+                        lambda: ("SECOND.md", "FIRST.md"))
+    assert _by_name(projects.scan_projects())["Alpha"]["content_hash"] == before
+
+    (path / "SECOND.md").write_text("Changed guidance.")
     assert _by_name(projects.scan_projects())["Alpha"]["content_hash"] != before
 
 
@@ -294,7 +314,7 @@ def test_read_project_returns_the_detail(root, monkeypatch, tmp_path):
     assert project["branch"] == "main"
     assert project["wiki_page"] is None
     # The document bodies are never handed to the model here.
-    assert "readme" not in project and "claude_md" not in project
+    assert "readme" not in project and "agent_instructions" not in project
 
 
 def test_read_project_attaches_the_wiki_page(root, monkeypatch, tmp_path):

@@ -43,6 +43,8 @@ def _load(path: Path) -> dict:
 
 PREFS = _load(_PREFS_PATH)
 
+_DEFAULT_PROJECT_INSTRUCTION_FILES = ("AGENTS.md",)
+
 
 def section(name: str) -> dict:
     value = PREFS.get(name)
@@ -98,3 +100,24 @@ def followed_teams() -> list:
 
 def job_search() -> dict:
     return section("job_search")
+
+
+def project_instruction_files() -> tuple[str, ...]:
+    """Ordered, root-level filenames the project scanner may read.
+
+    Invalid entries are dropped rather than allowed to widen the scanner's
+    explicit-file boundary. An absent or unusable list uses the cross-harness
+    default.
+    """
+    entries = section("projects").get("instruction_files")
+    if not isinstance(entries, list):
+        return _DEFAULT_PROJECT_INSTRUCTION_FILES
+
+    safe = []
+    for entry in entries:
+        if (not isinstance(entry, str) or not entry or entry in (".", "..")
+                or "/" in entry or "\\" in entry):
+            continue
+        if entry not in safe:
+            safe.append(entry)
+    return tuple(safe) or _DEFAULT_PROJECT_INSTRUCTION_FILES

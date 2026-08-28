@@ -22,6 +22,15 @@ schema of whichever file is live. **Restart the chat server after editing**
 
 ## Keys
 
+### `projects`
+
+`instruction_files` is the ordered allowlist of root-level instruction files
+read by the local-project scanner. The first existing file wins. It defaults to
+`["AGENTS.md"]`; add compatibility filenames to your gitignored
+`preferences.json` when older repositories use another spelling. Entries must
+be plain filenames — paths are ignored so this preference cannot expand the
+scanner beyond a checkout's root.
+
 ### `persona`
 
 | Key | Used by | Purpose |
