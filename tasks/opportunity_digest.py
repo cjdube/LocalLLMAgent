@@ -1,7 +1,7 @@
 """Gather fractional-work opportunity signals and email the weekly Opportunity
 Digest. Non-interactive — run by launchd each Sunday evening.
 
-Three signals from free, ToS-clean sources (see CLAUDE.md's data sourcing
+Three signals from free, ToS-clean sources (see AGENTS.md's data sourcing
 policy — no LinkedIn scraping, no paid data SaaS):
   - funded: new SEC Form D filings in the watched states (EDGAR full-text
     search API)

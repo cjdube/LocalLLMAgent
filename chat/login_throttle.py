@@ -25,8 +25,8 @@ class LoginThrottle:
     MAX_LOCKOUT_S = 900
     # Failed-only keys are otherwise never removed (success is the only other
     # cleanup), so a scanner cycling addresses could grow _state without bound.
-    # Past this size, record_failure first drops entries that are neither
-    # locked out nor inside an active failure window.
+    # At this size, new keys first displace stale entries, then the oldest entry
+    # that is not actively locked out. Active lockouts are never displaced.
     MAX_TRACKED = 1000
 
     def __init__(self, clock=time.monotonic):
@@ -43,6 +43,24 @@ class LoginThrottle:
         for k in stale:
             del self._state[k]
 
+    def _make_room(self, now: float) -> bool:
+        """Free one slot for a new key without discarding an active lockout."""
+        # Caller holds self._lock.
+        self._sweep_stale(now)
+        if len(self._state) < self.MAX_TRACKED:
+            return True
+
+        victim = min(
+            ((key, entry) for key, entry in self._state.items()
+             if entry["locked_until"] <= now),
+            key=lambda item: item[1]["window_start"],
+            default=None,
+        )
+        if victim is None:
+            return False
+        del self._state[victim[0]]
+        return True
+
     def retry_after(self, key: str) -> float:
         """Seconds the caller must still wait, or 0 if an attempt is allowed now."""
         now = self._clock()
@@ -55,9 +73,10 @@ class LoginThrottle:
     def record_failure(self, key: str) -> None:
         now = self._clock()
         with self._lock:
-            if len(self._state) >= self.MAX_TRACKED:
-                self._sweep_stale(now)
             entry = self._state.get(key)
+            if entry is None and len(self._state) >= self.MAX_TRACKED:
+                if not self._make_room(now):
+                    return
             if not entry or now - entry["window_start"] > self.WINDOW_S:
                 entry = {"failures": 0, "window_start": now, "lockouts": 0, "locked_until": 0.0}
             entry["failures"] += 1

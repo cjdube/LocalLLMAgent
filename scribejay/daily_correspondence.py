@@ -46,7 +46,7 @@ def _run_for_day(start, end, day, me, logger) -> None:
     rather than N half-runs."""
     result = fetch_sent_metadata(start, end)
     if "error" in result:
-        # A source that fails reads as an empty day to its caller (CLAUDE.md),
+        # A source that fails reads as an empty day to its caller (AGENTS.md),
         # but never silently: this is the line that says the page is missing
         # because Gmail failed, not because he wrote to nobody.
         logger.warning(f"fetch_sent_metadata failed for {day}: {result['error']}")

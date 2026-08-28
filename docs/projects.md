@@ -41,9 +41,9 @@ note-taking and plenty to say to the repo that just moved to server-sent events.
 
 - git freshness — remote, branch, last commit day (`%cs`, never a sliced ISO
   stamp), commits in the last 30 days, and whether the tree is dirty
-- its README, its agent instructions (`CLAUDE.md`, or `AGENTS.md` where that is
-  the project's spelling — first match wins), and the first heading of each
-  `docs/*.md`
+- its README, the first root instruction file named by
+  `projects.instruction_files` (`AGENTS.md` by default; compatibility names may
+  be added in preferences), and the first heading of each `docs/*.md`
 
 **Only those three documents are ever read.** Not `.env`, not `config/*.json`,
 not anything else that happens to sit in a project directory — the registry
@@ -67,7 +67,7 @@ summary: <one plain sentence saying what this project is and does>
 topics: <8 to 15 comma-separated technical terms this project is about>
 ```
 
-`think=False`, because this fills in a template (see the CLAUDE.md rule: on a
+`think=False`, because this fills in a template (see the AGENTS.md rule: on a
 reasoning-heavy call the thinking tokens come out of the same `num_predict`
 budget and the call returns *empty content*).
 
@@ -81,7 +81,7 @@ Three degradations are reported rather than swallowed, because all three are
 otherwise invisible — the project still appears in the registry and simply stops
 matching anything:
 
-- a project with no README, CLAUDE.md/AGENTS.md or `docs/` is named in a WARNING
+- a project with no README, configured instruction file, or `docs/` is named in a WARNING
   (on the real machine: `AgenticOS`, `AIChatScraper`, `my-agent-hq`,
   `SortOfCardGame` — the fix is a README in that repo, not code here). The one
   exception where code *was* the fix: `AgenticDevelopment` had `AGENTS.md` and
@@ -103,7 +103,7 @@ touches the anchor) is written up in
 
 ### Why a distillation and not the raw docs
 
-A project has far more text behind it than a wiki page — a README, a CLAUDE.md,
+A project has far more text behind it than a wiki page — a README, an instruction file,
 a docs tree. Feeding that in raw would rebuild a bug this repo has already hit
 once: see the comment on `daily_synthesis._ai_chat_signals`, which reads the
 *distilled* AI-chat log rather than raw transcripts because "a token set that

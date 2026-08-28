@@ -8,7 +8,7 @@ failed in both directions, measured on the ai-slop lens: an em-dash rule and an
 exact-phrase list fired in only 1 of 3 runs when buried in the pattern list, and
 once pushed to the top they crowded out other findings and eventually produced a
 *fabricated* one — the model quoted a comma-heavy sentence containing no em
-dashes at all and called it a cluster. Counting is Python's job (CLAUDE.md).
+dashes at all and called it a cluster. Counting is Python's job (AGENTS.md).
 
 A lens opts in through its own frontmatter, so no lens is named here and
 `evaluate_against` stays generic:

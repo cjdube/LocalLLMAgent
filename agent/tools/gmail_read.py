@@ -495,7 +495,7 @@ def _thread_state(thread_id: str, wanted_label_ids, logger=None) -> dict:
     on this mailbox; revisit the trade if it ever becomes thousands.
 
     Answers empty when it cannot tell, and logs why. Silently degrading is what
-    CLAUDE.md forbids — degrading out loud is the allowed kind.
+    AGENTS.md forbids — degrading out loud is the allowed kind.
     """
     wanted = {lid for lid in (wanted_label_ids or []) if lid}
     empty = {"labels": set(), "newest": None}

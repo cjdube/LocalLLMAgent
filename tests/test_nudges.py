@@ -3,7 +3,7 @@
 SYNTHESIS_DIR is redirected to tmp_path suite-wide by
 tests/conftest.py::_isolate_learnings_dir, so these tests write their fixture
 archive there and never touch the real vault. TIMEZONE is pinned because the
-window's cutoff is a local calendar day (CLAUDE.md: UTC→local day windows) and
+window's cutoff is a local calendar day (AGENTS.md: UTC→local day windows) and
 the host's zone must not decide whether a file is in range.
 """
 
@@ -172,7 +172,7 @@ def test_tool_description_tells_the_model_to_relay_the_summary():
 def test_tool_description_forbids_inventing_a_suggestion():
     # A registry-style "what did you suggest?" tool is the shape where the model
     # answers plausibly from its own head instead of calling anything, and a
-    # fabricated suggestion is indistinguishable from a real one (CLAUDE.md, and
+    # fabricated suggestion is indistinguishable from a real one (AGENTS.md, and
     # the measured list_games case). Pinned so a future trim can't drop it.
     description = nudges_mod.TOOL_SCHEMA["function"]["description"]
     assert "NOT something you know" in description

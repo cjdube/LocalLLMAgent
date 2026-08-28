@@ -14,7 +14,7 @@ Code: `tasks/daily_synthesis.py`. Launchd: `launchd/local.wren.dailysynthesis.pl
 ## The pipeline
 
 Deterministic Python owns the structure; the model only judges a short,
-pre-matched list (the [small-local-model constraint](../CLAUDE.md) — a small
+pre-matched list (the [small-local-model constraint](../AGENTS.md) — a small
 model told to "find connections across everything" manufactures them):
 
 1. **Gather signals** — yesterday's activity, tagged with the *channel* it came
@@ -222,7 +222,7 @@ side, so bare titles would outrank the entire vault while saying nothing. This i
 Counting is what stops the silence being ambiguous. 25 of the 37 open items were bare
 when this shipped. A backlog that is all bare titles makes this source contribute
 nothing, which reads exactly like a matcher that has broken — so the count goes in the
-log next to the anchor count, per the degrade-loudly rule in CLAUDE.md.
+log next to the anchor count, per the degrade-loudly rule in AGENTS.md.
 
 The practical consequence is a habit, not a setting: **write the description when you
 park something.** An item titled "better logging" gives the matcher nothing; the same

@@ -15,8 +15,9 @@ either can be scheduled without the other.
 ## Where the hours come from
 
 Claude Code timestamps every event it writes to
-`~/.claude/projects/<slug>/<uuid>.jsonl`, so the day is already on disk. The task
-only has to decide where one stretch of work ends and the next begins.
+`<CLAUDE_CONFIG_DIR>/projects/<slug>/<uuid>.jsonl`, so the day is already on
+disk (`CLAUDE_CONFIG_DIR` defaults to `~/.claude`). The task only has to decide
+where one stretch of work ends and the next begins.
 
 `fetch_session_activity` returns one entry per timestamped event —
 `{ts, project, slug, session, text}` — across every session file with activity in

@@ -102,7 +102,7 @@ def test_an_empty_description_leaves_no_dangling_header():
 
 def test_every_template_tells_the_model_to_call_the_tool_in_the_same_turn():
     """Told to "report back", the model describes the comment and stops:
-    nothing written, nothing gated, and the reply reads fine. CLAUDE.md."""
+    nothing written, nothing gated, and the reply reads fine. AGENTS.md."""
     for tag in clickup_watcher.WATCHED_TAGS:
         text = " ".join(clickup_watcher.job_text(_tagged_task(tag=tag), tag).split())
         assert "in the same turn" in text

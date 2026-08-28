@@ -21,7 +21,8 @@ ToS-clean and local-first.
 ## The two sources
 
 - **Claude Code sessions** — Claude Code writes every session to
-  `~/.claude/projects/<slug>/<uuid>.jsonl` as an append-only log of JSON events.
+  `<CLAUDE_CONFIG_DIR>/projects/<slug>/<uuid>.jsonl` as an append-only log of
+  JSON events (`CLAUDE_CONFIG_DIR` defaults to `~/.claude`).
   For a given day, `fetch_claude_sessions` reads every session with activity that
   day (across all projects), keeping only role=user/assistant **text** — tool
   calls, tool results, subagent sidechains, thinking blocks, and injected

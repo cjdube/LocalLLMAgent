@@ -154,7 +154,7 @@ def test_search_rejects_an_empty_query(tmp_path, monkeypatch):
 
 
 def test_search_schema_denies_the_model_its_own_answer(tmp_path, monkeypatch):
-    # CLAUDE.md's catalogue-tool rule: a "what exists?" description must say the
+    # AGENTS.md's catalogue-tool rule: a "what exists?" description must say the
     # list is not in the model's head, or pretraining invents plausible pages.
     description = wiki.SEARCH_WIKI_SCHEMA["function"]["description"].lower()
     assert "you do not know" in description

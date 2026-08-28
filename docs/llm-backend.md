@@ -33,8 +33,8 @@ Two environment variables in `config/.env`, resolved as
 
 `<TASK_KEY>` is the uppercased task/module name. Wired task keys:
 `DAILY_SYNTHESIS`, `OPPORTUNITY_DIGEST`, `MORNING_BRIEF`, `STARRED_BLURBS`,
-`RESEARCH`, `EVALUATE_APP`, `EVALUATE_AGAINST`. (Journaling keys moved to the
-`SCRIBEJAY_*` chain below.)
+`PROJECT_SCAN`, `RESEARCH`, `EVALUATE_APP`, `EVALUATE_AGAINST`. (Journaling keys
+moved to the `SCRIBEJAY_*` chain below.)
 
 (The list is the set of `resolve_backend("<key>")` call sites — `grep -rn
 'resolve_backend(' agent tasks` is the check when this drifts.)
@@ -59,7 +59,7 @@ SCRIBEJAY_<TASK_KEY>_BACKEND  ->  SCRIBEJAY_LLM_BACKEND  ->  ollama
 ```
 
 Wired ScribeJay task keys: `DAILY_CHROME_LEARNINGS`, `DAILY_YOUTUBE_LEARNINGS`,
-`AI_CHAT_LEARNINGS`, `CLAUDE_TIME_BLOCKS`, `CALENDAR_COLORIZER`.
+`AI_CHAT_LEARNINGS`, `CLAUDE_TIME_BLOCKS`, `CALENDAR_COLORIZER`, `DAILY_COMMITS`.
 (`strava_download` uses no model at all.)
 
 There is deliberately **no** fallback from `SCRIBEJAY_*` to `WREN_*`. Two reasons:

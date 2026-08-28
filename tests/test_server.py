@@ -74,6 +74,7 @@ def client():
     srv.pending_backends.clear()
     srv.loaded_groups.clear()
     srv.cancel_events.clear()
+    srv._reset_sessions.clear()
     srv._session_last_active.clear()
     with srv.app.test_client() as c:
         yield c
@@ -214,7 +215,7 @@ def test_the_tools_prompt_reaches_the_model_as_one_paragraph():
 
 
 def test_the_tools_prompt_still_names_its_confirmation_gated_tools():
-    """Per CLAUDE.md, an instruction about a gated tool must tell the model to
+    """Per AGENTS.md, an instruction about a gated tool must tell the model to
     call it in the same turn rather than promise to — the wording that took the
     replay from 2-of-3 failing to 9 of 9. Pin that the instruction survives an
     edit to the file."""
@@ -838,6 +839,25 @@ def test_chat_new_cancels_a_running_turn(auth_client):
     resp = auth_client.post("/chat/new")
     assert resp.status_code == 200
     assert event.is_set()
+
+
+def test_chat_new_after_advance_cannot_restore_old_confirmation(auth_client, monkeypatch):
+    def reset_then_confirm(*args, **kwargs):
+        reset = srv.chat_new()
+        assert reset.status_code == 200
+        # Simulate an old turn doing one last session-scoped write after reset,
+        # as load_tools can before advance() notices cancellation.
+        srv.loaded_groups[SID] = {"wiki"}
+        return {"type": "confirm", "call": EMAIL_CALL}
+
+    monkeypatch.setattr(srv, "advance", reset_then_confirm)
+    resp = auth_client.post("/chat", json={"message": "send the email"})
+
+    assert resp.status_code == 200
+    assert resp.get_json()["type"] == "cancelled"
+    assert SID not in srv.conversations
+    assert SID not in srv.pending_confirmations
+    assert SID not in srv.loaded_groups
 
 
 def test_chat_new_with_no_running_turn_still_clears(auth_client):
@@ -1556,6 +1576,24 @@ def test_escalate_paused_write_continues_on_the_frontier(auth_client, monkeypatc
     assert resp.get_json()["type"] == "confirm"
     assert srv.pending_confirmations[SID] == EMAIL_CALL
     assert srv.pending_backends[SID] == "gemini"
+
+
+def test_chat_new_during_escalation_cannot_restore_old_history(
+        auth_client, monkeypatch, frontier_configured):
+    _seed_completed_turn()
+
+    def reset_then_answer(messages, *args, **kwargs):
+        reset = srv.chat_new()
+        assert reset.status_code == 200
+        messages.append({"role": "assistant", "content": "stale frontier answer"})
+        return {"type": "final", "text": "stale frontier answer"}
+
+    monkeypatch.setattr(srv, "advance", reset_then_answer)
+    resp = auth_client.post("/chat/escalate")
+
+    assert resp.status_code == 200
+    assert resp.get_json()["type"] == "cancelled"
+    assert SID not in srv.conversations
 
 
 def test_local_final_advertises_escalation_when_configured(auth_client, monkeypatch, frontier_configured):

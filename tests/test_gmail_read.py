@@ -1049,7 +1049,7 @@ def test_one_unreadable_message_does_not_cost_the_day(gmail):
 
 
 def test_gmail_being_down_is_an_error_dict_not_a_crash(gmail):
-    # CLAUDE.md: a failing source degrades to empty for its caller.
+    # AGENTS.md: a failing source degrades to empty for its caller.
     gmail.list_error = _http_error(503, "backend error")
     result = gmail_read.fetch_sent_metadata(_START, _END)
     assert "error" in result

@@ -262,6 +262,9 @@ loaded_groups: dict[str, set[str]] = {}
 # dict.) Membership doubles as the "a turn is running" flag: a second /chat for
 # the same sid gets 409 instead of interleaving into the same history.
 cancel_events: dict[str, threading.Event] = {}
+# Sessions whose running turn was invalidated by /chat/new. Kept separate from
+# the Event because /chat/cancel stops a turn without clearing its whole session.
+_reset_sessions: set[str] = set()
 _turn_registry_lock = threading.Lock()
 
 # Sessions idle past this are evicted on the next /chat from anyone — the
@@ -284,17 +287,57 @@ def _begin_turn(sid: str) -> threading.Event | None:
         return event
 
 
+def _clear_session_state(sid: str) -> None:
+    """Clear everything owned by one session. Caller holds _turn_registry_lock."""
+    conversations.pop(sid, None)
+    summaries.pop(sid, None)
+    pending_confirmations.pop(sid, None)
+    pending_backends.pop(sid, None)
+    loaded_groups.pop(sid, None)
+    _session_last_active.pop(sid, None)
+
+
+def _finish_turn(sid: str, cancel: threading.Event, *, history: list | None = None,
+                 pending_call: dict | None = None,
+                 pending_backend: str | None = None) -> bool:
+    """Atomically commit a completed turn and release its slot.
+
+    Returns False when /chat/new reset the session, cancellation arrived after
+    advance() returned, or this request no longer owns the session's turn slot.
+    In those cases no result state is committed; a reset also clears any
+    session-scoped writes the old turn made after /chat/new first cleared them.
+    """
+    with _turn_registry_lock:
+        owns_slot = cancel_events.get(sid) is cancel
+        was_reset = owns_slot and sid in _reset_sessions
+        cancelled = not owns_slot or cancel.is_set()
+
+        if was_reset:
+            _clear_session_state(sid)
+        elif not cancelled:
+            if history is not None:
+                conversations[sid] = history
+            if pending_call is not None:
+                pending_confirmations[sid] = pending_call
+                if pending_backend:
+                    pending_backends[sid] = pending_backend
+                else:
+                    pending_backends.pop(sid, None)
+
+        if owns_slot:
+            cancel_events.pop(sid, None)
+            _reset_sessions.discard(sid)
+        return owns_slot and not was_reset and not cancelled
+
+
 def _evict_idle_sessions() -> None:
     cutoff = time.time() - SESSION_IDLE_EVICT_S
-    for sid in [s for s, t in _session_last_active.items() if t < cutoff]:
-        if sid in cancel_events:
-            continue  # a turn is somehow still running; leave it alone
-        conversations.pop(sid, None)
-        summaries.pop(sid, None)
-        pending_confirmations.pop(sid, None)
-        pending_backends.pop(sid, None)
-        loaded_groups.pop(sid, None)
-        _session_last_active.pop(sid, None)
+    with _turn_registry_lock:
+        for sid in [s for s, t in _session_last_active.items() if t < cutoff]:
+            if sid in cancel_events:
+                continue  # a turn is somehow still running; leave it alone
+            _clear_session_state(sid)
+            _reset_sessions.discard(sid)
 
 LOGIN_PAGE = """<!DOCTYPE html>
 <html><head><title>Wren</title><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -546,7 +589,7 @@ def _warn_if_promised_without_acting(stage: str, text: str, history: list, check
     dropped the request — it surfaced only because the user asked a second time
     five minutes later.
 
-    Per CLAUDE.md, a turn that silently does *less* is worse than one that
+    Per AGENTS.md, a turn that silently does *less* is worse than one that
     fails, because only the failure is visible. So flag it; the prompt (see
     agent/wren_chat.md) is what's meant to prevent it. We deliberately don't
     auto-retry: re-prompting for the tool call would re-drive a write the user
@@ -572,7 +615,7 @@ def _warn_if_final_is_empty(stage: str, text: str, history: list, checkpoint: in
     done_reason was `stop` and eval_count only ~65-103 tokens, so agent/loop.py's
     num_predict cut-off warning never fires: nothing was truncated, the model
     just produced nothing. The user sees an empty bubble and the log records an
-    ordinary turn, which is the silence CLAUDE.md says is worse than a failure.
+    ordinary turn, which is the silence AGENTS.md says is worse than a failure.
 
     Whether the turn ran a tool separates two different bugs, so say which:
     no tool means the model answered nothing at all; a tool ran means it fetched
@@ -630,8 +673,9 @@ def _run_turn(sid: str, history: list, checkpoint: int, cancel: threading.Event,
     history is rolled back to `checkpoint` so the next turn starts clean; for
     /chat/confirm the checkpoint sits after the resolved tool result, which
     therefore survives the rollback (see that route's comment). `cancel` is
-    the Event _begin_turn registered for this sid; it is always deregistered
-    on the way out, which also releases the session's one-turn slot.
+    the Event _begin_turn registered for this sid; _finish_turn deregisters it
+    on the way out and atomically rejects a result invalidated by /chat/new or
+    a late cancellation.
 
     `backend` is None for a normal (local) turn and set only when a /chat/confirm
     continues an escalated turn — so the frontier turn's continuation stays on
@@ -671,25 +715,31 @@ def _run_turn(sid: str, history: list, checkpoint: int, cancel: threading.Event,
                          timeout=CHAT_MODEL_TIMEOUT, **backend_kwargs)
     except TurnCancelled:
         del history[checkpoint:]  # discard the stopped turn so the next one starts clean
+        _finish_turn(sid, cancel)
         logger.info(f"chat {stage} cancelled by user")
         _record_if_escalated(escalation, "cancelled")
         return jsonify({**note, "type": "cancelled"})
     except Exception as e:
         del history[checkpoint:]  # roll back the failed turn so the next one starts clean
+        if not _finish_turn(sid, cancel):
+            logger.info(f"chat {stage} cancelled before its error was returned")
+            _record_if_escalated(escalation, "cancelled")
+            return jsonify({**note, "type": "cancelled"})
         logger.exception(f"chat {stage} failed: {e}")
         _record_if_escalated(escalation, f"error:{e}")
         return jsonify({**note, "error": str(e)}), 500
-    finally:
-        cancel_events.pop(sid, None)
+
+    pending_call = result["call"] if result["type"] == "confirm" else None
+    if not _finish_turn(sid, cancel, pending_call=pending_call,
+                        pending_backend=backend):
+        del history[checkpoint:]
+        logger.info(f"chat {stage} cancelled before its result was committed")
+        _record_if_escalated(escalation, "cancelled")
+        return jsonify({**note, "type": "cancelled"})
 
     _record_if_escalated(escalation, "ok")
 
     if result["type"] == "confirm":
-        pending_confirmations[sid] = result["call"]
-        # A frontier turn that pauses for a second confirm keeps its backend, so
-        # the next continuation stays on the frontier model too.
-        if backend:
-            pending_backends[sid] = backend
         return jsonify({**note, **_call_response(result)})
 
     resp = {**note, **_call_response(result)}
@@ -769,7 +819,8 @@ def chat():
     if BUSY_PROBE_ENABLED and not frontier and not force_local and escalation_available():
         free, reason = probe_local_model(logger=logger)
         if not free:
-            cancel_events.pop(sid, None)  # release the slot; no turn ever ran
+            if not _finish_turn(sid, cancel):
+                return jsonify({"type": "cancelled"})
             logger.info("chat turn offered the frontier model: %s", reason)
             return jsonify({"type": "busy", "reason": reason,
                             "escalate_to": active_model_label(escalation_backend())})
@@ -856,7 +907,8 @@ def chat_confirm():
 
     call = pending_confirmations.pop(sid, None)
     if call is None:
-        cancel_events.pop(sid, None)  # release the turn slot taken above
+        if not _finish_turn(sid, cancel):
+            return jsonify({"type": "cancelled"})
         return jsonify({"error": "no pending action"}), 400
     # Set only when the paused write belonged to an escalated turn; continue that
     # turn on the same frontier backend rather than dropping back to local.
@@ -923,7 +975,8 @@ def chat_escalate():
 
     last_user = _last_user_index(history)
     if last_user is None:
-        cancel_events.pop(sid, None)  # release the turn slot taken above
+        if not _finish_turn(sid, cancel):
+            return jsonify({"type": "cancelled"})
         return jsonify({"error": "nothing to redo yet"}), 400
 
     _session_last_active[sid] = time.time()
@@ -946,9 +999,13 @@ def chat_escalate():
                          stateful_tools=WRITE_TOOLS, backend=backend,
                          logger=logger, should_cancel=cancel.is_set)
     except TurnCancelled:
+        _finish_turn(sid, cancel)
         logger.info("chat escalate cancelled by user")
         return jsonify({"type": "cancelled"})  # working discarded; local answer intact
     except Exception as e:
+        if not _finish_turn(sid, cancel):
+            logger.info("chat escalate cancelled before its error was returned")
+            return jsonify({"type": "cancelled"})
         logger.exception(f"chat escalate failed: {e}")
         record_escalation(request=request_text, local_reply=local_reply,
                           prompt_tokens=prompt_tokens, backend=backend, model=label,
@@ -957,18 +1014,18 @@ def chat_escalate():
         # silent fallback to the reply the user just judged too weak.
         return jsonify({"error": f"the frontier model couldn't be reached ({e}). "
                                  "Your local answer is unchanged."}), 502
-    finally:
-        cancel_events.pop(sid, None)
 
     # Success (a final answer, or a write paused for confirmation): commit the
     # frontier history and log the escalation.
-    conversations[sid] = working
+    pending_call = result["call"] if result["type"] == "confirm" else None
+    if not _finish_turn(sid, cancel, history=working, pending_call=pending_call,
+                        pending_backend=backend):
+        logger.info("chat escalate cancelled before its result was committed")
+        return jsonify({"type": "cancelled"})
     record_escalation(request=request_text, local_reply=local_reply,
                       prompt_tokens=prompt_tokens, backend=backend, model=label,
                       outcome="ok")
     if result["type"] == "confirm":
-        pending_confirmations[sid] = result["call"]
-        pending_backends[sid] = backend  # continue on the frontier after confirm
         return jsonify(_call_response(result))
     resp = _call_response(result)
     resp["escalated"] = True
@@ -984,9 +1041,10 @@ def chat_cancel():
     nothing is running. `cancelling` is False when there was no active turn."""
     if not _authenticated():
         return jsonify({"error": "not authenticated"}), 401
-    event = cancel_events.get(_session_id())
-    if event is not None:
-        event.set()
+    with _turn_registry_lock:
+        event = cancel_events.get(_session_id())
+        if event is not None:
+            event.set()
     return jsonify({"cancelling": event is not None})
 
 
@@ -995,21 +1053,18 @@ def chat_new():
     if not _authenticated():
         return jsonify({"error": "not authenticated"}), 401
     sid = _session_id()
-    # Cancel any turn still running for this sid before clearing its state.
-    # Without this the orphaned turn keeps its reference to the old history and
-    # runs to completion: it can still park a pending_confirmation on what the
-    # user now sees as a fresh session (a confirm card for a request whose
-    # context is gone), and it holds the sid's one turn slot, so the next /chat
-    # gets 409'd until it drains. The turn's own handler pops cancel_events.
-    event = cancel_events.get(sid)
-    if event is not None:
-        event.set()
-    conversations.pop(sid, None)
-    summaries.pop(sid, None)
-    pending_confirmations.pop(sid, None)
-    pending_backends.pop(sid, None)
-    loaded_groups.pop(sid, None)
-    _session_last_active.pop(sid, None)
+    # Mark, cancel, and clear under the same lock _finish_turn uses to commit.
+    # The old request keeps the turn slot until it drains, so no new turn can
+    # start between this clear and its final cleanup. _finish_turn clears once
+    # more before releasing the slot, catching any late load_tools write too.
+    with _turn_registry_lock:
+        event = cancel_events.get(sid)
+        if event is not None:
+            _reset_sessions.add(sid)
+            event.set()
+        else:
+            _reset_sessions.discard(sid)
+        _clear_session_state(sid)
     return jsonify({"ok": True})
 
 

@@ -273,7 +273,9 @@ def _age_job(jid: str, hours: float) -> None:
     with background.locked(background._STORE_PATH):
         data = background._load()
         job = background._find(data["jobs"], jid)
-        job["updated"] = (datetime.now() - timedelta(hours=hours)).isoformat(timespec="seconds")
+        aged = (datetime.now() - timedelta(hours=hours)).isoformat(timespec="seconds")
+        job["updated"] = aged
+        job["approval_started"] = aged
         background._save(data)
 
 
@@ -292,7 +294,7 @@ def test_stale_awaiting_job_is_repushed_once_per_lifetime(monkeypatch):
     assert [a["label"] for a in calls[-1]["actions"]] == ["Approve", "Deny"]
     assert background.get_job_result(jid)["status"] == "awaiting_approval"
 
-    # touch() reset the clock: the next idle poll does not re-push again.
+    # The recorded re-push reset the clock: the next idle poll stays quiet.
     n = len(calls)
     assert bg_worker.main() == 0
     assert len(calls) == n
@@ -305,6 +307,23 @@ def test_fresh_awaiting_job_is_not_repushed(monkeypatch):
                              approval_message="m")
     assert bg_worker.main() == 0
     assert calls == []
+
+
+def test_approval_expires_once_after_24_hours(monkeypatch):
+    calls = _capture_notify(monkeypatch)
+    jid = background.run_in_background("send the report")["id"]
+    background.save_awaiting(jid, [], {"function": {"name": "send_email", "arguments": {}}},
+                             approval_message="Send it?")
+    _age_job(jid, hours=25)
+
+    assert bg_worker.main() == 0
+    assert calls[-1]["title"] == "Wren task expired"
+    assert "send the report" in calls[-1]["message"]
+    assert background.get_job_result(jid)["status"] == "expired"
+
+    count = len(calls)
+    assert bg_worker.main() == 0
+    assert len(calls) == count
 
 
 # --------------------------------------------------------------------------- #

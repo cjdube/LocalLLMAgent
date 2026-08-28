@@ -167,7 +167,7 @@ backend is the riskiest single switch. See [llm-backend.md](llm-backend.md) and
 
 ## Related
 
-- `CLAUDE.md` — the "Untrusted content boundary" and data-sourcing rules that
+- `AGENTS.md` — the "Untrusted content boundary" and data-sourcing rules that
   govern new capabilities.
 - [background.md](background.md) — the approval flow and exclusions in full.
 - [memory.md](memory.md) — why the memory writes are gated, and the friction

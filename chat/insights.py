@@ -535,7 +535,7 @@ def run_stats(days: int = 30, limit: int | None = 30, now: datetime | None = Non
     No timezone conversion happens here, and none belongs here: `logging` writes
     the log timestamps in local time and `now` is local, so both sides of the
     window comparison are already naive-local. (The UTC-vs-local rule in
-    CLAUDE.md is about feeds that hand us UTC — a log we wrote ourselves isn't
+    AGENTS.md is about feeds that hand us UTC — a log we wrote ourselves isn't
     one, and converting it would introduce the very skew that rule prevents.)
     """
     cutoff = (now or datetime.now()) - timedelta(days=days)
@@ -818,7 +818,7 @@ def system_map(tools: list[dict], write_tools) -> dict:
             # SCRIBEJAY_LLM_BACKEND → ollama) with NO fallback to WREN_*, so the
             # default is spelled out here rather than left to _resolve_backend.
             # Read from the environment instead of importing scribejay.model:
-            # chat/ must not import scribejay.* (CLAUDE.md).
+            # chat/ must not import scribejay.* (AGENTS.md).
             "scribejay": {"name": "ScribeJay",
                        "model": active_model_label(os.getenv("SCRIBEJAY_LLM_BACKEND", "ollama")),
                        "role": "writes the record"},

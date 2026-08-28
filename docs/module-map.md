@@ -1,6 +1,6 @@
 # Module map
 
-Where each part of Wren lives, and why it is shaped that way. `CLAUDE.md`
+Where each part of Wren lives, and why it is shaped that way. `AGENTS.md`
 carries the short version — the rules that bind a change. This file carries the
 per-module detail behind them.
 

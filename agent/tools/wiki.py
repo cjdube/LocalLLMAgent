@@ -485,7 +485,7 @@ def render_lenses_index(logger=None) -> str:
 
     A lens dropped by either cap is invisible to Wren, who then never offers it —
     a silent degrade, so it's logged at WARNING with the counts and the names
-    (CLAUDE.md). MAX_INDEX_CHARS is usually the cap that bites: descriptions run
+    (AGENTS.md). MAX_INDEX_CHARS is usually the cap that bites: descriptions run
     ~150-200 chars, so ~3 exhaust the budget well before MAX_INDEX_LENSES.
     Rendered per turn, so a persistent drop repeats every turn; log_inspector
     collapses identical warnings into a count rather than pushing each one."""
@@ -520,7 +520,7 @@ def render_lenses_index(logger=None) -> str:
     )
 
 
-# Wording follows the catalogue-tool rule in CLAUDE.md: a "what exists?" tool has
+# Wording follows the catalogue-tool rule in AGENTS.md: a "what exists?" tool has
 # to state outright that the answer is not in the model's head, or pretraining
 # supplies a plausible page name and the model skips the call. The wiki is the
 # worst case for that — its topics (agents, RAG, product management) are exactly

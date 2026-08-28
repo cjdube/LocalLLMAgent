@@ -129,7 +129,7 @@ def test_block_is_capped_by_count_and_warns(caplog):
     with caplog.at_level(logging.WARNING, logger="cap-count"):
         block = memory.render_memory_block(log)
     assert block.count("\n- ") == memory.MAX_ACTIVE_MEMORIES
-    # Both halves: it truncated AND it said so, with the counts CLAUDE.md asks
+    # Both halves: it truncated AND it said so, with the counts AGENTS.md asks
     # for. A cap that drops quietly is the bug, not the fix.
     assert any("truncated" in r.message for r in caplog.records)
     assert any(f"of {memory.MAX_ACTIVE_MEMORIES + 5} active" in r.message

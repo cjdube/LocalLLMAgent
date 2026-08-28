@@ -63,7 +63,7 @@ ends the list, so every lens after it disappears from the prompt. Those lenses
 still work when named explicitly (in the CLI, or if the user names the page in
 chat) — Wren just won't know to offer them.
 
-That would be a silent degrade of exactly the kind `CLAUDE.md` warns about, so
+That would be a silent degrade of exactly the kind `AGENTS.md` warns about, so
 it isn't silent: `render_lenses_index(logger)` logs a WARNING naming which cap
 bit, how many of how many lenses made it, the character total, and the dropped
 page names. `chat/server.py` passes its logger; the logger is optional so the
@@ -80,7 +80,7 @@ context every turn, on every turn that never evaluates anything.
 The index names each lens by its **exact page slug**, which is what
 `evaluate_against` takes as `lens_page` — the model picks from a list rather
 than transcribing a guess (see the "never make the model copy an opaque
-identifier" rule in `CLAUDE.md`). If no listed lens fits the request, the tool
+identifier" rule in `AGENTS.md`). If no listed lens fits the request, the tool
 description tells Wren to ask which lens rather than pick one.
 
 A missing or misconfigured vault degrades to *no lenses* rather than raising —
@@ -90,7 +90,7 @@ this feeds the prompt build, which must never break a chat turn.
 
 `evaluate_against(lens_page, target_url=... | target_text=...)` is a fixed
 pipeline, not a freeform agent task (small-local-model constraint, see
-`CLAUDE.md`):
+`AGENTS.md`):
 
 1. Load the lens page from the vault. Missing or empty → `{"error": ...}`.
 2. Resolve the target: fetch a URL via `fetch_webpage` (Firecrawl), or take
@@ -158,7 +158,7 @@ couldn't. Asked whether a Medium article was slop, it produced a
 *summary-recap endings* finding, hedged as "the structure suggests a buildup
 toward…". A finding shaped exactly like a real one, about text never sent.
 
-That's the bad kind of degrade (`CLAUDE.md`): not a crash, not an empty answer,
+That's the bad kind of degrade (`AGENTS.md`): not a crash, not an empty answer,
 but a *confident* one that reads as complete. Three parts fix it, because the
 model and the reader each need telling:
 
@@ -271,7 +271,7 @@ The call passes `think=False`. Judging a target against standards that are
 on, 1 run in 3 spent the whole budget on scratchpad and returned a blank
 evaluation, and turning it off made the output cite the lens's standards more
 specifically. An empty response is reported as an error rather than passed
-through. See `CLAUDE.md` and commit `b273d1c`.
+through. See `AGENTS.md` and commit `b273d1c`.
 
 Runtime is a minute or two (page fetch + a large local generation), so the tool
 description tells Wren to offer `run_in_background` when it isn't needed
@@ -379,7 +379,7 @@ Standalone:
 - **A lens critiques; it never rewrites.** The `no-ai-slop` skill this borrows
   from has an edit mode that returns a revised draft. That half stayed out on
   purpose: "return the full edited draft" is a *document*, and the local model
-  writes blurbs and scores, not documents (`CLAUDE.md`). A small model asked to
+  writes blurbs and scores, not documents (`AGENTS.md`). A small model asked to
   rewrite prose while preserving voice will flatten the voice — the exact failure
   the lens exists to catch, and it would degrade silently. Rewriting is what the
   frontier-escalation button is for.

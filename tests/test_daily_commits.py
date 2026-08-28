@@ -13,7 +13,7 @@ from agent.activity_log import prior_day
 from scribejay import daily_commits as dc
 
 # No title line: the model stopped owning the heading when the page grew a second
-# source, and Python writes the date (CLAUDE.md — never ask the model for one).
+# source, and Python writes the date (AGENTS.md — never ask the model for one).
 DRAFT = ("### What I Built\n"
          "- **Labelled-email actions:** Wren can now act on a labelled email.")
 
@@ -85,7 +85,7 @@ def test_python_writes_the_heading_not_the_model(stubbed_run, monkeypatch):
 
 
 def test_the_totals_line_is_appended_in_python(stubbed_run):
-    # The model is never asked for arithmetic (CLAUDE.md), so the totals must be
+    # The model is never asked for arithmetic (AGENTS.md), so the totals must be
     # in the written page even though the draft it returned had none.
     assert "+694" not in DRAFT
     assert dc.main() == 0
@@ -124,7 +124,7 @@ def test_an_empty_draft_on_a_day_that_had_commits_is_logged_as_a_warning(stubbed
                                                                         monkeypatch, capsys):
     # There WERE commits, so an all-None draft is the model failing, not a quiet
     # day. Without the WARNING the only symptom is a missing file nobody looks for
-    # (CLAUDE.md: degrading is only safe if it's logged).
+    # (AGENTS.md: degrading is only safe if it's logged).
     monkeypatch.setattr(dc, "complete_text", lambda **k: "")
     assert dc.main() == 0
     assert stubbed_run["persists"] == []
@@ -162,7 +162,7 @@ def test_collect_failure_is_a_failed_run(stubbed_run, monkeypatch):
 
 
 def test_template_filling_runs_with_thinking_off(stubbed_run, monkeypatch):
-    # CLAUDE.md: a call that fills a fixed template passes think=False, because
+    # AGENTS.md: a call that fills a fixed template passes think=False, because
     # thinking tokens share num_predict and an over-reasoning call returns EMPTY.
     seen = {}
     monkeypatch.setattr(dc, "complete_text", lambda **k: seen.update(k) or DRAFT)

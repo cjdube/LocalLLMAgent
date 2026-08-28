@@ -186,7 +186,7 @@ def with_identity(system_prompt: str, logger: Optional[logging.Logger] = None) -
 
     # logger is threaded purely so render_memory_block can SAY when its cap
     # dropped a pinned fact. A truncation nobody is told about looks exactly
-    # like Wren ignoring an instruction, which is the failure CLAUDE.md calls
+    # like Wren ignoring an instruction, which is the failure AGENTS.md calls
     # out: degrading is only safe if it is logged.
     parts = [p for p in (WREN_CORE, USER_CONTEXT, model_line,
                          render_memory_block(logger), system_prompt) if p]

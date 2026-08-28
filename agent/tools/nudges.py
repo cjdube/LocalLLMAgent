@@ -63,7 +63,7 @@ MAX_CHAT_CHARS = 5000
 
 # The filename daily_synthesis writes: `Daily-Synthesis-<YYYY-MM-DD>.md`. The
 # date comes from here rather than from anything inside the file — Python owns
-# date math (CLAUDE.md), and the writer already resolved the local calendar day.
+# date math (AGENTS.md), and the writer already resolved the local calendar day.
 FILE_PREFIX = "Daily-Synthesis-"
 _FILENAME_RE = re.compile(rf"^{re.escape(FILE_PREFIX)}(\d{{4}}-\d{{2}}-\d{{2}})\.md$")
 
@@ -103,7 +103,7 @@ def _render(rows: list, days: int, total: int = None) -> str:
     with "The daily synthesis note on 'screenwatcher' fits your automation
     interests", a suggestion that was never sent. That is the failure the
     description's anti-fabrication clause exists to prevent, and asking a small
-    model to transcribe a long list is what induces it (CLAUDE.md: don't make the
+    model to transcribe a long list is what induces it (AGENTS.md: don't make the
     model copy content Python can render). Relaying this block instead: 6 of 6
     runs reproduced all 16 rows verbatim, the only difference being a curly
     apostrophe normalized to a straight one."""

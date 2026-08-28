@@ -65,6 +65,11 @@ def test_fetch_claude_sessions_empty_when_store_absent():
     assert ct.fetch_claude_sessions(START, END) == []
 
 
+def test_claude_projects_dir_honors_claude_config_dir(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "alternate-claude"))
+    assert ct.claude_projects_dir() == tmp_path / "alternate-claude" / "projects"
+
+
 def test_fetch_gemini_chats_unprocessed_and_dedup():
     d = ct.gemini_dir()
     d.mkdir(parents=True)

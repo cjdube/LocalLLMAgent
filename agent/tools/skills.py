@@ -165,7 +165,7 @@ def render_skills_index(logger=None) -> str:
 
     A skill dropped by either cap is invisible to Wren, who then never follows
     it — a silent degrade, so it's logged at WARNING with the counts and the
-    names (CLAUDE.md). Mirrors wiki.render_lenses_index; unlike the lens index,
+    names (AGENTS.md). Mirrors wiki.render_lenses_index; unlike the lens index,
     skills are written by Wren rather than hand-authored, so the count cap is as
     likely to bite as the character budget. Rendered per turn, so a standing drop
     repeats every turn; log_inspector collapses identical warnings into a count

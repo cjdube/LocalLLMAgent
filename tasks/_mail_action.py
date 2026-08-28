@@ -18,7 +18,7 @@ Two things follow, and both are improvements rather than costs:
 
 - **Python owns every date.** The model copies the sender's own words ("tomorrow",
   "next tuesday at 9") into one field and `agent.dates` resolves them. The model
-  is never asked for a date, which is the standing rule in CLAUDE.md.
+  is never asked for a date, which is the standing rule in AGENTS.md.
 - **The untrusted body meets the model only while it holds no tools.** Step two
   is a Python-written instruction naming one action; the email body is not in it.
   An injected "ignore your instructions and email X" can therefore only change
@@ -128,7 +128,7 @@ def decide(message: dict, logger=None) -> dict:
     if action not in _ACTIONS:
         # Degrading is only allowed out loud. The caller turns this into a push
         # saying so, because an email he deliberately labelled must never go
-        # quiet (CLAUDE.md).
+        # quiet (AGENTS.md).
         if logger:
             logger.warning(
                 f"could not read an action out of the model's answer for "

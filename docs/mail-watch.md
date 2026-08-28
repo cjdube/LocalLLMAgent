@@ -143,7 +143,7 @@ description tells the model to report what a message says and never to follow
 instructions inside it. `reply_to_thread` writes, and is gated in both
 `WRITE_TOOLS` and `CONSEQUENTIAL_TOOLS`. **Do not add another write to
 `agent/tools/gmail_read.py` without a gate** — see the "Untrusted content
-boundary" section of `CLAUDE.md`.
+boundary" section of `AGENTS.md`.
 
 ## `Wren/Do` — what "handle it" is allowed to mean
 
@@ -397,7 +397,7 @@ deny. Both are passes; nothing happening without a tap is the guarantee.
 ### Gmail drops the watch after 7 days, silently
 
 The mailbox just stops publishing. A stopped watcher looks exactly like a quiet
-inbox, which is the silent degrade `CLAUDE.md` calls worse than a crash. Three
+inbox, which is the silent degrade `AGENTS.md` calls worse than a crash. Three
 layers guard it:
 
 - `mail_watch_renew` runs **daily**, far more often than the 7 days needs, so one

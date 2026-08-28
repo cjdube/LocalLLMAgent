@@ -83,7 +83,7 @@ def test_a_quiet_day_still_logs_a_finished_run(stubbed_run, monkeypatch, capsys)
 
 
 def test_gmail_failing_is_a_warning_not_a_failed_run(stubbed_run, monkeypatch, capsys):
-    # CLAUDE.md: a dead source reads as an empty day — but never silently, or a
+    # AGENTS.md: a dead source reads as an empty day — but never silently, or a
     # missing page looks like a quiet day instead of a broken one.
     monkeypatch.setattr(dc, "fetch_sent_metadata", lambda *a, **k: {"error": "gmail 503"})
     assert dc.main() == 0

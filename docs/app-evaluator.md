@@ -18,7 +18,7 @@ Code: `agent/tools/web_fetch.py` (the general page-fetch tool),
   `WEB_FETCH_MAX_CHARS` (default 8000, matching the agent loop's tool-result
   cap) so the tool decides its own cut.
 - **`evaluate_app(url)`** — the teardown. A fixed pipeline, not a freeform
-  agent task (small-local-model constraint, see `CLAUDE.md`): Python fetches
+  agent task (small-local-model constraint, see `AGENTS.md`): Python fetches
   the page with `fetch_webpage`, compacts the markdown deterministically
   (images and link targets stripped, whitespace collapsed, bounded to ~6000
   chars), and the model writes one analysis against a fixed four-section

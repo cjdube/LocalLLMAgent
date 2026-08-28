@@ -15,7 +15,7 @@ RED_SOX = [{"league": "mlb", "id": "2", "name": "Red Sox"}]
 PATRIOTS = [{"league": "nfl", "id": "17", "name": "Patriots"}]
 
 # America/New_York, so an evening game is the case where the UTC date and the
-# local date disagree — pinned per CLAUDE.md rather than inherited from the host.
+# local date disagree — pinned per AGENTS.md rather than inherited from the host.
 EASTERN = "America/New_York"
 
 

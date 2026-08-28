@@ -364,7 +364,7 @@ def render_memory_block(logger=None) -> str:
         total += len(line)
     if len(kept) < len(memories) and logger:
         # A dropped fact is invisible to Wren, who then never applies it — a
-        # silent degrade, so say so with the counts (CLAUDE.md).
+        # silent degrade, so say so with the counts (AGENTS.md).
         cause = (f"the {MAX_MEMORY_BLOCK_CHARS}-char budget"
                  if len(kept) < min(len(memories), MAX_ACTIVE_MEMORIES)
                  else f"the {MAX_ACTIVE_MEMORIES}-memory cap")

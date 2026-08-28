@@ -3,7 +3,7 @@
 _STORE_PATH is redirected to tmp_path suite-wide by
 tests/conftest.py::_isolate_remaining_config_stores, so these tests never touch
 the production log. TIMEZONE is pinned because the window's cutoff is a local
-calendar time (CLAUDE.md: UTC→local day windows) and the host's zone must not
+calendar time (AGENTS.md: UTC→local day windows) and the host's zone must not
 decide whether a row is in range.
 """
 

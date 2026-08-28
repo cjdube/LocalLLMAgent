@@ -78,7 +78,7 @@ is what the code falls back to when the variable is unset.
 | `WREN_CHAT_MODEL_TIMEOUT` | 120 | unset | Read timeout for an *interactive* turn. Deliberately tighter than `OLLAMA_TIMEOUT`: someone is waiting, and a fast "Ollama is busy" beats a five-minute spinner. |
 
 > **These two move together.** `OLLAMA_NUM_CTX` and `WREN_CHAT_MAX_HISTORY_CHARS`
-> are coupled — the `.env.example` comment and CLAUDE.md both say raise them
+> are coupled — the `.env.example` comment and AGENTS.md both say raise them
 > together. The 8192/16000 default pair and the live 32768/48000 pair are both
 > internally consistent.
 
@@ -334,7 +334,7 @@ Listed for completeness, so they don't get confused with the ones above.
 | `chat/routes_games.py` | `AI_TIMEOUT_S` 160, `WARMUP_TIMEOUT_S` 620, `MAX_GAME_BODY_BYTES` 2 MB | Proxy timeouts must stay **above** the browser's own budgets. |
 | `agent/escalations.py` | `MAX_RECORDS` 200 | Store pruning. |
 | `agent/tools/push_log.py` | `_PRUNE_AFTER_DAYS` 30, `_MAX_ROWS` 500 | Age first, then a hard cap so a burst can't outrun the age window. |
-| `agent/tools/background.py` | `_TOKEN_MAX_AGE_S` 3600, `_LIST_LIMIT` 20 | Approval-token expiry. |
+| `agent/tools/background.py` | `_TOKEN_MAX_AGE_S` 3600, `_MAX_APPROVAL_REPUSHES` 3, `_EXPIRE_AWAITING_AFTER_S` 86400, `_MAX_NONTERMINAL_JOBS` 100, `_MAX_STORED_JOBS` 500, `_LIST_LIMIT` 20 | Bounded approval reminders, job lifetime, polling store, and model-facing list. |
 | `chat/insights.py` | `_MEMORY_TEXT_MAX` 300, `_WIKI_PAGES_MAX` 150 | Dashboard rendering only. |
 | HTTP timeouts | `web_fetch` 60s, `research` 15s, `opportunity_digest` 15s, `notify` 10s, `projects` git 10s, `games` probe 0.3s | Policy: **every HTTP call has an explicit timeout.** |
 | `launchd/local.wren.selfheal.plist` | `StartInterval` 3600 | How long a Homebrew Python upgrade can sit unrepaired. See below. |

@@ -5,7 +5,7 @@ model reply pushes nothing, and a dead source degrades instead of crashing.
 Every external source (Chrome history, YouTube Likes, wiki, ClickUp, opportunities) and
 the model/warm/notify calls are stubbed — no Chrome DB, no Google, no model, no
 push. TIMEZONE is pinned so the prior-day window is deterministic, not the
-host's zone (CLAUDE.md: UTC→local day windows)."""
+host's zone (AGENTS.md: UTC→local day windows)."""
 
 import logging
 from datetime import timedelta
@@ -854,7 +854,7 @@ def test_a_project_with_nothing_but_a_name_is_skipped(stub_anchors, stub_project
 
 def test_project_anchor_tokens_are_capped(stub_anchors, stub_projects, monkeypatch):
     # The bug _ai_chat_signals documents: a token set large enough to overlap
-    # everything outranks every real pair. A project has a README, a CLAUDE.md
+    # everything outranks every real pair. A project has a README, an AGENTS.md
     # and a docs tree behind it, so the bound is enforced, not assumed.
     monkeypatch.setattr(ds, "load_registry", lambda: [_project(
         "Huge",

@@ -77,6 +77,7 @@ Three design points worth keeping:
 ```
 pending ──(worker)──▶ done | failed
         └─(worker)──▶ awaiting_approval ──▶ approved | denied ──(worker)──▶ …
+                                             └─(24h)──▶ expired
 ```
 
 - **pending** — enqueued (or resumed after an approval); the next poll acts on it.
@@ -86,8 +87,12 @@ pending ──(worker)──▶ done | failed
   the resolved call. The resolved state is persisted **before** the run
   continues, so a transient failure + retry can't execute an approved
   consequential action twice.
-- **done / failed** — terminal; the result is pushed to the phone. Terminal jobs
-  older than 14 days are pruned on the next write.
+- **expired** — approval was not received within 24 hours; the paused call and
+  conversation are discarded and one final phone notification is attempted.
+- **done / failed / expired** — terminal. Terminal jobs older than 14 days are
+  pruned on the next write, and only the newest 500 total records are retained.
+  At most 100 unfinished jobs may be queued; a new handoff is refused once that
+  bound is reached rather than growing the 30-second polling store indefinitely.
 
 ## Approval by phone
 
@@ -103,10 +108,12 @@ finds nothing to do. A real transition is acknowledged with a confirming push
 own.
 
 If the buttons expire (their token lifetime passed) or never rendered
-(`WREN_PUBLIC_URL` was unset when the job paused), the worker **re-pushes** stale
-`awaiting_approval` jobs once per token lifetime so a missed tap doesn't strand a
-job forever. There's also a CLI fallback: `python -m agent.tools.background
---approve <id>` / `--deny <id>`.
+(`WREN_PUBLIC_URL` was unset when the job paused), the worker **re-pushes** an
+`awaiting_approval` job once per token lifetime, up to three reminders. It then
+stays quiet until the 24-hour decision window closes and the job becomes
+`expired`; this keeps a missed tap recoverable without sending hourly pushes
+forever. During the window there is also a CLI fallback:
+`python -m agent.tools.background --approve <id>` / `--deny <id>`.
 
 ## Failure handling
 

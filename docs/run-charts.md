@@ -38,7 +38,7 @@ logs/*.log  →  parse_runs()  →  run_stats()  →  /api/run_stats  →  SVG c
 ```
 
 Nothing here calls a model — not the local Gemma, not a cloud backend. This is
-the "deterministic Python owns structure" rule from CLAUDE.md applied to axes:
+the "deterministic Python owns structure" rule from AGENTS.md applied to axes:
 scales and path coordinates are structure. Nothing new is written to disk
 either; the series is parsed from logs the tasks already produce.
 

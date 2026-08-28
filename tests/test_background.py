@@ -31,6 +31,17 @@ def test_enqueue_rejects_empty():
     assert "error" in background.run_in_background("   ")
 
 
+def test_enqueue_refuses_when_unfinished_queue_is_full(monkeypatch):
+    monkeypatch.setattr(background, "_MAX_NONTERMINAL_JOBS", 2)
+    background.run_in_background("one")
+    background.run_in_background("two")
+
+    out = background.run_in_background("three")
+
+    assert out == {"error": "background queue is full (2 unfinished jobs)"}
+    assert background.list_background_jobs()["count"] == 2
+
+
 def test_next_actionable_skips_awaiting_and_is_oldest_first():
     a = background.run_in_background("a")["id"]
     b = background.run_in_background("b")["id"]
@@ -87,6 +98,17 @@ def test_old_terminal_jobs_prune_on_next_write():
     assert len(jobs) == 1
 
 
+def test_terminal_history_has_a_hard_cap(monkeypatch):
+    monkeypatch.setattr(background, "_MAX_STORED_JOBS", 3)
+    for i in range(5):
+        jid = background.run_in_background(f"job {i}")["id"]
+        background.mark_done(jid, "done")
+
+    out = background.list_background_jobs()
+    assert out["count"] == 3
+    assert {j["task"] for j in out["jobs"]} == {"job 2", "job 3", "job 4"}
+
+
 def test_prune_never_touches_non_terminal_jobs():
     stuck = background.run_in_background("stuck approval")["id"]
     _await(stuck)  # awaiting_approval
@@ -95,6 +117,41 @@ def test_prune_never_touches_non_terminal_jobs():
     background.run_in_background("fresh work")
     statuses = {j["id"]: j["status"] for j in background.list_background_jobs()["jobs"]}
     assert statuses[stuck] == "awaiting_approval"  # old but alive — kept
+
+
+def test_approval_expires_after_total_decision_window():
+    jid = background.run_in_background("stuck approval")["id"]
+    _await(jid)
+    with background.locked(background._STORE_PATH):
+        data = background._load()
+        job = background._find(data["jobs"], jid)
+        job["approval_started"] = (
+            datetime.now() - timedelta(seconds=background._EXPIRE_AWAITING_AFTER_S + 1)
+        ).isoformat(timespec="seconds")
+        atomic_write_json(background._STORE_PATH, data)
+
+    expired = background.expire_stale_approvals()
+
+    assert expired == [{"id": jid, "task_text": "stuck approval"}]
+    result = background.get_job_result(jid)
+    assert result["status"] == "expired"
+    assert result["result"].startswith("expired:")
+    assert background.expire_stale_approvals() == []
+
+
+def test_approval_reminders_stop_at_the_repush_limit():
+    jid = background.run_in_background("stuck approval")["id"]
+    _await(jid)
+    with background.locked(background._STORE_PATH):
+        data = background._load()
+        job = background._find(data["jobs"], jid)
+        job["approval_repushes"] = background._MAX_APPROVAL_REPUSHES
+        job["updated"] = (
+            datetime.now() - timedelta(seconds=background._TOKEN_MAX_AGE_S + 1)
+        ).isoformat(timespec="seconds")
+        atomic_write_json(background._STORE_PATH, data)
+
+    assert background.stale_awaiting(background._TOKEN_MAX_AGE_S) == []
 
 
 def test_list_background_jobs_caps_output_but_counts_all():

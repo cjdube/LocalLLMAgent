@@ -72,7 +72,7 @@ def has_substantive_content(text: str) -> bool:
 def commit_totals_line(commits: list) -> str:
     """Per-repo commit and line totals as one deterministic line.
 
-    Arithmetic the model is never asked for (CLAUDE.md: deterministic Python owns
+    Arithmetic the model is never asked for (AGENTS.md: deterministic Python owns
     structure). It is also the footnote that makes the drafted bullets checkable —
     a draft claiming a big day under a two-commit total is visibly wrong."""
     if not commits:

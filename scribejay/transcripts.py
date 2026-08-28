@@ -24,8 +24,15 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+
+def claude_projects_dir() -> Path:
+    """Claude Code's session root, including its supported config override."""
+    root = Path(os.getenv("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude"))
+    return root.expanduser() / "projects"
+
+
 # Module-level so tests can redirect it away from the real session store.
-CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
+CLAUDE_PROJECTS_DIR = claude_projects_dir()
 
 DEFAULT_GEMINI_DIR = str(Path.home() / "Vaults" / "llm-wiki-learnings" / "gemini_inbox")
 

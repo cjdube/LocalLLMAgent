@@ -2,9 +2,9 @@
 
 Wren's on-device model is small. Four failure modes have each cost weeks of
 silent breakage, and each one produced a rule in
-[CLAUDE.md](../CLAUDE.md)'s *Small-local-model constraints* section.
+[AGENTS.md](../AGENTS.md)'s *Small-local-model constraints* section.
 
-CLAUDE.md carries the rule and the measured result, because that's what's
+AGENTS.md carries the rule and the measured result, because that's what's
 needed while writing code. This file carries the evidence — the incidents, the
 replay counts, the reasoning — because that's what's needed when someone is
 about to decide the rule doesn't apply to their case. It usually does.
@@ -186,7 +186,7 @@ Both are the same failure shape as the original: a plausible empty answer.
 
 ## Related
 
-- [CLAUDE.md](../CLAUDE.md) — the rules themselves, in short form
+- [AGENTS.md](../AGENTS.md) — the rules themselves, in short form
 - [docs/llm-backend.md](llm-backend.md) — the backend seam and Gemini's knobs
 - [docs/tool-loading.md](tool-loading.md) — how a tool reaches the model at all
 - [docs/ollama-serving.md](ollama-serving.md) — failure modes of *serving* the

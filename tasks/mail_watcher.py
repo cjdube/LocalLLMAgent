@@ -120,7 +120,7 @@ def summarize(message: dict, logger=None) -> str:
     # think=False is required, not a preference: thinking tokens are drawn from
     # the same num_predict budget as the answer, so a reasoning-heavy run on a
     # template-filling call returns EMPTY content rather than a short one
-    # (CLAUDE.md, docs/model-constraints.md). There is nothing to reason past
+    # (AGENTS.md, docs/model-constraints.md). There is nothing to reason past
     # here — the whole email is already in the prompt.
     text = complete_text(SUMMARY_SYSTEM_PROMPT, prompt, think=False, logger=logger)
     text = " ".join((text or "").split())
@@ -192,7 +192,7 @@ def push_for(message: dict, logger=None) -> dict:
     summary = summarize(message, logger)
     if not summary:
         # A degrade that says so. A silently shorter alert is the failure mode
-        # CLAUDE.md singles out: the push still lands, so nothing looks broken.
+        # AGENTS.md singles out: the push still lands, so nothing looks broken.
         if logger:
             logger.warning(
                 f"model returned no summary for message {message.get('message_id')} "

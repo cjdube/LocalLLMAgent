@@ -1,7 +1,7 @@
 """Opportunity signal store — companies showing a pain a fractional product
 operator can solve, gathered daily by tasks/opportunity_digest.py.
 
-Three signals, all from free ToS-clean sources (see CLAUDE.md's data sourcing
+Three signals, all from free ToS-clean sources (see AGENTS.md's data sourcing
 policy): "funded" (new SEC Form D filings), "hiring" (product/eng leadership
 openings at watched companies, plus HN Who-is-hiring posts), and
 "stalled_search" (a watched leadership opening still unfilled after

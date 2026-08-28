@@ -44,7 +44,7 @@ def test_parse_log_reads_subject_paths_and_counts():
 
 
 def test_parse_log_keeps_the_timestamp_whole():
-    # CLAUDE.md's timezone rule: never slice an ISO stamp. The offset is what
+    # AGENTS.md's timezone rule: never slice an ISO stamp. The offset is what
     # makes a 21:09 commit sort and read as an evening one.
     assert ga._parse_log(REAL_LOG, "r")[0]["time"] == "2026-08-25T21:09:34-04:00"
 
@@ -97,7 +97,7 @@ def test_compact_caps_the_commit_count():
     ([_commit(1, files=40)], "trimmed the file list"),
 ])
 def test_every_cap_that_drops_something_logs_it(commits, expect):
-    # CLAUDE.md: degrading on volume is only safe if it is logged. A silently
+    # AGENTS.md: degrading on volume is only safe if it is logged. A silently
     # shortened prompt produces a thinner page that nothing alerts on.
     logger = _Recorder()
     ga.compact_commits(commits, logger=logger)
@@ -212,7 +212,7 @@ def test_collect_excludes_commits_outside_the_day(projects):
 
 
 def test_collect_excludes_a_late_evening_commit_from_the_wrong_day(projects):
-    # The timezone trap CLAUDE.md names: 2026-08-25T22:30-04:00 is 2026-08-26 in
+    # The timezone trap AGENTS.md names: 2026-08-25T22:30-04:00 is 2026-08-26 in
     # UTC. A window built from UTC stamps would file this under the wrong day, and
     # a fixture timed before 20:00 would never notice.
     repo = _repo(projects, "alpha")

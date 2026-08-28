@@ -38,7 +38,7 @@ FETCH_TIMEOUT = 30
 # Prompt-bounding caps. A heavy day is ~10 commits, so these rarely bind — they
 # exist because one `git log` over a repo with a vendored dependency tree can
 # produce a 900-file commit, and the small local model's window is the thing that
-# breaks first. Every cap that actually drops something logs it (CLAUDE.md:
+# breaks first. Every cap that actually drops something logs it (AGENTS.md:
 # degrading is only safe if it is logged).
 MAX_COMMITS = 40
 MAX_FILES_PER_COMMIT = 12

@@ -4,7 +4,7 @@ the technical constraints the marketing copy glosses over.
 
 Ported from the standalone ~/Projects/app-evaluator script into Wren's idiom.
 Deliberately a fixed pipeline, not a freeform agent task (small-local-model
-constraint, see CLAUDE.md): Python fetches the page via Firecrawl, compacts
+constraint, see AGENTS.md): Python fetches the page via Firecrawl, compacts
 the markdown deterministically, and the model writes one analysis against a
 fixed section template — no JSON schema to parse, nothing to break.
 

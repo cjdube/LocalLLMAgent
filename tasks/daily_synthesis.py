@@ -3,7 +3,7 @@ few high-confidence "these line up" nudges — Wren's first proactive-synthesis
 task. Non-interactive, run by launchd every morning after the daily learnings
 tasks have populated the day's signals.
 
-The design follows the small-local-model constraint (see CLAUDE.md): Python owns
+The design follows the small-local-model constraint (see AGENTS.md): Python owns
 the structure. It reads yesterday's browsing + YouTube Likes + AI-agent chats (the
 "signals") and the user's projects + wiki pages + parked ClickUp items + watched or
 interesting companies (the "anchors"),
@@ -86,7 +86,7 @@ MAX_ANCHOR_CANDIDATES = 5
 MAX_CROSS_CANDIDATES = 3
 MAX_NUDGES = 3
 
-# Thinking stays ON for the judgment call (CLAUDE.md: this call has to reason past
+# Thinking stays ON for the judgment call (AGENTS.md: this call has to reason past
 # what the prompt contains, unlike a template-filler), and the price is that its
 # tokens share num_predict — so a run that loops in scratchpad returns EMPTY
 # content rather than a truncated answer, and the day's already-matched candidates
@@ -104,7 +104,7 @@ MAX_SYNTHESIS_ATTEMPTS = 2
 MAX_ANCHOR_SUMMARY_CHARS = 200
 
 # Hard ceiling on a project anchor's token set. A project has far more text
-# available than a wiki page — a README, a CLAUDE.md, a docs tree — and feeding
+# available than a wiki page — a README, an AGENTS.md, a docs tree — and feeding
 # that in raw would rebuild the bug _ai_chat_signals documents below: a token set
 # that large overlaps everything and outranks every real pair. tasks/project_scan.py
 # already distils each project to a summary and ~15 topics for this reason; this is
@@ -280,7 +280,7 @@ def _ai_chat_signals(day, logger) -> list:
 def gather_signals(start, end, day, logger) -> list:
     """Yesterday's activity as {channel, kind, text, tokens} rows. Each source is
     guarded: a dead source contributes nothing rather than killing the run
-    (CLAUDE.md: degrade, don't crash). `channel` is what makes an echo detectable —
+    (AGENTS.md: degrade, don't crash). `channel` is what makes an echo detectable —
     see cross_channel_pairs."""
     signals = []
 
@@ -720,7 +720,7 @@ def main() -> int:
         if not candidates:
             # Distinct from the no-overlap case above: the day DID line up with his
             # world, we just said so already. Saying which is what keeps a quiet
-            # morning readable in the log (CLAUDE.md: a run that produces less has
+            # morning readable in the log (AGENTS.md: a run that produces less has
             # to say why).
             logger.info(f"All {matched} candidate(s) were repeats of the last "
                         f"{RECENT_NUDGE_DAYS} days; nothing to synthesize")
@@ -755,7 +755,7 @@ def main() -> int:
             # nothing at all, or it returned prose that held no "- " bullets. They
             # used to share one INFO line, which made a broken run indistinguishable
             # from a quiet one — and silence is this task's common case, so nobody
-            # would ever look. Per CLAUDE.md, a task that silently produces LESS is
+            # would ever look. Per AGENTS.md, a task that silently produces LESS is
             # worse than one that fails, because only the failure pushes an alert.
             # These WARNINGs reach the 8am log_inspector; the INFO does not.
             if not (raw or "").strip():

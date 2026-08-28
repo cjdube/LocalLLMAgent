@@ -11,7 +11,7 @@ Code: `tasks/opportunity_digest.py` (pollers, scoring, digest),
 `agent/tools/research.py` (company research briefs),
 `chat/static/opportunities.html` + routes in `chat/server.py` (the triage
 page). It deliberately does NOT scrape LinkedIn or use paid data SaaS — see
-`CLAUDE.md`'s data sourcing policy.
+`AGENTS.md`'s data sourcing policy.
 
 ## When does it run?
 

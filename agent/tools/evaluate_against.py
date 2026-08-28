@@ -5,7 +5,7 @@ against a fixed VC rubric, this judges anything against the user's *own* rubric,
 loaded from the vault at call time rather than baked into the prompt.
 
 Same deliberate shape as evaluate_app (small-local-model constraint, see
-CLAUDE.md): Python loads and compacts both the lens and the target, and the
+AGENTS.md): Python loads and compacts both the lens and the target, and the
 model writes one analysis against a fixed section template — nothing to parse,
 nothing to break. The lens is the user's own trusted note; the target is
 untrusted web/text content, so the prompt tells the model to ignore instructions
@@ -75,7 +75,7 @@ _FETCH_CHARS = 20000
 # on the ai-slop lens against a clean draft — 3 of 3 runs manufactured findings,
 # one of them advising a change that would have made the draft worse. A lens page
 # can't fix this from its own text; the output contract has to permit an empty
-# section. See CLAUDE.md on parse-and-degrade honesty.
+# section. See AGENTS.md on parse-and-degrade honesty.
 #
 # The verdict line exists because the three headings answer "what did you find?"
 # and never "so what?" — asked "is this article AI slop?", the template returned
@@ -233,7 +233,7 @@ def evaluate_against(lens_page: str = "", target_url: str = "",
         # for the same num_predict budget as the answer. Measured with thinking on,
         # 1 run in 3 spent all 3072 tokens reasoning and returned NOTHING; off,
         # 4 of 4 clean at a tenth of the budget, naming the lens's standards
-        # more specifically. See CLAUDE.md.
+        # more specifically. See AGENTS.md.
         evaluation = complete_text(system_prompt=EVAL_SYSTEM_PROMPT, user_prompt=user_prompt,
                                    backend=resolve_backend("evaluate_against"),
                                    think=False,
@@ -244,7 +244,7 @@ def evaluate_against(lens_page: str = "", target_url: str = "",
         out = {"lens": lens_page, "evaluation": evaluation}
         if truncated:
             # Python appends this, not the model: how much of the document was
-            # judged is a fact we hold and it doesn't (CLAUDE.md — deterministic
+            # judged is a fact we hold and it doesn't (AGENTS.md — deterministic
             # Python owns structure). Telling the model to stay quiet about the
             # ending fixes the false findings but leaves the report looking
             # complete; this is what stops the reader assuming it is.

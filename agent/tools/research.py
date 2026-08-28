@@ -3,7 +3,7 @@ the business behind an opportunity, so the user can judge fit before spending
 outreach effort.
 
 Deliberately a fixed pipeline, not a freeform agent task (small-local-model
-constraint, see CLAUDE.md): Python runs a bounded set of Tavily searches —
+constraint, see AGENTS.md): Python runs a bounded set of Tavily searches —
 plus, for EDGAR items, a deterministic parse of the Form D filing XML itself
 (officers' names, offering amount, revenue range — official and free) — and
 the model only writes the summary against a fixed template. Read-only against
@@ -191,7 +191,7 @@ def research(company: str, context: str = None, filing: dict = None) -> dict:
         # snippets above, with "Unknown" as the miss case — no chain-of-thought
         # needed, and the scratchpad would compete with it for num_predict.
         # Measured: 3 of 3 complete briefs at 4% of the budget, ~6x faster, with
-        # the same facts. See CLAUDE.md.
+        # the same facts. See AGENTS.md.
         summary = complete_text(system_prompt=RESEARCH_SYSTEM_PROMPT, user_prompt=user_prompt,
                                 backend=resolve_backend("research"), think=False,
                                 logger=logger)  # surfaces loop.py's num_predict cut-off warning

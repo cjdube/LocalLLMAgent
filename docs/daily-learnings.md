@@ -43,7 +43,7 @@ URLs) is appended **in Python**, not by the model, so the links are always real.
 Written as `Daily-YouTube-<date>.md`.
 
 Likes are timestamped UTC and the day window is local — `_liked_local_date`
-converts before comparing. See the day-boundary rule in [CLAUDE.md](../CLAUDE.md).
+converts before comparing. See the day-boundary rule in [AGENTS.md](../AGENTS.md).
 
 ## Shared behavior
 
@@ -56,7 +56,7 @@ model call; it's never silently dropped.
 
 **The prompt is deliberately small and focused** so the on-device model produces
 a complete draft rather than trailing off. See the small-local-model constraints
-in [CLAUDE.md](../CLAUDE.md) and [docs/model-constraints.md](model-constraints.md).
+in [AGENTS.md](../AGENTS.md) and [docs/model-constraints.md](model-constraints.md).
 
 ## Where the output goes
 

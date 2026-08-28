@@ -96,8 +96,8 @@ def _transient_exceptions() -> tuple:
 
 
 # Re-push a stuck approval once its buttons' tokens have expired (see
-# background._TOKEN_MAX_AGE_S) — without this, a missed push strands the job in
-# awaiting_approval forever, invisible to next_actionable().
+# background._TOKEN_MAX_AGE_S), up to the store's reminder bound; expire it
+# after the total decision window so it cannot remain invisible forever.
 REPUSH_AFTER_S = background._TOKEN_MAX_AGE_S
 
 
@@ -288,10 +288,18 @@ def _repush_stale_approvals(logger) -> None:
     """Re-send the approval push for jobs stuck awaiting_approval longer than a
     token lifetime — their buttons have expired (or never rendered, if
     WREN_PUBLIC_URL was unset when they paused). Fresh tokens each time;
-    touch() resets the staleness clock so each job re-pushes at most once per
-    lifetime, not on every 30-second poll. Runs on the idle path, so it uses
-    the approval_message persisted at pause time instead of the describer
-    stack."""
+    mark_approval_repushed() resets the staleness clock so each job re-pushes at
+    most once per lifetime, not on every 30-second poll. Runs on the idle path,
+    so it uses the approval_message persisted at pause time instead of the
+    describer stack."""
+    for job in background.expire_stale_approvals():
+        logger.info(f"expiring approval for background job {job['id']}")
+        notify(
+            message=f"Background task expired after 24 hours without approval: "
+                    f"{job['task_text'][:160]}",
+            title="Wren task expired",
+        )
+
     for job in background.stale_awaiting(REPUSH_AFTER_S):
         logger.info(f"re-pushing approval for stale job {job['id']}")
         notify(
@@ -301,7 +309,7 @@ def _repush_stale_approvals(logger) -> None:
             priority="high",
             actions=background.approval_actions(job["id"]),
         )
-        background.touch(job["id"])
+        background.mark_approval_repushed(job["id"])
 
 
 def main() -> int:

@@ -27,7 +27,7 @@ nothing had failed. See [The ClickUp half](#the-clickup-half) below.
 | **Rendered by Python, not the model** | The draft prompt is written for commits ("several commits are often one piece of work"), which says nothing true about a contract being signed. It is also what let this ship before the Foundry and Blog Spaces held a single closed Task: there is no wording to tune on data that does not exist yet. |
 | **The Space leads each line** | It is the part git cannot say. A Wren Task mostly restates a commit two sections above it; a Vibe Foundry one is the only record of that day's work anywhere. |
 | **`date_updated_gt` at the start of the local day** | Bounds the fetch against the `_MAX_PAGES` ceiling as the workspace grows. Safe rather than lucky: closing a Task *is* an update, so anything closed that day carries a `date_updated` at or after the day's start. |
-| **A day of pure non-code work never wakes the model** | Ollama has one slot ([docs/ollama.md](ollama.md)); loading it to render a list nobody drafted would starve chat for nothing. |
+| **A day of pure non-code work never wakes the model** | Ollama has one slot ([ollama-serving.md](ollama-serving.md)); loading it to render a list nobody drafted would starve chat for nothing. |
 | **A ClickUp outage costs the section, not the page** | The standing degrade-don\'t-crash rule. It is logged at WARNING, so a silently missing section is still visible in the 8am log sweep. |
 
 A day that *had* commits but whose draft came back empty writes **nothing at all**,
@@ -53,8 +53,9 @@ Scope:
 ## The fetch in front of the read
 
 `fetch_repos()` runs `git fetch --all --quiet --no-tags` in every checkout before
-any day is scanned. This is the task's only network call, and the reason **GitHub**
-appears as an application on ScribeJay's `/map` — the remotes here are GitHub.
+any day is scanned. This is the Git half's only network call; the ClickUp half
+separately calls the ClickUp API with `CLICKUP_API_TOKEN`. GitHub appears as an
+application on ScribeJay's `/map` because the remotes here are GitHub.
 
 It exists because the read is otherwise blind to any machine but this one. Work
 committed and pushed elsewhere — a cloud session, a second Mac, an edit through

@@ -173,7 +173,7 @@ def test_nothing_to_do_is_an_answer_not_a_failure(model, logger):
 
 
 def test_an_unreadable_answer_errors_and_says_so(model, logger):
-    """The degrade CLAUDE.md singles out: an email he deliberately labelled must
+    """The degrade AGENTS.md singles out: an email he deliberately labelled must
     never go quiet. Both halves — the error out, and the warning in the log."""
     model["reply"]["text"] = "I think you should probably call the restaurant."
 

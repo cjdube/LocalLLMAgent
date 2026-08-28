@@ -15,7 +15,7 @@ Each case declares:
   system / user   the real prompts, with fixture input
   parse           the task's own parser -> a list/dict of results
   expect_count    how many results a healthy run produces (the
-                  "silently produces less" rule from CLAUDE.md)
+                  "silently produces less" rule from AGENTS.md)
   think           what production passes; None means "leave the model's default"
 """
 

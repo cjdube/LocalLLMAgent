@@ -16,6 +16,7 @@ other's updates.
 A job moves through:
     pending -> (worker) -> done | failed
                         -> awaiting_approval -> approved | denied -> (worker) -> ...
+                                             -> expired
 
 Usage:
     python -m agent.tools.background --list
@@ -83,7 +84,8 @@ LIST_BG_JOBS_TOOL_SCHEMA = {
     "function": {
         "name": "list_background_jobs",
         "description": f"List {_NAME}'s recent background jobs and their status (pending, "
-        "awaiting_approval, done, failed). Use when they ask what's running or what happened to a task.",
+        "awaiting_approval, done, failed, expired). Use when they ask what's running or what "
+        "happened to a task.",
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
 }
@@ -108,18 +110,23 @@ def _load() -> dict:
 
 
 # Keep the store bounded: it's re-read on every worker poll (every 30s,
-# forever) and list_background_jobs feeds the model's context. Terminal jobs
-# old enough that their result has long been read fall off on the next write;
-# pending/awaiting jobs are never pruned.
+# forever) and list_background_jobs feeds the model's context. Awaiting jobs
+# get three reminder pushes, expire after a day, and then follow normal terminal
+# retention. The queue cap prevents a stopped worker from accepting forever.
 _PRUNE_TERMINAL_AFTER_S = 14 * 24 * 3600
+_EXPIRE_AWAITING_AFTER_S = 24 * 3600
+_MAX_APPROVAL_REPUSHES = 3
+_MAX_NONTERMINAL_JOBS = 100
+_MAX_STORED_JOBS = 500
 _LIST_LIMIT = 20
+_TERMINAL_STATUSES = ("done", "failed", "expired")
 
 
 def _prune(data: dict, now: datetime | None = None) -> None:
     now = now or datetime.now()
 
     def keep(job: dict) -> bool:
-        if job["status"] not in ("done", "failed"):
+        if job["status"] not in _TERMINAL_STATUSES:
             return True
         try:
             age = (now - datetime.fromisoformat(job["updated"])).total_seconds()
@@ -127,7 +134,12 @@ def _prune(data: dict, now: datetime | None = None) -> None:
             return True  # unparseable timestamp: keep rather than guess
         return age <= _PRUNE_TERMINAL_AFTER_S
 
-    data["jobs"] = [j for j in data["jobs"] if keep(j)]
+    jobs = [j for j in data["jobs"] if keep(j)]
+    nonterminal = [j for j in jobs if j["status"] not in _TERMINAL_STATUSES]
+    terminal = [j for j in jobs if j["status"] in _TERMINAL_STATUSES]
+    terminal.sort(key=lambda j: j.get("updated", ""), reverse=True)
+    room = max(0, _MAX_STORED_JOBS - len(nonterminal))
+    data["jobs"] = nonterminal + terminal[:room]
 
 
 def _save(data: dict) -> None:
@@ -179,11 +191,19 @@ def start_job(task: str, origin: str = "chat", comment_prefix: str = None) -> di
         "pending_call": None,
         "result": None,
         "attempts": 0,
+        "approval_started": None,
+        "approval_repushes": 0,
         "created": _now(),
         "updated": _now(),
     }
     with locked(_STORE_PATH):
         data = _load()
+        _prune(data)
+        active = sum(j["status"] not in _TERMINAL_STATUSES for j in data["jobs"])
+        if active >= _MAX_NONTERMINAL_JOBS:
+            return {
+                "error": f"background queue is full ({_MAX_NONTERMINAL_JOBS} unfinished jobs)"
+            }
         data["jobs"].append(job)
         _save(data)
     return {"id": job["id"], "status": "pending",
@@ -240,8 +260,16 @@ def save_awaiting(job_id: str, messages: list, pending_call: dict,
     approval_message is the human text of the approval push, stored so a
     re-push for a stale job (see stale_awaiting) doesn't need the heavy
     describer stack the worker only loads when actually running a job."""
-    _update(job_id, status="awaiting_approval", messages=messages,
-            pending_call=pending_call, approval_message=approval_message)
+    with locked(_STORE_PATH):
+        data = _load()
+        job = _find(data["jobs"], job_id)
+        if job is None:
+            return
+        now = _now()
+        job.update(status="awaiting_approval", messages=messages,
+                   pending_call=pending_call, approval_message=approval_message,
+                   approval_started=now, approval_repushes=0, updated=now)
+        _save(data)
 
 
 def mark_resumed(job_id: str, messages: list) -> None:
@@ -249,15 +277,19 @@ def mark_resumed(job_id: str, messages: list) -> None:
     the job back to the pending queue. Persisting at this boundary makes a
     transient-failure retry resume from AFTER the resolved call — so an
     approved consequential action can't execute a second time."""
-    _update(job_id, status="pending", messages=messages, pending_call=None)
+    _update(job_id, status="pending", messages=messages, pending_call=None,
+            approval_message=None, approval_started=None, approval_repushes=0)
 
 
 def mark_done(job_id: str, result: str) -> None:
-    _update(job_id, status="done", result=result, messages=None, pending_call=None)
+    _update(job_id, status="done", result=result, messages=None, pending_call=None,
+            approval_message=None, approval_started=None, approval_repushes=0)
 
 
 def mark_failed(job_id: str, error: str) -> None:
-    _update(job_id, status="failed", result=f"failed: {error}", messages=None, pending_call=None)
+    _update(job_id, status="failed", result=f"failed: {error}", messages=None,
+            pending_call=None, approval_message=None, approval_started=None,
+            approval_repushes=0)
 
 
 def bump_attempts(job_id: str) -> int:
@@ -278,13 +310,14 @@ def stale_awaiting(max_age_s: int, now: datetime | None = None) -> list:
     """Jobs stuck in awaiting_approval whose last update is older than
     max_age_s — i.e. their approval push's tokens have expired (or it never had
     buttons because WREN_PUBLIC_URL was unset). The worker re-pushes these;
-    touch() resets the clock so each re-push happens once per interval."""
+    mark_approval_repushed() resets the clock after a successful reminder."""
     now = now or datetime.now()
     out = []
     with locked(_STORE_PATH):
         jobs = _load()["jobs"]
     for j in jobs:
-        if j["status"] != "awaiting_approval":
+        if (j["status"] != "awaiting_approval"
+                or j.get("approval_repushes", 0) >= _MAX_APPROVAL_REPUSHES):
             continue
         try:
             age = (now - datetime.fromisoformat(j["updated"])).total_seconds()
@@ -295,9 +328,51 @@ def stale_awaiting(max_age_s: int, now: datetime | None = None) -> list:
     return out
 
 
-def touch(job_id: str) -> None:
-    """Refresh the job's updated timestamp (e.g. after re-pushing its approval)."""
-    _update(job_id)
+def mark_approval_repushed(job_id: str) -> None:
+    """Record one reminder push and refresh the interval clock."""
+    with locked(_STORE_PATH):
+        data = _load()
+        job = _find(data["jobs"], job_id)
+        if job is None or job["status"] != "awaiting_approval":
+            return
+        now = _now()
+        job["approval_started"] = job.get("approval_started") or now
+        job["approval_repushes"] = job.get("approval_repushes", 0) + 1
+        job["updated"] = now
+        _save(data)
+
+
+def expire_stale_approvals(max_age_s: int = _EXPIRE_AWAITING_AFTER_S,
+                           now: datetime | None = None) -> list[dict]:
+    """Expire approvals older than their total decision window, once."""
+    now = now or datetime.now()
+    expired = []
+    with locked(_STORE_PATH):
+        data = _load()
+        for job in data["jobs"]:
+            if job["status"] != "awaiting_approval":
+                continue
+            raw = job.get("approval_started") or job.get("updated")
+            try:
+                age = (now - datetime.fromisoformat(raw)).total_seconds()
+            except (ValueError, TypeError):
+                age = max_age_s + 1
+            if age <= max_age_s:
+                continue
+            job.update(
+                status="expired",
+                result="expired: approval was not received before the decision window closed",
+                messages=None,
+                pending_call=None,
+                approval_message=None,
+                approval_started=None,
+                approval_repushes=0,
+                updated=now.isoformat(timespec="seconds"),
+            )
+            expired.append({"id": job["id"], "task_text": job["task_text"]})
+        if expired:
+            _save(data)
+    return expired
 
 
 def resolve_job(job_id: str, approved: bool) -> bool:

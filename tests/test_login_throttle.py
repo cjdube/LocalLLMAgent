@@ -124,6 +124,42 @@ def test_stale_entries_swept_once_tracking_cap_reached():
     assert len(t._state) == 1  # just "fresh"
 
 
+def test_active_entries_never_exceed_tracking_cap():
+    t, _ = _throttle()
+    for i in range(LoginThrottle.MAX_TRACKED + 25):
+        t.record_failure(f"scanner-{i}")
+
+    assert len(t._state) == LoginThrottle.MAX_TRACKED
+    assert f"scanner-{LoginThrottle.MAX_TRACKED + 24}" in t._state
+
+
+def test_capacity_eviction_preserves_active_lockouts():
+    t, _ = _throttle()
+    for _ in range(LoginThrottle.MAX_FAILURES):
+        t.record_failure("locked")
+    for i in range(LoginThrottle.MAX_TRACKED - 1):
+        t.record_failure(f"scanner-{i}")
+
+    t.record_failure("fresh")
+
+    assert len(t._state) == LoginThrottle.MAX_TRACKED
+    assert t.retry_after("locked") > 0
+    assert "fresh" in t._state
+
+
+def test_full_table_of_active_lockouts_rejects_a_new_key():
+    t, _ = _throttle()
+    t.MAX_TRACKED = 2
+    for key in ("locked-a", "locked-b"):
+        for _ in range(LoginThrottle.MAX_FAILURES):
+            t.record_failure(key)
+
+    t.record_failure("fresh")
+
+    assert set(t._state) == {"locked-a", "locked-b"}
+    assert all(t.retry_after(key) > 0 for key in t._state)
+
+
 def test_locked_out_entries_survive_the_sweep():
     t, clock = _throttle()
     for _ in range(LoginThrottle.MAX_FAILURES):

@@ -3,7 +3,7 @@ run by launchd once a day.
 
 **Gmail drops a watch after 7 days and tells nobody.** The mailbox simply stops
 publishing, the watcher goes quiet, and a stopped watcher looks exactly like a
-quiet inbox — the silent degrade CLAUDE.md calls worse than a crash. So there are
+quiet inbox — the silent degrade AGENTS.md calls worse than a crash. So there are
 three layers, deliberately: this job renews daily (so one missed run costs
 nothing), it pushes an alert when the stored expiry is inside ALERT_HOURS, and
 tasks/log_inspector.py flags the job in its morning rollup if it stopped running

@@ -4,7 +4,7 @@ Source choice (deliberate, don't "fix" it): ESPN serves its own apps from
 site.api.espn.com, and the scoreboard endpoint below is the same JSON shape for
 every league — one parser covers MLB, NBA and NFL. No key, no account, three
 requests a day. It is undocumented and ESPN publishes no terms for it, which
-puts it outside the letter of the "official APIs only" rule in CLAUDE.md; the
+puts it outside the letter of the "official APIs only" rule in AGENTS.md; the
 alternative (MLB's sanctioned statsapi.mlb.com) only covers baseball and would
 mean maintaining a second parser for the other leagues. The tradeoff was made
 knowingly.
