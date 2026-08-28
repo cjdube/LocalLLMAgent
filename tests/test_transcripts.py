@@ -1,8 +1,9 @@
-"""Tests for scribejay/transcripts.py — parsing Claude Code session logs and the
-Gemini drop folder. Both sources are redirected to tmp_path by conftest, so these
-never touch the real ~/.claude transcripts or the user's vault."""
+"""Tests for scribejay/transcripts.py — parsing Claude Code and Codex Desktop
+session logs plus the Gemini drop folder. All sources are redirected to tmp_path
+by conftest, so these never touch real transcripts or the user's vault."""
 
 import json
+import logging
 import os
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -26,6 +27,29 @@ def _write_session(lines: list[dict]) -> None:
     # Pin mtime inside the day so the append-only prefilter can't skip it,
     # independent of the machine's wall clock.
     os.utime(path, (END.timestamp(), END.timestamp()))
+
+
+def _write_codex_session(lines: list[dict], name="session", meta=None,
+                         mtime=None) -> Path:
+    day_dir = ct.CODEX_SESSIONS_DIR / "2024" / "06" / "01"
+    day_dir.mkdir(parents=True, exist_ok=True)
+    path = day_dir / f"{name}.jsonl"
+    payload = {
+        "id": name,
+        "timestamp": _ts(1, 9),
+        "cwd": "/Users/x/Projects/MyApp",
+        "originator": "Codex Desktop",
+        "source": "vscode",
+        "thread_source": "user",
+        "history_mode": "paginated",
+    }
+    if meta:
+        payload.update(meta)
+    records = [{"timestamp": _ts(1, 9), "type": "session_meta", "payload": payload}, *lines]
+    path.write_text("\n".join(json.dumps(record) for record in records))
+    stamp = END.timestamp() if mtime is None else mtime
+    os.utime(path, (stamp, stamp))
+    return path
 
 
 def test_fetch_claude_sessions_extracts_text_and_drops_noise():
@@ -68,6 +92,124 @@ def test_fetch_claude_sessions_empty_when_store_absent():
 def test_claude_projects_dir_honors_claude_config_dir(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "alternate-claude"))
     assert ct.claude_projects_dir() == tmp_path / "alternate-claude" / "projects"
+
+
+def test_fetch_codex_sessions_extracts_visible_text_and_drops_noise(caplog):
+    _write_codex_session([
+        {"timestamp": _ts(1, 10), "type": "response_item", "payload": {
+            "type": "message", "role": "user", "content": [
+                {"type": "input_text", "text": "<environment_context>noise</environment_context>"},
+                {"type": "input_text", "text": "# AGENTS.md instructions for /tmp\nnoise"},
+                {"type": "input_text", "text": "Build the transcript reader"},
+            ]}},
+        {"timestamp": _ts(1, 10, 1), "type": "response_item", "payload": {
+            "type": "message", "role": "developer",
+            "content": [{"type": "input_text", "text": "DEVELOPER_NOISE"}]}},
+        {"timestamp": _ts(1, 10, 2), "type": "response_item", "payload": {
+            "type": "message", "role": "assistant", "phase": "commentary",
+            "content": [{"type": "output_text", "text": "I am checking the format."}]}},
+        {"timestamp": _ts(1, 10, 3), "type": "reasoning", "payload": {
+            "summary": [{"type": "summary_text", "text": "PRIVATE_REASONING"}]}},
+        {"timestamp": _ts(1, 10, 4), "type": "response_item", "payload": {
+            "type": "message", "role": "assistant", "phase": "final_answer",
+            "content": [{"type": "output_text", "text": "Implemented and tested it."}]}},
+        # Visible text outside the selected local day must not leak in.
+        {"timestamp": _ts(2, 10), "type": "response_item", "payload": {
+            "type": "message", "role": "user",
+            "content": [{"type": "input_text", "text": "NEXT_DAY"}]}},
+    ])
+
+    with caplog.at_level(logging.WARNING):
+        sessions = ct.fetch_codex_sessions(START, END, logger=logging.getLogger("codex-test"))
+
+    assert len(sessions) == 1
+    session = sessions[0]
+    assert session["project"] == "MyApp"
+    assert session["slug"] == ""
+    assert session["started_at"] == datetime(2024, 6, 1, 10, 0, tzinfo=timezone.utc)
+    assert "User: Build the transcript reader" in session["text"]
+    assert "Assistant: I am checking the format." in session["text"]
+    assert "Assistant: Implemented and tested it." in session["text"]
+    assert "environment_context" not in session["text"]
+    assert "AGENTS.md" not in session["text"]
+    assert "DEVELOPER_NOISE" not in session["text"]
+    assert "PRIVATE_REASONING" not in session["text"]
+    assert "NEXT_DAY" not in session["text"]
+    assert caplog.text == ""
+
+
+def test_fetch_codex_sessions_excludes_imported_onboarding_and_children():
+    message = {"timestamp": _ts(1, 10), "type": "response_item", "payload": {
+        "type": "message", "role": "user",
+        "content": [{"type": "input_text", "text": "must not appear"}]}}
+    _write_codex_session([message], "imported", {
+        "thread_source": None, "history_mode": "legacy",
+    })
+    _write_codex_session([message], "onboarding", {"thread_source": "onboarding_checklist"})
+    _write_codex_session([message], "guardian", {
+        "thread_source": "guardian_review", "source": {"subagent": {"other": "guardian"}},
+    })
+
+    assert ct.fetch_codex_sessions(START, END) == []
+
+
+def test_fetch_codex_sessions_sorts_and_compacts():
+    _write_codex_session([{"timestamp": _ts(1, 14), "type": "response_item", "payload": {
+        "type": "message", "role": "user",
+        "content": [{"type": "input_text", "text": "L" * 100}]}}], "late")
+    _write_codex_session([{"timestamp": _ts(1, 9), "type": "response_item", "payload": {
+        "type": "message", "role": "user",
+        "content": [{"type": "input_text", "text": "E" * 100}]}}], "early")
+
+    sessions = ct.fetch_codex_sessions(START, END, max_chars=60)
+
+    assert [session["started_at"].hour for session in sessions] == [9, 14]
+    assert all("trimmed" in session["text"] for session in sessions)
+
+
+def test_fetch_codex_sessions_skips_stale_file():
+    _write_codex_session([{"timestamp": _ts(1, 10), "type": "response_item", "payload": {
+        "type": "message", "role": "user",
+        "content": [{"type": "input_text", "text": "stale"}]}}],
+        mtime=START.timestamp() - 1)
+    assert ct.fetch_codex_sessions(START, END) == []
+
+
+def test_fetch_codex_sessions_warns_on_private_format_drift(caplog):
+    _write_codex_session([{"timestamp": _ts(1, 10), "type": "response_item", "payload": {
+        "type": "message", "role": "assistant",
+        "content": [{"type": "output_text", "text": "unphased answer"}]}}])
+
+    with caplog.at_level(logging.WARNING):
+        assert ct.fetch_codex_sessions(
+            START, END, logger=logging.getLogger("codex-test")
+        ) == []
+
+    assert "unknown phase" in caplog.text
+    assert "no extractable turns" in caplog.text
+
+
+def test_fetch_codex_sessions_warns_on_malformed_metadata(caplog):
+    day_dir = ct.CODEX_SESSIONS_DIR / "2024" / "06" / "01"
+    day_dir.mkdir(parents=True)
+    path = day_dir / "broken.jsonl"
+    path.write_text("not json\n")
+    os.utime(path, (END.timestamp(), END.timestamp()))
+
+    with caplog.at_level(logging.WARNING):
+        assert ct.fetch_codex_sessions(
+            START, END, logger=logging.getLogger("codex-test")
+        ) == []
+    assert "malformed metadata" in caplog.text
+
+
+def test_fetch_codex_sessions_empty_when_store_absent():
+    assert ct.fetch_codex_sessions(START, END) == []
+
+
+def test_codex_sessions_dir_honors_codex_home(monkeypatch, tmp_path):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "alternate-codex"))
+    assert ct.codex_sessions_dir() == tmp_path / "alternate-codex" / "sessions"
 
 
 def test_fetch_gemini_chats_unprocessed_and_dedup():

@@ -267,7 +267,7 @@ the dashboard.
 
 | Task | Schedule | What it does |
 |---|---|---|
-| `scribejay/ai_chat_learnings.py` | Daily 4:30 AM | Covers the prior day's chats with AI agents — Claude Code sessions from `<CLAUDE_CONFIG_DIR>/projects` (default `~/.claude/projects`) plus any Gemini export dropped in `WREN_GEMINI_CHATS_DIR` — into an **Accomplished / Learned** summary per session. Writes `AI-Chat-Learnings-<date>.md` in `LEARNINGS_DIR`. A day with no chats writes nothing; `--backfill N` does the last N days. See [docs/ai-chat-learnings.md](docs/ai-chat-learnings.md). |
+| `scribejay/ai_chat_learnings.py` | Daily 4:30 AM | Covers the prior day's chats with AI agents — Claude Code sessions from `<CLAUDE_CONFIG_DIR>/projects`, top-level user-started Codex Desktop tasks from `<CODEX_HOME>/sessions`, plus any Gemini export dropped in `WREN_GEMINI_CHATS_DIR` — into an **Accomplished / Learned** summary per session. Imported, onboarding, guardian, and subagent Codex histories are excluded. Writes `AI-Chat-Learnings-<date>.md` in `LEARNINGS_DIR`. A day with no chats writes nothing; `--backfill N` does the last N days for Claude and Codex. See [docs/ai-chat-learnings.md](docs/ai-chat-learnings.md). |
 | `scribejay/claude_time_blocks.py` | Daily 4:45 AM | Logs yesterday's Claude Code working hours to Google Calendar, so the day is on record without anyone remembering to block it out. Pools every session's timestamps into one timeline, splits it on idle gaps, and creates one event per stretch — non-overlapping by construction, colored as work, deduped by `source_id` so re-runs and `--backfill N` never duplicate. A day with no sessions writes nothing. A successful run sends no phone push — the calendar entries are the record; only a failure alerts. See [docs/claude-time-blocks.md](docs/claude-time-blocks.md). |
 | `scribejay/daily_commits.py` | Daily 4:55 AM | Covers what he actually *shipped* the prior day, from **two** sources, written as `Daily-Work-<date>.md` in `LEARNINGS_DIR`. **Commits** across the checkouts under `PROJECTS_DIR`, grouped by the model into **What I Built** plus **Also**; and **ClickUp Tasks closed that day**, listed by Python under **Closed in ClickUp**. The second source is the one that records work leaving no commit behind — a contract in the Vibe Foundry Space, a post in the Blog Space — so a day of pure non-code work still writes a page (and never wakes the model). The Git half needs no API token; the ClickUp half uses `CLICKUP_API_TOKEN` and degrades to Git-only output when unavailable. It `git fetch`es first (once per run, warns and carries on if a remote is down), so a commit pushed from another machine is not silently missing from the day. Several commits over the same paths become one bullet; the paths themselves are what let the page say a change was tested or documented. The per-repo totals line is computed in Python, not by the model. A day with neither commits nor closed Tasks writes nothing; `--backfill N` does the last N days as one run. See [docs/daily-commits.md](docs/daily-commits.md). |
 | `scribejay/daily_youtube_learnings.py` | Daily 5:05 AM | Covers the prior day's YouTube Liked videos — the model writes a short synthesis of what they teach, and the linked list of exact videos is appended in Python so the URLs are always real. Writes `Daily-YouTube-<date>.md` in `LEARNINGS_DIR`. A day with no Likes writes nothing. See [docs/daily-learnings.md](docs/daily-learnings.md). |
@@ -1071,14 +1071,12 @@ recipient is pinned, and what to hold onto when adding a write tool — is in
 ## What's NOT here
 
 - No Anthropic/Claude API usage anywhere in this codebase — no `anthropic`
-  package in `requirements.txt`, and no API call to one at runtime. Claude Code
-  was only used to *write* this code. The one place "Claude" appears at runtime
-  is `scribejay/ai_chat_learnings.py`, which reads Claude Code's **local** session
-  logs off disk (`~/.claude/projects`) to summarize the prior day's chats — file
-  reads, no network, no API, and it exists precisely *because* there is no API
-  for past chats (see [docs/ai-chat-learnings.md](docs/ai-chat-learnings.md)).
-  Deleting Claude Code from this machine would end that one daily summary and
-  affect nothing else.
+  package in `requirements.txt`, and no API call to one at runtime.
+  `scribejay/ai_chat_learnings.py` reads Claude Code and Codex Desktop's **local**
+  session logs off disk to summarize the prior day's chats — file reads, no
+  transcript API. Imported agent history under Codex is excluded so the Claude
+  source is not counted twice. See
+  [docs/ai-chat-learnings.md](docs/ai-chat-learnings.md).
 - `config/.env`, `config/google_credentials.json`, `config/google_token.json`,
   `config/github_starred_state.json`, and `logs/*.log` are gitignored — they
   contain secrets/tokens and machine-specific state.

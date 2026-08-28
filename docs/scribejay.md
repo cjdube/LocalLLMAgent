@@ -60,7 +60,8 @@ model call is what most tasks need, not what makes it a ScribeJay task.
 
 Plus two helpers: `scribejay/journal.py` (the video-list section and the
 "is this draft substantive?" check) and `scribejay/transcripts.py` (Claude Code and
-Gemini transcript readers, shared by two tasks).
+Codex Desktop session readers plus the Gemini drop-folder reader; the Claude
+reader is also shared with the time-block task).
 
 **The module basenames did not change, on purpose.** `chat/insights.py` derives
 a task's key from its plist's `StandardOutPath` basename, not from the label, so

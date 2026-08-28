@@ -1,14 +1,18 @@
 """Read past AI-agent chat transcripts for the daily tasks that review them —
 ai_chat_learnings (what was accomplished) and claude_time_blocks (when it happened).
 
-Two sources, both local and ToS-clean (there is no API to fetch past chats from
-either consumer product, so we use what lands on disk):
+Three sources, all local and ToS-clean (there is no API to fetch past chats from
+these consumer products, so we use what lands on disk):
 
 - Claude Code writes every session to ~/.claude/projects/<slug>/<uuid>.jsonl as
   an append-only log of JSON events. We extract the human/assistant *text* for a
   given calendar day — dropping tool-call noise, sidechains, and injected
   system-reminders — so a session spanning several days is summarized once per
   day it was active ("new or revisited that day").
+- Codex Desktop writes session JSONL under ~/.codex/sessions. We keep only
+  top-level tasks the user started, and only their user text plus visible
+  commentary/final answers. Imported agent history, onboarding, guardians,
+  subagents, tool traffic, and injected context are excluded.
 - A Gemini "drop folder" (WREN_GEMINI_CHATS_DIR): Gemini has no local footprint,
   so the user drops an exported .md/.txt/.json file per conversation and we pick up
   anything not yet processed. Files are never modified or deleted.
@@ -31,8 +35,17 @@ def claude_projects_dir() -> Path:
     return root.expanduser() / "projects"
 
 
-# Module-level so tests can redirect it away from the real session store.
+# Module-level so tests can redirect them away from the real session stores.
 CLAUDE_PROJECTS_DIR = claude_projects_dir()
+
+
+def codex_sessions_dir() -> Path:
+    """Codex's local session root, including its existing home override."""
+    root = Path(os.getenv("CODEX_HOME") or (Path.home() / ".codex"))
+    return root.expanduser() / "sessions"
+
+
+CODEX_SESSIONS_DIR = codex_sessions_dir()
 
 DEFAULT_GEMINI_DIR = str(Path.home() / "Vaults" / "llm-wiki-learnings" / "gemini_inbox")
 
@@ -42,6 +55,16 @@ DEFAULT_GEMINI_DIR = str(Path.home() / "Vaults" / "llm-wiki-learnings" / "gemini
 DEFAULT_MAX_CHARS = 12000
 
 _SYSTEM_REMINDER_RE = re.compile(r"<system-reminder>.*?</system-reminder>", re.DOTALL)
+
+_CODEX_INJECTED_PREFIXES = (
+    "<app-context>",
+    "<environment_context>",
+    "<recommended_plugins>",
+    "<task-notification>",
+    "<user_instructions>",
+    "# AGENTS.md instructions",
+)
+_CODEX_ASSISTANT_PHASES = {"commentary", "final_answer"}
 
 
 def _parse_ts(raw):
@@ -167,6 +190,175 @@ def fetch_claude_sessions(start: datetime, end: datetime,
         except OSError:
             continue
         session = _read_session_day(path, start, end, max_chars)
+        if session:
+            sessions.append(session)
+
+    sessions.sort(key=lambda s: s["started_at"])
+    return sessions
+
+
+def _codex_record_text(record) -> tuple[str | None, bool, bool]:
+    """Extract one Codex user/assistant message.
+
+    Returns (text, had_candidate_text, unknown_assistant_phase). The two flags
+    let the caller distinguish expected injected/tool noise from private-schema
+    drift that would otherwise make a daily page silently shorter.
+    """
+    if record.get("type") != "response_item":
+        return None, False, False
+    payload = record.get("payload")
+    if not isinstance(payload, dict) or payload.get("type") != "message":
+        return None, False, False
+
+    role = payload.get("role")
+    content = payload.get("content")
+    if not isinstance(content, list):
+        return None, False, False
+
+    if role == "user":
+        parts = []
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") != "input_text":
+                continue
+            text = block.get("text")
+            if not isinstance(text, str) or text.startswith(_CODEX_INJECTED_PREFIXES):
+                continue
+            if text.strip():
+                parts.append(text)
+        text = "\n".join(parts).strip()
+        return (f"User: {text}" if text else None), bool(text), False
+
+    if role == "assistant":
+        parts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "output_text":
+                text = block.get("text")
+                if isinstance(text, str) and text.strip():
+                    parts.append(text)
+        if not parts:
+            return None, False, False
+        phase = payload.get("phase")
+        if phase not in _CODEX_ASSISTANT_PHASES:
+            return None, True, True
+        text = "\n".join(parts).strip()
+        return f"Assistant: {text}", True, False
+
+    return None, False, False
+
+
+def _read_codex_session_day(path: Path, start: datetime, end: datetime,
+                            max_chars: int, logger=None) -> dict | None:
+    """One top-level Codex Desktop task's visible text for the local day."""
+    try:
+        handle = path.open(errors="replace")
+    except OSError:
+        return None
+
+    with handle:
+        first = next((line.strip() for line in handle if line.strip()), "")
+        try:
+            meta = json.loads(first)
+        except (json.JSONDecodeError, TypeError):
+            if logger:
+                logger.warning(f"Codex session has malformed metadata; skipping {path}")
+            return None
+
+        payload = (
+            meta.get("payload")
+            if isinstance(meta, dict) and meta.get("type") == "session_meta"
+            else None
+        )
+        if not isinstance(payload, dict):
+            if logger:
+                logger.warning(f"Codex session has no session_meta first record; skipping {path}")
+            return None
+
+        thread_source = payload.get("thread_source")
+        if thread_source != "user":
+            # Imported agent history currently has legacy history and no
+            # thread_source. Guardians and onboarding identify themselves. All
+            # are expected non-user tasks, so skip them before reading the body.
+            expected = (
+                payload.get("history_mode") == "legacy" and thread_source is None
+            ) or thread_source in {"guardian_review", "onboarding_checklist"}
+            if not expected and logger:
+                logger.warning(
+                    f"Codex session has unsupported thread_source {thread_source!r}; "
+                    f"skipping {path}"
+                )
+            return None
+
+        turns, first_ts = [], None
+        candidates = 0
+        unknown_phases = 0
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(record, dict):
+                continue
+
+            ts = _parse_ts(record.get("timestamp"))
+            if ts is None:
+                continue
+            ts_local = ts.astimezone(start.tzinfo)
+            if not (start <= ts_local <= end):
+                continue
+
+            text, had_candidate, unknown_phase = _codex_record_text(record)
+            candidates += int(had_candidate)
+            unknown_phases += int(unknown_phase)
+            if text is None:
+                continue
+            if first_ts is None:
+                first_ts = ts_local
+            turns.append(text)
+
+    if unknown_phases and logger:
+        logger.warning(
+            f"Ignored {unknown_phases} Codex assistant message(s) with an unknown phase "
+            f"in {path}"
+        )
+    if not turns:
+        if candidates and logger:
+            logger.warning(
+                f"Codex session had {candidates} candidate message(s) but no extractable "
+                f"turns in {path}"
+            )
+        return None
+    cwd = payload.get("cwd")
+    return {
+        "project": Path(cwd).name if isinstance(cwd, str) and cwd else "unknown",
+        "slug": "",
+        "started_at": first_ts,
+        "text": _compact(turns, max_chars),
+    }
+
+
+def fetch_codex_sessions(start: datetime, end: datetime,
+                         max_chars: int = DEFAULT_MAX_CHARS, logger=None) -> list[dict]:
+    """Top-level Codex Desktop tasks active inside tz-aware local bounds.
+
+    Codex's on-disk JSONL is a private, changeable format. Expected non-user
+    histories are ignored; suspicious metadata/content changes log a warning and
+    degrade to an empty session rather than failing the whole daily review.
+    """
+    if not CODEX_SESSIONS_DIR.exists():
+        return []
+
+    start_ts = start.timestamp()
+    sessions = []
+    for path in sorted(CODEX_SESSIONS_DIR.glob("*/*/*/*.jsonl")):
+        try:
+            if path.stat().st_mtime < start_ts:
+                continue
+        except OSError:
+            continue
+        session = _read_codex_session_day(path, start, end, max_chars, logger)
         if session:
             sessions.append(session)
 

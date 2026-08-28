@@ -268,12 +268,14 @@ def _isolate_skills_dir(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _isolate_ai_chat_learnings(tmp_path, monkeypatch):
-    # Redirect the Gemini-dedup store to tmp, and point both chat sources away
-    # from the user's real data: no test may read ~/.claude session transcripts or
-    # the real Gemini drop folder, and none may write the production state store.
+    # Redirect the Gemini-dedup store to tmp, and point all chat sources away
+    # from the user's real data: no test may read ~/.claude or ~/.codex session
+    # transcripts or the real Gemini drop folder, and none may write the
+    # production state store.
     monkeypatch.setattr(_ai_chat_learnings, "STATE_PATH",
                         tmp_path / "ai_chat_learnings_state.json")
     monkeypatch.setattr(_chat_transcripts, "CLAUDE_PROJECTS_DIR", tmp_path / "claude_projects")
+    monkeypatch.setattr(_chat_transcripts, "CODEX_SESSIONS_DIR", tmp_path / "codex_sessions")
     monkeypatch.setenv("WREN_GEMINI_CHATS_DIR", str(tmp_path / "gemini_inbox"))
 
 

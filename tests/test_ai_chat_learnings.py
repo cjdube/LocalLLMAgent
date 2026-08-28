@@ -1,5 +1,5 @@
-"""Tests for scribejay/ai_chat_learnings.py — main() summarizes each Claude session and
-new Gemini drop file into one dated file; empty/all-"None" days write nothing;
+"""Tests for scribejay/ai_chat_learnings.py — main() summarizes Claude, Codex,
+and new Gemini chats into one dated file; empty/all-"None" days write nothing;
 --backfill runs each day separately and skips Gemini. Collaborators are stubbed;
 no model, transcript, vault, or Gmail access."""
 
@@ -25,13 +25,15 @@ def stubbed(monkeypatch):
                         seen["persists"].append({"prefix": prefix, "day": day, "content": content})
                         or {"written": True})
     monkeypatch.setattr(ai, "notify_failure", lambda *a, **k: None)
+    monkeypatch.setattr(ai, "fetch_codex_sessions", lambda *a, **k: [])
     monkeypatch.setattr(ai, "fetch_gemini_chats", lambda *a, **k: [])
     return seen
 
 
-def _session():
-    return {"project": "MyApp", "slug": "fix login",
-            "started_at": datetime(2024, 6, 1, 9, 14), "text": "User: hi\nAssistant: done"}
+def _session(hour=9, minute=14, slug="fix login"):
+    return {"project": "MyApp", "slug": slug,
+            "started_at": datetime(2024, 6, 1, hour, minute),
+            "text": "User: hi\nAssistant: done"}
 
 
 def test_happy_path_writes_one_dated_file(stubbed, monkeypatch):
@@ -43,6 +45,20 @@ def test_happy_path_writes_one_dated_file(stubbed, monkeypatch):
     assert p["content"].startswith("## AI Chat Learnings:")
     assert "### Claude · MyApp · fix login · 9:14 AM" in p["content"]
     assert "**Accomplished**" in p["content"]
+
+
+def test_claude_and_codex_sections_are_globally_chronological(stubbed, monkeypatch):
+    monkeypatch.setattr(ai, "fetch_claude_sessions", lambda *a, **k: [_session(11)])
+    monkeypatch.setattr(ai, "fetch_codex_sessions",
+                        lambda *a, **k: [_session(8, slug="")])
+
+    assert ai.main() == 0
+    content = stubbed["persists"][0]["content"]
+    codex = "### Codex · MyApp · 8:14 AM"
+    claude = "### Claude · MyApp · fix login · 11:14 AM"
+    assert codex in content
+    assert claude in content
+    assert content.index(codex) < content.index(claude)
 
 
 def test_no_chats_writes_nothing(stubbed, monkeypatch):
@@ -71,26 +87,34 @@ def test_gemini_chat_summarized_and_marked_processed(stubbed, monkeypatch):
 
 def test_backfill_runs_each_day_and_skips_gemini(stubbed, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["ai_chat_learnings", "--backfill", "3"])
-    monkeypatch.setattr(ai, "fetch_claude_sessions", lambda *a, **k: [_session()])
+    monkeypatch.setattr(ai, "fetch_claude_sessions", lambda *a, **k: [])
+    codex_calls = []
+    monkeypatch.setattr(ai, "fetch_codex_sessions",
+                        lambda *a, **k: codex_calls.append((a, k)) or [_session(slug="")])
 
     def _boom(*a, **k):
         raise AssertionError("Gemini drop folder must not be read during backfill")
     monkeypatch.setattr(ai, "fetch_gemini_chats", _boom)
 
     assert ai.main() == 0
+    assert len(codex_calls) == 3
     assert len(stubbed["persists"]) == 3
     assert len({p["day"] for p in stubbed["persists"]}) == 3  # three distinct days
 
 
 def test_single_date_runs_that_day_and_skips_gemini(stubbed, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["ai_chat_learnings", "--date", "2026-06-29"])
-    monkeypatch.setattr(ai, "fetch_claude_sessions", lambda *a, **k: [_session()])
+    monkeypatch.setattr(ai, "fetch_claude_sessions", lambda *a, **k: [])
+    codex_calls = []
+    monkeypatch.setattr(ai, "fetch_codex_sessions",
+                        lambda *a, **k: codex_calls.append((a, k)) or [_session(slug="")])
 
     def _boom(*a, **k):
         raise AssertionError("Gemini drop folder must not be read for a single --date run")
     monkeypatch.setattr(ai, "fetch_gemini_chats", _boom)
 
     assert ai.main() == 0
+    assert len(codex_calls) == 1
     assert len(stubbed["persists"]) == 1
     assert str(stubbed["persists"][0]["day"]) == "2026-06-29"
 
