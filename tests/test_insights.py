@@ -746,7 +746,7 @@ def _real_launchd(monkeypatch):
     dir, for determinism. The drift guards below are the one place that must
     NOT have it: their whole job is to compare the hand-maintained tables in
     insights.py against the plists actually installed here, and over an empty
-    dir they compare nothing and pass. That is how claude_time_blocks sat with
+    dir they compare nothing and pass. That is how AI Session Time Blocks sat with
     no ROUTINE_USES entry at all — drawing zero edges on /map — while this file
     reported green. Read-only: discover_tasks() only parses plists.
     """

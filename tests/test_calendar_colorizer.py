@@ -130,7 +130,7 @@ def test_apply_maps_numbers_back_to_the_right_event_ids(monkeypatch):
 
 
 def test_session_blocks_are_left_alone_but_other_sourced_events_are_not(monkeypatch):
-    # claude_time_blocks logs these hours at 4:45am already colored; this run
+    # AI Session Time Blocks logs these hours at 4:45am already colored; this run
     # always re-classifies, so without the skip it would guess from the title and
     # overwrite that color four hours later. Strava's events also carry a
     # source_id and must keep being classified ("Morning run" -> Fitness).

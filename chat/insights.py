@@ -716,7 +716,7 @@ ROUTINE_USES = {
 ROUTINE_WRITES = {
     "strava_download": "rides → calendar",
     "calendar_colorizer": "event colours",
-    "claude_time_blocks": "AI coding time blocks",
+    "claude_time_blocks": "AI session time blocks",
     "daily_chrome_learnings": "daily browsing page",
     "daily_commits": "daily commits page",
     "daily_correspondence": "daily correspondence page",

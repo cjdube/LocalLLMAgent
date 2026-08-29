@@ -1,4 +1,4 @@
-# AI coding time blocks — how it works
+# AI Session Time Blocks — how it works
 
 A daily unattended task that reconstructs yesterday's Claude Code and Codex Desktop
 working hours and logs them to Google Calendar, so the calendar records how the day
@@ -145,4 +145,4 @@ The module, launchd label, log filename, task key, backend override, and
 `claude-time:` prefix all predate Codex ingestion and remain unchanged. Keeping them
 preserves dashboard history, launchd installation, model configuration, calendar
 deduplication, and colorizer behavior while the user-facing capability is now named
-**AI coding time blocks**.
+**AI Session Time Blocks**.

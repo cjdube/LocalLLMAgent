@@ -1,4 +1,4 @@
-"""Log yesterday's AI coding time as Google Calendar blocks.
+"""Log yesterday's AI session time as Google Calendar blocks.
 Non-interactive — run by launchd every morning, covering the day that just ended.
 
 The point is a calendar that records how the day actually went without anyone
@@ -21,7 +21,7 @@ worth having whether or not you track time.
 
 Usage:
     python -m scribejay.claude_time_blocks                    # yesterday
-    python -m scribejay.claude_time_blocks --dry-run          # show the blocks, write nothing
+    python -m scribejay.claude_time_blocks --dry-run          # show the AI session blocks, write nothing
     python -m scribejay.claude_time_blocks --date 2026-08-05  # one specific day
     python -m scribejay.claude_time_blocks --backfill 7       # each of the last 7 days
 """
@@ -261,7 +261,7 @@ def main() -> int:
     args = parser.parse_args()
 
     logger = setup_logger("claude_time_blocks")
-    logger.info("Starting claude time blocks run")
+    logger.info("Starting AI Session Time Blocks run")
 
     try:
         gap = int(os.getenv("WREN_SESSION_BLOCK_GAP_MINUTES", DEFAULT_GAP_MINUTES))
@@ -301,10 +301,10 @@ def main() -> int:
             logger.info(f"Day: {day}")
             run(start, end, day)
 
-        logger.info("Claude time blocks run complete")
+        logger.info("AI Session Time Blocks run complete")
         return 0
     except Exception as e:
-        logger.exception(f"Claude time blocks run failed: {e}")
+        logger.exception(f"AI Session Time Blocks run failed: {e}")
         notify_failure("claude_time_blocks", e, logger)
         return 1
 

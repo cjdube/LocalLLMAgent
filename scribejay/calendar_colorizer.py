@@ -142,7 +142,7 @@ def main() -> int:
         events = [
             e for e in events_result.get("events", [])
             if e.get("summary") and e.get("status") != "cancelled"
-            # scribejay/claude_time_blocks.py logged these hours earlier the same
+            # AI Session Time Blocks logged these hours earlier the same
             # morning, already colored. This run always re-classifies — even
             # events colored by a previous run or by hand — so without this skip
             # it would guess a category from the title and overwrite that color.

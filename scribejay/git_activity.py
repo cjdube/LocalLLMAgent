@@ -1,6 +1,6 @@
 """Yesterday's commits, read out of the checkouts under PROJECTS_DIR.
 
-The record already said WHEN the user worked (scribejay/claude_time_blocks.py) and
+The record already said WHEN the user worked (AI Session Time Blocks) and
 what he READ (scribejay/daily_chrome_learnings.py). It did not say what he shipped.
 Git is the only source that does.
 

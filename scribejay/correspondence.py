@@ -1,7 +1,7 @@
 """Yesterday's sent mail, turned into a record of who was written to.
 
 The record says what he built (scribejay/daily_commits.py), what he read
-(daily_chrome_learnings) and where his hours went (claude_time_blocks). None of it
+(daily_chrome_learnings) and where his hours went (AI Session Time Blocks). None of it
 says who he talked to. This is the only source that does.
 
 **Metadata only.** `agent.tools.gmail_read.fetch_sent_metadata` asks Gmail for

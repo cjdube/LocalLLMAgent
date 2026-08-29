@@ -25,7 +25,7 @@ per-module detail behind them.
 ## The journaling agent (`scribejay/`)
 
 - `scribejay/*.py` — ScribeJay, the second agent in this repo. It keeps the record —
-  Strava onto the calendar, Claude Code hours as time blocks, yesterday's events
+  Strava onto the calendar, AI Session Time Blocks, yesterday's events
   colour-coded, daily vault pages from Chrome/YouTube/AI chats — while Wren reads
   that record and acts on request. Each task is a pipeline: gather -> one
   `complete_text()` call -> write. No tool registry, and never `advance()`.

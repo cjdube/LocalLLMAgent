@@ -1,5 +1,5 @@
 """Read past AI-agent chat transcripts for the daily tasks that review them —
-ai_chat_learnings (what was accomplished) and claude_time_blocks (when it happened).
+ai_chat_learnings (what was accomplished) and AI Session Time Blocks (when it happened).
 
 Three sources, all local and ToS-clean (there is no API to fetch past chats from
 these consumer products, so we use what lands on disk):
