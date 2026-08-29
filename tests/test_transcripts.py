@@ -5,7 +5,7 @@ by conftest, so these never touch real transcripts or the user's vault."""
 import json
 import logging
 import os
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from scribejay import transcripts as ct
@@ -151,6 +151,7 @@ def test_fetch_codex_sessions_excludes_imported_onboarding_and_children():
     })
 
     assert ct.fetch_codex_sessions(START, END) == []
+    assert ct.fetch_codex_session_activity(START, END) == []
 
 
 def test_fetch_codex_sessions_sorts_and_compacts():
@@ -173,6 +174,7 @@ def test_fetch_codex_sessions_skips_stale_file():
         "content": [{"type": "input_text", "text": "stale"}]}}],
         mtime=START.timestamp() - 1)
     assert ct.fetch_codex_sessions(START, END) == []
+    assert ct.fetch_codex_session_activity(START, END) == []
 
 
 def test_fetch_codex_sessions_warns_on_private_format_drift(caplog):
@@ -184,9 +186,14 @@ def test_fetch_codex_sessions_warns_on_private_format_drift(caplog):
         assert ct.fetch_codex_sessions(
             START, END, logger=logging.getLogger("codex-test")
         ) == []
+        activity = ct.fetch_codex_session_activity(
+            START, END, logger=logging.getLogger("codex-test")
+        )
 
     assert "unknown phase" in caplog.text
     assert "no extractable turns" in caplog.text
+    assert len(activity) == 2
+    assert all(event["text"] is None for event in activity)
 
 
 def test_fetch_codex_sessions_warns_on_malformed_metadata(caplog):
@@ -200,11 +207,15 @@ def test_fetch_codex_sessions_warns_on_malformed_metadata(caplog):
         assert ct.fetch_codex_sessions(
             START, END, logger=logging.getLogger("codex-test")
         ) == []
+        assert ct.fetch_codex_session_activity(
+            START, END, logger=logging.getLogger("codex-test")
+        ) == []
     assert "malformed metadata" in caplog.text
 
 
 def test_fetch_codex_sessions_empty_when_store_absent():
     assert ct.fetch_codex_sessions(START, END) == []
+    assert ct.fetch_codex_session_activity(START, END) == []
 
 
 def test_codex_sessions_dir_honors_codex_home(monkeypatch, tmp_path):
@@ -265,6 +276,65 @@ def test_fetch_session_activity_keeps_every_timestamped_event():
     assert {e["session"] for e in events} == {"sess"}
     # Only the first event said anything a human wrote.
     assert [bool(e["text"]) for e in events] == [True, False, False]
+
+
+def test_fetch_codex_session_activity_keeps_every_top_level_timestamp():
+    _write_codex_session([
+        {"timestamp": _ts(1, 10), "type": "response_item", "payload": {
+            "type": "message", "role": "user", "content": [
+                {"type": "input_text", "text": "Build the activity reader"},
+            ]}},
+        {"timestamp": _ts(1, 10, 2), "type": "reasoning", "payload": {
+            "summary": [{"type": "summary_text", "text": "PRIVATE_REASONING"}]}},
+        {"timestamp": _ts(1, 10, 4), "type": "response_item", "payload": {
+            "type": "function_call", "name": "exec_command", "arguments": "{}"}},
+        {"timestamp": _ts(1, 10, 6), "type": "response_item", "payload": {
+            "type": "message", "role": "assistant", "phase": "commentary",
+            "content": [{"type": "output_text", "text": "Checking the records."}]}},
+        {"timestamp": _ts(2, 10), "type": "event_msg", "payload": {}},
+        {"type": "event_msg", "payload": {}},
+    ])
+
+    events = ct.fetch_codex_session_activity(START, END)
+
+    # session_meta itself is timestamped and therefore starts the activity beat.
+    assert [(event["ts"].hour, event["ts"].minute) for event in events] == [
+        (9, 0), (10, 0), (10, 2), (10, 4), (10, 6),
+    ]
+    assert {event["project"] for event in events} == {"MyApp"}
+    assert {event["slug"] for event in events} == {""}
+    assert {event["session"] for event in events} == {"session"}
+    assert [bool(event["text"]) for event in events] == [False, True, False, False, True]
+    assert "PRIVATE_REASONING" not in "\n".join(event["text"] or "" for event in events)
+
+
+def test_fetch_codex_session_activity_sorts_across_tasks():
+    _write_codex_session([
+        {"timestamp": _ts(1, 14), "type": "event_msg", "payload": {}},
+    ], "late", {"timestamp": _ts(1, 14)})
+    _write_codex_session([
+        {"timestamp": _ts(1, 9), "type": "event_msg", "payload": {}},
+    ], "early")
+
+    events = ct.fetch_codex_session_activity(START, END)
+
+    assert [event["ts"].hour for event in events] == [9, 9, 9, 14]
+
+
+def test_fetch_codex_session_activity_uses_the_callers_local_day():
+    local_tz = timezone(timedelta(hours=-4))
+    local_start = datetime(2024, 6, 1, 0, 0, tzinfo=local_tz)
+    local_end = datetime(2024, 6, 1, 23, 59, 59, tzinfo=local_tz)
+    _write_codex_session([
+        # 10 PM on June 1 locally: included even though its UTC date is June 2.
+        {"timestamp": _ts(2, 2), "type": "event_msg", "payload": {}},
+        # 1 AM on June 2 locally: outside the selected local day.
+        {"timestamp": _ts(2, 5), "type": "event_msg", "payload": {}},
+    ])
+
+    events = ct.fetch_codex_session_activity(local_start, local_end)
+
+    assert events[-1]["ts"] == datetime(2024, 6, 1, 22, 0, tzinfo=local_tz)
 
 
 def test_fetch_session_activity_falls_back_to_the_project_dir_name():

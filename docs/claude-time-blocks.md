@@ -1,11 +1,12 @@
-# Claude Code time blocks — how it works
+# AI coding time blocks — how it works
 
-A daily unattended task that reconstructs yesterday's Claude Code working hours and
-logs them to Google Calendar, so the calendar is a record of how the day actually
-went without anyone remembering to block it out after the fact.
+A daily unattended task that reconstructs yesterday's Claude Code and Codex Desktop
+working hours and logs them to Google Calendar, so the calendar records how the day
+actually went without anyone remembering to block it out after the fact.
 
-Code: `scribejay/claude_time_blocks.py` (the task), `scribejay/transcripts.py`
-(`fetch_session_activity`, the reader it shares with `ai_chat_learnings`).
+Code: `scribejay/claude_time_blocks.py` (the compatibility-preserved task),
+`scribejay/transcripts.py` (`fetch_session_activity` and
+`fetch_codex_session_activity`, shared with `ai_chat_learnings`).
 
 It is a **companion** to [ai-chat-learnings](ai-chat-learnings.md), not part of it:
 the learnings review — *what* was accomplished — is worth having whether or not you
@@ -16,20 +17,29 @@ either can be scheduled without the other.
 
 Claude Code timestamps every event it writes to
 `<CLAUDE_CONFIG_DIR>/projects/<slug>/<uuid>.jsonl`, so the day is already on
-disk (`CLAUDE_CONFIG_DIR` defaults to `~/.claude`). The task only has to decide
-where one stretch of work ends and the next begins.
+disk (`CLAUDE_CONFIG_DIR` defaults to `~/.claude`). Codex Desktop likewise writes
+timestamped JSONL under `${CODEX_HOME:-~/.codex}/sessions`.
 
 `fetch_session_activity` returns one entry per timestamped event —
-`{ts, project, slug, session, text}` — across every session file with activity in
-the window, oldest first, in local time. Unlike `fetch_claude_sessions`, it keeps
-records the learnings task drops (tool results, subagent sidechains, meta): an agent
-grinding through tools for twenty minutes with nothing said out loud is still time at
-the keyboard. `text` carries the human/assistant text and is `None` for those
-records, so the blurb prompt can still be built from what was actually said.
+`{ts, project, slug, session, text}` — across Claude sessions. The Codex reader
+returns the same shape, with an empty slug. Both readers keep timestamped tool,
+reasoning, event, and metadata records the learnings task drops: an agent grinding
+through tools for twenty minutes with nothing said out loud is still work. `text`
+is populated only for visible user/assistant conversation, so private reasoning,
+tool traffic, and injected context never enter the blurb prompt.
+
+Only Codex Desktop tasks whose first `session_meta` record says
+`thread_source == "user"` are accepted. Imported chats, onboarding, guardians,
+and subagents are rejected before their transcript bodies are read. That boundary
+matters because Codex can [import work from other agents](https://learn.chatgpt.com/docs/import),
+which would otherwise duplicate activity already represented by its original source.
+Codex JSONL is a private observed format, not a stable public API; suspicious schema
+changes warn and degrade instead of failing the whole daily run.
 
 ## One timeline, not one per session
 
-Every session's events are pooled into a **single** timeline and split on idle gaps.
+Every Claude and Codex session's events are pooled into a **single** timeline and
+split on idle gaps.
 The obvious alternative — one calendar event per session — does not work, and the
 real data is why:
 
@@ -65,15 +75,16 @@ inside the real stretch. The calendar reads `13:40–15:35`, not `13:41–15:31`
 AI · LocalLLMAgent, ObsidianWikiAgent — implemented check_slug_typos linting rule
 8:05 – 9:25 AM
 
-  LocalLLMAgent · fix-the-slug-lint — 8:05 to 9:21 AM
-  ObsidianWikiAgent · check-wiki-slugs — 9:09 to 9:21 AM
+  Claude · LocalLLMAgent · fix-the-slug-lint — 8:05 to 9:21 AM
+  Codex · ObsidianWikiAgent — 9:09 to 9:21 AM
 
-  Logged by Wren from Claude Code's local session logs.
+  Logged by ScribeJay from local Claude Code and Codex Desktop session logs.
 ```
 
 Python owns the structure — the timeline, the rounding, the `AI · <projects> —`
-prefix, and the per-session description lines with their exact spans and Claude
-Code's own conversation slugs. The model writes only the phrase after the dash: one
+prefix, and the agent/session description lines with their exact spans. Claude's
+conversation slug is included where available; Codex has none. The model writes
+only the phrase after the dash: one
 bounded call per block (2–6 a day, ~2k prompt tokens each), `think=False`, capped at
 60 characters. An empty or unusable response falls back to `working session` **and
 logs a WARNING** — a block silently titled that would otherwise read as an ordinary
@@ -81,7 +92,8 @@ quiet day rather than a broken prompt.
 
 Events are colored with the Work category's color (by *role*, so renaming the
 category in `config/preferences.json` doesn't break this) and stamped with a
-`source_id` of `claude-time:<date>:<HHMM>`, derived from the block's start.
+`source_id` of `claude-time:<date>:<HHMM>`, derived from the block's start. The
+prefix is a retained legacy identifier, not a claim that the event is Claude-only.
 
 ## Idempotency, and why the colorizer leaves these alone
 
@@ -111,15 +123,26 @@ something to match.
 touches the calendar. A successful run is silent — the calendar entries are the
 record. Only a failure pushes to the phone.
 
-**Backfilling over days already blocked out by hand will double up.** The dedup key
-only knows about events this task created — a manually-written "AI - LogViewer
-capabilities" is invisible to it. Dry-run first and check the days you're about to
-cover.
+This rollout is **forward-only**. It does not rewrite existing Claude-only calendar
+events. Do not backfill a day that already contains generated `claude-time:` blocks:
+adding Codex activity can change the combined block boundaries, and the legacy
+start-time dedup key cannot reconcile the old and new shapes. Backfill remains safe
+for days this task has never generated. Events blocked out manually are likewise
+invisible to the dedup key, so dry-run first.
 
 ## Safety and privacy
 
 Transcript text is untrusted input (it contains web and tool output that may carry
 prompt injection); the task only reads local files and writes a calendar event, and
 the blurb prompt treats transcript content as data, not instructions. It runs on the
-local model by design — `SCRIBEJAY_CLAUDE_TIME_BLOCKS_BACKEND` can opt into the cloud, but
-that sends transcript text off-device.
+local model by design. `SCRIBEJAY_CLAUDE_TIME_BLOCKS_BACKEND` is retained as the
+legacy per-task override name; choosing a cloud backend sends transcript text from
+both supported agents off-device.
+
+## Compatibility names
+
+The module, launchd label, log filename, task key, backend override, and
+`claude-time:` prefix all predate Codex ingestion and remain unchanged. Keeping them
+preserves dashboard history, launchd installation, model configuration, calendar
+deduplication, and colorizer behavior while the user-facing capability is now named
+**AI coding time blocks**.

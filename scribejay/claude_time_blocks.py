@@ -1,10 +1,10 @@
-"""Log yesterday's Claude Code working time as Google Calendar blocks.
+"""Log yesterday's AI coding time as Google Calendar blocks.
 Non-interactive — run by launchd every morning, covering the day that just ended.
 
 The point is a calendar that records how the day actually went without anyone
-remembering to fill it in. Claude Code already timestamps every event it writes to
-~/.claude/projects/<slug>/<uuid>.jsonl, so the hours are on disk; this task only has
-to decide where one stretch of work ends and the next begins.
+remembering to fill it in. Claude Code and Codex Desktop both timestamp their local
+session logs, so the hours are on disk; this task only has to decide where one
+stretch of work ends and the next begins.
 
 It pools EVERY session's events for the day and splits that single timeline on idle
 gaps, rather than making one event per session. Sessions overlap constantly — one
@@ -43,7 +43,11 @@ from agent.tools.calendar import (
     _local_timezone,
     log_calendar_event,
 )
-from scribejay.transcripts import _compact, fetch_session_activity
+from scribejay.transcripts import (
+    _compact,
+    fetch_codex_session_activity,
+    fetch_session_activity,
+)
 from tasks._common import notify_failure, setup_logger
 from agent.activity_log import prior_day
 
@@ -97,7 +101,7 @@ def _round_up(ts: datetime) -> datetime:
 
 def segment(events: list[dict], gap_minutes: int = DEFAULT_GAP_MINUTES,
             min_minutes: int = DEFAULT_MIN_MINUTES) -> list[dict]:
-    """Split one day's pooled events (from fetch_session_activity) into
+    """Split one day's pooled Claude/Codex activity events into
     non-overlapping blocks of working time, as [{"start", "end", "events"}].
 
     A gap longer than `gap_minutes` between consecutive events ends a block —
@@ -142,25 +146,26 @@ def block_summary(block: dict, blurb: str) -> str:
 
 
 def block_description(block: dict) -> str:
-    """One line per session in the block — its own span, project, and Claude
-    Code's own slug for the conversation — so the entry says which sessions made
-    it up even when several ran at once. Built here rather than asked of the
-    model, so the times and names are exact."""
+    """One line per agent session, with its exact span and project."""
     spans = {}
     for event in block["events"]:
-        span = spans.get(event["session"])
+        key = (event["agent"], event["session"])
+        span = spans.get(key)
         if span is None:
-            spans[event["session"]] = {"first": event["ts"], "last": event["ts"],
-                                       "project": event["project"], "slug": event["slug"]}
+            spans[key] = {"first": event["ts"], "last": event["ts"],
+                          "agent": event["agent"], "project": event["project"],
+                          "slug": event["slug"]}
         else:
             span["last"] = event["ts"]
 
     lines = []
     for span in sorted(spans.values(), key=lambda s: s["first"]):
-        label = f"{span['project']} · {span['slug']}" if span["slug"] else span["project"]
+        label = f"{span['agent']} · {span['project']}"
+        if span["slug"]:
+            label += f" · {span['slug']}"
         lines.append(f"{label} — {span['first']:%-I:%M} to {span['last']:%-I:%M %p}")
     lines.append("")
-    lines.append("Logged by Wren from Claude Code's local session logs.")
+    lines.append("Logged by ScribeJay from local Claude Code and Codex Desktop session logs.")
     return "\n".join(lines)
 
 
@@ -216,9 +221,15 @@ def _run_for_day(start, end, day, gap, min_minutes, max_chars, backend,
                  warm, dry_run, logger) -> list[dict]:
     """Build and log one day's blocks. Returns the blocks that were created
     (empty on a quiet day, or on a dry run)."""
-    events = fetch_session_activity(start, end)
+    claude_events = [dict(event, agent="Claude")
+                     for event in fetch_session_activity(start, end)]
+    codex_events = [dict(event, agent="Codex")
+                    for event in fetch_codex_session_activity(start, end, logger=logger)]
+    events = claude_events + codex_events
     blocks = segment(events, gap, min_minutes)
-    logger.info(f"{len(events)} Claude event(s) on {day} -> {len(blocks)} block(s), "
+    logger.info(f"{len(claude_events)} Claude event(s) on {day}")
+    logger.info(f"{len(codex_events)} Codex event(s) on {day}")
+    logger.info(f"{len(events)} combined event(s) -> {len(blocks)} block(s), "
                 f"{_hours(blocks):.1f}h")
     if not blocks:
         return []

@@ -1,4 +1,4 @@
-"""Tests for scribejay/claude_time_blocks.py — the timeline segmentation, the entry
+"""Tests for scribejay/claude_time_blocks.py — the unified timeline, the entry
 text Python owns, and the calendar write's idempotency key. The model call, the
 model pre-load, the calendar write and the push are all monkeypatched; nothing
 touches the network.
@@ -27,11 +27,19 @@ DAY = datetime(2026, 8, 5, tzinfo=TZ).date()
 @pytest.fixture(autouse=True)
 def _pin_timezone(monkeypatch):
     monkeypatch.setenv("TIMEZONE", "America/New_York")
+    monkeypatch.setattr(ctb, "fetch_codex_session_activity", lambda *a, **k: [])
 
 
-def _at(hour, minute=0, project="Wren", session="s1", text="User: do the thing"):
+def _at(hour, minute=0, project="Wren", session="s1", text="User: do the thing",
+        agent="Claude", slug="add-the-digest"):
     return {"ts": datetime(2026, 8, 5, hour, minute, tzinfo=TZ), "project": project,
-            "slug": "add-the-digest", "session": session, "text": text}
+            "slug": slug, "session": session, "text": text, "agent": agent}
+
+
+def _raw_at(hour, minute=0, **kwargs):
+    event = _at(hour, minute, **kwargs)
+    event.pop("agent")
+    return event
 
 
 def _never_called(*a, **k):
@@ -63,6 +71,20 @@ def test_segment_merges_concurrent_sessions_into_one_block():
 
     assert len(blocks) == 1
     assert ctb.block_projects(blocks[0]) == ["Wren", "WeighAnchor"]
+
+
+def test_segment_merges_interleaved_agents_into_one_non_overlapping_block():
+    events = [
+        _at(9, 0, agent="Claude"),
+        _at(9, 10, agent="Codex", slug=""),
+        _at(9, 25, agent="Claude"),
+        _at(9, 40, agent="Codex", slug=""),
+    ]
+
+    blocks = ctb.segment(events, gap_minutes=20, min_minutes=10)
+
+    assert len(blocks) == 1
+    assert (blocks[0]["start"].hour, blocks[0]["end"].hour) == (9, 9)
 
 
 def test_segment_drops_a_block_below_the_floor():
@@ -105,9 +127,24 @@ def test_description_lists_each_session_with_its_own_span():
     ])
     description = ctb.block_description(block)
 
-    assert "Wren · add-the-digest — 9:00 to 9:25 AM" in description
-    assert "WeighAnchor · add-the-digest — 9:10 to 9:10 AM" in description
-    assert description.endswith("Logged by Wren from Claude Code's local session logs.")
+    assert "Claude · Wren · add-the-digest — 9:00 to 9:25 AM" in description
+    assert "Claude · WeighAnchor · add-the-digest — 9:10 to 9:10 AM" in description
+    assert description.endswith(
+        "Logged by ScribeJay from local Claude Code and Codex Desktop session logs."
+    )
+
+
+def test_description_keys_equal_session_ids_by_agent():
+    (block,) = ctb.segment([
+        _at(9, 0, project="Wren", session="shared", agent="Claude"),
+        _at(9, 10, project="Wren", session="shared", agent="Codex", slug=""),
+        _at(9, 20, project="Wren", session="shared", agent="Codex", slug=""),
+    ])
+
+    description = ctb.block_description(block)
+
+    assert "Claude · Wren · add-the-digest — 9:00 to 9:00 AM" in description
+    assert "Codex · Wren — 9:10 to 9:20 AM" in description
 
 
 # --------------------------------------------------------------------------- #
@@ -196,6 +233,48 @@ def test_quiet_day_never_warms_the_model(monkeypatch):
 
     assert ctb._run_for_day(None, None, DAY, 20, 10, 6000, None,
                             _never_called, False, _LOGGER) == []
+
+
+def test_codex_only_day_logs_a_block(monkeypatch):
+    monkeypatch.setattr(ctb, "fetch_session_activity", lambda *a: [])
+    monkeypatch.setattr(
+        ctb, "fetch_codex_session_activity",
+        lambda *a, **k: [
+            _raw_at(9, 0, slug=""),
+            _raw_at(9, 15, slug=""),
+        ],
+    )
+    monkeypatch.setattr(ctb, "complete_text", lambda **k: "added Codex activity")
+    logged = []
+    monkeypatch.setattr(ctb, "log_calendar_event",
+                        lambda **k: (logged.append(k) or {"event_id": "e"}))
+
+    blocks = ctb._run_for_day(None, None, DAY, 20, 10, 6000, None,
+                              lambda: None, False, _LOGGER)
+
+    assert len(blocks) == 1
+    assert logged[0]["source_id"] == "claude-time:2026-08-05:0900"
+    assert "Codex · Wren" in logged[0]["description"]
+
+
+def test_run_merges_interleaved_source_fetches_before_segmenting(monkeypatch):
+    monkeypatch.setattr(ctb, "fetch_session_activity", lambda *a: [
+        _raw_at(9, 0, slug="claude-task"), _raw_at(9, 25, slug="claude-task"),
+    ])
+    monkeypatch.setattr(ctb, "fetch_codex_session_activity", lambda *a, **k: [
+        _raw_at(9, 10, slug=""), _raw_at(9, 40, slug=""),
+    ])
+    monkeypatch.setattr(ctb, "complete_text", lambda **k: "worked across agents")
+    logged = []
+    monkeypatch.setattr(ctb, "log_calendar_event",
+                        lambda **k: (logged.append(k) or {"event_id": "e"}))
+
+    blocks = ctb._run_for_day(None, None, DAY, 20, 10, 6000, None,
+                              lambda: None, False, _LOGGER)
+
+    assert len(blocks) == len(logged) == 1
+    assert "Claude · Wren · claude-task" in logged[0]["description"]
+    assert "Codex · Wren" in logged[0]["description"]
 
 
 # --------------------------------------------------------------------------- #

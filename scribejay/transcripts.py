@@ -10,9 +10,10 @@ these consumer products, so we use what lands on disk):
   system-reminders — so a session spanning several days is summarized once per
   day it was active ("new or revisited that day").
 - Codex Desktop writes session JSONL under ~/.codex/sessions. We keep only
-  top-level tasks the user started, and only their user text plus visible
-  commentary/final answers. Imported agent history, onboarding, guardians,
-  subagents, tool traffic, and injected context are excluded.
+  top-level tasks the user started. Learnings keep only user text plus visible
+  commentary/final answers; time tracking keeps every timestamp while exposing
+  text only for those visible turns. Imported agent history, onboarding,
+  guardians, subagents, and injected context are excluded.
 - A Gemini "drop folder" (WREN_GEMINI_CHATS_DIR): Gemini has no local footprint,
   so the user drops an exported .md/.txt/.json file per conversation and we pick up
   anything not yet processed. Files are never modified or deleted.
@@ -246,6 +247,48 @@ def _codex_record_text(record) -> tuple[str | None, bool, bool]:
     return None, False, False
 
 
+def _codex_session_metadata(handle, path: Path, logger=None) -> tuple[dict, dict] | None:
+    """Validate and return one top-level Codex task's first record and payload.
+
+    This is the shared private-format boundary for both transcript summaries and
+    activity tracking. Expected imported/system tasks are rejected before their
+    potentially large bodies are read.
+    """
+    first = next((line.strip() for line in handle if line.strip()), "")
+    try:
+        meta = json.loads(first)
+    except (json.JSONDecodeError, TypeError):
+        if logger:
+            logger.warning(f"Codex session has malformed metadata; skipping {path}")
+        return None
+
+    payload = (
+        meta.get("payload")
+        if isinstance(meta, dict) and meta.get("type") == "session_meta"
+        else None
+    )
+    if not isinstance(payload, dict):
+        if logger:
+            logger.warning(f"Codex session has no session_meta first record; skipping {path}")
+        return None
+
+    thread_source = payload.get("thread_source")
+    if thread_source != "user":
+        # Imported agent history currently has legacy history and no
+        # thread_source. Guardians and onboarding identify themselves. All are
+        # expected non-user tasks, so skip them before reading the body.
+        expected = (
+            payload.get("history_mode") == "legacy" and thread_source is None
+        ) or thread_source in {"guardian_review", "onboarding_checklist"}
+        if not expected and logger:
+            logger.warning(
+                f"Codex session has unsupported thread_source {thread_source!r}; "
+                f"skipping {path}"
+            )
+        return None
+    return meta, payload
+
+
 def _read_codex_session_day(path: Path, start: datetime, end: datetime,
                             max_chars: int, logger=None) -> dict | None:
     """One top-level Codex Desktop task's visible text for the local day."""
@@ -255,38 +298,10 @@ def _read_codex_session_day(path: Path, start: datetime, end: datetime,
         return None
 
     with handle:
-        first = next((line.strip() for line in handle if line.strip()), "")
-        try:
-            meta = json.loads(first)
-        except (json.JSONDecodeError, TypeError):
-            if logger:
-                logger.warning(f"Codex session has malformed metadata; skipping {path}")
+        metadata = _codex_session_metadata(handle, path, logger)
+        if metadata is None:
             return None
-
-        payload = (
-            meta.get("payload")
-            if isinstance(meta, dict) and meta.get("type") == "session_meta"
-            else None
-        )
-        if not isinstance(payload, dict):
-            if logger:
-                logger.warning(f"Codex session has no session_meta first record; skipping {path}")
-            return None
-
-        thread_source = payload.get("thread_source")
-        if thread_source != "user":
-            # Imported agent history currently has legacy history and no
-            # thread_source. Guardians and onboarding identify themselves. All
-            # are expected non-user tasks, so skip them before reading the body.
-            expected = (
-                payload.get("history_mode") == "legacy" and thread_source is None
-            ) or thread_source in {"guardian_review", "onboarding_checklist"}
-            if not expected and logger:
-                logger.warning(
-                    f"Codex session has unsupported thread_source {thread_source!r}; "
-                    f"skipping {path}"
-                )
-            return None
+        _, payload = metadata
 
         turns, first_ts = [], None
         candidates = 0
@@ -339,6 +354,22 @@ def _read_codex_session_day(path: Path, start: datetime, end: datetime,
     }
 
 
+def _codex_session_files(start: datetime) -> list[Path]:
+    """Codex logs whose append-only mtime could contain the requested window."""
+    if not CODEX_SESSIONS_DIR.exists():
+        return []
+
+    start_ts = start.timestamp()
+    paths = []
+    for path in sorted(CODEX_SESSIONS_DIR.glob("*/*/*/*.jsonl")):
+        try:
+            if path.stat().st_mtime >= start_ts:
+                paths.append(path)
+        except OSError:
+            continue
+    return paths
+
+
 def fetch_codex_sessions(start: datetime, end: datetime,
                          max_chars: int = DEFAULT_MAX_CHARS, logger=None) -> list[dict]:
     """Top-level Codex Desktop tasks active inside tz-aware local bounds.
@@ -347,23 +378,88 @@ def fetch_codex_sessions(start: datetime, end: datetime,
     histories are ignored; suspicious metadata/content changes log a warning and
     degrade to an empty session rather than failing the whole daily review.
     """
-    if not CODEX_SESSIONS_DIR.exists():
-        return []
-
-    start_ts = start.timestamp()
     sessions = []
-    for path in sorted(CODEX_SESSIONS_DIR.glob("*/*/*/*.jsonl")):
-        try:
-            if path.stat().st_mtime < start_ts:
-                continue
-        except OSError:
-            continue
+    for path in _codex_session_files(start):
         session = _read_codex_session_day(path, start, end, max_chars, logger)
         if session:
             sessions.append(session)
 
     sessions.sort(key=lambda s: s["started_at"])
     return sessions
+
+
+def fetch_codex_session_activity(start: datetime, end: datetime, logger=None) -> list[dict]:
+    """Every timestamped event from top-level Codex Desktop tasks in the window.
+
+    The return shape matches fetch_session_activity. Tool, reasoning, and other
+    records contribute timestamps to the working timeline but carry no `text`;
+    only visible user, commentary, and final-answer messages can reach a model.
+    """
+    out = []
+    for path in _codex_session_files(start):
+        try:
+            handle = path.open(errors="replace")
+        except OSError:
+            continue
+
+        with handle:
+            metadata = _codex_session_metadata(handle, path, logger)
+            if metadata is None:
+                continue
+            meta, payload = metadata
+            project = payload.get("cwd")
+            project = Path(project).name if isinstance(project, str) and project else "unknown"
+            candidates = 0
+            unknown_phases = 0
+            events = []
+
+            def add_record(record):
+                nonlocal candidates, unknown_phases
+                if not isinstance(record, dict):
+                    return
+                ts = _parse_ts(record.get("timestamp"))
+                if ts is None:
+                    return
+                ts_local = ts.astimezone(start.tzinfo)
+                if not (start <= ts_local <= end):
+                    return
+                text, had_candidate, unknown_phase = _codex_record_text(record)
+                candidates += int(had_candidate)
+                unknown_phases += int(unknown_phase)
+                events.append((ts_local, text))
+
+            add_record(meta)
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                add_record(record)
+
+        if unknown_phases and logger:
+            logger.warning(
+                f"Ignored {unknown_phases} Codex assistant message(s) with an unknown phase "
+                f"in {path}"
+            )
+        if events and candidates and not any(text for _, text in events) and logger:
+            logger.warning(
+                f"Codex session had {candidates} candidate message(s) but no extractable "
+                f"turns in {path}"
+            )
+        for ts_local, text in events:
+            out.append({
+                "ts": ts_local,
+                "project": project,
+                "slug": "",
+                "session": path.stem,
+                "text": text,
+            })
+
+    out.sort(key=lambda event: event["ts"])
+    return out
 
 
 def _session_files(start: datetime) -> list[Path]:

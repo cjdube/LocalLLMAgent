@@ -1,8 +1,8 @@
 """ScribeJay — the journaling agent.
 
 ScribeJay keeps the record of what actually happened. Strava activities logged onto
-the calendar, yesterday's events colour-coded after the fact, Claude Code working
-time turned into time blocks, and a daily page in the Obsidian vault built from
+the calendar, yesterday's events colour-coded after the fact, Claude/Codex working
+time turned into AI coding time blocks, and a daily page in the Obsidian vault built from
 Chrome history, YouTube Likes, Claude/Codex/Gemini chats and the commits he made.
 
 Wren (agent/, chat/, tasks/) is the interactive agent: she READS the record ScribeJay
