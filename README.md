@@ -781,6 +781,16 @@ grow the polling store or notify forever; during that window
 `python -m agent.tools.background --approve <job_id>` / `--deny <job_id>` is the
 terminal fallback.
 
+### Reboot and upgrade recovery
+
+The chat server, mail watcher, and interval pollers start independently at login.
+Calendar jobs keep their normal times. If an interpreter upgrade causes a
+calendar job to miss a window, the self-healer reloads its launchd registration
+and hands it to a persisted recovery queue instead of starting every missed job
+at once. The queue waits for Ollama only when the selected task actually uses it,
+runs one task at a time, and sends one recovery summary rather than a push storm.
+See [reboot recovery](docs/reboot-recovery.md).
+
 Useful commands:
 ```bash
 # check status

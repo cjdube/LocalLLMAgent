@@ -44,9 +44,10 @@
 # two Sunday jobs (starredblurbs, opportunitydigest) a full week — they were
 # not healed until they died at 20:00 and 21:00 on 2026-08-16.
 #
-# Hence also the kickstart below: a job flagged by the reactive check has by
-# definition just missed its window, so it is re-run once immediately. That
-# turns a week-long hole into an 18-minute delay.
+# A reactive failure still means the missed work should be recovered, but not by
+# starting every model task simultaneously while the Mac is still booting. The
+# repaired labels are handed to tasks.startup_recovery, which persists and
+# serializes them after their dependencies are ready.
 #
 # local.wren.selfheal runs this hourly with --quiet. That job deliberately does
 # NOT go through .venv/bin/python like every other plist: the interpreter is the
@@ -256,6 +257,7 @@ fi
 skipped=0
 healed=""
 failed=""
+reloaded=()
 if [ ${#stale[@]} -gt 0 ]; then
     for label in "${stale[@]}"; do
         # A scheduled job caught mid-run is doing real work — the wiki ingest can
@@ -267,6 +269,7 @@ if [ ${#stale[@]} -gt 0 ]; then
             continue
         fi
         if reload "$label"; then
+            reloaded+=("$label")
             healed="$healed ${label#local.*.}"
             log "  reloaded $label"
         else
@@ -286,23 +289,34 @@ if [ "$server_stale" -eq 1 ]; then
     fi
 fi
 
-# Catch-up, reactive path only. A job in `flagged` carried "needs LWCR update",
-# which launchd sets only after that job tried to exec and failed — so its
-# scheduled window is already gone and nothing will retry it until next time it
-# comes round. For a weekly job that is seven days. Run it once now.
-#
-# Deliberately NOT done for jobs reloaded by the interpreter check alone: those
-# were repaired before they ever fired, so starting them here would run them
-# off-schedule for no reason.
-caught_up=""
+# Queue reactive catch-up only. A job in `flagged` has already missed a window;
+# the Python runner drains these one at a time after Ollama is ready. Proactive
+# interpreter reloads remain reload-only because they did not necessarily miss
+# any work.
+was_reloaded() {
+    local wanted="$1" item
+    for item in "${reloaded[@]}"; do
+        [ "$item" = "$wanted" ] && return 0
+    done
+    return 1
+}
+
+queued=()
 if [ ${#flagged[@]} -gt 0 ]; then
     for label in "${flagged[@]}"; do
         is_catchup_candidate "$label" || continue
-        is_running "$label" && continue          # skipped above, or already back
-        launchctl kickstart "$DOMAIN/$label" >/dev/null 2>&1 || true
-        caught_up="$caught_up ${label#local.*.}"
-        log "  re-ran $label — it missed its scheduled window"
+        was_reloaded "$label" || continue
+        queued+=("$label")
     done
+fi
+if [ ${#queued[@]} -gt 0 ]; then
+    if (cd "$ROOT" && "$ROOT/.venv/bin/python" -m tasks.startup_recovery \
+        --enqueue "${queued[@]}") >/dev/null 2>&1; then
+        log "  queued catch-up:${queued[*]}"
+    else
+        failed="$failed startup-recovery-queue"
+        log "  FAILED to queue catch-up:${queued[*]}"
+    fi
 fi
 
 # Record the interpreter only once every agent is actually back on it. Writing
@@ -315,10 +329,9 @@ if [ -n "$now_fp" ] && [ "$now_fp" != "$was_fp" ] \
 fi
 
 if [ -n "$healed" ]; then
-    if [ -n "$caught_up" ]; then
-        healed="$healed (re-ran:$caught_up )"
-    fi
-    push "Reloaded after an interpreter change:$healed"
+    # The queued runner sends the one recovery summary after all missed work is
+    # done. Keep this alert only for a pure repair with nothing to catch up.
+    [ ${#queued[@]} -gt 0 ] || push "Reloaded after an interpreter change:$healed"
 fi
 
 # A failed reload means a service is loaded nowhere. Push it on its own — it is

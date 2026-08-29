@@ -13,6 +13,7 @@ from flask import Blueprint, jsonify, request
 from agent.toolset import TOOLS, WRITE_TOOLS
 from agent.tools.memory import recall
 from agent.tools.notify import ntfy_health
+from tasks.startup_recovery import status as startup_recovery_status
 from chat.auth import _authenticated
 from chat.insights import (
     RunManager,
@@ -64,7 +65,7 @@ def api_schedules():
             "last_run": _run_summary(runs[0] if runs else None),
             "recent_statuses": [r["status"] for r in runs],
         })
-    return jsonify({"tasks": out})
+    return jsonify({"tasks": out, "startup_recovery": startup_recovery_status()})
 
 
 @dashboard_bp.route("/api/runs/<task_key>", methods=["GET"])

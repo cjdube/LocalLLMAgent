@@ -52,6 +52,19 @@ def notify_failure(task_name: str, detail: object, logger: logging.Logger = None
     Falls back to email if the push doesn't land: this alert fires once and is
     gone if it doesn't arrive, and nothing retries it. (ntfy was down for four
     days in July 2026 without anyone noticing.)"""
+    # A recovery-launched task can fail simply because a reboot has not brought
+    # every dependency up yet. Its coordinator records the detail and sends one
+    # summary after the queue drains, rather than buzzing once per task.
+    try:
+        from tasks.startup_recovery import recovering_task
+        if recovering_task(task_name, detail):
+            if logger:
+                logger.info("startup recovery recorded failure; summary alert deferred")
+            return
+    except Exception:
+        # Failure reporting must remain best-effort even if the optional
+        # recovery store is unavailable or the interpreter is being repaired.
+        pass
     try:
         result = notify(
             message=f"{task_name} failed: {detail}",

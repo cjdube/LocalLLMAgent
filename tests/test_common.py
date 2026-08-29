@@ -50,6 +50,14 @@ def test_notify_failure_pushes_high_priority_with_email_fallback(monkeypatch):
     assert "boom" in calls["message"]
 
 
+def test_notify_failure_defers_alert_during_startup_recovery(monkeypatch):
+    from tasks import startup_recovery
+    monkeypatch.setattr(startup_recovery, "recovering_task", lambda task, detail: task == "morning_brief")
+    monkeypatch.setattr(_common, "notify", lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not push")))
+
+    _common.notify_failure("morning_brief", "Ollama down")
+
+
 def test_notify_failure_swallows_push_errors(monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("push exploded")

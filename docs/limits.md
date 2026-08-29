@@ -349,8 +349,9 @@ normally repaired before any job has to fail. But the check only runs when
 **The residual limit: a job whose scheduled fire time falls inside the gap
 between the upgrade and the next self-heal pass still dies at launch.** It gets
 caught by the older per-job `needs LWCR update` check on the following pass and
-re-run immediately, so the cost is a delay of up to an hour — not a lost run,
-and not the week that the same failure cost `opportunity_digest` on 2026-08-16.
+placed into the serialized startup-recovery queue. The queue waits for its
+dependency and runs one task at a time, so the cost is a delay rather than a
+boot-time fan-out or a lost week. See [reboot-recovery.md](reboot-recovery.md).
 
 Do not close this by shortening the interval. The window is already small, the
 recovery is automatic, and the check costs a `launchctl` query per agent.

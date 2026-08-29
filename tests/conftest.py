@@ -141,6 +141,7 @@ from tasks import opportunity_digest as _opportunity_digest
 from tasks import starred_blurbs as _starred_blurbs
 from tasks import starred_installed as _starred_installed
 from tasks import starred_releases as _starred_releases
+from tasks import startup_recovery as _startup_recovery
 
 # Resolved from the source tree rather than from any redirect, so it still names
 # the real directory when a redirect is the thing that's broken.
@@ -340,6 +341,9 @@ def _isolate_remaining_config_stores(tmp_path, monkeypatch):
     # missed per-test stub lands fixture escalation rows in the real store, never
     # config/escalations.json. See docs/frontier-escalation.md.
     monkeypatch.setattr(_escalations, "_STORE_PATH", tmp_path / "escalations.json")
+    # Reboot catch-up state controls launchd work and notification suppression,
+    # so fixture data here could otherwise start or silence real jobs later.
+    monkeypatch.setattr(_startup_recovery, "STORE_PATH", tmp_path / "startup_recovery.json")
     # The local project registry. load_registry() resolves this at
     # call time, so this one redirect covers the task that writes it, the chat
     # tools that read it, and daily_synthesis's project anchors.
