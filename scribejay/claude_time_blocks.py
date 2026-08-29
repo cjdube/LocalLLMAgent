@@ -27,7 +27,6 @@ Usage:
 """
 
 import argparse
-import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -35,8 +34,8 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent import prefs
 from agent.loop import complete_text, warm_model
+from scribejay import config
 from scribejay.model import backend as scribejay_backend, log_backend
 from agent.tools.calendar import (
     SESSION_BLOCK_SOURCE_PREFIX,
@@ -69,10 +68,10 @@ _ROUND_MINUTES = 5
 
 # Session blocks are the user's own build time; the fallback keeps a cloner whose
 # preferences.json renames the category from breaking (see docs/preferences.md).
-_COLOR_ID = prefs.category_color_by_role("work", "1")
+_COLOR_ID = config.category_color_by_role("work", "1")
 
-BLURB_SYSTEM_PROMPT = f"""You are {prefs.user_name()}'s assistant. You are given the transcript of \
-ONE stretch of work {prefs.user_name()} did with an AI coding agent, and the name(s) of the \
+BLURB_SYSTEM_PROMPT = f"""You are {config.user_name()}'s assistant. You are given the transcript of \
+ONE stretch of work {config.user_name()} did with an AI coding agent, and the name(s) of the \
 project(s) it touched. Write the title of the calendar entry for that stretch: what the work was \
 about. You are running unattended — infer everything from the transcript given.
 
@@ -264,9 +263,9 @@ def main() -> int:
     logger.info("Starting AI Session Time Blocks run")
 
     try:
-        gap = int(os.getenv("WREN_SESSION_BLOCK_GAP_MINUTES", DEFAULT_GAP_MINUTES))
-        min_minutes = int(os.getenv("WREN_SESSION_BLOCK_MIN_MINUTES", DEFAULT_MIN_MINUTES))
-        max_chars = int(os.getenv("WREN_SESSION_BLOCK_MAX_CHARS", DEFAULT_MAX_CHARS))
+        gap = int(config.getenv("WREN_SESSION_BLOCK_GAP_MINUTES", DEFAULT_GAP_MINUTES))
+        min_minutes = int(config.getenv("WREN_SESSION_BLOCK_MIN_MINUTES", DEFAULT_MIN_MINUTES))
+        max_chars = int(config.getenv("WREN_SESSION_BLOCK_MAX_CHARS", DEFAULT_MAX_CHARS))
         backend = scribejay_backend("claude_time_blocks")
         log_backend(logger, "claude_time_blocks", backend)
 

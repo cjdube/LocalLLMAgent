@@ -33,8 +33,8 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent.loop import complete_text, warm_model
+from scribejay import config
 from scribejay.model import backend as scribejay_backend, log_backend
-from agent import prefs
 from agent.activity_log import persist_or_email, prior_day
 from agent.tools.calendar import _local_timezone
 from scribejay.git_activity import (collect_commits, compact_commits, fetch_repos,
@@ -44,7 +44,7 @@ from scribejay.journal import (closed_tasks_section, commit_totals_line,
                                has_substantive_content)
 from tasks._common import notify_failure, setup_logger
 
-DRAFT_SYSTEM_PROMPT = f"""You are {prefs.user_name()}'s personal executive assistant. You write a \
+DRAFT_SYSTEM_PROMPT = f"""You are {config.user_name()}'s personal executive assistant. You write a \
 short daily log of what he BUILT on the day just completed, from the commit data given. You are \
 running unattended — infer everything from the data and write your best draft.
 

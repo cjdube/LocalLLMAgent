@@ -18,7 +18,6 @@ Usage:
 """
 
 import argparse
-import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -26,8 +25,8 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent import prefs
 from agent.loop import complete_text, warm_model
+from scribejay import config
 from scribejay.model import backend as scribejay_backend, log_backend
 from agent.store import atomic_write_json, load_json, locked
 from agent.tools.calendar import _local_timezone
@@ -43,8 +42,8 @@ from agent.activity_log import persist_or_email, prior_day
 # Gemini dedup lives here so a re-run never re-summarizes the same drop file.
 STATE_PATH = Path(__file__).resolve().parent.parent / "config" / "ai_chat_learnings_state.json"
 
-SESSION_SYSTEM_PROMPT = f"""You are {prefs.user_name()}'s assistant. You are given ONE past chat \
-session {prefs.user_name()} had with an AI agent. Summarize it into a brief, skimmable log entry — \
+SESSION_SYSTEM_PROMPT = f"""You are {config.user_name()}'s assistant. You are given ONE past chat \
+session {config.user_name()} had with an AI agent. Summarize it into a brief, skimmable log entry — \
 focus ONLY on what was accomplished and what was learned, NOT the back-and-forth or the reasoning \
 behind each decision. You are running unattended — infer everything from the transcript given.
 
@@ -164,7 +163,7 @@ def main() -> int:
     logger.info("Starting ai chat learnings run")
 
     try:
-        max_chars = int(os.getenv("AI_CHAT_LEARNINGS_MAX_CHARS", DEFAULT_MAX_CHARS))
+        max_chars = int(config.getenv("AI_CHAT_LEARNINGS_MAX_CHARS", DEFAULT_MAX_CHARS))
         backend = scribejay_backend("ai_chat_learnings")
         log_backend(logger, "ai_chat_learnings", backend)
         warm_model(logger=logger, backend=backend)

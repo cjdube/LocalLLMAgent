@@ -13,8 +13,8 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent import prefs
 from agent.loop import complete_text, warm_model
+from scribejay import config
 from scribejay.model import backend as scribejay_backend, log_backend
 from agent.tools.calendar import (
     CATEGORY_COLORS,
@@ -29,12 +29,12 @@ from tasks._common import notify_failure, setup_logger
 VALID_COLOR_IDS = {color_id for color_id, _ in CATEGORY_COLORS.values()}
 
 # The colorId the model should use only when it can't tell what an event is.
-_FALLBACK_COLOR = prefs.category_color_by_role("fallback", "11")
+_FALLBACK_COLOR = config.category_color_by_role("fallback", "11")
 
 
 def _classification_table() -> str:
     rows = ["| Category | Color name | colorId |", "|----------|-----------|---------|"]
-    for c in prefs.calendar_categories():
+    for c in config.calendar_categories():
         label = c["name"].replace("/", " / ")
         if c.get("hint"):
             label = f"{label} {c['hint']}"
@@ -42,7 +42,7 @@ def _classification_table() -> str:
     return "\n".join(rows)
 
 
-CLASSIFY_SYSTEM_PROMPT = f"""You are {prefs.user_name()}'s calendar color-coding assistant. You are given a \
+CLASSIFY_SYSTEM_PROMPT = f"""You are {config.user_name()}'s calendar color-coding assistant. You are given a \
 JSON list of yesterday's calendar events, each with an "n" (its number) and a "summary" (title). For \
 each event, decide which category it belongs to and return the matching Google Calendar \
 colorId, using EXACTLY this mapping:

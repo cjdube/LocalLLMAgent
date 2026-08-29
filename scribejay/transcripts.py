@@ -24,15 +24,16 @@ into a summary (the small-local-model rule). Transcript text is untrusted input
 """
 
 import json
-import os
 import re
 from datetime import datetime
 from pathlib import Path
 
+from scribejay import config
+
 
 def claude_projects_dir() -> Path:
     """Claude Code's session root, including its supported config override."""
-    root = Path(os.getenv("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude"))
+    root = Path(config.getenv("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude"))
     return root.expanduser() / "projects"
 
 
@@ -42,7 +43,7 @@ CLAUDE_PROJECTS_DIR = claude_projects_dir()
 
 def codex_sessions_dir() -> Path:
     """Codex's local session root, including its existing home override."""
-    root = Path(os.getenv("CODEX_HOME") or (Path.home() / ".codex"))
+    root = Path(config.getenv("CODEX_HOME") or (Path.home() / ".codex"))
     return root.expanduser() / "sessions"
 
 
@@ -545,7 +546,7 @@ def gemini_dir() -> Path:
     # expanduser: .env.example documents this as a ~-prefixed path, and without
     # expansion a literal "~/..." dir never exists — fetch_gemini_chats would
     # silently return [] forever rather than reading the drop folder.
-    return Path(os.getenv("WREN_GEMINI_CHATS_DIR", DEFAULT_GEMINI_DIR)).expanduser()
+    return Path(config.getenv("WREN_GEMINI_CHATS_DIR", DEFAULT_GEMINI_DIR)).expanduser()
 
 
 def fetch_gemini_chats(processed: dict, max_chars: int = DEFAULT_MAX_CHARS) -> list[dict]:

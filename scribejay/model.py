@@ -23,14 +23,14 @@ Usage:
     log_backend(logger, "daily_chrome_learnings", b)
 """
 
-import os
+from scribejay import config
 
 
 def backend(task_key: str) -> str | None:
     """SCRIBEJAY_<TASK_KEY>_BACKEND, else SCRIBEJAY_LLM_BACKEND, else None."""
     return (
-        os.getenv(f"SCRIBEJAY_{task_key.upper()}_BACKEND")
-        or os.getenv("SCRIBEJAY_LLM_BACKEND")
+        config.getenv(f"SCRIBEJAY_{task_key.upper()}_BACKEND")
+        or config.getenv("SCRIBEJAY_LLM_BACKEND")
         or None
     )
 
@@ -42,9 +42,9 @@ def log_backend(logger, task_key: str, resolved: str | None) -> None:
     unset variable is not an error, it is just a different (smaller) model, and
     the only visible symptom is a thinner draft nobody compares against
     yesterday's."""
-    if os.getenv(f"SCRIBEJAY_{task_key.upper()}_BACKEND"):
+    if config.getenv(f"SCRIBEJAY_{task_key.upper()}_BACKEND"):
         source = f"SCRIBEJAY_{task_key.upper()}_BACKEND"
-    elif os.getenv("SCRIBEJAY_LLM_BACKEND"):
+    elif config.getenv("SCRIBEJAY_LLM_BACKEND"):
         source = "SCRIBEJAY_LLM_BACKEND"
     else:
         source = "unset"

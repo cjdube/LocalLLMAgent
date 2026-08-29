@@ -17,8 +17,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent.loop import complete_text, warm_model
+from scribejay import config
 from scribejay.model import backend as scribejay_backend, log_backend
-from agent import prefs
 from agent.tools.chrome_history import fetch_chrome_history
 from tasks._common import notify_failure, setup_logger
 from agent.activity_log import (
@@ -29,7 +29,7 @@ from agent.activity_log import (
 )
 from scribejay.journal import has_substantive_content
 
-DRAFT_SYSTEM_PROMPT = f"""You are {prefs.user_name()}'s personal executive assistant. You write a \
+DRAFT_SYSTEM_PROMPT = f"""You are {config.user_name()}'s personal executive assistant. You write a \
 short daily log entry covering the day just completed, from the data given. You are running \
 unattended — infer everything from the data and write your best draft.
 

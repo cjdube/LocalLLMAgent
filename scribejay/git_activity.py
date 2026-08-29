@@ -27,6 +27,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from scribejay import config
+
 DEFAULT_PROJECTS_DIR = str(Path.home() / "Projects")
 
 GIT_TIMEOUT = 15
@@ -53,7 +55,7 @@ _FIELD = "\x1f"
 
 
 def _projects_dir() -> Path:
-    return Path(os.getenv("PROJECTS_DIR", DEFAULT_PROJECTS_DIR)).expanduser()
+    return Path(config.getenv("PROJECTS_DIR", DEFAULT_PROJECTS_DIR)).expanduser()
 
 
 def _git(path: Path, *args: str) -> str | None:
@@ -81,7 +83,7 @@ def author() -> str | None:
     filter — right on a single-user Mac, wrong on a shared checkout, which is why
     collect_commits logs a WARNING when it resolves that way rather than treating
     "everyone's commits" as normal."""
-    configured = os.getenv("SCRIBEJAY_GIT_AUTHOR")
+    configured = config.getenv("SCRIBEJAY_GIT_AUTHOR")
     if configured:
         return configured
     try:

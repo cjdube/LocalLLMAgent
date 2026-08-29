@@ -19,14 +19,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent import prefs
 from agent.tools.calendar import log_calendar_event
 from agent.tools.strava import fetch_strava
+from scribejay import config
 from tasks._common import notify_failure, setup_logger
 
 # All Strava activities get the fitness category's color — looked up by role,
 # not name, so renaming the category in config/preferences.json can't break it.
-FITNESS_COLOR_ID = prefs.category_color_by_role("fitness", "4")
+FITNESS_COLOR_ID = config.category_color_by_role("fitness", "4")
 
 
 def _log_activity(activity: dict, logger) -> bool:

@@ -16,9 +16,10 @@ fields onto calendar events without a natural-language step. The subject line th
 user wrote is the most accurate description of the exchange that exists.
 """
 
-import os
 from email.utils import getaddresses
 from pathlib import Path
+
+from scribejay import config
 
 DEFAULT_CORRESPONDENCE_DIR = str(Path.home() / "Vaults" / "llm-wiki-learnings" / "correspondence")
 
@@ -37,7 +38,7 @@ def _correspondence_dir() -> Path:
     people he emails and the companies they work for into wiki entities. A record
     of who he wrote to is a diary, so it gets its own directory outside the queue,
     the way daily_synthesis archives nudges to SYNTHESIS_DIR."""
-    return Path(os.getenv("CORRESPONDENCE_DIR", DEFAULT_CORRESPONDENCE_DIR)).expanduser()
+    return Path(config.getenv("CORRESPONDENCE_DIR", DEFAULT_CORRESPONDENCE_DIR)).expanduser()
 
 
 def _recipients(row: dict) -> list:

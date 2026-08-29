@@ -17,14 +17,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent.loop import complete_text, warm_model
+from scribejay import config
 from scribejay.model import backend as scribejay_backend, log_backend
-from agent import prefs
 from agent.tools.youtube import fetch_liked_videos
 from tasks._common import notify_failure, setup_logger
 from agent.activity_log import persist_or_email, prior_day
 from scribejay.journal import videos_section
 
-DRAFT_SYSTEM_PROMPT = f"""You are {prefs.user_name()}'s personal executive assistant. You write a \
+DRAFT_SYSTEM_PROMPT = f"""You are {config.user_name()}'s personal executive assistant. You write a \
 short thematic synthesis of the AI/technical and product-management YouTube videos he Liked \
 yesterday — the videos he chose to learn from. You are running unattended — infer everything from the data given.
 
