@@ -416,6 +416,9 @@ they stay unit-testable and runnable standalone.
   chat"; lost entirely on server restart — no persistence across sessions.
   Long sessions are trimmed oldest-turn-first to stay inside the model's
   context window (`WREN_CHAT_MAX_HISTORY_CHARS`, see above).
+- **Reply links:** Wren's replies render bare HTTP(S) URLs and Markdown links
+  as safe new-tab links. User messages and system notices stay text-only, and
+  unsupported schemes remain literal text.
 - **Auth:** a shared token (`WREN_CHAT_TOKEN` in `config/.env`) gates
   `POST /login`, checked with a constant-time comparison; a signed session
   cookie (`FLASK_SECRET_KEY`) remembers you for 30 days after that. This is

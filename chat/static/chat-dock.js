@@ -66,10 +66,63 @@
     }
   });
 
+  // Wren's reply text comes from a model that can read untrusted content, so
+  // build its links as DOM nodes instead of parsing model-supplied HTML. The
+  // first alternative owns a complete Markdown link (safe or not), which keeps
+  // unsupported schemes literal rather than linkifying a URL inside its syntax.
+  const LINK_TOKEN_RE = /\[([^\]\n]+)\]\(([^\n)]*)\)|(https?:\/\/[^\s<>"']+)/g;
+  const TRAILING_URL_PUNCTUATION_RE = /[.,!?;:]+$/;
+
+  function safeHttpUrl(value) {
+    try {
+      const url = new URL(value);
+      return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function appendLink(fragment, label, href) {
+    const anchor = document.createElement("a");
+    anchor.href = href;
+    anchor.target = "_blank";
+    anchor.rel = "noopener noreferrer";
+    anchor.textContent = label;
+    fragment.appendChild(anchor);
+  }
+
+  function linkifiedText(text) {
+    const fragment = document.createDocumentFragment();
+    let last = 0;
+    let match;
+    LINK_TOKEN_RE.lastIndex = 0;
+    while ((match = LINK_TOKEN_RE.exec(text)) !== null) {
+      if (match.index > last) {
+        fragment.appendChild(document.createTextNode(text.slice(last, match.index)));
+      }
+
+      const markdown = match[1] !== undefined;
+      const rawUrl = markdown ? match[2] : match[3];
+      const url = markdown ? rawUrl : rawUrl.replace(TRAILING_URL_PUNCTUATION_RE, "");
+      const trailing = markdown ? "" : rawUrl.slice(url.length);
+      const href = safeHttpUrl(url);
+      if (href) {
+        appendLink(fragment, markdown ? match[1] : url, href);
+        if (trailing) fragment.appendChild(document.createTextNode(trailing));
+      } else {
+        fragment.appendChild(document.createTextNode(match[0]));
+      }
+      last = LINK_TOKEN_RE.lastIndex;
+    }
+    if (last < text.length) fragment.appendChild(document.createTextNode(text.slice(last)));
+    return fragment;
+  }
+
   function addMessage(role, text) {
     const div = document.createElement("div");
     div.className = "msg " + role;
-    div.textContent = text;
+    if (role === "wren") div.appendChild(linkifiedText(text));
+    else div.textContent = text;
     messagesEl.appendChild(div);
     scrollToEnd();
     return div;

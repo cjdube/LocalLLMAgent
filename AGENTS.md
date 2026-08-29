@@ -2,7 +2,7 @@
 
 **Canonical instructions:** This file is the sole source of project guidance. When a request adds or changes project instructions — including one that names `CLAUDE.md` — edit `AGENTS.md`. Keep `CLAUDE.md` as the import-only compatibility pointer `@AGENTS.md`.
 
-Wren is a local-first personal AI agent: a Gemma model served by Ollama on a Mac mini. Nothing about the user's day ships to a cloud model at runtime **by default** — an opt-in cloud backend (Gemini) is selectable per-task via `WREN_LLM_BACKEND` / `WREN_<TASK>_BACKEND`, which does send that task's data off-device ([docs/llm-backend.md](docs/llm-backend.md)). Run `pytest` before calling any change to existing code done — and `npm test` too if you touched a script under `chat/static/`.
+Wren is a local-first personal AI agent: a Gemma model served by Ollama on a Mac mini. Nothing about the user's day ships to a cloud model at runtime **by default** — an opt-in cloud backend (Gemini) is selectable per-task via `WREN_LLM_BACKEND` / `WREN_<TASK>_BACKEND`, which does send that task's data off-device ([docs/llm-backend.md](docs/llm-backend.md)). Run `pytest` before calling any change to existing code done — and `npm test` too if you touched a script under `chat/static/`. After changing code used by a long-running process, restart the affected service before handing off so the user can test it; report that restart explicitly.
 
 **Two agents live here.** Wren (`agent/`, `chat/`, `tasks/`) is interactive: she reads the record and acts on request. **ScribeJay** (`scribejay/`) is the journaling agent: it writes the record. The seam is one sentence — **ScribeJay writes the record, Wren reads it** — which is why the raw-capture tools are not in Wren's registry. [docs/scribejay.md](docs/scribejay.md)
 

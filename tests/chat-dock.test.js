@@ -206,6 +206,53 @@ describe("sending a turn", () => {
     await settle();
     expect(lastMessage()).toContain("empty reply");
   });
+
+  test("renders bare HTTP(S) URLs as safe new-tab links", async () => {
+    resolvesWith({ type: "final", text: "Read https://example.com/docs." });
+    submit("where are the docs?");
+    await settle();
+    const link = messages().querySelector(".msg.wren:last-of-type a");
+    expect(link.textContent).toBe("https://example.com/docs");
+    expect(link.href).toBe("https://example.com/docs");
+    expect(link.target).toBe("_blank");
+    expect(link.rel).toBe("noopener noreferrer");
+    expect(lastMessage()).toBe("Read https://example.com/docs.");
+  });
+
+  test("renders Markdown links and preserves surrounding multiline text", async () => {
+    resolvesWith({
+      type: "final",
+      text: "Read [the docs](https://example.com/docs).\nThen visit https://example.org.",
+    });
+    submit("where are the docs?");
+    await settle();
+    const links = messages().querySelectorAll(".msg.wren:last-of-type a");
+    expect([...links].map((link) => [link.textContent, link.href])).toEqual([
+      ["the docs", "https://example.com/docs"],
+      ["https://example.org", "https://example.org/"],
+    ]);
+    expect(lastMessage()).toBe("Read the docs.\nThen visit https://example.org.");
+  });
+
+  test("keeps unsafe, malformed, and HTML-like reply content as text", async () => {
+    const text = "[bad](javascript:alert(1)) [broken](https://example.com not-a-url) <script>globalThis.PWNED = true</script>";
+    resolvesWith({ type: "final", text });
+    submit("show me links");
+    await settle();
+    const reply = messages().querySelector(".msg.wren:last-of-type");
+    expect(reply.querySelectorAll("a")).toHaveLength(0);
+    expect(reply.querySelector("script")).toBeNull();
+    expect(reply.textContent).toBe(text);
+    expect(globalThis.PWNED).toBeUndefined();
+  });
+
+  test("does not linkify user messages or system notices", async () => {
+    resolvesWith({ error: "See https://example.com/help" });
+    submit("See https://example.com/user");
+    await settle();
+    expect(messages().querySelector(".msg.user a")).toBeNull();
+    expect(messages().querySelector(".msg.system a")).toBeNull();
+  });
 });
 
 // The server summarizes a long session's oldest turns away and drops them. That
