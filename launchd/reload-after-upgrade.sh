@@ -198,10 +198,11 @@ fi
 # reload, which on an interpreter change is every agent we own.
 flagged=()
 stale=()
-# Both prefixes: journaling runs under local.scribejay.* since ScribeJay was split
-# out of Wren, and those agents exec the same .venv interpreter, so leaving them
-# out of this glob would leave exactly them broken after a Homebrew python bump.
-for dest in "$AGENTS"/local.wren.*.plist "$AGENTS"/local.scribejay.*.plist; do
+# Wren's own agents only. local.scribejay.* now execs ScribeJay's own .venv from
+# its own checkout, so this script — which judges staleness against THIS repo's
+# interpreter and logs — is no longer the right thing to reload them with.
+# ScribeJay carries its own copy of this script for its own agents.
+for dest in "$AGENTS"/local.wren.*.plist; do
     [ -e "$dest" ] || continue
     label="$(basename "$dest" .plist)"
     [ "$label" = "$SERVER_LABEL" ] && continue   # judged by interpreter, below

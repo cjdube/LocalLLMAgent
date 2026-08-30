@@ -35,24 +35,22 @@ RETRY_DELAYS_S = (60, 300, 900)
 # task discovery: the queue needs an explicit answer to priority and whether an
 # unavailable Ollama should hold the job. The partition check below makes adding
 # a scheduled job without making that decision fail loudly.
+#
+# Wren's own calendar jobs only. ScribeJay's eight left with its repo, and a
+# recovery run here could not start them anyway: this queue boots labels through
+# `launchctl kickstart`, but it decides WHICH to queue from the plists in this
+# checkout, and reads each result from this checkout's logs/. Recovering them is
+# ScribeJay's job to own, in its own repo, against its own logs.
 POLICIES = {
     "local.wren.morningbrief": ("morning_brief", 0, "wren"),
     "local.wren.mailwatchrenew": ("mail_watch_renew", 0, "none"),
     "local.wren.loginspector": ("log_inspector", 0, "none"),
     "local.wren.opportunitydigest": ("opportunity_digest", 0, "wren"),
-    "local.scribejay.stravadownload": ("strava_download", 0, "none"),
-    "local.scribejay.calendarcolorizer": ("calendar_colorizer", 0, "scribejay"),
-    "local.scribejay.claudetimeblocks": ("claude_time_blocks", 0, "scribejay"),
     "local.wren.dailysynthesis": ("daily_synthesis", 1, "wren"),
     "local.wren.projectscan": ("project_scan", 1, "wren"),
     "local.wren.starredblurbs": ("starred_blurbs", 1, "wren"),
     "local.wren.starredinstalled": ("starred_installed", 1, "none"),
     "local.wren.starredreleases": ("starred_releases", 1, "none"),
-    "local.scribejay.aichatlearnings": ("ai_chat_learnings", 2, "scribejay"),
-    "local.scribejay.dailychromelearnings": ("daily_chrome_learnings", 2, "scribejay"),
-    "local.scribejay.dailycommits": ("daily_commits", 2, "scribejay"),
-    "local.scribejay.dailycorrespondence": ("daily_correspondence", 2, "scribejay"),
-    "local.scribejay.dailyyoutubelearnings": ("daily_youtube_learnings", 2, "scribejay"),
 }
 
 
@@ -85,14 +83,7 @@ def _backend_uses_ollama(label: str) -> bool:
     task_name, _, kind = POLICIES[label]
     if kind == "none":
         return False
-    # ScribeJay is intentionally one-way: nothing under tasks/ imports it. Its
-    # small environment chain is duplicated here rather than crossing that seam.
-    backend = (
-        resolve_backend(task_name) if kind == "wren" else
-        os.getenv(f"SCRIBEJAY_{task_name.upper()}_BACKEND")
-        or os.getenv("SCRIBEJAY_LLM_BACKEND")
-    )
-    return (backend or "ollama").strip().lower() == "ollama"
+    return (resolve_backend(task_name) or "ollama").strip().lower() == "ollama"
 
 
 def ollama_ready() -> bool:

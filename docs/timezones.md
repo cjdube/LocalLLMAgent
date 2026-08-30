@@ -68,8 +68,7 @@ need the same answer, so none of them roll their own.
 - Falls back to `"UTC"` if the path can't be resolved.
 
 Callers include `agent/tools/chrome_history.py`, `agent/tools/youtube.py`,
-`agent/tools/reminders.py`, `tasks/morning_brief.py`, and
-`scribejay/calendar_colorizer.py`.
+`agent/tools/reminders.py`, and `tasks/morning_brief.py`.
 
 ## Testing it
 

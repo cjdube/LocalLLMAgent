@@ -30,18 +30,16 @@ def _documented_keys(text: str, marker: str) -> set[str]:
 
 
 def test_backend_key_inventory_matches_literal_call_sites():
+    # ScribeJay's half of this guard went with ScribeJay: its keys are checked
+    # against its own call sites in its own repo. Asserting them from here would
+    # rglob a directory that no longer exists and compare two empty sets.
     docs = (ROOT / "docs" / "llm-backend.md").read_text(encoding="utf-8")
     wren_paths = [
         *sorted((ROOT / "agent").rglob("*.py")),
         *sorted((ROOT / "tasks").rglob("*.py")),
     ]
-    scribejay_paths = sorted((ROOT / "scribejay").rglob("*.py"))
-
     assert _documented_keys(docs, "Wired task keys:") == _literal_call_keys(
         wren_paths, "resolve_backend"
-    )
-    assert _documented_keys(docs, "Wired ScribeJay task keys:") == _literal_call_keys(
-        scribejay_paths, "scribejay_backend"
     )
 
 

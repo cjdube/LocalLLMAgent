@@ -130,9 +130,7 @@ from chat import insights as _insights
 from agent.tools import clickup as _clickup
 from chat import wikilint as _wikilint
 from evals import run_eval as _run_eval
-from scribejay import transcripts as _chat_transcripts
 from tasks import _common
-from scribejay import ai_chat_learnings as _ai_chat_learnings
 from tasks import clickup_watcher as _clickup_watcher
 from tasks import mail_watcher as _mail_watcher
 from tasks import morning_brief as _morning_brief
@@ -265,19 +263,6 @@ def _isolate_skills_dir(tmp_path, monkeypatch):
     # inherit whatever procedures happen to be saved on this machine.
     # skills._skills_dir() reads this env on every call, so the env var is enough.
     monkeypatch.setenv("WREN_SKILLS_DIR", str(tmp_path / "skills"))
-
-
-@pytest.fixture(autouse=True)
-def _isolate_ai_chat_learnings(tmp_path, monkeypatch):
-    # Redirect the Gemini-dedup store to tmp, and point all chat sources away
-    # from the user's real data: no test may read ~/.claude or ~/.codex session
-    # transcripts or the real Gemini drop folder, and none may write the
-    # production state store.
-    monkeypatch.setattr(_ai_chat_learnings, "STATE_PATH",
-                        tmp_path / "ai_chat_learnings_state.json")
-    monkeypatch.setattr(_chat_transcripts, "CLAUDE_PROJECTS_DIR", tmp_path / "claude_projects")
-    monkeypatch.setattr(_chat_transcripts, "CODEX_SESSIONS_DIR", tmp_path / "codex_sessions")
-    monkeypatch.setenv("WREN_GEMINI_CHATS_DIR", str(tmp_path / "gemini_inbox"))
 
 
 @pytest.fixture(autouse=True)

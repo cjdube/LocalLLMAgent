@@ -344,22 +344,6 @@ def log_calendar_event(
     }
 
 
-def set_event_color(event_id: str, color_id: str) -> dict:
-    """Patch just the colorId of an existing event — used by
-    scribejay/calendar_colorizer.py to recolor yesterday's events by category."""
-    calendar_id = os.getenv("GOOGLE_CALENDAR_ID", "primary")
-
-    try:
-        service = build_service("calendar", "v3")
-        service.events().patch(
-            calendarId=calendar_id, eventId=event_id, body={"colorId": color_id}
-        ).execute()
-    except Exception as e:
-        return {"error": str(e)}
-
-    return {"event_id": event_id, "color_id": color_id, "updated": True}
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)

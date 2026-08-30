@@ -845,61 +845,6 @@ def backlog_anchors(api_key: str = None) -> dict:
     return {"items": items, "skipped": skipped}
 
 
-def closed_tasks(day: date, api_key: str = None) -> dict:
-    """Every Task that reached a Done status on `day` (a LOCAL date), for
-    scribejay/daily_commits.py. A **library function, not a chat tool** — the
-    third one here, same reason as clickup_digest and backlog_anchors.
-
-    This is the record of work that leaves no commit behind. The Wren Space
-    mostly duplicates git, but a contract advanced in the Vibe Foundry Space or
-    a post researched in the Blog Space touches no repository at all, so without
-    this those days read as empty ones in the vault.
-
-    **Closed on `day` means `date_closed` falls on `day`, never `date_updated`.**
-    Editing a Task months after shipping it bumps date_updated, which would
-    report old work as today's. The two disagree on 2 of this account's 26 closed
-    Tasks — a quiet 8% of the record wrong, in the direction that invents work.
-
-    The fetch is narrowed with `date_updated_gt` at the start of the day, and
-    that is safe rather than lucky: closing a Task IS an update, so anything
-    closed on `day` carries a date_updated at or after the start of it. It bounds
-    a growing workspace against the _MAX_PAGES ceiling.
-
-    Rows carry the Space and the status name because both differ across Spaces
-    and both are what makes a line readable — "Vibe Foundry — X (signed)" says
-    something "X" alone does not. No description: nothing renders one, and a
-    field with no reader is waste."""
-    token, err = _client(api_key)
-    if err:
-        return err
-
-    tz = ZoneInfo(local_timezone())
-    start_ms = int(datetime.combine(day, datetime.min.time(),
-                                    tzinfo=tz).timestamp() * 1000)
-    try:
-        team_id = _team_id(token)
-        spaces = _spaces(token, team_id)
-        if not spaces:
-            return {"items": []}
-        space_by_id = {a["id"]: a["name"] for a in spaces}
-        tasks = _fetch_tasks(token, team_id, list(space_by_id), include_done=True,
-                             updated_after_ms=start_ms)
-    except _ClickUpError as e:
-        return {"error": str(e)}
-    except Exception as e:
-        return http_error(e)
-
-    wanted = day.isoformat()
-    items = [{
-        "title": task.get("name", "(no title)"),
-        "space": space_by_id.get((task.get("space") or {}).get("id"), ""),
-        "status": (task.get("status") or {}).get("status", ""),
-    } for task in tasks
-        if (task.get("status") or {}).get("type") == "closed"
-        and _ms_to_local_date(task.get("date_closed")) == wanted]
-    return {"items": items}
-
-
 def tagged_clickup_tasks(tags: list, api_key: str = None) -> dict:
     """Tasks currently carrying any of `tags`. A **library function, not a chat
     tool** — no TOOL_SCHEMA, because the only caller is tasks/clickup_watcher.py

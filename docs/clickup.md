@@ -398,24 +398,18 @@ nothing. Why the count is returned rather than swallowed is in
 
 Done items are excluded. A shipped idea is not something to be nudged toward.
 
-## Closed Tasks in ScribeJay's daily page
+## Closed Tasks live in ScribeJay now
 
-`closed_tasks(day)` — the third library function here, no `TOOL_SCHEMA`, called
-by `scribejay/daily_commits.py`. It answers one question: what reached a Done
-status on a given local day.
+`closed_tasks(day)` — what reached a Done status on a given local day — was
+deleted from this repo on 2026-08-30. ScribeJay's `daily_commits` was its only
+caller and took a copy when it left, so what remained here was a function no
+code called. It is described in ScribeJay's own `docs/daily-commits.md`,
+including the two decisions that carry the weight: the filter is `date_closed`
+and never `date_updated` (the two disagree on 2 of 26 closed Tasks, and the
+wrong one invents work), and the rendering is Python, not the model.
 
-This is the source that records work leaving no commit behind. ScribeJay's only
-other "what I did" witness is git, so before this a day spent on a Vibe Foundry
-contract or a Blog draft read as a quiet day and nothing alerted, because nothing
-had failed.
-
-Two decisions carry the weight, both covered in
-[docs/daily-commits.md](daily-commits.md):
-
-- **The filter is `date_closed`, never `date_updated`** — the two disagree on 2 of
-  26 closed Tasks, and the wrong one invents work.
-- **The rendering is Python, not the model** — which is what let it ship before
-  either non-code Space had a closed Task to verify against.
+Should the morning brief ever want to show the day's closed items, write it as
+that feature. Do not restore this as a library function with one caller.
 
 ## Three things that would each have been a silent bug
 

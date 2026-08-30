@@ -90,6 +90,11 @@ EXTERNAL_ROOTS_ENV = "WREN_EXTERNAL_TASK_ROOTS"
 # hard-coding a sibling's naming rule here would be worse than one explicit key.
 RUN_LOG_ENV = "WREN_RUN_LOG"
 
+# Display casing for an external root's short name. str.title() is right for
+# most ("wiki" -> "Wiki") but wrong for an internally-capitalised name, and
+# "Scribejay" next to ScribeJay's own icon reads as a typo on every row.
+_SOURCE_TITLES = {"scribejay": "ScribeJay"}
+
 
 # --------------------------------------------------------------------------- #
 # Task discovery (schedules)
@@ -113,6 +118,38 @@ def _external_roots() -> list[tuple[str, Path]]:
         if root.is_dir():
             roots.append((name, root))
     return roots
+
+
+def _scribejay_backend() -> str:
+    """The backend ScribeJay actually runs on, for the /map agent label.
+
+    The value lives in ScribeJay's own `config/.env`, which this process never
+    loads, so reading `SCRIBEJAY_LLM_BACKEND` from *our* environment reported
+    "ollama" no matter what that repo was set to — and would have reported a
+    value ScribeJay does not use had anyone set it here. Read the file at the
+    external root instead. Still no import and no shell: one key out of a
+    sibling's config, the same way the dashboard reads its plists and logs.
+
+    Its chain is SCRIBEJAY_<TASK>_BACKEND → SCRIBEJAY_LLM_BACKEND → ollama, with
+    no WREN_* fallback. Only the middle rung is a whole-agent setting, so only
+    that one belongs on a label naming the agent.
+    """
+    for name, root in _external_roots():
+        if name != "scribejay":
+            continue
+        try:
+            text = (root / "config/.env").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            break
+        for line in text.splitlines():
+            key, sep, value = line.partition("=")
+            if sep and key.strip() == "SCRIBEJAY_LLM_BACKEND":
+                # Strip quotes the way a shell would; an empty value means unset.
+                value = value.strip().strip("'\"").strip()
+                if value:
+                    return value
+        break
+    return "ollama"
 
 
 def _task_sources() -> list[tuple[str | None, Path, Path]]:
@@ -234,7 +271,7 @@ def _task_from_plist(plist_path: Path, source: str | None, logs_dir: Path) -> di
         # a URL segment in /api/runs/<task_key>.
         "key": key if source is None else f"{source}-{key}",
         "display_name": _prettify(key) if source is None
-                        else f"{source.title()}: {_prettify(key)}",
+                        else f"{_SOURCE_TITLES.get(source, source.title())}: {_prettify(key)}",
         "label": data.get("Label", ""),
         "module": module,
         "schedule": sci,
@@ -664,28 +701,32 @@ TOOL_SERVICES = {
 # task gains or loses an integration.
 ROUTINE_USES = {
     "morning_brief": ["google_calendar", "gmail", "github", "google_tasks", "weather", "ntfy"],
-    "strava_download": ["google_calendar", "strava", "ntfy"],
-    "calendar_colorizer": ["google_calendar", "gmail", "ntfy"],
+    # ScribeJay's eight are federated from its own repo, so their keys carry the
+    # `scribejay-` prefix _task_from_plist() puts on every external task's key.
+    # The prefix is the short name in WREN_EXTERNAL_TASK_ROOTS — rename it there
+    # and these keys stop matching, drawing a routine with no edges.
+    "scribejay-strava_download": ["google_calendar", "strava", "ntfy"],
+    "scribejay-calendar_colorizer": ["google_calendar", "gmail", "ntfy"],
     # calendar = the time blocks it writes; ntfy = notify_failure.
-    "claude_time_blocks": ["google_calendar", "ntfy"],
-    "daily_chrome_learnings": ["chrome", "gmail", "ntfy"],
+    "scribejay-claude_time_blocks": ["google_calendar", "ntfy"],
+    "scribejay-daily_chrome_learnings": ["chrome", "gmail", "ntfy"],
     # projects = the local checkouts it reads, the same node project_scan reads.
     # github = the `git fetch` in front of that read, which is how a commit pushed
     # from another machine reaches this disk; the remotes are GitHub, so a dead
     # GitHub is a real way this task comes up short (it warns and still writes the
     # day). gmail = persist_or_email fallback.
-    "daily_commits": ["projects", "github", "gmail", "ntfy"],
+    "scribejay-daily_commits": ["projects", "github", "gmail", "ntfy"],
     # gmail twice over: the SENT metadata is the source, and it is also
     # persist_or_email's fallback. No model, so no other service.
-    "daily_correspondence": ["gmail", "ntfy"],
-    "daily_youtube_learnings": ["youtube", "gmail", "ntfy"],
+    "scribejay-daily_correspondence": ["gmail", "ntfy"],
+    "scribejay-daily_youtube_learnings": ["youtube", "gmail", "ntfy"],
     # Cross-source: yesterday's browsing + Likes matched against the wiki and the
     # opportunity watchlist; gmail = notify's email fallback when the push fails.
     # "nudges" both ways: it writes the dated archive and reads it back to drop
     # a connection it already made.
     "daily_synthesis": ["chrome", "youtube", "wiki", "opportunities", "nudges",
                         "gmail", "ntfy"],
-    "ai_chat_learnings": ["gmail", "ntfy"],  # source is local chat files; gmail = persist_or_email fallback
+    "scribejay-ai_chat_learnings": ["gmail", "ntfy"],  # source is local chat files; gmail = persist_or_email fallback
     "opportunity_digest": ["opportunities", "gmail", "ntfy"],
     "starred_blurbs": ["github", "ntfy"],
     "starred_releases": ["github", "ntfy"],
@@ -714,28 +755,38 @@ ROUTINE_USES = {
 # because "what did this write?" is the whole question you ask of a journal.
 # A drift-guard test asserts every ScribeJay routine appears here.
 ROUTINE_WRITES = {
-    "strava_download": "rides → calendar",
-    "calendar_colorizer": "event colours",
-    "claude_time_blocks": "AI session time blocks",
-    "daily_chrome_learnings": "daily browsing page",
-    "daily_commits": "daily commits page",
-    "daily_correspondence": "daily correspondence page",
-    "daily_youtube_learnings": "daily YouTube page",
-    "ai_chat_learnings": "daily AI-chat page",
+    "scribejay-strava_download": "rides → calendar",
+    "scribejay-calendar_colorizer": "event colours",
+    "scribejay-claude_time_blocks": "AI session time blocks",
+    "scribejay-daily_chrome_learnings": "daily browsing page",
+    "scribejay-daily_commits": "daily commits page",
+    "scribejay-daily_correspondence": "daily correspondence page",
+    "scribejay-daily_youtube_learnings": "daily YouTube page",
+    "scribejay-ai_chat_learnings": "daily AI-chat page",
 }
 
 
 def _agent_of(task: dict) -> str:
     """Which agent owns a routine — what /map's agent toggle filters on.
 
-    The launchd Label is the source of truth, not the module path: launchd runs
-    the label, and the labels were renamed to local.scribejay.* in the same commit
-    that created scribejay/. An external root is a third repo federated in
-    (docs/external-tasks.md), so it belongs to neither agent.
+    The launchd Label is the source of truth, not the module path and not which
+    repo the plist was found in: launchd runs the label, and the labels were
+    renamed to local.scribejay.* in the same commit that created scribejay/.
+
+    The label is checked BEFORE `external` on purpose. ScribeJay now lives in its
+    own repo and reaches this dashboard through WREN_EXTERNAL_TASK_ROOTS, so all
+    eight of its routines arrive with external=True. Testing `external` first
+    would drop every one of them into the grey "external" bucket — no teal rows,
+    no `writes` labels, no routine ring — which is a silent presentation bug, not
+    an error. "External" means a THIRD repo that is neither of our two agents
+    (ObsidianWikiAgent's local.wikiagent.*), and that is exactly what the
+    remaining branch still catches. See docs/external-tasks.md.
     """
+    if task["label"].startswith("local.scribejay."):
+        return "scribejay"
     if task["external"]:
         return "external"
-    return "scribejay" if task["label"].startswith("local.scribejay.") else "wren"
+    return "wren"
 
 # Keep the payload bounded: memory texts are truncated for the map (the detail
 # panel links to /memories for the full store) and the wiki band is capped.
@@ -814,13 +865,8 @@ def system_map(tools: list[dict], write_tools) -> dict:
         "agents": {
             "wren": {"name": "Wren", "model": active_model_label(),
                      "role": "reads the record, acts on request"},
-            # ScribeJay's model dial is its own chain (SCRIBEJAY_<TASK>_BACKEND →
-            # SCRIBEJAY_LLM_BACKEND → ollama) with NO fallback to WREN_*, so the
-            # default is spelled out here rather than left to _resolve_backend.
-            # Read from the environment instead of importing scribejay.model:
-            # chat/ must not import scribejay.* (AGENTS.md).
             "scribejay": {"name": "ScribeJay",
-                       "model": active_model_label(os.getenv("SCRIBEJAY_LLM_BACKEND", "ollama")),
+                       "model": active_model_label(_scribejay_backend()),
                        "role": "writes the record"},
         },
         "services": services,

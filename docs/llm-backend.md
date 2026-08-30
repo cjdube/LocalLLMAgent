@@ -33,8 +33,8 @@ Two environment variables in `config/.env`, resolved as
 
 `<TASK_KEY>` is the uppercased task/module name. Wired task keys:
 `DAILY_SYNTHESIS`, `OPPORTUNITY_DIGEST`, `MORNING_BRIEF`, `STARRED_BLURBS`,
-`PROJECT_SCAN`, `RESEARCH`, `EVALUATE_APP`, `EVALUATE_AGAINST`. (Journaling keys
-moved to the `SCRIBEJAY_*` chain below.)
+`PROJECT_SCAN`, `RESEARCH`, `EVALUATE_APP`, `EVALUATE_AGAINST`. (The journaling
+keys left with ScribeJay — see its own `docs/llm-backend.md`.)
 
 (The list is the set of `resolve_backend("<key>")` call sites — `grep -rn
 'resolve_backend(' agent tasks` is the check when this drifts.)
@@ -49,34 +49,13 @@ WREN_LLM_BACKEND=ollama
 WREN_DAILY_SYNTHESIS_BACKEND=gemini
 ```
 
-## ScribeJay has its own chain
+## ScribeJay has its own chain, in its own repo
 
-The journaling agent (`scribejay/`, see [scribejay.md](scribejay.md)) resolves its backend
-in `scribejay/model.py`, not through `resolve_backend`:
-
-```
-SCRIBEJAY_<TASK_KEY>_BACKEND  ->  SCRIBEJAY_LLM_BACKEND  ->  ollama
-```
-
-Wired ScribeJay task keys: `DAILY_CHROME_LEARNINGS`, `DAILY_YOUTUBE_LEARNINGS`,
-`AI_CHAT_LEARNINGS`, `CLAUDE_TIME_BLOCKS`, `CALENDAR_COLORIZER`, `DAILY_COMMITS`.
-(`strava_download` uses no model at all.)
-
-There is deliberately **no** fallback from `SCRIBEJAY_*` to `WREN_*`. Two reasons:
-ScribeJay is a second agent with a second model dial — the point of the split is
-that the journal can be pointed at a free OpenRouter model without touching what
-chat runs on — and a silent fallback would hide a missed `.env` rename.
-`agent/activity_log.py` sizes its compaction caps for a cloud model, so a task
-that quietly drops to the small local model loses whole draft sections rather
-than erroring.
-
-Every ScribeJay run logs the backend it resolved to and where that came from, on
-its first line:
-
-```
-backend: gemini (from SCRIBEJAY_DAILY_CHROME_LEARNINGS_BACKEND)
-backend: ollama (default) (from unset)
-```
+The journaling agent lives in the sibling ScribeJay checkout now and resolves its
+backend through `SCRIBEJAY_<TASK_KEY>_BACKEND -> SCRIBEJAY_LLM_BACKEND -> ollama`,
+with deliberately **no** fallback to `WREN_*`. Both halves are documented there,
+in ScribeJay's own `docs/llm-backend.md`; nothing in this repo reads those
+variables, so setting one here does nothing.
 
 `chat/server.py` and `tasks/bg_worker.py` deliberately have no per-task wiring —
 they follow the global default. `bg_worker` ingests untrusted web/search content,
@@ -94,7 +73,7 @@ consumer next starts — there's nothing to reload live:
   run, so tasks need no restart — the next run picks up the change.)
 - **Scheduled tasks** — nothing to do; the change applies on the task's next run.
   To exercise it immediately, run the task by hand, e.g.
-  `python -m scribejay.daily_chrome_learnings`.
+  `python -m tasks.daily_synthesis`.
 - **Verify** — the dashboard's identity line shows the active chat backend
   (e.g. `gemini-2.5-flash (gemini)`); task logs under `logs/` show a
   `gemini_chat model=…` line when a task ran on the cloud backend.

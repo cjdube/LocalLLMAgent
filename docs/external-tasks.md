@@ -7,7 +7,7 @@ schedule, next run, run history, duration charts, the `/map` routines band, and
 `log_inspector`'s "was due and didn't run" detection.
 
 ```
-WREN_EXTERNAL_TASK_ROOTS=wiki=~/Projects/ObsidianWikiAgent
+WREN_EXTERNAL_TASK_ROOTS=wiki=~/Projects/ObsidianWikiAgent,scribejay=~/Projects/ScribeJay
 ```
 
 Comma-separated `name=path` entries. The name prefixes every task key from that
@@ -17,10 +17,21 @@ Unset means Wren's own tasks only. A root that doesn't exist is skipped, not
 raised — a moved or unmounted checkout means "no tasks from there", not a 500 on
 every dashboard poll.
 
-## Why federate instead of merging the repos
+## The two roots today
 
-The only external root today is
-[ObsidianWikiAgent](https://github.com/cjdube/ObsidianWikiAgent), which runs
+**ScribeJay** (`~/Projects/ScribeJay`) is the journaling agent, split out of this
+repo on 2026-08-30. Its eight `local.scribejay.*` jobs reach the dashboard
+entirely through this mechanism — see [scribejay.md](scribejay.md). Two things
+about it are specific to that root:
+
+- Its rows are **not** in the grey "external" agent bucket.
+  `chat/insights.py:_agent_of` tests the `local.scribejay.` label *before* the
+  `external` flag, so the eight keep their own colour. Reverse those two checks
+  and every row silently turns grey while the tests still pass.
+- `_SOURCE_TITLES` in the same file maps `scribejay` → `ScribeJay`, because
+  `str.title()` would render it "Scribejay" next to ScribeJay's own icon.
+
+**ObsidianWikiAgent** ([repo](https://github.com/cjdube/ObsidianWikiAgent)) runs
 three jobs against the `llm-wiki-learnings` vault:
 
 | Job | Schedule | What it does |
@@ -30,8 +41,8 @@ three jobs against the `llm-wiki-learnings` vault:
 | `wiki-learnings-snapshot` | Daily 11:00 PM | Commits and pushes the vault to its git remote |
 
 That vault is load-bearing for Wren — it's what `agent/tools/wiki.py` reads,
-where `scribejay/daily_chrome_learnings.py` and friends write, and the source of the
-lens pages `evaluate_against` judges against. So the jobs' health matters here.
+where ScribeJay's daily pages land, and the source of the lens pages
+`evaluate_against` judges against. So the jobs' health matters here.
 The *code* doesn't belong here:
 
 - ObsidianWikiAgent is vault-agnostic and serves more than one vault. Merging

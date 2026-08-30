@@ -124,6 +124,12 @@ def _catalogue() -> list[tuple[dict, dict[str, Path]]]:
             "streams": streams,
         }, live))
 
+    # Orphans are grouped by stem, exactly like a task's two streams above. A
+    # retired task leaves BOTH files behind, and emitting one row per file gave
+    # the page two rows with identical display names and no way to tell them
+    # apart. That is how the eight journaling logs looked after ScribeJay moved
+    # to its own repo: sixteen files, sixteen rows, eight visible duplicates.
+    orphans: dict[str, tuple[dict, dict[str, Path]]] = {}
     for path in sorted(insights.LOGS_DIR.glob("*.log")):
         if path in claimed or path.name.endswith(_SKIP_SUFFIXES):
             continue
@@ -133,15 +139,23 @@ def _catalogue() -> list[tuple[dict, dict[str, Path]]]:
         is_stdout = path.name.endswith(".launchd.log")
         stem = path.name[:-len(".launchd.log")] if is_stdout else path.stem
         stream = "stdout" if is_stdout else "log"
-        out.append(({
+        entry, live = orphans.setdefault(stem, ({
             "key": f"file:{path.name}",
             "display_name": stem.replace("_", " ").title(),
             "human_schedule": "—",
             "is_daemon": False,
             "external": False,
             "orphan": True,
-            "streams": {stream: info},
-        }, {stream: path}))
+            "streams": {},
+        }, {}))
+        entry["streams"][stream] = info
+        live[stream] = path
+        # The key names the structured log whenever there is one, so a pair is
+        # addressed the same way a lone `<stem>.log` already was. Set here rather
+        # than left to whichever file `sorted()` reached first.
+        if not is_stdout:
+            entry["key"] = f"file:{path.name}"
+    out.extend(orphans.values())
     return out
 
 

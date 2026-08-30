@@ -29,26 +29,28 @@ in the gitignored `config/.env`.
 
 ## Architecture
 
-### Two agents: Wren and ScribeJay
+### Wren, and her sibling ScribeJay
 
-The repo holds two agents that share one substrate.
+**Wren** — this repo — is the interactive agent. She reads the record and takes
+action on request: answer from the wiki and her memories, book a meeting, set a
+reminder, send the brief.
 
-**Wren** is the interactive one. She reads the record and takes action on
-request — answer from the wiki and her memories, book a meeting, set a reminder,
-send the brief.
-
-**ScribeJay** (`scribejay/`) is the journaling one. It keeps the record: Strava rides
-onto the calendar, yesterday's AI session hours as time blocks, the day's
-events color-coded, and daily vault pages from Chrome history, YouTube Likes,
-AI chats and the commits he made. It is a *pipeline* agent — gather → one
-`complete_text()` call → write. It has no tool registry and never calls `advance()`.
+**ScribeJay** is the journaling agent, and since 2026-08-30 it is a separate
+repo at `~/Projects/ScribeJay` with its own venv, `.env` and launchd agents. It
+keeps the record: Strava rides onto the calendar, yesterday's AI session hours as
+time blocks, the day's events color-coded, and daily vault pages from Chrome
+history, YouTube Likes, AI chats and the commits he made.
 
 The seam is one sentence: **ScribeJay writes the record, Wren reads it.** So the
 raw-capture tools (`fetch_strava`, `fetch_chrome_history`, `fetch_liked_videos`)
 and `recolor_event` are **not** in Wren's chat registry — asked what she did
 yesterday, she reaches for the calendar and the wiki, which is where ScribeJay put
-it. ScribeJay also resolves its own backend (`SCRIBEJAY_*_BACKEND`) and never reads
-Wren's. See [docs/scribejay.md](docs/scribejay.md).
+it.
+
+Knowledge runs one way: Wren shows ScribeJay's runs on her dashboard, and
+ScribeJay does not know Wren exists. What that permits and forbids in a change
+here is [docs/scribejay.md](docs/scribejay.md); how ScribeJay itself works is
+ScribeJay's own `docs/architecture.md`.
 
 `daily_synthesis` is deliberately **not** journaling and stays with Wren — it
 applies yesterday's activity to her notes and projects, which is reasoning, not
@@ -56,7 +58,7 @@ record-keeping.
 
 ```
 launchd (per-task .plist, timed)
-   -> python -m tasks.<task_name>   (Wren)   |   python -m scribejay.<task_name>
+   -> python -m tasks.<task_name>
        -> fetches data via tool modules (weather, calendar, Strava, Chrome history)
        -> calls the local model via Ollama's HTTP API for anything that
           needs natural-language composition or tool-calling
@@ -227,7 +229,6 @@ in — nothing new inherits it automatically.
 | `evaluate_app.py` | Strategic teardown of a product from its website URL (`evaluate_app`) — a fixed pipeline (Firecrawl fetch → deterministic compaction → one model call) producing a skeptical VC-style analysis: hidden risks, adoption friction, missing technical constraints. See [docs/app-evaluator.md](docs/app-evaluator.md) |
 | `evaluate_against.py` | Evaluate a target (a URL or inline text) against the user's **own** standards (`evaluate_against`) — same fixed pipeline as `evaluate_app`, but the rubric is a wiki "lens" page he curates, loaded at call time. Adding a lens is writing a page, not a code change. See [docs/lenses.md](docs/lenses.md) |
 | `github_starred.py` | List starred GitHub repos, optionally filtered to those pushed to since a given timestamp, with a `recent_changes` summary (release notes or recent commit subjects) per matched repo; `fetch_readme` returns a repo's raw README (best-effort, feeds the `/starred` blurbs); `fetch_latest_release` returns a repo's latest published release (best-effort, feeds the `/starred` release-awareness column); `compare_versions` normalizes two tag strings to a numeric core and reports whether an installed version is behind a release (feeds the `/starred` "Installed" column) |
-| `strava.py` | Strava activities via the Strava API (own OAuth app), for a given date. Run `--authorize` once to mint a refresh token. A **library module, not a chat tool** — `scribejay/strava_download.py` is its only caller |
 | `gmail_read.py` | Read the mailbox (`gmail.readonly`) — `search_mail` (Gmail's own query syntax) then `read_email`, which returns a whole **thread** oldest-first because a single reply rarely makes sense alone. `my_address()` answers who the mailbox belongs to — identity, not the `BRIEF_TO_EMAIL` delivery preference — which is how a reply tells his own messages on a thread from everyone else's. Also owns the label lookup, the change-history walk and `users.watch`, all used by the mail tasks. Bodies are compacted in Python (quoted reply history trimmed, HTML stripped, budgeted) — a raw email would swamp the small model's context. **Everything it returns is untrusted text a stranger wrote**, so both tools are reads and neither may gain a write without a gate. See [docs/mail-watch.md](docs/mail-watch.md) |
 | `mail_state.py` | The mail watcher's durable state in `config/mail_state.json`: the history watermark (forward-only, since Pub/Sub does not guarantee order), the seen-message set (since Pub/Sub delivers at least once), and the watch expiry the renewal job checks |
 | `calendar.py` | Google Calendar read/write — `get_upcoming_events`, `get_events_by_date` (bounded for chat: the true `event_count` plus as many events as fit, and a `partial` note naming where the shown events stop — a long range used to overflow the tool-result cap and read as a half-empty calendar; any past or future range, including relative phrases like `'tomorrow'` or `'next tuesday'`, resolved in Python so the model never guesses a date, and echoed back in the result so the reply names the day actually looked up), and `log_calendar_event` (idempotent via `source_id`). `get_events_in_range` and `set_event_color` back the date tools and ScribeJay's colorizer but aren't themselves registered tools — coloring the past is journaling, so it left Wren's registry with the rest of ScribeJay |
@@ -239,7 +240,7 @@ in — nothing new inherits it automatically.
 | `google_tasks.py` | Google Tasks read/write (`get_tasks`, `get_tasks_due_soon`, `create_task`, `update_task_due_date`, `complete_task`). The read pages through every list — `maxResults` is a page size, not a total, and unpaged it reported one page as the whole list — then reports the true `task_count` and caps what it hands the model, saying so when it does |
 | `clickup.py` | Read and write ClickUp, in ClickUp's own three nouns: a **Space** holds **Lists**, and a List holds **Tasks**. Reads: `list_clickup_spaces` (what Spaces and Lists exist, and the statuses each Space defines), `list_clickup_tasks` (filterable by Space, List and status) and `read_clickup_task` (one Task with its description and comments). Writes: `add_clickup_task`, `move_clickup_task`, `comment_on_clickup_task` — all confirmation-gated, and the two that write free text are barred from unattended runs because `read_clickup_task` reads them back into a later prompt. Every tool carries `clickup` in its name so the model can tell them from Google Tasks' always-loaded `create_task`/`list_tasks`. Nothing assumes a Space, List or Task is called anything in particular: names are discovered from the account on every call, so adding or renaming any of them needs no edit and no restart — and the model never sees a ClickUp id. A new Task opens at its Space's own first not-started status, so the model never picks one; priority is given as a word and mapped to ClickUp's inverted number in Python. **Ambiguity is a question, never a default** — two workspaces, a Space with several Lists and no List named, a title matching two Tasks, or a List named with no Space each refuse and name the options. Statuses are per-Space and really do differ, so a status filter is validated against the chosen Space and the error names the ones that exist; without that, `--status parked` against the Blog Space returned an empty list, which reads as "nothing is parked". Finished Tasks are excluded by default because ClickUp excludes its Closed group by default (21 of 57 here), and the result says so. See [docs/clickup.md](docs/clickup.md) |
 | `chrome_history.py` | Read Chrome's local history DB for a date range (`fetch_chrome_history`). A **library module, not a chat tool** — ScribeJay's daily tasks and `daily_synthesis` call it directly with `max_sites=None` for the whole day. It kept the size-budgeted chat shape for those callers, but there is deliberately no `TOOL_SCHEMA`: raw capture is ScribeJay's job now |
-| `youtube.py` | List videos Liked on the authorized YouTube channel in a date range (`fetch_liked_videos`) — title, channel, and description per video, via the YouTube Data API v3 and the shared Google OAuth token. A **library module, not a chat tool**, feeding `scribejay/daily_youtube_learnings.py` and `daily_synthesis` |
+| `youtube.py` | List videos Liked on the authorized YouTube channel in a date range (`fetch_liked_videos`) — title, channel, and description per video, via the YouTube Data API v3 and the shared Google OAuth token. A **library module, not a chat tool**, feeding `daily_synthesis` |
 | `memory.py` | Persistent long-term memory in two tiers — `remember` (archival, search-only) and `pin` (active, injected into every system prompt), plus `recall`, `recategorize`, `archive`, `forget`. Stored in `config/wren_memory.json`; the writes are confirmation-gated. See [docs/memory.md](docs/memory.md) |
 | `skills.py` | Procedural memory (chat-only) — reusable how-to procedures composing the other tools: `list_skills`, `read_skill`, `write_skill` (create/overwrite), `delete_skill`. One Markdown file per skill under `skills/` (override with `WREN_SKILLS_DIR`); a capped title+one-line index is injected into the chat prompt so Wren knows what procedures exist, reading a body on demand. Writes are confirmation-gated |
 | `reminders.py` | Scheduled reminders — `set_reminder` (parses the time in Python via `dates.resolve_reminder_time`, not the model), `list_reminders`, `cancel_reminder`. Stored in `config/reminders.json`; the `reminder_sweep` task fires each due one as an `ntfy` phone push, then clears it — `push_log.py` keeps the record of what was sent. Set/cancel are confirmation-gated |
@@ -260,22 +261,19 @@ Every tool module is runnable standalone for testing, e.g.:
 
 ## Scheduled tasks
 
-Tasks under `scribejay/` belong to the journaling agent and run under
-`local.scribejay.*` launchd labels; everything under `tasks/` is Wren's and runs
-under `local.wren.*`. Both write to the same `logs/` directory and both show on
-the dashboard.
+Everything under `tasks/` is Wren's and runs under a `local.wren.*` launchd
+label, logging to this repo's `logs/`.
+
+ScribeJay's eight journaling jobs — the 4:30–5:50 AM vault pages, the Strava
+download and the 5:00 PM calendar colorizer — are **not** in this table. They
+run under `local.scribejay.*` from their own checkout and log there. They still
+appear on this dashboard, federated through `WREN_EXTERNAL_TASK_ROOTS`; what they
+do is ScribeJay's own README.
 
 | Task | Schedule | What it does |
 |---|---|---|
-| `scribejay/ai_chat_learnings.py` | Daily 4:30 AM | Covers the prior day's chats with AI agents — Claude Code sessions from `<CLAUDE_CONFIG_DIR>/projects`, top-level user-started Codex Desktop tasks from `<CODEX_HOME>/sessions`, plus any Gemini export dropped in `WREN_GEMINI_CHATS_DIR` — into an **Accomplished / Learned** summary per session. Imported, onboarding, guardian, and subagent Codex histories are excluded. Writes `AI-Chat-Learnings-<date>.md` in `LEARNINGS_DIR`. A day with no chats writes nothing; `--backfill N` does the last N days for Claude and Codex. See [docs/ai-chat-learnings.md](docs/ai-chat-learnings.md). |
-| `scribejay/claude_time_blocks.py` | Daily 4:45 AM | **AI Session Time Blocks:** logs yesterday's Claude Code and top-level Codex Desktop working hours to Google Calendar. Pools both agents' timestamps into one timeline before splitting it on idle gaps, so concurrent sessions produce non-overlapping `AI · …` events rather than double-booking the day. Imported, onboarding, guardian, and subagent Codex histories are excluded. Existing module/config names and `claude-time:` source IDs remain as legacy compatibility identifiers; rollout is forward-only, so previously generated Claude-only events are not rewritten. A quiet day writes nothing, and only failures alert. See [docs/ai-session-time-blocks.md](docs/ai-session-time-blocks.md). |
-| `scribejay/daily_commits.py` | Daily 4:55 AM | Covers what he actually *shipped* the prior day, from **two** sources, written as `Daily-Work-<date>.md` in `LEARNINGS_DIR`. **Commits** across the checkouts under `PROJECTS_DIR`, grouped by the model into **What I Built** plus **Also**; and **ClickUp Tasks closed that day**, listed by Python under **Closed in ClickUp**. The second source is the one that records work leaving no commit behind — a contract in the Vibe Foundry Space, a post in the Blog Space — so a day of pure non-code work still writes a page (and never wakes the model). The Git half needs no API token; the ClickUp half uses `CLICKUP_API_TOKEN` and degrades to Git-only output when unavailable. It `git fetch`es first (once per run, warns and carries on if a remote is down), so a commit pushed from another machine is not silently missing from the day. Several commits over the same paths become one bullet; the paths themselves are what let the page say a change was tested or documented. The per-repo totals line is computed in Python, not by the model. A day with neither commits nor closed Tasks writes nothing; `--backfill N` does the last N days as one run. See [docs/daily-commits.md](docs/daily-commits.md). |
-| `scribejay/daily_youtube_learnings.py` | Daily 5:05 AM | Covers the prior day's YouTube Liked videos — the model writes a short synthesis of what they teach, and the linked list of exact videos is appended in Python so the URLs are always real. Writes `Daily-YouTube-<date>.md` in `LEARNINGS_DIR`. A day with no Likes writes nothing. See [docs/daily-learnings.md](docs/daily-learnings.md). |
-| `scribejay/daily_chrome_learnings.py` | Daily 5:15 AM | Covers the prior day's Chrome browsing into a compact daily log — **Tools & Tech Encountered** plus **Product & Strategy** — written as `Daily-Chrome-<date>.md` in `LEARNINGS_DIR`. Each site carries its top page *paths*, so the review says what was being looked into rather than restating tab titles. Excluded domains/keywords come from [preferences](docs/preferences.md). A quiet day writes nothing; a failed vault write emails the draft instead. See [docs/daily-learnings.md](docs/daily-learnings.md). |
-| `scribejay/daily_correspondence.py` | Daily 5:20 AM | Covers who the prior day was spent talking to: yesterday's Gmail **sent** mail, grouped by conversation into **Reached out** and **Replied**, written as `Correspondence-<date>.md` in `CORRESPONDENCE_DIR` — deliberately **not** `LEARNINGS_DIR`, because the vault's `raw/` is an ingest queue and these pages name people. Metadata only: Gmail is asked for headers, so bodies are never fetched. **No model call** — with no bodies the subject line he wrote is already the most accurate description there is, so the page is assembled in Python. Mail Wren sends him is filtered out (4 of 10 sent messages in a sample fortnight). A day with no qualifying mail writes nothing; Gmail failing logs a warning rather than failing the run. See [docs/daily-correspondence.md](docs/daily-correspondence.md). |
 | `tasks/project_scan.py` | Daily 5:30 AM | Refreshes the local project registry that feeds `daily_synthesis`'s project anchors. Scans each checkout under `PROJECTS_DIR` for git freshness plus its README, first configured root instruction file (`AGENTS.md` by default), and `docs/` headings, **and nothing else** — never `.env`. One model call per project distils that into a summary and topic terms, cached in `config/projects.json` and keyed on a document hash, so a commit touching no docs costs nothing. `--refresh` regenerates all. See [docs/projects.md](docs/projects.md). |
 | `tasks/daily_synthesis.py` | Daily 5:45 AM | Proactive synthesis: matches yesterday's browsing, YouTube Likes and AI-chat *Learned* bullets against his own projects, the ClickUp items he parked, his wiki pages and watched companies, then has the model keep only the genuine, non-obvious connections. A ClickUp item with no description is not an anchor and is skipped — a bare title can only match its own spelling — so the count of skipped items is logged rather than swallowed. Pushes at most 3 "these line up — want a summary?" nudges via ntfy and writes `Daily-Synthesis-<date>.md` to `SYNTHESIS_DIR` (default `<vault>/nudges`, deliberately not the vault's `raw/`). Skips a connection it already nudged in the last 7 days, and Wren can read the archive back in chat via `list_nudges`. **Silence is the common case.** See [docs/daily-synthesis.md](docs/daily-synthesis.md). |
-| `scribejay/strava_download.py` | Daily 5:50 AM | Fetches yesterday's Strava activities and maps each one onto a Google Calendar event in plain Python — no model, since it's a pure field mapping with no natural-language step. Deduped by `source_id` (Strava activity id) so re-runs never create duplicates. |
 | `tasks/morning_brief.py` | Daily 6:00 AM | Fetches weather + upcoming calendar events (next 48h, set by `morning_brief.calendar_hours_ahead` in [preferences](docs/preferences.md)) + Google Tasks past due or due within 48h (via `google_tasks.get_tasks_due_soon`) + starred GitHub repos pushed to since the last brief (via `github_starred.fetch_starred_repos`, cursor persisted in `config/github_starred_state.json`), has the model write a short "at a glance" summary and a one-sentence intro for the starred-repos section, assembles a styled HTML email (weather / calendar / tasks due soon / Backlog / Scores / Starred Repos sections), sends it via Gmail. **Scores** lists yesterday's finals for the teams in [`sports.teams`](docs/preferences.md#sports) — no model call, and the whole section is omitted on a day none of them played, which is most of the year for any one league. Baseball doubleheaders come back as two lines, labelled Game 1 / Game 2. **Backlog** stacks what moved in ClickUp since the last brief (including what shipped) on top of what is in flight right now, with the in-flight item untouched longest called out once it has been quiet a week — no model call, own cursor in `config/clickup_state.json`, advanced independently of the starred one. The pipeline lives in `build_and_send_brief()`, shared with the chat `send_morning_brief` tool. |
 | `tasks/opportunity_digest.py` | Weekly Sundays at 9:00 PM | The fractional-work opportunity scout. Polls three free, ToS-clean sources — SEC Form D filings in the watched states, leadership openings on watched ATS boards, and the current HN "Who is hiring" thread — dedupes into `config/opportunities.json`, scores fractional-operator fit, and emails a three-section digest. **Nothing new → no email.** See [docs/opportunity-scout.md](docs/opportunity-scout.md). |
 | `tasks/starred_blurbs.py` | Weekly Sundays at 8:00 PM | Caches a one-line "what it does" blurb per starred GitHub repo for the `/starred` view — one model call summarizing its README, cached in `config/starred_blurbs.json`, falling back to the repo's GitHub description. Only newly-starred repos each run; de-starred repos are pruned; `--refresh` regenerates all. See [docs/starred.md](docs/starred.md). |
@@ -284,7 +282,6 @@ the dashboard.
 | `tasks/mail_watch_renew.py` | Daily 4:15 AM | Re-registers Gmail's push notification for the `Wren/Watch` label and stores its expiry. Runs daily against a 7-day expiry on purpose, so one missed run costs nothing; renewing is idempotent. **Gmail drops the watch after 7 days without saying so**, and a stopped watcher looks exactly like a quiet inbox — so this also alerts when the expiry is inside 48h *even though the call succeeded*. See [docs/mail-watch.md](docs/mail-watch.md). |
 | `tasks/mail_watcher.py` | Always on | Watches two Gmail labels, seconds after mail lands. `Wren/Watch` means *tell me*: one summarized sentence pushed to the phone, with **no tools** on that path and the sender and subject taken from the headers rather than the model. `Wren/Do` means *handle it*, in **two steps**: Wren first reads the email with **no tools** and picks one action — a task, a calendar entry, a reply, or nothing — and only then does a background job run that one action, from a Python instruction with every date already resolved. (Handing the email straight to the toolset was the first build; measured live, 0 of 3 runs took any action.) Because the words came from a stranger, everything outside `MAIL_JOB_SAFE_TOOLS` still waits for a tap-to-approve push, including ordinary writes and any tool that would put model-chosen text in an outbound URL. "Nothing needed doing" and "could not work it out" both push, so a labelled email never goes quiet. A thread carrying both labels is acted on once. `Wren/Do` is optional; skip the label and it runs watch-only. Holds a Pub/Sub **streaming pull** open (dialled out, so **no port opens** and the tailnet-only surface is intact). **A label covers the whole thread**, so every later reply reaches Wren with no further action — peel `Wren/Do` off when the job is done. His own replies and drafts are skipped. A quiet inbox means no pushes, which is normal. See [docs/mail-watch.md](docs/mail-watch.md). |
 | `tasks/log_inspector.py` | Daily 8:00 AM | Watches Wren's own logs — the only task that does. Scans the last 24h of `logs/*.log` for errors and the small model's strain signals, and separately checks via `parse_runs()` that every scheduled task actually ran and finished, catching what a line scan can't see. Pure Python, no model: a health check that called the model couldn't report that the model is down. **Quiet by default — a push always means something needs attention.** See [docs/log-inspector.md](docs/log-inspector.md). |
-| `scribejay/calendar_colorizer.py` | Daily 5:00 PM | Fetches yesterday's calendar events, has the model guess a category per event title (the categories from `config/preferences.json` — Work, Fitness, Meal Prep, Domestic/Chores, Meetings, Travel, and so on) and returns a colorId per event, then patches each event's color. Always re-classifies, even events colored by a previous run or by hand — except the AI Session Time Blocks entries, which arrive already colored. On failure, pushes a phone alert and emails a notice. |
 | `tasks/reminder_sweep.py` | Every 60s (poll) | Fires any reminder that has come due as an `ntfy` phone push, then clears it, so a reminder lands within about a minute of its time. No model — the time was resolved in Python by `dates.resolve_reminder_time` when `set_reminder` saved it. |
 | `tasks/clickup_watcher.py` | Every 5 min (poll) | Turns a ClickUp tag into a background job: `wren-research` means *go and read the web about this*, `wren-context` means *go and read my own notes about this*. Either way the answer lands as a comment on the Task, after a tap on the phone. **Never calls the model** — one HTTP GET and a template, because Ollama serves one request at a time and a poller that took that slot would starve chat every five minutes. **The tag is the decision**, so nothing here classifies anything; Python fills in a per-tag prompt. The tag is removed *before* the job is queued, which is what stops the same Task running twice. A ClickUp outage is one phone push after ten failed polls in a row, not one per poll. Nothing tagged means nothing happens. See [docs/clickup.md](docs/clickup.md). |
 | `tasks/bg_worker.py` | Every 30s (poll) | Runs one queued background job per invocation from `config/bg_jobs.json` through the full `advance()` loop, pausing gated actions for tap-to-approve phone approval and retrying transient failures. **How much is gated depends on where the job came from**: one the user typed pauses only for consequential actions, while one built out of an email (`Wren/Do`) pauses for everything outside `toolset.MAIL_JOB_SAFE_TOOLS`, and one raised by a ClickUp tag pauses for every write, because the user tagged it and walked away. The agent stack is imported lazily so the idle poll — the overwhelmingly common case — stays cheap. See [docs/background.md](docs/background.md). |
@@ -933,11 +930,8 @@ mostly useful if the Python process fails to start at all).
 5. Test each task manually before trusting the schedule:
    ```bash
    .venv/bin/python -m tasks.morning_brief
-   .venv/bin/python -m scribejay.strava_download
-   .venv/bin/python -m scribejay.daily_chrome_learnings
-   .venv/bin/python -m scribejay.daily_youtube_learnings
    .venv/bin/python -m tasks.daily_synthesis
-   .venv/bin/python -m scribejay.calendar_colorizer
+   .venv/bin/python -m tasks.project_scan
    ```
 6. Test the chat server manually: `.venv/bin/python -m chat.server`, then
    visit `http://localhost:8420` and log in with `WREN_CHAT_TOKEN`. (Fine for
@@ -1084,12 +1078,10 @@ recipient is pinned, and what to hold onto when adding a write tool — is in
 ## What's NOT here
 
 - No Anthropic/Claude API usage anywhere in this codebase — no `anthropic`
-  package in `requirements.txt`, and no API call to one at runtime.
-  `scribejay/ai_chat_learnings.py` reads Claude Code and Codex Desktop's **local**
-  session logs off disk to summarize the prior day's chats — file reads, no
-  transcript API. Imported agent history under Codex is excluded so the Claude
-  source is not counted twice. See
-  [docs/ai-chat-learnings.md](docs/ai-chat-learnings.md).
+  package in `requirements.txt`, and no API call to one at runtime. (ScribeJay
+  summarizes the prior day's Claude Code and Codex Desktop chats, but it reads
+  their **local** session logs off disk — file reads, no transcript API — and it
+  is a separate repo.)
 - `config/.env`, `config/google_credentials.json`, `config/google_token.json`,
   `config/github_starred_state.json`, and `logs/*.log` are gitignored — they
   contain secrets/tokens and machine-specific state.

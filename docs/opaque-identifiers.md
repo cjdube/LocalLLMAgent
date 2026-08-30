@@ -26,8 +26,9 @@ exactly like a real one and matches nothing.
 
 ### The calendar colorizer — total failure
 
-`scribejay/calendar_colorizer.py`, 2026-07-25. Google's 26-character event ids went
-out in the prompt and came back as the response's keys.
+ScribeJay's `calendar_colorizer.py`, 2026-07-25, while it still lived here.
+Google's 26-character event ids went out in the prompt and came back as the
+response's keys.
 
 The model spent all 3,072 `num_predict` tokens **inside its thinking block**,
 transcribing one id character by character and second-guessing itself. It
@@ -93,9 +94,9 @@ if not 1 <= n <= len(batch):
 scores[batch[n - 1]["id"]] = (score, angle)
 ```
 
-Reference implementations: `scribejay/calendar_colorizer.py:_classify_input` /
-`_apply_classification`, and `tasks/opportunity_digest.py:_compact_for_scoring` /
-`_parse_scores`.
+Reference implementation: `tasks/opportunity_digest.py:_compact_for_scoring` /
+`_parse_scores`. ScribeJay's `calendar_colorizer.py` does the same thing in its
+own repo.
 
 ## What counts as an opaque identifier
 

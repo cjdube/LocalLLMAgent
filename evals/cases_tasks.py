@@ -22,12 +22,6 @@ Each case declares:
 import json
 
 from agent.tools.research import RESEARCH_SYSTEM_PROMPT
-from scribejay.calendar_colorizer import (
-    CLASSIFY_SYSTEM_PROMPT,
-    _classify_input,
-    _parse_classification,
-)
-from scribejay.claude_time_blocks import BLURB_SYSTEM_PROMPT as BLOCK_BLURB_PROMPT
 from tasks.daily_synthesis import (
     SYNTHESIS_SYSTEM_PROMPT,
     parse_nudges,
@@ -75,12 +69,6 @@ def _lead(n):
 _LEADS_10 = [_lead(n) for n in range(10)]
 _LEADS_40 = [_lead(n) for n in range(40)]
 
-_EVENTS = [
-    "Volleyball", "Standup", "Dentist", "Lunch with Dana", "Deep work — Wren",
-    "1:1 with Sam", "Grocery run", "Board meeting", "Physio", "Code review",
-    "School pickup", "Evening Run",
-]
-
 _README = """# ripgrep
 
 ripgrep is a line-oriented search tool that recursively searches the current
@@ -91,14 +79,6 @@ first class support on Windows, macOS and Linux.
 ripgrep is similar to other popular search tools like The Silver Searcher, ack
 and grep. It is built on top of Rust's regex engine, which uses finite automata
 to guarantee linear time searching.
-"""
-
-_TRANSCRIPT = """user: I want to add a retry to the synthesis call when the model returns nothing.
-assistant: The empty-content case is the thinking budget being spent on scratchpad. A retry is the right shape here rather than think=False, because turning thinking off would make the nudges worse.
-user: How many attempts?
-assistant: Two. And warn even when the retry succeeds, otherwise the failure rate becomes invisible.
-user: Do it, and add a test that pins the warning.
-assistant: Added MAX_SYNTHESIS_ATTEMPTS = 2 with the warning on every empty attempt, plus a test asserting the WARNING fires on a successful retry.
 """
 
 _CANDIDATES = [
@@ -154,12 +134,6 @@ def _parse_blurb(raw):
     return [line] if line else []
 
 
-def _parse_block_blurb(raw):
-    line = next((l.strip().strip('"').strip("*- ") for l in (raw or "").splitlines()
-                 if l.strip()), "")
-    return [line] if line else []
-
-
 # A hand-written ideal answer per case. Not sent to any model — it's what
 # tests/test_run_eval.py feeds each parser to prove the parser, the fixture and
 # expect_count are wired together correctly.
@@ -170,7 +144,6 @@ def _parse_block_blurb(raw):
 # harness bug is the one that costs hours of Ollama time to discover.
 _GOLDEN_SCORES_10 = "\n".join(f"{n}|{5 + n % 5}|Interim leadership angle." for n in range(1, 11))
 _GOLDEN_SCORES_40 = "\n".join(f"{n}|{5 + n % 5}|Interim leadership angle." for n in range(1, 41))
-_GOLDEN_COLORS = json.dumps({str(n): "1" for n in range(1, len(_EVENTS) + 1)})
 _GOLDEN_BRIEF = "\n".join(f"{label} Something factual." for label in _RESEARCH_LABELS)
 
 
@@ -199,34 +172,12 @@ CASES = [
         "think": False,
     },
     {
-        "id": "calendar_colorizer",
-        "task": "calendar_colorizer",
-        "system": CLASSIFY_SYSTEM_PROMPT,
-        "user": json.dumps(_classify_input([{"summary": s} for s in _EVENTS])),
-        # _parse_classification RAISES on empty or non-JSON; the runner catches
-        # that and records it as a parse failure, which is the real behaviour.
-        "parse": _parse_classification,
-        "golden": _GOLDEN_COLORS,
-        "expect_count": len(_EVENTS),
-        "think": False,
-    },
-    {
         "id": "starred_blurb",
         "task": "starred_blurbs",
         "system": REPO_BLURB_PROMPT,
         "user": f"repo: BurntSushi/ripgrep\nREADME:\n{_README}",
         "parse": _parse_blurb,
         "golden": "ripgrep is a fast recursive regex search tool.",
-        "expect_count": 1,
-        "think": False,
-    },
-    {
-        "id": "time_block_blurb",
-        "task": "claude_time_blocks",
-        "system": BLOCK_BLURB_PROMPT,
-        "user": f"projects: LocalLLMAgent\n\ntranscript:\n{_TRANSCRIPT}\n",
-        "parse": _parse_block_blurb,
-        "golden": "Added a retry for empty synthesis responses.",
         "expect_count": 1,
         "think": False,
     },

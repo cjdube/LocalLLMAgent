@@ -76,6 +76,33 @@ def test_orphan_log_is_listed_after_tasks(tmp_path, launchd_dir):
     assert keys == ["morning_brief", "file:retired_task.log"]
 
 
+def test_a_retired_tasks_two_streams_are_one_row(tmp_path, launchd_dir):
+    """Both halves of the promise, because a row can be right about one and
+    wrong about the other: ONE row for the pair, carrying BOTH streams, each
+    stream resolving to its own file. Emitting a row per file put two entries
+    with the same display name on the page when ScribeJay's eight tasks left."""
+    (tmp_path / "retired_task.log").write_text(line("06:00:00", "INFO", "old") + "\n")
+    (tmp_path / "retired_task.launchd.log").write_text("crash\n")
+
+    entries = logview.list_logs()
+    assert [e["display_name"] for e in entries] == ["Retired Task"]
+    assert set(entries[0]["streams"]) == {"log", "stdout"}
+    key = entries[0]["key"]
+    assert logview.resolve(key, "log").name == "retired_task.log"
+    assert logview.resolve(key, "stdout").name == "retired_task.launchd.log"
+
+
+def test_an_orphan_with_only_launchd_output_is_still_listed(tmp_path, launchd_dir):
+    """A task that died before its logger initialised has no `<stem>.log` at
+    all, so grouping must not make the structured stream a precondition."""
+    (tmp_path / "crashed_task.launchd.log").write_text("boom\n")
+
+    entry = logview.list_logs()[0]
+    assert entry["key"] == "file:crashed_task.launchd.log"
+    assert set(entry["streams"]) == {"stdout"}
+    assert logview.resolve(entry["key"], "stdout").name == "crashed_task.launchd.log"
+
+
 def test_bak_files_are_not_listed(tmp_path, launchd_dir):
     (tmp_path / "weekly_learnings.log.bak").write_text("frozen\n")
     assert logview.list_logs() == []

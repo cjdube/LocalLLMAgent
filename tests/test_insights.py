@@ -12,6 +12,8 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 from chat import insights
 
 # A Tuesday, 08:00 local.
@@ -772,18 +774,55 @@ def test_every_scheduled_routine_has_routine_uses(monkeypatch):
     assert not undeclared, f"routines missing from ROUTINE_USES: {sorted(undeclared)}"
 
 
+_SCRIBEJAY_ROOT = Path("~/Projects/ScribeJay").expanduser()
+
+
+def _scheduled_tasks_incl_scribejay(monkeypatch):
+    """Wren's own scheduled plists PLUS the sibling ScribeJay checkout's.
+
+    ScribeJay's eight routines left this repo, but the ROUTINE_* tables below
+    still describe them — Wren draws them on /map. So the drift guards have to
+    look where the plists actually are now, which means federating the sibling
+    exactly as config/.env does at runtime.
+
+    Skipped rather than faked when the sibling isn't on this disk: a synthetic
+    root would assert the tables against plists this test wrote itself, which is
+    the "green for the wrong reason" shape these guards exist to prevent. The
+    mechanism (prefixing, agent tagging) is covered by its own tests above and
+    does not depend on the sibling being present.
+    """
+    if not (_SCRIBEJAY_ROOT / "launchd").is_dir():
+        pytest.skip(f"sibling ScribeJay checkout not present at {_SCRIBEJAY_ROOT}")
+    monkeypatch.setenv(insights.EXTERNAL_ROOTS_ENV, f"scribejay={_SCRIBEJAY_ROOT}")
+    tasks = _scheduled_tasks(monkeypatch)
+    found = [t for t in tasks if insights._agent_of(t) == "scribejay"]
+    assert found, (
+        "federated ScribeJay but found no scribejay routines — either the "
+        "external-root wiring or _agent_of's label branch has regressed")
+    return tasks
+
+
 def test_every_scribejay_routine_declares_what_it_writes(monkeypatch):
     # ScribeJay's /map draws ROUTINE_WRITES where Wren's draws her memory band, so
     # a journaling task added without an entry silently leaves a gap in the ring.
-    scribejay = {t["key"] for t in _scheduled_tasks(monkeypatch)
+    scribejay = {t["key"] for t in _scheduled_tasks_incl_scribejay(monkeypatch)
               if insights._agent_of(t) == "scribejay"}
-    assert scribejay, "no local.scribejay.* plists found"
     undeclared = scribejay - set(insights.ROUTINE_WRITES)
     assert not undeclared, f"ScribeJay routines missing from ROUTINE_WRITES: {sorted(undeclared)}"
 
 
+def test_every_scribejay_routine_declares_the_services_it_uses(monkeypatch):
+    # The other half of the same drift: a federated routine absent from
+    # ROUTINE_USES draws zero edges on /map. The Wren-only guard above cannot
+    # see these, because it never federates the sibling.
+    scribejay = {t["key"] for t in _scheduled_tasks_incl_scribejay(monkeypatch)
+                 if insights._agent_of(t) == "scribejay"}
+    undeclared = scribejay - set(insights.ROUTINE_USES)
+    assert not undeclared, f"ScribeJay routines missing from ROUTINE_USES: {sorted(undeclared)}"
+
+
 def test_routine_writes_has_no_entries_for_tasks_that_do_not_exist(monkeypatch):
-    keys = {t["key"] for t in _scheduled_tasks(monkeypatch)}
+    keys = {t["key"] for t in _scheduled_tasks_incl_scribejay(monkeypatch)}
     stale = set(insights.ROUTINE_WRITES) - keys
     assert not stale, f"ROUTINE_WRITES names tasks that no longer exist: {sorted(stale)}"
 
@@ -796,46 +835,105 @@ def test_agent_of_reads_the_launchd_label_not_the_module(monkeypatch):
     external = {"label": "local.wikiagent.learnings-ingest", "external": True}
     assert insights._agent_of(scribejay) == "scribejay"
     assert insights._agent_of(wren) == "wren"
-    # An external root belongs to neither agent even if its label says otherwise.
+    # A THIRD repo belongs to neither of our two agents.
     assert insights._agent_of(external) == "external"
-    assert insights._agent_of({"label": "local.scribejay.x", "external": True}) == "external"
+
+
+def test_a_federated_scribejay_task_is_still_scribejay_not_external():
+    # ScribeJay lives in its own repo now, so every one of its routines reaches
+    # this dashboard with external=True. If `external` were tested first, all
+    # eight would fall into the grey external bucket — no teal rows, no `writes`
+    # labels, no routine ring — and nothing would raise. This assertion is the
+    # only thing standing between that and a silent presentation bug.
+    federated = {"label": "local.scribejay.dailycommits", "external": True}
+    assert insights._agent_of(federated) == "scribejay"
+
+
+def test_an_external_repo_is_not_claimed_by_the_scribejay_branch():
+    # The other half: widening the label check must not swallow a genuine third
+    # repo. Asserted separately so a fix to one cannot quietly break the other.
+    for label in ("local.wikiagent.learnings-ingest", "local.somethingelse.job"):
+        assert insights._agent_of({"label": label, "external": True}) == "external"
+
+
+def test_scribejay_source_keeps_its_internal_capital(tmp_path, monkeypatch):
+    # source.title() renders "Scribejay", which sits next to ScribeJay's own
+    # icon on every dashboard row and reads as a typo.
+    root = tmp_path / "ScribeJay"
+    (root / "launchd").mkdir(parents=True)
+    (root / "logs").mkdir()
+    _write_plist(root / "launchd" / "local.scribejay.dailycommits.plist",
+                 {"Hour": 4, "Minute": 55},
+                 label="local.scribejay.dailycommits",
+                 stdout=str(root / "logs" / "daily_commits.launchd.log"))
+    monkeypatch.setenv(insights.EXTERNAL_ROOTS_ENV, f"scribejay={root}")
+    insights._TASKS_CACHE.clear()
+    task = next(t for t in insights.discover_tasks()
+                if t["label"] == "local.scribejay.dailycommits")
+    assert task["display_name"].startswith("ScribeJay: ")
+    # And the key carries the prefix the ROUTINE_* tables are now keyed on.
+    assert task["key"] == "scribejay-daily_commits"
 
 
 def test_system_map_tags_routines_with_agent_and_output(tmp_path, monkeypatch):
+    # The post-split shape: Wren's routine sits in this repo, ScribeJay's arrives
+    # federated from a sibling root. Both have to come out of one system_map()
+    # call correctly tagged — the ScribeJay row teal and carrying its `writes`
+    # label, which is the whole payload the routine ring is drawn from.
     _isolate_map_sources(tmp_path, monkeypatch)
-    _write_plist(tmp_path / "a.plist", {"Hour": 6, "Minute": 0},
-                 label="local.scribejay.dailychromelearnings",
-                 stdout=str(tmp_path / "daily_chrome_learnings.log"))
     _write_plist(tmp_path / "b.plist", {"Hour": 7, "Minute": 0},
                  label="local.wren.morningbrief",
                  stdout=str(tmp_path / "morning_brief.log"))
+    sibling = tmp_path / "ScribeJay"
+    (sibling / "launchd").mkdir(parents=True)
+    (sibling / "logs").mkdir()
+    _write_plist(sibling / "launchd" / "a.plist", {"Hour": 6, "Minute": 0},
+                 label="local.scribejay.dailychromelearnings",
+                 stdout=str(sibling / "logs" / "daily_chrome_learnings.launchd.log"))
+    monkeypatch.setenv(insights.EXTERNAL_ROOTS_ENV, f"scribejay={sibling}")
+    insights._TASKS_CACHE.clear()
+
     out = insights.system_map(SAMPLE_TOOLS, write_tools=[])
     by_key = {rt["key"]: rt for rt in out["routines"]}
-    assert by_key["daily_chrome_learnings"]["agent"] == "scribejay"
-    assert by_key["daily_chrome_learnings"]["writes"] == "daily browsing page"
+    sj = by_key["scribejay-daily_chrome_learnings"]
+    assert sj["agent"] == "scribejay", "a federated ScribeJay row fell into the external bucket"
+    assert sj["writes"] == "daily browsing page"
+    assert sj["uses"] == insights.ROUTINE_USES["scribejay-daily_chrome_learnings"]
     assert by_key["morning_brief"]["agent"] == "wren"
     # Wren's routines have no "writes" label — only ScribeJay's map draws that band.
     assert by_key["morning_brief"]["writes"] is None
 
 
 def test_system_map_describes_both_agents(tmp_path, monkeypatch):
+    # ScribeJay's backend is set in ScribeJay's repo, which this process never
+    # loads, so the label has to come off the file at the external root. Wren's
+    # own environment is set to a DIFFERENT backend here on purpose: reading it
+    # would pass a test that only checked "some value arrives".
     _isolate_map_sources(tmp_path, monkeypatch)
-    monkeypatch.setenv("SCRIBEJAY_LLM_BACKEND", "gemini")
+    sibling = tmp_path / "ScribeJay"
+    (sibling / "config").mkdir(parents=True)
+    (sibling / "config/.env").write_text('SCRIBEJAY_LLM_BACKEND="gemini"\n', encoding="utf-8")
+    monkeypatch.setenv(insights.EXTERNAL_ROOTS_ENV, f"scribejay={sibling}")
+    monkeypatch.setenv("SCRIBEJAY_LLM_BACKEND", "ollama")
     monkeypatch.setenv("WREN_LLM_BACKEND", "ollama")
+
     out = insights.system_map(SAMPLE_TOOLS, write_tools=[])
     assert out["agents"]["wren"]["name"] == "Wren"
     assert out["agents"]["scribejay"]["name"] == "ScribeJay"
-    # Each agent reports the model IT would use, from its own env chain.
+    # Each agent reports the model IT would use, from its own config.
     assert "(ollama)" in out["agents"]["wren"]["model"]
     assert "(gemini)" in out["agents"]["scribejay"]["model"]
 
 
 def test_scribejay_model_does_not_fall_back_to_wrens_backend(tmp_path, monkeypatch):
-    # SCRIBEJAY_* has no WREN_* fallback on purpose (docs/scribejay.md). With only
-    # WREN_LLM_BACKEND set, the map must still show ScribeJay on the local model —
-    # otherwise it would advertise a cloud backend ScribeJay never uses.
+    # Two ways the label could lie, and neither may happen. SCRIBEJAY_* has no
+    # WREN_* fallback (docs/scribejay.md), so WREN_LLM_BACKEND must not reach it.
+    # And a SCRIBEJAY_* set in *this* repo's .env is inert — ScribeJay never sees
+    # it — so honouring it would advertise a backend ScribeJay does not run on.
+    # With no readable root, the answer is the bottom of ScribeJay's own chain.
     _isolate_map_sources(tmp_path, monkeypatch)
-    monkeypatch.delenv("SCRIBEJAY_LLM_BACKEND", raising=False)
+    monkeypatch.setenv(insights.EXTERNAL_ROOTS_ENV, f"scribejay={tmp_path / 'gone'}")
+    monkeypatch.setenv("SCRIBEJAY_LLM_BACKEND", "gemini")
     monkeypatch.setenv("WREN_LLM_BACKEND", "gemini")
     out = insights.system_map(SAMPLE_TOOLS, write_tools=[])
     assert "(gemini)" in out["agents"]["wren"]["model"]

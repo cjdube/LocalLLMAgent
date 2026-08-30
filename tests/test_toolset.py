@@ -23,7 +23,10 @@ TASK_ONLY_SCHEMAS: set[str] = set()
 # Capture modules ScribeJay owns. They are imported as plain functions by
 # scribejay/*.py and tasks/daily_synthesis.py; Wren's model must not be able to call
 # them at all, which is why they carry no TOOL_SCHEMA (see scribejay/__init__.py).
-SCRIBEJAY_CAPTURE_MODULES = ("chrome_history", "strava", "youtube")
+# strava.py left with ScribeJay — the colorizer and the download job were its
+# only callers. These two stay because tasks/daily_synthesis.py still fetches
+# both directly, so they are duplicated across the two repos on purpose.
+SCRIBEJAY_CAPTURE_MODULES = ("chrome_history", "youtube")
 
 
 def test_scribejay_capture_modules_expose_no_tool_schema():

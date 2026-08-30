@@ -60,9 +60,12 @@ against a label.
 from what you call your categories, so renaming "Work/LLC" to "Consulting"
 breaks nothing. Recognized values, each expected on exactly one category:
 
-- `fitness` — the color Strava activities are logged with (`scribejay/strava_download.py`)
+- `fitness` — the color Strava activities are logged with
 - `fallback` — the colorId the colorizer uses when it can't classify an event
-  (`scribejay/calendar_colorizer.py`)
+
+  Both are read by ScribeJay, from its own `config/preferences.json`. They are
+  listed here because the two files are kept in step by hand; changing one and
+  not the other is the failure this section exists to prevent.
 - `work`, `meetings`, `appointments` — **legacy, no consumer.** These were the
   weekly review's event buckets; the weekly review was split into the daily
   learnings tasks, which then dropped calendar bucketing entirely. Kept on their

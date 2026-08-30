@@ -22,34 +22,30 @@ per-module detail behind them.
 - `agent/tools/sports.py` — final scores from ESPN's public scoreboard endpoint for the teams in `sports.teams` ([preferences.md](preferences.md#sports)); feeds the morning brief's Scores section and the `fetch_scores` chat tool. Its docstring records why ESPN's undocumented endpoint was chosen over MLB's official one, and why events are never re-filtered by their own UTC date.
 - `agent/store.py` — locked/atomic JSON store primitives used by every store under `config/`.
 
-## The journaling agent (`scribejay/`)
+## The journaling agent is not in this map
 
-- `scribejay/*.py` — ScribeJay, the second agent in this repo. It keeps the record —
-  Strava onto the calendar, AI Session Time Blocks, yesterday's events
-  colour-coded, daily vault pages from Chrome/YouTube/AI chats — while Wren reads
-  that record and acts on request. Each task is a pipeline: gather -> one
-  `complete_text()` call -> write. No tool registry, and never `advance()`.
-- `scribejay/model.py` — ScribeJay's own backend chain (`SCRIBEJAY_<TASK>_BACKEND` ->
-  `SCRIBEJAY_LLM_BACKEND` -> ollama), independent of Wren's `WREN_*` variables on
-  purpose. Every run logs which it resolved to, because an unset variable is not
-  an error — just a smaller model and a thinner draft.
-- **Import boundary.** `scribejay/` imports only the porch listed in
-  `scribejay/__init__.py`, and nothing under `agent/`, `chat/` or `tasks/` may
-  import `scribejay.*` (`evals/` excepted). That list is what would have to travel
-  with ScribeJay if it is ever extracted into its own repo. [scribejay.md](scribejay.md)
+ScribeJay keeps the record — Strava onto the calendar, AI Session Time Blocks,
+yesterday's events colour-coded, daily vault pages from Chrome/YouTube/AI chats —
+while Wren reads that record and acts on request. It moved to
+`~/Projects/ScribeJay` on 2026-08-30, so its modules are in **its** module map,
+not this one.
+
+What survives here is the boundary: nothing under `agent/`, `chat/` or `tasks/`
+may import from that checkout, and it does not import from this one. Wren sees it
+only as federated dashboard rows. [scribejay.md](scribejay.md)
 
 ## Scheduling and state
 
-- `tasks/*.py` — unattended entrypoints run by launchd; `tasks/_common.py` has `setup_logger`/`notify_failure`, and `agent/activity_log.py` the shared gather→persist→email helpers for the two daily-learnings tasks. `tasks/bg_worker.py` is the generic runner that polls `config/bg_jobs.json` for user-initiated background jobs with push-to-approve.
+- `tasks/*.py` — unattended entrypoints run by launchd; `tasks/_common.py` has `setup_logger`/`notify_failure`, and `agent/activity_log.py` the gather→persist→email helpers `daily_synthesis` uses (ScribeJay carries its own copy). `tasks/bg_worker.py` is the generic runner that polls `config/bg_jobs.json` for user-initiated background jobs with push-to-approve.
 - `tasks/clickup_watcher.py` — turns a `wren-research` or `wren-context` tag on a ClickUp Task into a background job every five minutes. **Never calls the model**: one GET plus a per-tag Python template, because Ollama's single slot means a polling model call starves chat. The tag is removed *before* the job is queued, which is what stops one Task being handled twice. Its two collaborators (`clickup.tagged_clickup_tasks`, `clickup.remove_clickup_tag`) are the only functions in `agent/tools/clickup.py` that take a ClickUp id, and are deliberately not chat tools. [clickup.md](clickup.md#the-tag-watcher)
 - `tasks/mail_watcher.py` — the **second** always-on process on the mini, alongside the chat server. It holds a Pub/Sub streaming-pull subscription open rather than polling, which is what buys seconds of latency on new mail without opening a port. Its Pub/Sub client runs callbacks on background threads, so it is autouse-stubbed in `tests/conftest.py` and tested through `handle_notification()`. State (history watermark, dedupe set, watch expiry) is in `agent/tools/mail_state.py`, and the reads in `agent/tools/gmail_read.py`. [mail-watch.md](mail-watch.md)
-- `launchd/` — the scheduler: one plist per task (`StartInterval` for pollers, `StartCalendarInterval` for daily/weekly jobs), logging to `logs/`. Wren's jobs are labelled `local.wren.*`, ScribeJay's `local.scribejay.*`; `launchd/reload-after-upgrade.sh` globs both prefixes, since both exec the same `.venv` interpreter. `tasks/startup_recovery.py` serializes only calendar jobs that the healer proves missed a run. [reboot-recovery.md](reboot-recovery.md)
+- `launchd/` — the scheduler: one plist per task (`StartInterval` for pollers, `StartCalendarInterval` for daily/weekly jobs), logging to `logs/`. Wren's jobs are labelled `local.wren.*`, and `launchd/reload-after-upgrade.sh` globs exactly that prefix — it judges staleness against **this** repo's interpreter, so ScribeJay's `local.scribejay.*` agents are healed by ScribeJay's own copy of that script. `tasks/startup_recovery.py` serializes only calendar jobs that the healer proves missed a run. [reboot-recovery.md](reboot-recovery.md)
 - `tests/` — flat pytest suite, one `test_<module>.py` per source module — except where a module sits behind a seam and is tested through it (`agent/backends/gemini.py` in `tests/test_loop.py`). Plus the jest/jsdom suites (`npm test`), also flat in `tests/` — one `tests/<script>.test.js` per standalone browser script in `chat/static/`.
 - `config/` — `.env` (documented in `.env.example`) plus gitignored JSON stores.
 
 ## Related
 
-- [scribejay.md](scribejay.md) — the journaling agent, the seam, and the porch
+- [scribejay.md](scribejay.md) — the sibling journaling repo, the seam, and what a Wren change may not do
 - [tool-loading.md](tool-loading.md) — how tools reach the model's context
 - [limits.md](limits.md) — where every bound is defined
 - [security-model.md](security-model.md) — the trust boundaries these modules sit inside
