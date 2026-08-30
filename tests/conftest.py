@@ -194,13 +194,24 @@ def _isolate_task_logs(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_scribejay_config(tmp_path, monkeypatch):
+    # /map's ScribeJay label reads that agent's own config under the user's
+    # home. Read-only, so this is determinism rather than protecting production
+    # state: without it the label a test sees depends on which backend this
+    # machine's ScribeJay happens to be set to. Pointed at a path that does not
+    # exist, which is the documented degrade — "ollama".
+    monkeypatch.setattr(_insights, "SCRIBEJAY_CONFIG", tmp_path / "no-scribejay.json")
+
+
+@pytest.fixture(autouse=True)
 def _isolate_launchd_dir(tmp_path, monkeypatch):
     """Pin task discovery at an empty plist dir — the games/projects treatment,
     for the games/projects reason: `chat/insights.py` *reads the machine*.
 
-    `LAUNCHD_DIR` is the last of insights' three ambient inputs to get a
-    backstop. `LOGS_DIR` is redirected above and `WREN_EXTERNAL_TASK_ROOTS` is
-    unset below, but discover_tasks() also globs the repo's real `launchd/`, so
+    `LAUNCHD_DIR` and `LAUNCH_AGENTS` are the last of insights' ambient inputs
+    to get a backstop. `LOGS_DIR` is redirected above and
+    `WREN_EXTERNAL_TASK_ROOTS` is unset below, but discover_tasks() also globs
+    the repo's real `launchd/` and the real `~/Library/LaunchAgents`, so
     which tasks a test sees depends on which plists are installed in this
     checkout — /api/schedules, /api/capabilities, system_map and /api/logs all
     reach it without asking for any particular task. Nothing here writes, so
@@ -221,6 +232,14 @@ def _isolate_launchd_dir(tmp_path, monkeypatch):
     launchd = tmp_path / "launchd"
     launchd.mkdir(exist_ok=True)
     monkeypatch.setattr(_insights, "LAUNCHD_DIR", launchd)
+    # LAUNCH_AGENTS is the same ambient input one level worse: an external root
+    # is now also searched in ~/Library/LaunchAgents by label prefix, so without
+    # this every task assertion would depend on which agents this machine
+    # happens to have installed. Empty, and pointed somewhere that is not the
+    # plist dir above so a test can fill each independently.
+    launch_agents = tmp_path / "LaunchAgents"
+    launch_agents.mkdir(exist_ok=True)
+    monkeypatch.setattr(_insights, "LAUNCH_AGENTS", launch_agents)
     _insights._TASKS_CACHE.clear()
     _insights._RUNS_CACHE.clear()
     yield

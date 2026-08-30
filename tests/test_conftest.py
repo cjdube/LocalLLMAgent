@@ -160,6 +160,25 @@ def test_insights_launchd_dir_is_redirected_away_from_the_repo():
     assert not list(Path(insights.LAUNCHD_DIR).glob("*.plist"))
 
 
+def test_insights_launch_agents_is_redirected_away_from_the_real_one():
+    # The third plist source, and the worst of the three unpinned: an external
+    # root is searched in ~/Library/LaunchAgents by label prefix, so the task
+    # list would depend on which agents this USER has installed, not just which
+    # plists this checkout carries.
+    real = Path("~/Library/LaunchAgents").expanduser()
+    assert Path(insights.LAUNCH_AGENTS).resolve() != real.resolve()
+    assert not list(Path(insights.LAUNCH_AGENTS).glob("*.plist"))
+
+
+def test_scribejay_config_is_redirected_away_from_the_users_own():
+    # /map's ScribeJay label reads ~/.scribejay/config.json. Read-only, so this
+    # is determinism, not damage — but an assertion that passes because this
+    # machine happens to run ollama fails on a machine that doesn't.
+    real = Path("~/.scribejay/config.json").expanduser()
+    assert Path(insights.SCRIBEJAY_CONFIG).resolve() != real.resolve()
+    assert insights._scribejay_backend() == "ollama"
+
+
 def test_task_discovery_cache_does_not_survive_between_tests():
     # discover_tasks() caches on a signature of (plist name, mtime) — NOT on the
     # directory — so an entry built under one test's tmp dir can be served to the

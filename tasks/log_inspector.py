@@ -134,11 +134,26 @@ def _classify(level: str, msg: str) -> tuple[str, str | None]:
 
 
 def _scan_log_dirs() -> list[Path]:
-    """Wren's logs/ plus the logs/ of every external task root, so a sibling
+    """Wren's logs/ plus the log directory of every federated task, so a sibling
     repo's scheduled jobs report into the same rollup. Signal B needs no
     equivalent — _task_outcomes goes through discover_tasks(), which is already
-    federated."""
-    return [_common.LOGS_DIR] + [root / "logs" for _, root in _external_roots()]
+    federated.
+
+    Each root's <root>/logs PLUS the directory every federated task actually
+    logs to. Both, not just the second: an external repo installed as a tool
+    logs outside its checkout (and _task_from_plist has already worked out
+    where), but a log left behind by a job whose plist is gone still carries
+    lines worth reporting, and only the first half finds those. Ordered,
+    deduplicated, Wren's own first.
+    """
+    dirs = [_common.LOGS_DIR]
+    candidates = [root / "logs" for _, root, _ in _external_roots()]
+    candidates += [Path(t["log_path"]).parent
+                   for t in discover_tasks() if t["external"]]
+    for path in candidates:
+        if path not in dirs:
+            dirs.append(path)
+    return dirs
 
 
 def _scan_lines(now: datetime) -> list[dict]:

@@ -33,9 +33,12 @@ activity to notes and projects, which is reasoning.
 
 That asymmetry is deliberate and it is the rule a change here can break:
 
-- Wren names ScribeJay in exactly three places — `WREN_EXTERNAL_TASK_ROOTS` in
+- Wren names ScribeJay in exactly four places — `WREN_EXTERNAL_TASK_ROOTS` in
   `config/.env`, the `local.scribejay.` branch in `chat/insights.py:_agent_of`,
-  and the `scribejay-` routine rows in the same file. All three are display.
+  the `scribejay-` routine rows in the same file, and `SCRIBEJAY_CONFIG`
+  (`~/.scribejay/config.json`), which that file reads one key out of for the
+  `/map` agent's model label. All four are display, and the fourth is a plain
+  file read — no import, no shell — like the plists and logs.
 - ScribeJay names Wren nowhere. It has its own `.env`, its own venv, its own
   Google token, its own `SCRIBEJAY_*` backend chain, and its own copy of the
   launchd healer. Nothing it does depends on this repo existing.

@@ -42,6 +42,12 @@ from agent.tools.wiki import _vault, list_wiki_pages
 _ROOT = Path(__file__).resolve().parent.parent
 LAUNCHD_DIR = _ROOT / "launchd"
 LOGS_DIR = _ROOT / "logs"
+# Where launchd actually keeps the agents it runs. An external repo need not
+# commit its plists at all: ScribeJay's `schedule install` generates them
+# straight into here, which left this dashboard reading a folder holding one
+# file. A module global rather than an inline path so tests/conftest.py can
+# redirect it the same way it redirects LAUNCHD_DIR.
+LAUNCH_AGENTS = Path.home() / "Library" / "LaunchAgents"
 VENV_PYTHON = _ROOT / ".venv" / "bin" / "python"
 
 # launchd hands the chat server the bare default PATH (/usr/bin:/bin:/usr/sbin:
@@ -100,8 +106,22 @@ _SOURCE_TITLES = {"scribejay": "ScribeJay"}
 # Task discovery (schedules)
 # --------------------------------------------------------------------------- #
 
-def _external_roots() -> list[tuple[str, Path]]:
-    """[(short_name, repo_root)] parsed from WREN_EXTERNAL_TASK_ROOTS.
+def _external_roots() -> list[tuple[str, Path, str]]:
+    """[(short_name, repo_root, label_prefix)] parsed from WREN_EXTERNAL_TASK_ROOTS.
+
+    Entry syntax is `name=path` with an optional `#label_prefix`:
+
+        wiki=~/Projects/ObsidianWikiAgent#local.wikiagent.,scribejay=~/Projects/ScribeJay
+
+    The prefix is which labels in ~/Library/LaunchAgents belong to that root,
+    and it defaults to `local.<name>.` — trailing dot included, which is what
+    keeps `local.wiki.` from also matching `local.wikiagent.*`. The default is
+    right for ScribeJay, so config/.env needs no `#`. It is wrong for the wiki
+    root, whose labels do not follow its short name; that one is harmless today
+    (the prefix matches nothing and the repo commits its plists) and the `#`
+    exists so it can be fixed in .env rather than in code the day it isn't.
+    Same shape as WREN_RUN_LOG below: one explicit value beats hard-coding a
+    sibling repo's naming rule here.
 
     Read at call time, not import, so the value a test sets is the value used.
     A malformed or nonexistent entry is skipped rather than raised: a sibling
@@ -110,57 +130,78 @@ def _external_roots() -> list[tuple[str, Path]]:
     """
     roots = []
     for entry in os.getenv(EXTERNAL_ROOTS_ENV, "").split(","):
-        name, sep, path = entry.partition("=")
-        name, path = name.strip(), path.strip()
+        name, sep, rest = entry.partition("=")
+        path, _, prefix = rest.partition("#")
+        name, path, prefix = name.strip(), path.strip(), prefix.strip()
         if not sep or not name or not path:
             continue
         root = Path(path).expanduser()
         if root.is_dir():
-            roots.append((name, root))
+            roots.append((name, root, prefix or f"local.{name}."))
     return roots
+
+
+# ScribeJay's settings left its checkout on 2026-08-30 for a config file under
+# the user's home, so this is no longer read out of the external root.
+SCRIBEJAY_CONFIG = Path.home() / ".scribejay" / "config.json"
 
 
 def _scribejay_backend() -> str:
     """The backend ScribeJay actually runs on, for the /map agent label.
 
-    The value lives in ScribeJay's own `config/.env`, which this process never
-    loads, so reading `SCRIBEJAY_LLM_BACKEND` from *our* environment reported
-    "ollama" no matter what that repo was set to — and would have reported a
-    value ScribeJay does not use had anyone set it here. Read the file at the
-    external root instead. Still no import and no shell: one key out of a
-    sibling's config, the same way the dashboard reads its plists and logs.
+    The value lives in ScribeJay's own config, which this process never loads,
+    so reading SCRIBEJAY_LLM_BACKEND from *our* environment reported "ollama" no
+    matter what that repo was set to — and would have reported a value ScribeJay
+    does not use had anyone set it here. Read its file instead. Still no import
+    and no shell: one key out of a sibling's config, the same way the dashboard
+    reads its plists and logs.
 
-    Its chain is SCRIBEJAY_<TASK>_BACKEND → SCRIBEJAY_LLM_BACKEND → ollama, with
-    no WREN_* fallback. Only the middle rung is a whole-agent setting, so only
-    that one belongs on a label naming the agent.
+    Its chain is SCRIBEJAY_<TASK>_BACKEND -> SCRIBEJAY_LLM_BACKEND -> ollama,
+    with no WREN_* fallback. Only the middle rung is a whole-agent setting, so
+    only that one belongs on a label naming the agent. ScribeJay's schema maps
+    it to section "model", name "backend".
+
+    That key is currently ABSENT from this machine's config.json, and "ollama"
+    is the right label for that: ScribeJay gives the setting no default on
+    purpose, so nothing has picked one. Two jobs are overridden to gemini via
+    model.per_task, which is per-task and so is not what this label reports.
     """
-    for name, root in _external_roots():
-        if name != "scribejay":
-            continue
-        try:
-            text = (root / "config/.env").read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            break
-        for line in text.splitlines():
-            key, sep, value = line.partition("=")
-            if sep and key.strip() == "SCRIBEJAY_LLM_BACKEND":
-                # Strip quotes the way a shell would; an empty value means unset.
-                value = value.strip().strip("'\"").strip()
-                if value:
-                    return value
-        break
-    return "ollama"
+    try:
+        data = json.loads(SCRIBEJAY_CONFIG.read_text(encoding="utf-8"))
+        backend = (data.get("model") or {}).get("backend")
+    except (OSError, ValueError, AttributeError):
+        return "ollama"
+    return backend.strip() if isinstance(backend, str) and backend.strip() else "ollama"
 
 
-def _task_sources() -> list[tuple[str | None, Path, Path]]:
-    """[(source, plist_dir, logs_dir)] — Wren's own first, source None.
+def _task_sources() -> list[tuple[str | None, list[Path], Path]]:
+    """[(source, plist_paths, logs_dir)] — Wren's own first, source None.
+
+    An external root's plists are looked for in TWO places: the `launchd/` it
+    commits, and the labels matching its prefix in ~/Library/LaunchAgents. Both
+    are needed because a sibling need not do it the same way. ObsidianWikiAgent
+    commits its three; ScribeJay's `schedule install` generates them into
+    LaunchAgents and commits only the self-healer, which is what took its eight
+    routines off this dashboard on 2026-08-30.
+
+    A plist found in both places is ONE task, and the LaunchAgents copy is the
+    one kept: a committed plist is a template (`__SCRIBEJAY_ROOT__`, filled in
+    by that repo's install.sh), while the installed copy is what launchd runs.
 
     Wren's own pair comes from the LAUNCHD_DIR / LOGS_DIR module globals rather
-    than from _ROOT, because tests/conftest.py redirects those to tmp_path.
+    than from _ROOT, because tests/conftest.py redirects those to tmp_path, and
+    reads LAUNCHD_DIR alone — her own installed-but-uncommitted agents
+    (local.wren.colima, local.wren.weighanchor) stay off the dashboard.
     """
-    sources: list[tuple[str | None, Path, Path]] = [(None, LAUNCHD_DIR, LOGS_DIR)]
-    for name, root in _external_roots():
-        sources.append((name, root / "launchd", root / "logs"))
+    sources: list[tuple[str | None, list[Path], Path]] = [
+        (None, sorted(LAUNCHD_DIR.glob("*.plist")), LOGS_DIR)]
+    for name, root, prefix in _external_roots():
+        found: dict[str, Path] = {}
+        for path in sorted((root / "launchd").glob("*.plist")):
+            found[path.name] = path
+        for path in sorted(LAUNCH_AGENTS.glob(f"{prefix}*.plist")):
+            found[path.name] = path  # installed copy wins
+        sources.append((name, [found[k] for k in sorted(found)], root / "logs"))
     return sources
 
 def _prettify(key: str) -> str:
@@ -189,8 +230,8 @@ _TASKS_CACHE_LOCK = threading.Lock()
 
 def _launchd_signature() -> tuple:
     sig = []
-    for source, plist_dir, _ in _task_sources():
-        for path in sorted(plist_dir.glob("*.plist")):
+    for source, plist_paths, _ in _task_sources():
+        for path in plist_paths:
             try:
                 st = path.stat()
             except OSError:
@@ -218,8 +259,8 @@ def discover_tasks() -> list[dict]:
 
 def _discover_tasks_uncached() -> list[dict]:
     tasks = []
-    for source, plist_dir, logs_dir in _task_sources():
-        for plist_path in sorted(plist_dir.glob("*.plist")):
+    for source, plist_paths, logs_dir in _task_sources():
+        for plist_path in plist_paths:
             try:
                 tasks.append(_task_from_plist(plist_path, source, logs_dir))
             except Exception as e:
@@ -263,8 +304,26 @@ def _task_from_plist(plist_path: Path, source: str | None, logs_dir: Path) -> di
     # An external repo may name its structured log anything; WREN_RUN_LOG in the
     # plist's EnvironmentVariables says which file to read. Wren's own plists
     # don't set it and keep the <key>.log convention.
+    #
+    # Failing that, an EXTERNAL task's log directory comes from its own
+    # StandardOutPath rather than from <root>/logs: a repo installed as a tool
+    # writes outside its checkout (ScribeJay's SCRIBEJAY_LOGS_DIR resolves
+    # through config.resolve_path() to ~/.scribejay/logs), and the plist already
+    # carries the answer. Only when that path is absolute — a committed plist is
+    # a template whose placeholder root is not.
+    #
+    # Never for Wren's own tasks, which stay on the LOGS_DIR global: it is what
+    # tests/conftest.py redirects, so a plist here with an absolute
+    # StandardOutPath would let the suite read and judge production logs.
     run_log = (data.get("EnvironmentVariables") or {}).get(RUN_LOG_ENV)
-    log_path = Path(run_log).expanduser() if run_log else logs_dir / f"{key}.log"
+    if run_log:
+        log_path = Path(run_log).expanduser()
+    else:
+        std_out_dir = Path(std_out).parent if std_out else None
+        if source is not None and std_out_dir and std_out_dir.is_absolute():
+            log_path = std_out_dir / f"{key}.log"
+        else:
+            log_path = logs_dir / f"{key}.log"
 
     return {
         # Prefixed so two repos can't collide on a key, and because the key is

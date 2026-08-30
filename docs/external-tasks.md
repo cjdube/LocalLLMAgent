@@ -1,10 +1,10 @@
 # External task roots — reporting on another repo's launchd jobs
 
-Wren's dashboard reads `launchd/*.plist` for schedules and `logs/*.log` for run
-history. `WREN_EXTERNAL_TASK_ROOTS` points it at the same two directories inside
-a **sibling repo**, so that repo's scheduled jobs appear as ordinary rows —
-schedule, next run, run history, duration charts, the `/map` routines band, and
-`log_inspector`'s "was due and didn't run" detection.
+Wren's dashboard reads launchd plists for schedules and `logs/*.log` for run
+history. `WREN_EXTERNAL_TASK_ROOTS` points it at a **sibling repo**, so that
+repo's scheduled jobs appear as ordinary rows — schedule, next run, run history,
+duration charts, the `/map` routines band, and `log_inspector`'s "was due and
+didn't run" detection.
 
 ```
 WREN_EXTERNAL_TASK_ROOTS=wiki=~/Projects/ObsidianWikiAgent,scribejay=~/Projects/ScribeJay
@@ -17,12 +17,59 @@ Unset means Wren's own tasks only. A root that doesn't exist is skipped, not
 raised — a moved or unmounted checkout means "no tasks from there", not a 500 on
 every dashboard poll.
 
+## Where the plists are looked for
+
+**Two places per root**, because a sibling need not do it the same way:
+
+1. `<root>/launchd/*.plist` — the plists the repo commits.
+2. `~/Library/LaunchAgents/<prefix>*.plist` — the agents launchd actually has
+   installed, filtered by label prefix.
+
+The second is not optional. ObsidianWikiAgent commits its three plists;
+ScribeJay's `schedule install` **generates** its plists straight into
+`~/Library/LaunchAgents` and commits only its self-healer. Reading
+`<root>/launchd` alone therefore found one poller and took all eight of
+ScribeJay's routines off this dashboard on 2026-08-30 — dashboard rows, `/map`
+routines, `/logs` entries and `log_inspector`'s absence detection, all at once,
+because everything hangs off `discover_tasks()`.
+
+A plist found in both places is **one** task, and the installed copy is the one
+kept: a committed plist is usually a template (`__SCRIBEJAY_ROOT__`, filled in
+by that repo's `install.sh`), while the installed copy is what launchd runs.
+
+### The `#prefix` suffix
+
+The label prefix defaults to `local.<name>.` — trailing dot included, which is
+what stops `local.wiki.` from also swallowing the real `local.wikiagent.*`
+agents. That default is correct for ScribeJay, so `config/.env` needs no `#`.
+
+A repo whose labels don't follow its short name can say so:
+
+```
+WREN_EXTERNAL_TASK_ROOTS=wiki=~/Projects/ObsidianWikiAgent#local.wikiagent.
+```
+
+`wiki` is exactly that case. It is harmless today — the default prefix matches
+nothing and that repo commits its plists — and the `#` is how it gets fixed in
+`.env` rather than in code the day it stops committing them. Same shape as
+`WREN_RUN_LOG` below: one explicit value beats hard-coding a sibling's naming
+rule into Wren.
+
+Wren's own tasks are read from this repo's `launchd/` only, never from
+`~/Library/LaunchAgents`. Two of her agents (`local.wren.colima`,
+`local.wren.weighanchor`) are installed but not committed, and so do not appear
+on the dashboard.
+
 ## The two roots today
 
 **ScribeJay** (`~/Projects/ScribeJay`) is the journaling agent, split out of this
 repo on 2026-08-30. Its eight `local.scribejay.*` jobs reach the dashboard
-entirely through this mechanism — see [scribejay.md](scribejay.md). Two things
+entirely through this mechanism — see [scribejay.md](scribejay.md). Three things
 about it are specific to that root:
+
+- Its plists are **generated into `~/Library/LaunchAgents`**, not committed, so
+  it is found by label prefix. The default `local.scribejay.` is correct, which
+  is why `config/.env` carries no `#` for it.
 
 - Its rows are **not** in the grey "external" agent bucket.
   `chat/insights.py:_agent_of` tests the `local.scribejay.` label *before* the
@@ -75,9 +122,13 @@ only if their logs look like Wren's. Three requirements:
 
 ### `WREN_RUN_LOG`
 
-By default Wren looks for the run log at `<root>/logs/<key>.log`, where `<key>`
-comes from the plist's `StandardOutPath` basename. An external repo needn't name
-its logs that way — ObsidianWikiAgent's `learnings-ingest` job writes
+By default Wren looks for the run log next to the plist's own
+`StandardOutPath` — `<that directory>/<key>.log`, where `<key>` is that path's
+basename — falling back to `<root>/logs/<key>.log` when `StandardOutPath` is a
+template placeholder rather than an absolute path. Taking the directory from the
+plist is what covers a repo installed as a tool, which logs outside its
+checkout: ScribeJay's `SCRIBEJAY_LOGS_DIR` can resolve to `~/.scribejay/logs`.
+An external repo needn't name its logs that way — ObsidianWikiAgent's `learnings-ingest` job writes
 `wiki_ingest.llm-wiki-learnings.log` — so a plist can name the file explicitly:
 
 ```xml
@@ -160,7 +211,9 @@ number on the page.
 ## Adding another root
 
 1. Make the repo's logs satisfy the three requirements above.
-2. Add `name=path` to `WREN_EXTERNAL_TASK_ROOTS` in `config/.env`.
+2. Add `name=path` to `WREN_EXTERNAL_TASK_ROOTS` in `config/.env`. Append
+   `#local.<whatever>.` if its launchd labels don't start with `local.<name>.`
+   and it installs its plists rather than committing them.
 3. Set `WREN_RUN_LOG` in each plist if the log names don't match the keys.
 4. Add the new task keys to `ROUTINE_USES` in `chat/insights.py` so `/map` shows
    what they touch.

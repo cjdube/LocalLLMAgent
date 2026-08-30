@@ -498,6 +498,221 @@ def test_malformed_external_root_entry_is_skipped(monkeypatch):
     assert insights._external_roots() == []
 
 
+def _write_agent(path, label, sci, std_out, program=None):
+    """A plist as `launchctl` sees it, for tests that write into LAUNCH_AGENTS."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {
+        "Label": label,
+        "ProgramArguments": program or ["/usr/bin/true", "-m", "some.module"],
+        "StandardOutPath": str(std_out),
+        "StartCalendarInterval": sci,
+    }
+    with open(path, "wb") as fh:
+        plistlib.dump(data, fh)
+    return path
+
+
+def test_label_prefix_defaults_to_local_dot_name_dot(monkeypatch):
+    # The trailing dot is load-bearing: without it `local.wiki` would also match
+    # the real local.wikiagent.* agents and file another repo's jobs under this
+    # root. The default is what makes config/.env need no edit for ScribeJay.
+    monkeypatch.setenv("WREN_EXTERNAL_TASK_ROOTS", f"scribejay={Path.home()}")
+    (name, _root, prefix), = insights._external_roots()
+    assert (name, prefix) == ("scribejay", "local.scribejay.")
+
+
+def test_label_prefix_can_be_named_explicitly(monkeypatch):
+    # ObsidianWikiAgent is configured as `wiki` but its labels are
+    # local.wikiagent.*, so the default rule is wrong for it. It is harmless
+    # today (that repo commits its plists), and `#` is how it gets fixed in
+    # .env rather than in code the day it stops.
+    monkeypatch.setenv("WREN_EXTERNAL_TASK_ROOTS",
+                       f"wiki={Path.home()}#local.wikiagent.")
+    (name, _root, prefix), = insights._external_roots()
+    assert (name, prefix) == ("wiki", "local.wikiagent.")
+
+
+def test_external_agents_installed_in_launch_agents_are_discovered(tmp_path, monkeypatch):
+    # ScribeJay generates its plists straight into ~/Library/LaunchAgents and
+    # commits only its self-healer, so globbing <root>/launchd found one poller
+    # and took its eight routines off the dashboard on 2026-08-30.
+    root = tmp_path / "ScribeJay"
+    (root / "launchd").mkdir(parents=True)
+    (root / "logs").mkdir()
+    agents = tmp_path / "LaunchAgents"
+    _write_agent(agents / "local.scribejay.dailycommits.plist",
+                 "local.scribejay.dailycommits", {"Hour": 4, "Minute": 55},
+                 root / "logs" / "daily_commits.launchd.log")
+    # A near-miss label from a THIRD repo. The prefix's trailing dot is the only
+    # thing keeping it out of this root.
+    _write_agent(agents / "local.scribejayXtra.other.plist",
+                 "local.scribejayXtra.other", {"Hour": 9, "Minute": 0},
+                 tmp_path / "other.launchd.log")
+    monkeypatch.setattr(insights, "LAUNCH_AGENTS", agents)
+    monkeypatch.setenv("WREN_EXTERNAL_TASK_ROOTS", f"scribejay={root}")
+    insights._TASKS_CACHE.clear()
+
+    (task,) = insights.discover_tasks()
+    assert task["key"] == "scribejay-daily_commits"
+    assert task["external"] is True
+    assert task["human_schedule"] == "Daily 4:55 AM"
+    # The label branch, not the external flag, is what gives it its own colour.
+    assert insights._agent_of(task) == "scribejay"
+    insights._TASKS_CACHE.clear()
+
+
+def test_a_plist_in_both_places_is_one_task_and_the_installed_copy_wins(tmp_path, monkeypatch):
+    # ScribeJay's selfheal plist is in both. The committed one is a TEMPLATE
+    # (__SCRIBEJAY_ROOT__, filled in by that repo's install.sh); the installed
+    # one is what launchd runs. Asserting the schedule, not just the count,
+    # because a count alone passes whichever copy won.
+    root = tmp_path / "ScribeJay"
+    (root / "logs").mkdir(parents=True)
+    agents = tmp_path / "LaunchAgents"
+    _write_agent(root / "launchd" / "local.scribejay.thing.plist",
+                 "local.scribejay.thing", {"Hour": 1, "Minute": 0},
+                 root / "logs" / "thing.launchd.log")
+    _write_agent(agents / "local.scribejay.thing.plist",
+                 "local.scribejay.thing", {"Hour": 4, "Minute": 55},
+                 root / "logs" / "thing.launchd.log")
+    monkeypatch.setattr(insights, "LAUNCH_AGENTS", agents)
+    monkeypatch.setenv("WREN_EXTERNAL_TASK_ROOTS", f"scribejay={root}")
+    insights._TASKS_CACHE.clear()
+
+    (task,) = insights.discover_tasks()
+    assert task["human_schedule"] == "Daily 4:55 AM"
+    insights._TASKS_CACHE.clear()
+
+
+def test_installing_an_agent_invalidates_the_tasks_cache(tmp_path, monkeypatch):
+    # discover_tasks() caches on a signature of the plist paths it found, so an
+    # agent added by `scribejay schedule install` has to change that signature
+    # or the dashboard serves a stale list until the server restarts.
+    root = tmp_path / "ScribeJay"
+    (root / "launchd").mkdir(parents=True)
+    (root / "logs").mkdir()
+    agents = tmp_path / "LaunchAgents"
+    _write_agent(agents / "local.scribejay.one.plist", "local.scribejay.one",
+                 {"Hour": 4, "Minute": 55}, root / "logs" / "one.launchd.log")
+    monkeypatch.setattr(insights, "LAUNCH_AGENTS", agents)
+    monkeypatch.setenv("WREN_EXTERNAL_TASK_ROOTS", f"scribejay={root}")
+    insights._TASKS_CACHE.clear()
+
+    assert len(insights.discover_tasks()) == 1
+    _write_agent(agents / "local.scribejay.two.plist", "local.scribejay.two",
+                 {"Hour": 5, "Minute": 5}, root / "logs" / "two.launchd.log")
+    assert len(insights.discover_tasks()) == 2
+    insights._TASKS_CACHE.clear()
+
+
+def test_external_log_dir_comes_from_the_plists_own_stdout_path(tmp_path, monkeypatch):
+    # A sibling installed as a tool logs OUTSIDE its checkout — ScribeJay's
+    # SCRIBEJAY_LOGS_DIR resolves to ~/.scribejay/logs — so <root>/logs is the
+    # wrong guess and the plist already carries the right answer.
+    root = tmp_path / "ScribeJay"
+    (root / "launchd").mkdir(parents=True)
+    (root / "logs").mkdir()
+    elsewhere = tmp_path / "dot-scribejay" / "logs"
+    elsewhere.mkdir(parents=True)
+    agents = tmp_path / "LaunchAgents"
+    _write_agent(agents / "local.scribejay.thing.plist", "local.scribejay.thing",
+                 {"Hour": 4, "Minute": 55}, elsewhere / "thing.launchd.log")
+    monkeypatch.setattr(insights, "LAUNCH_AGENTS", agents)
+    monkeypatch.setenv("WREN_EXTERNAL_TASK_ROOTS", f"scribejay={root}")
+    insights._TASKS_CACHE.clear()
+
+    (task,) = insights.discover_tasks()
+    assert task["log_path"] == str(elsewhere / "thing.log")
+    insights._TASKS_CACHE.clear()
+
+
+def test_external_run_log_env_still_beats_the_stdout_path(tmp_path, monkeypatch):
+    root = tmp_path / "ScribeJay"
+    (root / "launchd").mkdir(parents=True)
+    (root / "logs").mkdir()
+    named = tmp_path / "named.log"
+    agents = tmp_path / "LaunchAgents"
+    path = _write_agent(agents / "local.scribejay.thing.plist",
+                        "local.scribejay.thing", {"Hour": 4, "Minute": 55},
+                        tmp_path / "stdout-dir" / "thing.launchd.log")
+    with open(path, "rb") as fh:
+        data = plistlib.load(fh)
+    data["EnvironmentVariables"] = {"WREN_RUN_LOG": str(named)}
+    with open(path, "wb") as fh:
+        plistlib.dump(data, fh)
+    monkeypatch.setattr(insights, "LAUNCH_AGENTS", agents)
+    monkeypatch.setenv("WREN_EXTERNAL_TASK_ROOTS", f"scribejay={root}")
+    insights._TASKS_CACHE.clear()
+
+    (task,) = insights.discover_tasks()
+    assert task["log_path"] == str(named)
+    insights._TASKS_CACHE.clear()
+
+
+def test_external_log_dir_falls_back_when_stdout_path_is_not_absolute(tmp_path, monkeypatch):
+    # A committed plist is a template whose root is a placeholder, so its
+    # StandardOutPath is relative and says nothing. <root>/logs is right there.
+    root = tmp_path / "ScribeJay"
+    (root / "logs").mkdir(parents=True)
+    _write_agent(root / "launchd" / "local.scribejay.thing.plist",
+                 "local.scribejay.thing", {"Hour": 4, "Minute": 55},
+                 Path("__SCRIBEJAY_ROOT__/logs/thing.launchd.log"))
+    monkeypatch.setattr(insights, "LAUNCH_AGENTS", tmp_path / "no-agents")
+    monkeypatch.setenv("WREN_EXTERNAL_TASK_ROOTS", f"scribejay={root}")
+    insights._TASKS_CACHE.clear()
+
+    (task,) = insights.discover_tasks()
+    assert task["log_path"] == str(root / "logs" / "thing.log")
+    insights._TASKS_CACHE.clear()
+
+
+def test_wren_own_log_path_ignores_an_absolute_stdout_path(tmp_path, monkeypatch):
+    # LOGS_DIR is what tests/conftest.py redirects. If a Wren plist's absolute
+    # StandardOutPath were honoured here, the suite would read and judge
+    # production logs — the exact class of incident conftest exists to prevent.
+    logs = tmp_path / "redirected-logs"
+    logs.mkdir()
+    monkeypatch.setattr(insights, "LOGS_DIR", logs)
+    monkeypatch.setattr(insights, "LAUNCHD_DIR", tmp_path / "launchd")
+    _write_agent(tmp_path / "launchd" / "local.wren.thing.plist",
+                 "local.wren.thing", {"Hour": 6, "Minute": 0},
+                 Path("/var/production/logs/thing.launchd.log"))
+    insights._TASKS_CACHE.clear()
+
+    (task,) = insights.discover_tasks()
+    assert task["log_path"] == str(logs / "thing.log")
+    insights._TASKS_CACHE.clear()
+
+
+def test_scribejay_backend_is_read_from_its_own_config_file(tmp_path, monkeypatch):
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"model": {"backend": "gemini"}}), encoding="utf-8")
+    monkeypatch.setattr(insights, "SCRIBEJAY_CONFIG", config)
+    assert insights._scribejay_backend() == "gemini"
+
+
+def test_scribejay_backend_defaults_to_ollama_when_unset(tmp_path, monkeypatch):
+    # This is the live state: ScribeJay gives the setting no default on purpose,
+    # so nothing has picked one and "ollama" is the honest label. per_task
+    # overrides two jobs to gemini and must NOT reach a whole-agent label.
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps(
+        {"model": {"ollama_model": "gemma4:26b-mlx",
+                   "per_task": {"daily_chrome_learnings": "gemini"}}}),
+        encoding="utf-8")
+    monkeypatch.setattr(insights, "SCRIBEJAY_CONFIG", config)
+    assert insights._scribejay_backend() == "ollama"
+
+
+def test_scribejay_backend_degrades_on_a_missing_or_corrupt_config(tmp_path, monkeypatch):
+    monkeypatch.setattr(insights, "SCRIBEJAY_CONFIG", tmp_path / "gone.json")
+    assert insights._scribejay_backend() == "ollama"
+    corrupt = tmp_path / "corrupt.json"
+    corrupt.write_text("{not json", encoding="utf-8")
+    monkeypatch.setattr(insights, "SCRIBEJAY_CONFIG", corrupt)
+    assert insights._scribejay_backend() == "ollama"
+
+
 def test_external_plist_change_invalidates_the_tasks_cache(tmp_path, monkeypatch):
     root = _make_external_root(tmp_path)
     monkeypatch.setattr(insights, "LAUNCHD_DIR", tmp_path / "empty")
@@ -739,6 +954,7 @@ def test_routine_uses_reference_defined_services():
 
 
 _REPO_LAUNCHD = Path(insights.__file__).resolve().parent.parent / "launchd"
+_REAL_LAUNCH_AGENTS = Path("~/Library/LaunchAgents").expanduser()
 
 
 def _real_launchd(monkeypatch):
@@ -751,8 +967,14 @@ def _real_launchd(monkeypatch):
     dir they compare nothing and pass. That is how AI Session Time Blocks sat with
     no ROUTINE_USES entry at all — drawing zero edges on /map — while this file
     reported green. Read-only: discover_tasks() only parses plists.
+
+    LAUNCH_AGENTS gets the same treatment, and it is the half that matters for
+    the ScribeJay guards below: that repo commits no plists any more, so the
+    installed agents ARE the tables' subject. Undone here rather than in each
+    guard, so both helpers get it from one place.
     """
     monkeypatch.setattr(insights, "LAUNCHD_DIR", _REPO_LAUNCHD)
+    monkeypatch.setattr(insights, "LAUNCH_AGENTS", _REAL_LAUNCH_AGENTS)
     insights._TASKS_CACHE.clear()
 
 
@@ -785,14 +1007,20 @@ def _scheduled_tasks_incl_scribejay(monkeypatch):
     look where the plists actually are now, which means federating the sibling
     exactly as config/.env does at runtime.
 
-    Skipped rather than faked when the sibling isn't on this disk: a synthetic
-    root would assert the tables against plists this test wrote itself, which is
-    the "green for the wrong reason" shape these guards exist to prevent. The
-    mechanism (prefixing, agent tagging) is covered by its own tests above and
-    does not depend on the sibling being present.
+    "Where they actually are" is ~/Library/LaunchAgents, not the sibling's
+    launchd/: that repo generates its plists at install time and commits only
+    the self-healer. Skipping on the checkout being present is what let these
+    three FAIL rather than skip after the split — the directory existed and held
+    nothing this cares about. Skip on the installed agents instead.
+
+    Skipped rather than faked when they aren't installed: a synthetic root would
+    assert the tables against plists this test wrote itself, which is the "green
+    for the wrong reason" shape these guards exist to prevent. The mechanism
+    (prefixing, agent tagging) is covered by its own tests above and does not
+    depend on ScribeJay being installed.
     """
-    if not (_SCRIBEJAY_ROOT / "launchd").is_dir():
-        pytest.skip(f"sibling ScribeJay checkout not present at {_SCRIBEJAY_ROOT}")
+    if not list(_REAL_LAUNCH_AGENTS.glob("local.scribejay.*.plist")):
+        pytest.skip(f"no ScribeJay agents installed in {_REAL_LAUNCH_AGENTS}")
     monkeypatch.setenv(insights.EXTERNAL_ROOTS_ENV, f"scribejay={_SCRIBEJAY_ROOT}")
     tasks = _scheduled_tasks(monkeypatch)
     found = [t for t in tasks if insights._agent_of(t) == "scribejay"]
@@ -905,15 +1133,14 @@ def test_system_map_tags_routines_with_agent_and_output(tmp_path, monkeypatch):
 
 
 def test_system_map_describes_both_agents(tmp_path, monkeypatch):
-    # ScribeJay's backend is set in ScribeJay's repo, which this process never
-    # loads, so the label has to come off the file at the external root. Wren's
-    # own environment is set to a DIFFERENT backend here on purpose: reading it
+    # ScribeJay's backend is set in ScribeJay's own config, which this process
+    # never loads, so the label has to come off that file. Wren's own
+    # environment is set to a DIFFERENT backend here on purpose: reading it
     # would pass a test that only checked "some value arrives".
     _isolate_map_sources(tmp_path, monkeypatch)
-    sibling = tmp_path / "ScribeJay"
-    (sibling / "config").mkdir(parents=True)
-    (sibling / "config/.env").write_text('SCRIBEJAY_LLM_BACKEND="gemini"\n', encoding="utf-8")
-    monkeypatch.setenv(insights.EXTERNAL_ROOTS_ENV, f"scribejay={sibling}")
+    config = tmp_path / "scribejay-config.json"
+    config.write_text(json.dumps({"model": {"backend": "gemini"}}), encoding="utf-8")
+    monkeypatch.setattr(insights, "SCRIBEJAY_CONFIG", config)
     monkeypatch.setenv("SCRIBEJAY_LLM_BACKEND", "ollama")
     monkeypatch.setenv("WREN_LLM_BACKEND", "ollama")
 
