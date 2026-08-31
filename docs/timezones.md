@@ -94,8 +94,7 @@ _item("EVENING", "2026-07-14T01:20:00Z")  # 9:20pm Jul 13 local
 
 Suites already doing this: `tests/test_youtube.py`, `tests/test_chrome_history.py`,
 `tests/test_push_log.py`, `tests/test_calendar.py`, `tests/test_morning_brief.py`,
-`tests/test_daily_synthesis.py`, `tests/test_nudges.py`,
-`tests/test_claude_time_blocks.py`.
+`tests/test_daily_synthesis.py`, `tests/test_nudges.py`.
 
 ## Checklist for a new source
 

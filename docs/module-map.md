@@ -18,7 +18,7 @@ per-module detail behind them.
 - `agent/loop.py` — model interface: `advance()` (tool-calling loop), `complete_text()` (one-shot, tool-free — what scheduled tasks use). Both route through the `_llm_chat` backend seam; the default `_ollama_chat` lives here, the opt-in Gemini backend in `agent/backends/gemini.py`.
 - `agent/backends/` — LLM backend adapters behind the `_llm_chat` seam (currently `gemini.py`); each translates the canonical message/tool shape to/from its provider, so callers speak one shape. [llm-backend.md](llm-backend.md)
 - `agent/toolset.py` — the single tool registry (`TOOLS`, `DISPATCH`) and gating sets (`WRITE_TOOLS`, `CONSEQUENTIAL_TOOLS`, `UNATTENDED_EXCLUDED_TOOLS`), shared by the chat server and background runs. [tool-loading.md](tool-loading.md)
-- `agent/tools/*.py` — one module per capability (weather, strava, email, notify, wiki, skills, …).
+- `agent/tools/*.py` — one module per capability (weather, calendar, email, notify, wiki, skills, …).
 - `agent/tools/sports.py` — final scores from ESPN's public scoreboard endpoint for the teams in `sports.teams` ([preferences.md](preferences.md#sports)); feeds the morning brief's Scores section and the `fetch_scores` chat tool. Its docstring records why ESPN's undocumented endpoint was chosen over MLB's official one, and why events are never re-filtered by their own UTC date.
 - `agent/store.py` — locked/atomic JSON store primitives used by every store under `config/`.
 

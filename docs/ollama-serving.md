@@ -1,15 +1,21 @@
 # Sharing one Ollama
 
 Wren does not have Ollama to herself. One instance on the Mac mini
-(`gemma4:26b-mlx`, ~27 GB resident of 48 GB) serves **four** independent
+(`gemma4:26b-mlx`, ~27 GB resident of 48 GB) serves **five** independent
 consumers:
 
 | Consumer | What it is |
 |---|---|
 | Wren chat | `chat/server.py`, interactive, someone waiting on a phone |
-| Wren's scheduled tasks | ~12 launchd jobs, staggered across the day |
+| Wren's scheduled tasks | ~10 launchd jobs, staggered across the day |
+| ScribeJay's routines | 8 `local.scribejay.*` jobs, 4:30-5:50 AM and 5:00 PM, from `~/Projects/ScribeJay` |
 | `wiki_ingest.py` | ObsidianWikiAgent, launchd `local.wikiagent.learnings-ingest`, daily 9:00 AM |
 | WeighAnchor | game AI, `PROVIDER_DEFAULT=ollama`, node server on `:3002` |
+
+**The split changed nothing here.** ScribeJay left this repo on 2026-08-30 with
+its own venv and its own `SCRIBEJAY_*` backend chain, but it points at the same
+`OLLAMA_HOST`. Eight jobs that used to be Wren's are now a separate consumer of
+the same single slot — the contention is identical, only the label on it moved.
 
 Ollama runs with **`OLLAMA_NUM_PARALLEL=1`** and `OLLAMA_MAX_QUEUE=512`: one
 request at a time, everything else queued **silently** — the socket is

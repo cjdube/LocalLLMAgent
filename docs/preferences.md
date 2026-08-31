@@ -195,8 +195,6 @@ overrides.
 - **The EDGAR fund-name noise filter** (`_FUND_NAME_RE` in
   `tasks/opportunity_digest.py`) — SEC Form D mechanics, not a preference;
   anyone scouting the same source wants the same filter.
-- **The daily reviews' Obsidian template/section rules** in
-  `tasks/daily_*_learnings.py` — structural output contract, not a preference.
 - **`agent/wren.md` / `agent/wren_chat.md`** — Wren's own voice and her
   interactive behavior, deliberately impersonal; edit them directly if you want
   a different agent. `agent/identity.md` (who she serves) is the personal one:

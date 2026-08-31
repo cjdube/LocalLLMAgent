@@ -111,10 +111,6 @@ is what the code falls back to when the variable is unset.
 | Variable | Default | What it bounds |
 |---|---|---|
 | `WEB_FETCH_MAX_CHARS` | 8000 | Markdown returned by `fetch_webpage`. Matches the loop's cap deliberately. |
-| `AI_CHAT_LEARNINGS_MAX_CHARS` | 12000 | Per-session transcript fed to the model by `ai_chat_learnings`. |
-| `WREN_SESSION_BLOCK_MAX_CHARS` | 6000 | Per-block transcript fed to the model by `claude_time_blocks`. |
-| `WREN_SESSION_BLOCK_GAP_MINUTES` | 20 | Idle gap that ends a work block. Tuned against real days (10 fragments at a shorter gap, 30 over-merges at a longer one). |
-| `WREN_SESSION_BLOCK_MIN_MINUTES` | 10 | Blocks shorter than this are dropped. |
 | `GOOGLE_HTTP_TIMEOUT_S` | 30 | Google API calls. |
 | `OPP_STALLED_DAYS` | 45 | Days a watched opening stays open before it's flagged stalled. |
 | `OPP_SCORE_THRESHOLD` | 8 | Minimum model score (1-10) that adds a phone push to the email. |
@@ -301,8 +297,6 @@ tool-result problem. Their limits bound the **input** they compact into a prompt
 | `daily_synthesis` | `MAX_NUDGES` 3, `MAX_ANCHOR_CANDIDATES` 5, `MAX_CROSS_CANDIDATES` 3, `MAX_ANCHOR_SUMMARY_CHARS` 200, `MAX_PROJECT_ANCHOR_TOKENS` 40, `MAX_AI_CHAT_BULLETS` 20, `RECENT_NUDGE_DAYS` 7, `MAX_SYNTHESIS_ATTEMPTS` 2 |
 | `opportunity_digest` | `MAX_SCORE_ITEMS` 40 (batch size — one model call per batch), `_SNIPPET_CHARS` 300, `_EDGAR_MAX_PAGES` 3, `_HN_MAX_PAGES` 3, `_EDGAR_DEFAULT_LOOKBACK_DAYS` 7 |
 | `project_scan` | `MAX_TOPICS` 15, `MAX_SUMMARY_CHARS` 300 (kept under `daily_synthesis`'s own 200-char anchor cap so it doesn't waste prompt budget) |
-| `_chat_transcripts` | `DEFAULT_MAX_CHARS` 12000 |
-| `claude_time_blocks` | `DEFAULT_MAX_CHARS` 6000 |
 | `starred_blurbs` | `README_CHARS` 2000 |
 | `log_inspector` | `MAX_DETAIL_LINE` 150, and it fits its whole push inside `notify._MAX_MESSAGE_CHARS` |
 | `bg_worker` | `MAX_TRANSIENT_ATTEMPTS` 3 |
@@ -315,8 +309,8 @@ warns even when it succeeds, so the failure rate stays visible.
 ### Layer E — a limit that isn't a number
 
 **Lazy tool loading** (`docs/tool-loading.md`) is a context limit expressed as
-structure rather than a constant. Wren has 55 tools, about 37,000 chars of
-schema in total; chat sends ~17,000 of that as the always-loaded core. Sending
+structure rather than a constant. Wren has 57 tools, about 40,000 chars of
+schema in total; chat sends ~16,000 of that as a 24-tool always-loaded core. Sending
 every schema on every turn wastes context the small model can't spare.
 Chat sends a small always-loaded core plus groups pulled in on demand. Applies to
 chat only — the background worker uses the whole registry.

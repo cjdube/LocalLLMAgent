@@ -43,10 +43,12 @@ access logs than it needs to.
 ## Prompt injection
 
 Untrusted external text flows into model prompts from several tools: Tavily
-search results, fetched web pages, GitHub `recent_changes`, Chrome history
-titles, Strava activity names, YouTube video titles/descriptions, and AI-chat
-transcripts. Any of these could contain text crafted to steer the model. The
-blast radius is contained by design, in layers.
+search results, fetched web pages, GitHub `recent_changes`, incoming email on the
+`Wren/Watch` and `Wren/Do` labels, ClickUp Task titles and descriptions,
+opportunity-scout feeds (SEC EDGAR, ATS boards, HN), Chrome history titles,
+YouTube video titles/descriptions, and the vault pages ScribeJay writes from
+AI-chat transcripts. Any of these could contain text crafted to steer the model.
+The blast radius is contained by design, in layers.
 
 **Chat is the only place the model drives tool-calling freely**, and every write
 tool there is confirmation-gated in code (`confirm_before` in `agent/loop.py`,
@@ -70,13 +72,20 @@ describer, since the fallback would show raw JSON on the one surface a human
 reads before approving.
 
 **The prose scheduled tasks keep the model out of the write path entirely.**
-`morning_brief`, the daily learnings tasks, and `calendar_colorizer` use the
-tool-free `complete_text` path — the model only writes narrative prose, it never
-calls a tool, so injected instructions have nothing to actuate.
-`strava_download` goes further and uses no model at all: it's a deterministic
-Python field-map from Strava activity to calendar event, so there's no prompt for
-injected activity text to hijack. (It replaced an earlier `run_agent` path fed by
-Strava activity *names*.)
+`morning_brief`, `daily_synthesis`, `opportunity_digest`, `project_scan` and
+`starred_blurbs` use the tool-free `complete_text` path — the model only writes
+narrative prose and scores, it never calls a tool, so injected instructions have
+nothing to actuate.
+
+Two tasks go further and use **no model at all**, which removes the surface
+rather than containing it. `log_inspector` scans logs in pure Python — a health
+check that called the model couldn't report that the model is down. And in
+`clickup_watcher` the tag *is* the decision: `wren-research` / `wren-context`
+selects a prompt Python then fills in, so there is no classification step for
+injected Task text to steer. (Its reason was Ollama's single slot, not security,
+but the surface is gone either way.) The job that tag **queues** does drive the
+model — and pauses for a tap on every write, because the user tagged the item and
+walked away.
 
 **Rendered output is escaped and scheme-validated.** All model output rendered to
 HTML is `html.escape`d and any URL passes a scheme allow-list

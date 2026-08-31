@@ -241,8 +241,9 @@ def _match(a_tokens: set, b_tokens: set) -> dict | None:
 
 
 def _ai_chat_signals(day, logger) -> list:
-    """Yesterday's AI-agent chats, read from the daily log scribejay/ai_chat_learnings.py
-    writes at 4:30 AM (this task runs at 5:45).
+    """Yesterday's AI-agent chats, read from the daily log ScribeJay's
+    `ai_chat_learnings` routine writes at 4:30 AM (this task runs at 5:45).
+    We read its output file, never its code — see docs/scribejay.md.
 
     Deliberately the distilled file rather than the raw transcripts: a session's
     text is capped at 12k chars, and a token set that large overlaps everything, so

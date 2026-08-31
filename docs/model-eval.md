@@ -33,7 +33,7 @@ Two design rules follow, and they are the reason this harness is thin:
 canned tool results fed back. Scored on: was a tool called, was it the right
 one, were the arguments right, did the final answer use the result, and did the
 model invent anything. Three cases are lifted straight from recorded incidents
-(`calendar_weekday`, `games_vague`, `chain_strava_log`) and three expect *no*
+(`calendar_weekday`, `games_vague`, `chain_calendar_task`) and three expect *no*
 tool at all.
 
 Scoring the final answer matters as much as scoring the call. The weekday bug
@@ -41,7 +41,7 @@ was a **correct** tool call followed by a wrong answer, so a harness that stops
 at "did it emit a tool_call" would have scored that run as a pass.
 
 **Scheduled tasks** (`evals/cases_tasks.py`) — the real system prompt and real
-parser from seven `complete_text()` callers, over fixture input sized like the
+parser from five `complete_text()` callers, over fixture input sized like the
 real thing (the scoring case uses 40 leads because 40 is what broke). Scored on:
 was the answer non-empty, did it parse, and did N items in produce N results
 out.
@@ -353,7 +353,7 @@ All three run in `pytest`, in under a second.
 ## Safety
 
 No eval run can touch production state. Tool dispatch is stubbed, so no Google,
-Strava, mail or web call is ever made; confirmation-gated tools stop inside
+ClickUp, mail or web call is ever made; confirmation-gated tools stop inside
 `advance()` and execute nothing; results go to `evals/results/` (gitignored);
 and each case's logger has `propagate=False`, so a two-hour run puts nothing in
 `logs/wren.log`. `tests/conftest.py` redirects `RESULTS_DIR` to `tmp_path` so a

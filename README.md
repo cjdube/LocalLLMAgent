@@ -5,9 +5,9 @@ served by Ollama** — no Anthropic/Claude API calls at runtime, and no Claude
 Code/Cowork-managed scheduling. The agent has a name: **Wren**. It works two
 ways:
 
-- **Scheduled tasks** (Strava-to-calendar logging, a morning brief email, daily
-  activity + YouTube + AI-chat learnings entries) — unattended, triggered entirely
-  by macOS `launchd`, no human in the loop.
+- **Scheduled tasks** (a morning brief email, proactive daily-synthesis nudges,
+  a weekly fractional-work digest, Gmail label watching) — unattended, triggered
+  entirely by macOS `launchd`, no human in the loop.
 - **Ad hoc chat** — a small always-on web app (`chat/server.py`) so the user can
   talk to Wren directly and have her take action on request, from anywhere,
   over Tailscale. See "Wren — ad hoc chat" below.
@@ -59,7 +59,7 @@ record-keeping.
 ```
 launchd (per-task .plist, timed)
    -> python -m tasks.<task_name>
-       -> fetches data via tool modules (weather, calendar, Strava, Chrome history)
+       -> fetches data via tool modules (weather, calendar, Gmail, GitHub, Chrome history)
        -> calls the local model via Ollama's HTTP API for anything that
           needs natural-language composition or tool-calling
        -> writes the result out (email / calendar event / Markdown file)
@@ -75,7 +75,7 @@ model name is just `OLLAMA_MODEL` in `config/.env`. Swap models with
 swap: the **chat server** relies on Ollama's tool-calling protocol (`tools` /
 `tool_calls`), so a model with weak tool-calling support may not drive it
 reliably — the scheduled tasks only need plain text completion (or, for
-`strava_download`, no model at all). `evals/` answers "is this candidate model
+`clickup_watcher` and `log_inspector`, no model at all). `evals/` answers "is this candidate model
 better?" by replaying Wren's own prompts and tool schemas against each one and
 scoring what comes back; run it before a swap, not a leaderboard. See
 [docs/model-eval.md](docs/model-eval.md).
@@ -531,11 +531,12 @@ It's a single scrollable page (no tabs). Chat lives at `/`, not here:
   the confirmation-gated write tools. Click a chip to see its parameters. Always
   in sync with what's actually registered — no separate docs to maintain.
 **Run now runs the real task, side effects and all** — `morning_brief` sends the
-actual email, `strava_download`/`calendar_colorizer`/`claude_time_blocks` write
-real calendar events —
-exactly what the schedule does, just now. The button asks for a click-through
-confirm and refuses a second concurrent run of the same task. It's a read-only
-window otherwise: schedules are still edited by hand in the `.plist` files
+actual email, `daily_synthesis` pushes real nudges to the phone and writes to the
+vault — exactly what the schedule does, just now. The button asks for a
+click-through confirm and refuses a second concurrent run of the same task.
+**Federated rows refuse the button**: the `python -m <module>` command it spawns is
+a Wren convention, and another repo's job isn't ours to start — use `launchctl` in
+that checkout instead. It's a read-only window otherwise: schedules are still edited by hand in the `.plist` files
 (see below), not from the UI.
 
 New dashboard routes on the chat server, all behind the same auth:
@@ -871,13 +872,6 @@ mostly useful if the Python process fails to start at all).
    editing it and regenerating the lock (steps in the lock's header).
 3. Copy `config/.env.example` to `config/.env` and fill in:
    - `OPENWEATHERMAP_API_KEY` — [openweathermap.org](https://openweathermap.org/api)
-   - `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `STRAVA_REFRESH_TOKEN` — create a
-     Strava API application at [strava.com/settings/api](https://www.strava.com/settings/api)
-     (set the Authorization Callback Domain to `localhost`); the owning account must
-     have an active Strava subscription or the API returns "Application Inactive". Then
-     run `python -m agent.tools.strava --authorize` once and follow the prompts to mint
-     the refresh token (requests the `activity:read_all` scope so private activities are
-     included).
    - `TAVILY_API_KEY` — [tavily.com](https://tavily.com) (used for web search)
    - `GITHUB_TOKEN` — a GitHub personal access token, used to list starred repos.
      [Fine-grained](https://github.com/settings/personal-access-tokens/new) with
@@ -1017,7 +1011,7 @@ npm test
 Both suites are pure/offline — they mock the model and network, so no Ollama or
 API keys are needed. Nearly every module has a dedicated test file (see
 `tests/`), covering error paths and edge cases as well as happy paths; the
-deliberate exception is live-API wrapper internals (Google/Strava/Tavily
+deliberate exception is live-API wrapper internals (Google/Tavily/ClickUp
 calls), where only the pure helpers and error mapping are exercised. After
 editing the always-on chat server, restart it (it runs under launchd) so the
 changes take effect.
@@ -1053,8 +1047,8 @@ response headers. One endpoint is exempt from the session cookie —
 authenticated instead by an HMAC-signed, ~1h, effectively single-use token.
 
 **Prompt injection.** Untrusted text reaches the model from search results,
-fetched pages, GitHub, Chrome history, Strava, and YouTube. The containment rule
-is one sentence:
+fetched pages, GitHub, labelled email, ClickUp Tasks, Chrome history, and
+YouTube. The containment rule is one sentence:
 
 > The model can actuate a **consequential** write only with an explicit human
 > "yes" — a tap in chat, or a phone approval for a background task's
@@ -1062,8 +1056,8 @@ is one sentence:
 
 Everything else follows from that: chat gates every write in code (not in the
 prompt); the prose scheduled tasks use the tool-free `complete_text` path so
-injected text has nothing to actuate; `strava_download` uses no model at all;
-rendered output is escaped and scheme-validated; and background runs don't get
+injected text has nothing to actuate; `clickup_watcher` and `log_inspector` use
+no model at all; rendered output is escaped and scheme-validated; and background runs don't get
 the memory/skill writers **at all**, since those feed future system prompts. The
 policy is three editable sets in `agent/toolset.py` — `WRITE_TOOLS`,
 `CONSEQUENTIAL_TOOLS`, `UNATTENDED_EXCLUDED_TOOLS`.
