@@ -919,6 +919,96 @@ def remove_clickup_tag(task_id: str, tag: str, api_key: str = None) -> dict:
     return {"removed": tag, "task_id": task_id}
 
 
+# --------------------------------------------------------------------------- #
+# One Task in full, and the file hanging off it. Both take a ClickUp **id** or a
+# ClickUp-supplied URL, which is exactly why neither is a chat tool — the same
+# rule that keeps tagged_clickup_tasks and remove_clickup_tag schema-less
+# (docs/opaque-identifiers.md). Their only caller is tasks/clickup_watcher.py.
+# --------------------------------------------------------------------------- #
+
+# A Claude Code plan runs to a few thousand characters; the one already attached
+# to a live Task is 6KB. This ceiling exists so a mis-attached video or database
+# dump cannot be pulled into memory, not because a real plan approaches it.
+_MAX_ATTACHMENT_BYTES = 400_000
+
+# Read in chunks so the ceiling above is enforced while the download is still
+# happening. Checking Content-Length alone trusts a header the sender chose.
+_ATTACHMENT_CHUNK = 64 * 1024
+
+
+def clickup_task_detail(task_id: str, api_key: str = None) -> dict:
+    """One Task by id, including its **attachments**.
+
+    Its own entrypoint because GET /team/{id}/task does not return attachments
+    at all — the field is absent from that response, not merely empty (verified
+    against the live workspace 2026-08-31). So the only way to learn whether a
+    Task carries a file is to ask for that one Task, which is why the watcher
+    pays one extra GET per tagged Task rather than reading it off the poll.
+    """
+    token, err = _client(api_key)
+    if err:
+        return err
+    try:
+        task = _get(f"/task/{task_id}", token)
+    except Exception as e:
+        return http_error(e)
+
+    attachments = []
+    for a in task.get("attachments") or []:
+        # ClickUp keeps deleted attachments in the array with deleted=True.
+        if a.get("deleted"):
+            continue
+        attachments.append({
+            "id": a.get("id", ""),
+            "title": a.get("title", ""),
+            "extension": (a.get("extension") or "").lower(),
+            "size": a.get("size"),
+            "url": a.get("url", ""),
+        })
+
+    description, _ = _trim(task.get("description") or task.get("text_content") or "",
+                           _MAX_DESCRIPTION_CHARS)
+    return {
+        "id": task.get("id", task_id),
+        "title": task.get("name", ""),
+        "status": (task.get("status") or {}).get("status", ""),
+        "description": description,
+        "attachments": attachments,
+        "url": task.get("url", ""),
+    }
+
+
+def download_attachment(url: str, max_bytes: int = _MAX_ATTACHMENT_BYTES) -> dict:
+    """Fetch one attachment as text. Returns {"text": ...} or {"error": ...}.
+
+    **The URL is scheme-checked before it is fetched**, even though ClickUp
+    supplied it: this module already treats ClickUp as a place other people will
+    eventually write (see the guest-access note in docs/clickup.md), and an
+    attachment record is one more field that arrives over the wire. https only.
+
+    Not a chat tool, and deliberately not general-purpose: agent/tools/fetch.py
+    is how the model reads a web page. This exists so the watcher can read a
+    plan file without the model ever seeing a URL it could be talked into
+    following.
+    """
+    if not (url or "").lower().startswith("https://"):
+        return {"error": "attachment URL is not https"}
+    try:
+        with requests.get(url, timeout=TIMEOUT_S, stream=True) as resp:
+            resp.raise_for_status()
+            body = b""
+            for chunk in resp.iter_content(_ATTACHMENT_CHUNK):
+                body += chunk
+                if len(body) > max_bytes:
+                    return {"error": f"attachment is larger than {max_bytes} bytes"}
+    except Exception as e:
+        return http_error(e)
+    try:
+        return {"text": body.decode("utf-8")}
+    except UnicodeDecodeError:
+        return {"error": "attachment is not UTF-8 text"}
+
+
 # ClickUp's own three nouns, used exactly as ClickUp uses them, because the
 # model is repeating back a word the user said: a **Space** is a top-level area
 # of the workspace, a **List** sits inside a Space, and a **Task** sits on a

@@ -88,6 +88,9 @@ def stub(monkeypatch):
             return routes.get("folders", {"folders": []})
         if "/comment" in path:
             return routes.get("comments", {"comments": []})
+        if path.startswith("/task/"):
+            # GET /task/{id} — the only call that returns attachments at all.
+            return routes.get("task_detail", _task("Add up-arrow recall"))
         raise AssertionError(f"unexpected path {path}")
 
     writes = []
@@ -1140,3 +1143,144 @@ def test_the_suite_cannot_reach_the_live_clickup_api(monkeypatch):
     monkeypatch.setattr(clickup, "resolve_key", lambda name, arg=None: "pk_test")
     with pytest.raises(BaseException, match="live ClickUp API"):
         clickup.backlog_anchors()
+
+
+# --------------------------------------------------------------------------- #
+# clickup_task_detail and download_attachment
+#
+# The attachment shape below is captured from the live workspace on 2026-08-31,
+# from a Task that really does carry a Claude Code plan. The field that matters
+# is that it exists at all: GET /team/{id}/task does not return `attachments`,
+# so the ONLY way to learn whether a Task has a plan is this one-Task call.
+# --------------------------------------------------------------------------- #
+
+ATTACHMENT = {
+    "id": "98c7a2da-535e-4788-8761-f31d41ecdf0c.md",
+    "title": "currently-there-s-no-chat-transient-floyd.md",
+    "extension": "md",
+    "mimetype": "text/markdown",
+    "size": 6071,
+    "deleted": False,
+    "url": "https://t90141551004.p.clickup-attachments.com/t90141551004/98c7/plan.md",
+}
+
+# The real function, captured before conftest's autouse guard replaces it. That
+# guard exists because download_attachment does NOT go through _get — it talks
+# to an attachment host, not api.clickup.com — so it needs naming in its own
+# right, and this file is the one place that puts the real one back.
+_REAL_DOWNLOAD = clickup.download_attachment
+
+
+class _FakeResponse:
+    def __init__(self, chunks, status_ok=True):
+        self._chunks, self._ok = chunks, status_ok
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def raise_for_status(self):
+        if not self._ok:
+            raise requests.exceptions.HTTPError("404 Client Error", response=None)
+
+    def iter_content(self, size):
+        return iter(self._chunks)
+
+
+@pytest.fixture
+def download(monkeypatch):
+    """Put the real download_attachment back and stub the HTTP layer under it."""
+    monkeypatch.setattr(clickup, "download_attachment", _REAL_DOWNLOAD)
+
+    def _install(chunks, status_ok=True):
+        seen = []
+
+        def _get(url, **kwargs):
+            seen.append((url, kwargs))
+            return _FakeResponse(chunks, status_ok)
+
+        monkeypatch.setattr(clickup.requests, "get", _get)
+        return seen
+    return _install
+
+
+def test_task_detail_returns_the_attachments(stub):
+    stub.routes["task_detail"] = dict(_task("Add up-arrow recall", status="designed"),
+                                      attachments=[ATTACHMENT])
+    detail = clickup.clickup_task_detail("86bbnfav7")
+    assert detail["status"] == "designed"
+    assert [a["title"] for a in detail["attachments"]] == [ATTACHMENT["title"]]
+    assert detail["attachments"][0]["extension"] == "md"
+
+
+def test_task_detail_asks_for_the_one_task_not_the_listing(stub):
+    """The listing endpoint omits attachments entirely, so reading the field off
+    a poll would silently see none — never an error, just a Task that always
+    looks like it has no plan."""
+    stub.routes["task_detail"] = dict(_task("x"), attachments=[])
+    clickup.clickup_task_detail("86bbnfav7")
+    assert ("/task/86bbnfav7", {}) in [(p, q) for p, q in stub.calls]
+
+
+def test_a_deleted_attachment_is_not_a_plan(stub):
+    """ClickUp leaves removed attachments in the array with deleted=True. Kept,
+    they would make a Task whose plan was deleted look ready to build."""
+    stub.routes["task_detail"] = dict(
+        _task("x"), attachments=[dict(ATTACHMENT, deleted=True)])
+    assert clickup.clickup_task_detail("86bbnfav7")["attachments"] == []
+
+
+def test_a_task_with_no_attachments_key_is_not_a_crash(stub):
+    stub.routes["task_detail"] = _task("x")
+    assert clickup.clickup_task_detail("86bbnfav7")["attachments"] == []
+
+
+def test_task_detail_degrades_to_an_error_dict(stub, monkeypatch):
+    def _boom(*a, **k):
+        raise requests.exceptions.ConnectionError("no route to host")
+    monkeypatch.setattr(clickup, "_get", _boom)
+    assert "error" in clickup.clickup_task_detail("86bbnfav7")
+
+
+def test_an_attachment_downloads_as_text(download):
+    download([b"## Context\n", b"Do the thing.\n"])
+    assert clickup.download_attachment(ATTACHMENT["url"]) == {
+        "text": "## Context\nDo the thing.\n"}
+
+
+def test_a_non_https_url_is_refused_before_it_is_fetched(download):
+    """The URL arrives over the wire in an attachment record. ClickUp is a place
+    other people will eventually write, and html.escape is not the guard for a
+    URL — the scheme is."""
+    seen = download([b"x"])
+    for url in ("http://x/plan.md", "file:///etc/passwd", "javascript:alert(1)", ""):
+        assert "error" in clickup.download_attachment(url)
+    assert seen == [], "a refused URL was fetched anyway"
+
+
+def test_an_oversized_attachment_is_refused_mid_download(download):
+    """The cap is enforced while the bytes are arriving. Trusting
+    Content-Length would trust a number the sender chose."""
+    download([b"x" * 1000] * 10)
+    result = clickup.download_attachment(ATTACHMENT["url"], max_bytes=2000)
+    assert "larger than" in result["error"]
+
+
+def test_a_binary_attachment_is_an_error_not_mojibake(download):
+    download([b"\x89PNG\r\n\x1a\n\xff\xfe"])
+    assert "not UTF-8" in clickup.download_attachment(ATTACHMENT["url"])["error"]
+
+
+def test_a_dead_attachment_host_degrades_to_an_error_dict(download):
+    download([b"x"], status_ok=False)
+    assert "error" in clickup.download_attachment(ATTACHMENT["url"])
+
+
+def test_the_download_has_an_explicit_timeout(download):
+    """Every HTTP call in this repo carries one. A hung attachment host would
+    otherwise hold the five-minute watcher poll open indefinitely."""
+    seen = download([b"x"])
+    clickup.download_attachment(ATTACHMENT["url"])
+    assert seen[0][1]["timeout"] == clickup.TIMEOUT_S

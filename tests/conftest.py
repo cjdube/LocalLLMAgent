@@ -108,6 +108,7 @@ exercise the real adapter without a network call.
 
 import logging
 import os
+import subprocess as _real_subprocess
 import tempfile
 from pathlib import Path
 
@@ -131,6 +132,8 @@ from agent.tools import clickup as _clickup
 from chat import wikilint as _wikilint
 from evals import run_eval as _run_eval
 from tasks import _common
+from tasks import build_queue as _build_queue
+from tasks import build_worker as _build_worker
 from tasks import clickup_watcher as _clickup_watcher
 from tasks import mail_watcher as _mail_watcher
 from tasks import morning_brief as _morning_brief
@@ -361,6 +364,10 @@ def _isolate_remaining_config_stores(tmp_path, monkeypatch):
     # precious, but a test that leaves it at 9 makes the next real poll push a
     # spurious "ClickUp unreachable" to the phone.
     monkeypatch.setattr(_clickup_watcher, "_STATE_PATH", tmp_path / "clickup_watcher_state.json")
+    # The Claude Code build queue. Every row here is a paid Claude run waiting
+    # to happen, so a fixture job left in the production store would be picked
+    # up by the next real poll of tasks/build_worker.py and actually built.
+    monkeypatch.setattr(_build_queue, "_STORE_PATH", tmp_path / "build_jobs.json")
     # wiki.py resolves this env on every _vault() call. the user's real vault is a
     # readable path on this machine, so without the redirect a wiki test that
     # forgets to stub reads his actual notes into a fixture assertion.
@@ -432,6 +439,9 @@ def _block_clickup_egress(monkeypatch):
         )
     monkeypatch.setattr(_clickup, "_get", _blocked)
     monkeypatch.setattr(_clickup, "_write", _blocked)
+    # download_attachment does NOT go through _get — it fetches an attachment
+    # host, not api.clickup.com, and so needs naming here in its own right.
+    monkeypatch.setattr(_clickup, "download_attachment", _blocked)
 
 
 @pytest.fixture(autouse=True)
@@ -554,6 +564,41 @@ def _block_wiki_lint_subprocess(monkeypatch):
     # The cache is module state and survives between tests: a real payload
     # cached by one test would be served to the next without run_lint firing.
     _wikilint._LINT_CACHE.clear()
+
+
+@pytest.fixture(autouse=True)
+def _block_build_subprocess(monkeypatch):
+    """Stop any test from spawning a real Claude Code build.
+
+    tasks/build_worker.py shells out three times: `git worktree add` against the
+    user's REAL checkout, `claude -p` (which costs money and edits files for
+    tens of minutes), and a nested pytest. Any one of those escaping a test is
+    worse than the daemon-thread incident at the top of this file — a child
+    process outlives monkeypatch teardown by definition, and this child writes.
+
+    Rebinds the module's own `subprocess` global rather than an attribute on the
+    shared subprocess module: `subprocess` is one object imported by half the
+    standard library, and patching through it is exactly the collision that made
+    _block_ntfy_egress a blanket requests.get stub for the whole suite. This
+    name belongs to tasks/build_worker.py alone.
+
+    tests/test_build_worker.py substitutes its own recording stub per test, so
+    it never sees this. What this catches is a NEW caller, or a test that
+    exercises run_job without stubbing every leg of it.
+    """
+    class _NoSubprocess:
+        TimeoutExpired = _real_subprocess.TimeoutExpired
+        CompletedProcess = _real_subprocess.CompletedProcess
+
+        @staticmethod
+        def run(*a, **k):
+            raise AssertionError(
+                "a test spawned a real subprocess from tasks.build_worker — that "
+                "is `git worktree add`, a paid `claude -p` run, or a nested "
+                "pytest. Stub build_worker.subprocess (or the function calling it)."
+            )
+
+    monkeypatch.setattr(_build_worker, "subprocess", _NoSubprocess)
 
 
 @pytest.fixture(autouse=True)

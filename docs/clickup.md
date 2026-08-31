@@ -252,7 +252,15 @@ minutes; nothing tagged means nothing happens and nothing is logged.
 | `wren-research` | Searches the web, fetches the two or three most useful pages, comments what she found with the URL for each point | — |
 | `wren-context` | Searches your wiki and reads the pages it finds, comments what your notes already say and names each page | Search the web |
 
+| `wren-build` | Runs Claude Code against the plan attached to the Task, in a throwaway git worktree, and comments the branch, the diff size and the test result. Commits nothing. See [docs/clickup-build.md](clickup-build.md) | Commit, stage, branch, push, or call the local model at all |
+
 They are ordinary ClickUp tags. Type one onto a Task once and it exists.
+
+`wren-build` is the odd one out in this table: it never touches Ollama, it has
+three preconditions rather than one, and it hands the work to its own launchd
+worker instead of `bg_worker`. Everything about it is in
+[docs/clickup-build.md](clickup-build.md); the rest of this page describes the
+two model-answered tags.
 
 ### Three stages, and why they are three
 

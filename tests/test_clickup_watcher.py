@@ -131,7 +131,7 @@ def test_no_watched_tag_contains_a_slash():
     off is the only thing that stops the same Task being handled forever. The
     watcher warned every five minutes and queued nothing. See
     tests/test_clickup.py::test_a_tag_name_with_a_slash_is_refused_before_it_is_sent."""
-    for tag in WATCHED_TAGS:
+    for tag in clickup_watcher.ALL_TAGS:
         assert "/" not in tag, f"{tag!r} can never be removed through the API"
 
 
@@ -176,7 +176,7 @@ def test_one_poll_asks_for_every_watched_tag_at_once(stub):
     clickup_watcher.main()
     fetches = [e for e in stub.events if e[0] == "fetch"]
     assert len(fetches) == 1
-    assert set(fetches[0][1]) == set(clickup_watcher.WATCHED_TAGS)
+    assert set(fetches[0][1]) == set(clickup_watcher.ALL_TAGS)
 
 
 def test_the_poll_never_calls_the_model(stub, monkeypatch):
@@ -345,3 +345,205 @@ def test_every_template_asks_the_model_for_the_prefix_too():
     for tag in WATCHED_TAGS:
         text = " ".join(clickup_watcher.job_text(_tagged_task(tag=tag), tag).split())
         assert f'STARTS with "{tag}:"' in text
+
+
+# --------------------------------------------------------------------------- #
+# wren-build: the tag that queues a Claude Code run
+#
+# Three preconditions, and each one must fail on its own AND leave a comment.
+# The tag is gone by the time any of them is evaluated, so silence would be
+# indistinguishable from a broken watcher — and the user would have no reason
+# to look.
+# --------------------------------------------------------------------------- #
+
+@pytest.fixture
+def build_stub(stub, monkeypatch):
+    """ClickUp detail reads, the plan download, the queue and the status move,
+    all recorded in one ordered list — the ordering IS the guarantee here."""
+    state = {
+        "detail": {"id": "86bbnfav7", "title": "Add up-arrow recall",
+                   "status": "designed", "description": "",
+                   "attachments": [{"id": "a1", "title": "a-plan.md",
+                                    "extension": "md", "size": 6071,
+                                    "url": "https://x.clickup-attachments.com/a-plan.md"}]},
+        "plan": {"text": "## Context\nDo exactly this.\n"},
+        "queue": {"id": "job9"},
+        "move": {},
+    }
+
+    def _detail(task_id, api_key=None):
+        stub.events.append(("detail", task_id))
+        return state["detail"]
+
+    def _download(url, **kw):
+        stub.events.append(("download", url))
+        return state["plan"]
+
+    def _enqueue(task_id, title, plan_text, plan_name):
+        stub.events.append(("enqueue", title, plan_name, plan_text))
+        return state["queue"]
+
+    def _comment(title, comment, api_key=None):
+        stub.events.append(("comment", title, comment))
+        return {}
+
+    def _move(title, status, api_key=None):
+        stub.events.append(("move", title, status))
+        return state["move"]
+
+    monkeypatch.setattr(clickup_watcher.clickup, "clickup_task_detail", _detail)
+    monkeypatch.setattr(clickup_watcher.clickup, "download_attachment", _download)
+    monkeypatch.setattr(clickup_watcher.clickup, "comment_on_clickup_task", _comment)
+    monkeypatch.setattr(clickup_watcher.clickup, "move_clickup_task", _move)
+    monkeypatch.setattr(clickup_watcher.build_queue, "enqueue", _enqueue)
+    stub.state["tasks"] = [_tagged_task(title="Add up-arrow recall", tag="wren-build")]
+    stub.build = state
+    return stub
+
+
+def _kinds(stub):
+    return [e[0] for e in stub.events]
+
+
+def _comments(stub):
+    return [e[2] for e in stub.events if e[0] == "comment"]
+
+
+def test_a_designed_task_with_one_plan_is_queued(build_stub):
+    clickup_watcher.main()
+    queued = [e for e in build_stub.events if e[0] == "enqueue"]
+    assert len(queued) == 1
+    assert queued[0][1] == "Add up-arrow recall"
+    assert queued[0][2] == "a-plan.md"
+    assert "Do exactly this." in queued[0][3]
+
+
+def test_the_plan_reaches_the_queue_verbatim(build_stub):
+    build_stub.build["plan"] = {"text": "## Step 1\nEdit the thing.\n"}
+    clickup_watcher.main()
+    assert [e for e in build_stub.events if e[0] == "enqueue"][0][3] \
+        == "## Step 1\nEdit the thing.\n"
+
+
+def test_a_queued_build_moves_the_task_to_building(build_stub):
+    clickup_watcher.main()
+    assert ("move", "Add up-arrow recall", "building") in build_stub.events
+
+
+def test_the_tag_comes_off_before_the_build_is_queued(build_stub):
+    """The standing rule, and it costs more here than anywhere else: queue-first
+    plus a failed removal starts a paid Claude Code run on every poll forever."""
+    clickup_watcher.main()
+    kinds = _kinds(build_stub)
+    assert kinds.index("remove") < kinds.index("enqueue")
+
+
+def test_the_detail_is_read_before_the_tag_comes_off(build_stub):
+    """A ClickUp blip on that read must leave the tag on so the next poll
+    retries. Once the tag is off, the request is spent."""
+    clickup_watcher.main()
+    kinds = _kinds(build_stub)
+    assert kinds.index("detail") < kinds.index("remove")
+
+
+def test_an_unreadable_task_keeps_its_tag_and_queues_nothing(build_stub):
+    build_stub.build["detail"] = {"error": "HTTP 502"}
+    clickup_watcher.main()
+    assert "remove" not in _kinds(build_stub)
+    assert "enqueue" not in _kinds(build_stub)
+
+
+def test_a_failed_tag_removal_queues_no_build(build_stub):
+    build_stub.state["remove_fails"] = True
+    clickup_watcher.main()
+    assert "enqueue" not in _kinds(build_stub)
+
+
+# ---- the three preconditions, one at a time -------------------------------
+
+def test_a_task_that_is_not_designed_is_refused_and_says_so(build_stub):
+    build_stub.build["detail"]["status"] = "idea"
+    clickup_watcher.main()
+    assert "enqueue" not in _kinds(build_stub)
+    assert "designed" in _comments(build_stub)[0]
+
+
+def test_a_task_with_no_plan_is_refused_and_says_so(build_stub):
+    build_stub.build["detail"]["attachments"] = []
+    clickup_watcher.main()
+    assert "enqueue" not in _kinds(build_stub)
+    assert "no plan is attached" in _comments(build_stub)[0]
+
+
+def test_two_plans_are_refused_rather_than_guessed(build_stub):
+    """Ambiguity is a question, never a default — the standing posture across
+    this module. Picking one would build the wrong plan, and the user would
+    have no reason to look."""
+    build_stub.build["detail"]["attachments"] = [
+        {"title": "old-plan.md", "extension": "md", "url": "https://x/1.md"},
+        {"title": "new-plan.md", "extension": "md", "url": "https://x/2.md"},
+    ]
+    clickup_watcher.main()
+    assert "enqueue" not in _kinds(build_stub)
+    comment = _comments(build_stub)[0]
+    assert "old-plan.md" in comment and "new-plan.md" in comment
+
+
+def test_a_non_markdown_attachment_is_not_mistaken_for_a_plan(build_stub):
+    """A Task may well carry a screenshot as well. Those are not instructions."""
+    build_stub.build["detail"]["attachments"] = [
+        {"title": "screenshot.png", "extension": "png", "url": "https://x/1.png"}]
+    clickup_watcher.main()
+    assert "enqueue" not in _kinds(build_stub)
+    assert "no plan is attached" in _comments(build_stub)[0]
+
+
+def test_every_refusal_says_how_to_restart_it(build_stub):
+    """The tag is gone, so the comment is the only thing that tells him a
+    re-tag is what starts it again."""
+    for attachments in ([], [{"title": "a.md", "extension": "md", "url": "https://x/a"},
+                             {"title": "b.md", "extension": "md", "url": "https://x/b"}]):
+        build_stub.events.clear()
+        build_stub.build["detail"]["attachments"] = attachments
+        clickup_watcher.main()
+        assert "re-apply the tag" in _comments(build_stub)[0]
+
+
+def test_a_refusal_is_signed_with_the_tag_that_asked_for_it(build_stub):
+    """The comment lands under the user's own name — it is his token — and the
+    tag is off by then, so without the prefix he cannot tell his own note from
+    Wren's."""
+    build_stub.build["detail"]["status"] = "idea"
+    clickup_watcher.main()
+    assert _comments(build_stub)[0].startswith("wren-build:")
+
+
+# ---- everything after the tag is off still reports -------------------------
+
+def test_an_undownloadable_plan_is_reported_not_swallowed(build_stub):
+    build_stub.build["plan"] = {"error": "HTTP 404"}
+    clickup_watcher.main()
+    assert "enqueue" not in _kinds(build_stub)
+    assert "HTTP 404" in _comments(build_stub)[0]
+
+
+def test_a_full_queue_is_reported_on_the_task(build_stub):
+    build_stub.build["queue"] = {"error": "build queue is full (5 waiting)"}
+    clickup_watcher.main()
+    assert "full" in _comments(build_stub)[0]
+    assert ("move", "Add up-arrow recall", "building") not in build_stub.events
+
+
+def test_a_failed_status_move_never_cancels_a_queued_build(build_stub):
+    """The move is cosmetic; the build is the thing. Losing the build because
+    the board could not be updated would be the wrong trade."""
+    build_stub.build["move"] = {"error": "HTTP 500"}
+    clickup_watcher.main()
+    assert len([e for e in build_stub.events if e[0] == "enqueue"]) == 1
+
+
+def test_the_build_path_never_queues_a_model_job(build_stub):
+    """Claude Code does the thinking. Ollama serves one request at a time, and a
+    build routed through bg_worker would take that slot for tens of minutes."""
+    clickup_watcher.main()
+    assert "queue" not in _kinds(build_stub)

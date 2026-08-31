@@ -41,6 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent.store import atomic_write_json, load_json, locked
 from agent.tools import background, clickup
+from tasks import build_queue
 from tasks._common import notify_failure, setup_logger
 
 _STATE_PATH = Path(__file__).resolve().parent.parent / "config" / "clickup_watcher_state.json"
@@ -97,6 +98,27 @@ WATCHED_TAGS = {
     "wren-research": _RESEARCH,
     "wren-context": _CONTEXT,
 }
+
+# The third tag is a different animal: it produces no prompt for Wren's own
+# model at all. It queues a Claude Code run (tasks/build_worker.py), so it has
+# preconditions the other two do not, and it is handled on its own branch below
+# rather than as a third template.
+BUILD_TAG = "wren-build"
+
+# What a Task must be before Wren will build it. The status is checked because
+# `designed` is the point in this workflow where a plan has been written and
+# read; anything earlier has not been thought through yet, and anything later is
+# already being worked on.
+BUILD_STATUS = "designed"
+
+# A Claude Code plan is Markdown. Restricting the extension is what makes
+# "exactly one plan" a question with an answer — a Task may well carry a
+# screenshot or a PDF as well, and those are not instructions.
+PLAN_EXTENSIONS = ("md",)
+
+# Every tag one poll asks about. ClickUp ORs several tags[] values, so this is
+# still one GET no matter how long it gets.
+ALL_TAGS = sorted(WATCHED_TAGS) + [BUILD_TAG]
 
 
 def _load_state() -> dict:
@@ -161,6 +183,108 @@ def _handle(task: dict, tag: str, logger) -> bool:
     return True
 
 
+def plan_for_build(detail: dict) -> tuple:
+    """(the plan attachment, None) when this Task may be built, else (None, why).
+
+    Pure — it is handed the Task detail and returns a sentence, so every
+    precondition can be tested on its own without a network. The sentence is
+    what the user reads on the Task, so it says what to change and that a
+    re-tag is what restarts it; "precondition failed" would send him to the log.
+    """
+    status = (detail.get("status") or "").strip()
+    if status.lower() != BUILD_STATUS:
+        return None, (f"the Task is '{status or 'unknown'}', not '{BUILD_STATUS}'. "
+                      f"Move it to {BUILD_STATUS} and re-apply the tag.")
+
+    plans = [a for a in detail.get("attachments") or []
+             if (a.get("extension") or "").lower() in PLAN_EXTENSIONS]
+    if not plans:
+        return None, ("no plan is attached. Attach the Claude Code plan as a .md "
+                      "file and re-apply the tag.")
+    if len(plans) > 1:
+        names = ", ".join(a.get("title", "") for a in plans[:5])
+        return None, (f"{len(plans)} .md files are attached ({names}). I will not "
+                      "guess which one is the plan — leave one and re-apply the tag.")
+    return plans[0], None
+
+
+def _say(title: str, message: str, logger) -> None:
+    """Write one line back onto the Task, prefixed like every other answer Wren
+    leaves there. Called as a library function, exactly as remove_clickup_tag is
+    — the WRITE_TOOLS gates govern what the MODEL may call, and no model is
+    involved anywhere in this path.
+
+    A refused build must say so on the board. The tag is gone by then, so
+    silence is indistinguishable from a broken watcher, and the user would have
+    no reason to look.
+    """
+    text = f"{comment_prefix(BUILD_TAG)} {message}"
+    result = clickup.comment_on_clickup_task(title=title, comment=text)
+    if "error" in result:
+        logger.warning(f"could not comment on {title!r}: {result['error']}")
+
+
+def _handle_build(task: dict, logger) -> bool:
+    """Take one `wren-build` Task: check it, drop the tag, queue the build.
+    True if a build was queued.
+
+    The extra GET is unavoidable: GET /team/{id}/task does not return
+    attachments at all, so whether a plan is attached can only be learned by
+    asking for this one Task (verified live 2026-08-31). It is paid only for a
+    Task that is already tagged, which is rare.
+
+    **The detail read comes before the tag removal, and everything else after.**
+    A ClickUp blip on that read must leave the tag on so the next poll retries;
+    once the tag is off, every remaining outcome — good or bad — ends in a
+    comment, because each of them is final.
+    """
+    detail = clickup.clickup_task_detail(task["id"])
+    if "error" in detail:
+        logger.warning(f"could not read {task['title']!r} ({detail['error']}) — "
+                       "leaving the tag on, will retry next poll")
+        return False
+
+    removed = clickup.remove_clickup_tag(task["id"], BUILD_TAG)
+    if "error" in removed:
+        logger.warning(
+            f"could not remove {BUILD_TAG} from {task['title']!r} "
+            f"({removed['error']}) — not queueing, will retry next poll")
+        return False
+
+    plan, why = plan_for_build(detail)
+    if why:
+        logger.info(f"{task['title']!r} not built: {why}")
+        _say(task["title"], f"not started — {why}", logger)
+        return False
+
+    got = clickup.download_attachment(plan["url"])
+    if "error" in got:
+        logger.error(f"could not download the plan for {task['title']!r}: {got['error']}")
+        _say(task["title"], f"not started — the plan could not be downloaded "
+                            f"({got['error']}). Re-apply the tag to try again.", logger)
+        return False
+
+    job = build_queue.enqueue(task["id"], task["title"], got["text"], plan.get("title", ""))
+    if "error" in job:
+        logger.error(f"could not queue a build for {task['title']!r}: {job['error']}")
+        _say(task["title"], f"not started — {job['error']}. Re-apply the tag once "
+                            "the queue has drained.", logger)
+        return False
+
+    logger.info(f"queued build {job['id']} for {task['title']!r} "
+                f"from {plan.get('title', '')!r}")
+
+    # The board should show what Wren is working on right now. One enum value
+    # out of the list the Space itself defines — no free text, which is the same
+    # reason move_clickup_task is allowed in unattended runs at all. A failed
+    # move is cosmetic; it must never stop a build that is already queued.
+    moved = clickup.move_clickup_task(title=task["title"], status="building")
+    if "error" in moved:
+        logger.warning(f"queued the build but could not move {task['title']!r} "
+                       f"to building: {moved['error']}")
+    return True
+
+
 def main() -> int:
     logger = setup_logger("clickup_watcher")
     state = _load_state()
@@ -169,7 +293,7 @@ def main() -> int:
         # One GET for every watched tag at once: ClickUp ORs several tags[]
         # values (verified against the live workspace), so this does not grow
         # with the number of tags.
-        found = clickup.tagged_clickup_tasks(sorted(WATCHED_TAGS))
+        found = clickup.tagged_clickup_tasks(ALL_TAGS)
         if "error" in found:
             raise RuntimeError(found["error"])
     except Exception as e:
@@ -195,7 +319,9 @@ def main() -> int:
             # First watched tag only. A Task wearing both gets one job; the
             # other tag is left on it and picked up on the next poll, which
             # keeps the two answers in separate comments.
-            if _handle(task, tag, logger):
+            handled = (_handle_build(task, logger) if tag == BUILD_TAG
+                       else _handle(task, tag, logger))
+            if handled:
                 break
 
     return 0
