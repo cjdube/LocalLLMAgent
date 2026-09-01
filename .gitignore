@@ -67,3 +67,8 @@ evals/results/
 .claude/
 .codex/
 scratchpad
+# Handoffs for work that belongs in a SIBLING repo. Same rule as docs/reviews/
+# above: they quote another checkout's paths and line numbers, they describe
+# work not done yet, and the repo they are about is the one that should record
+# them once it lands. Craig carries these across by hand.
+docs/handoff/
