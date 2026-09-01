@@ -636,3 +636,118 @@ describe("the busy offer", () => {
     expect(offerButtons()).toHaveLength(0);
   });
 });
+
+// Up walks back through the messages you sent, Down walks forward — the recall
+// a shell and every other chat client give you. The promise has two halves, and
+// both are asserted here: Up recalls, AND Up still moves the caret between the
+// lines of a message you are writing. Gating recall on caret position is what
+// buys the second half, so the caret tests are as load-bearing as the rest.
+describe("message history", () => {
+  function press(key, opts = {}) {
+    return input().dispatchEvent(new KeyboardEvent("keydown",
+      { key, bubbles: true, cancelable: true, ...opts }));
+  }
+
+  const caretAt = (pos) => input().setSelectionRange(pos, pos);
+  const typed = () => input().dispatchEvent(new Event("input", { bubbles: true }));
+
+  // Send a message and let its turn finish, so the composer is enabled and
+  // empty again — the state you would actually be in when reaching for Up.
+  async function sent(text) {
+    resolvesWith({ type: "final", text: "ok" });
+    submit(text);
+    await settle();
+  }
+
+  test("Up does nothing before anything has been sent", () => {
+    expect(press("ArrowUp")).toBe(true);  // not prevented — the caret keeps it
+    expect(input().value).toBe("");
+  });
+
+  test("Up brings back the message you just sent", async () => {
+    await sent("what's on today?");
+    press("ArrowUp");
+    expect(input().value).toBe("what's on today?");
+  });
+
+  test("Up walks back and Down walks forward again", async () => {
+    await sent("one");
+    await sent("two");
+    press("ArrowUp");
+    expect(input().value).toBe("two");
+    press("ArrowUp");
+    expect(input().value).toBe("one");
+    press("ArrowDown");
+    expect(input().value).toBe("two");
+    press("ArrowDown");
+    expect(input().value).toBe("");  // past the newest — back to the empty draft
+  });
+
+  test("Up stops on the oldest message", async () => {
+    await sent("one");
+    press("ArrowUp");
+    press("ArrowUp");
+    press("ArrowUp");
+    expect(input().value).toBe("one");
+  });
+
+  test("Down past the newest restores what you were typing", async () => {
+    await sent("one");
+    input().value = "half a thought";
+    caretAt(0);
+    press("ArrowUp");
+    expect(input().value).toBe("one");
+    press("ArrowDown");
+    expect(input().value).toBe("half a thought");
+  });
+
+  test("Up with the caret mid-message moves the caret, not the history", async () => {
+    // The composer is a textarea: a long message wraps to several lines, and Up
+    // has to keep moving between them. Recall must not steal that.
+    await sent("one");
+    input().value = "line one\nline two";
+    caretAt(12);
+    expect(press("ArrowUp")).toBe(true);  // left to the browser
+    expect(input().value).toBe("line one\nline two");
+  });
+
+  test("Down does nothing when no walk is under way", async () => {
+    await sent("one");
+    input().value = "line one\nline two";
+    caretAt(3);
+    expect(press("ArrowDown")).toBe(true);
+    expect(input().value).toBe("line one\nline two");
+  });
+
+  test("editing a recalled message starts the next walk over", async () => {
+    await sent("one");
+    await sent("two");
+    press("ArrowUp");
+    press("ArrowUp");
+    expect(input().value).toBe("one");
+    typed();          // you edit it — it is your draft now
+    caretAt(0);
+    press("ArrowUp");
+    expect(input().value).toBe("two");  // the newest again, not older than "one"
+  });
+
+  test("the same message sent twice appears in the walk once", async () => {
+    await sent("again");
+    await sent("again");
+    press("ArrowUp");
+    expect(input().value).toBe("again");
+    press("ArrowUp");
+    expect(input().value).toBe("again");
+    press("ArrowDown");
+    expect(input().value).toBe("");  // one entry, so this was already the newest
+  });
+
+  test("New chat clears the thread but keeps the history", async () => {
+    // Deliberate: re-asking the last question in a fresh thread is the common
+    // reason to reach for Up.
+    await sent("what's on today?");
+    document.getElementById("newChat").click();
+    press("ArrowUp");
+    expect(input().value).toBe("what's on today?");
+  });
+});

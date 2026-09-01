@@ -50,19 +50,82 @@
     input.style.height = input.scrollHeight + border + "px";
   }
 
+  // Shell-style recall of your own past messages: Up walks back through them,
+  // Down walks forward. The list lives for the life of the page and survives
+  // "New chat" on purpose — re-asking the last question in a fresh thread is
+  // the common reason to reach for it.
+  const sentHistory = [];   // your sent messages, oldest first
+  let historyIndex = null;  // null = typing a fresh draft, not walking
+  let draft = "";           // what was in the box before the first Up
+
+  function recordSent(message) {
+    // Skip a repeat, the way a shell skips a repeated command.
+    if (sentHistory[sentHistory.length - 1] !== message) sentHistory.push(message);
+  }
+
+  // Put a recalled message in the box: grow to fit it (a recalled long message
+  // would otherwise sit in a one-line box), caret at the end to append or edit.
+  function recall(text) {
+    input.value = text;
+    autoGrow();
+    input.setSelectionRange(text.length, text.length);
+  }
+
   function resetInput() {
     input.value = "";
     input.style.height = "auto";
+    historyIndex = null;  // the box is a fresh draft again
   }
 
-  input.addEventListener("input", autoGrow);
+  input.addEventListener("input", () => {
+    autoGrow();
+    // Editing a recalled message makes it yours again: the arrows go back to
+    // moving the caret, and the next Up starts over from the newest message.
+    historyIndex = null;
+  });
 
   // A textarea takes Enter as a newline, so the send key has to be rebound:
   // Enter sends, Shift+Enter (and Ctrl/Cmd+Enter) starts a new line.
+  //
+  // Up is shared with the caret for the same reason: a long message wraps to
+  // several lines, and Up has to keep moving between them. It only means "the
+  // message before this one" from the very start of the box, where there is no
+  // line above to move to — or when a walk is already under way, so that a
+  // second Up keeps going back instead of stopping on the first recall. Down
+  // needs no caret test: it is only ever a step forward through a walk that Up
+  // began. Typing anything ends the walk and hands both keys straight back.
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
       form.requestSubmit ? form.requestSubmit() : sendBtn.click();
+      return;
+    }
+    if (!sentHistory.length) return;
+
+    const walking = historyIndex !== null;
+    const atStart = input.selectionStart === 0 && input.selectionEnd === 0;
+
+    if (e.key === "ArrowUp" && (walking || atStart)) {
+      if (!walking) {
+        draft = input.value;
+        historyIndex = sentHistory.length - 1;
+      } else if (historyIndex > 0) {
+        historyIndex -= 1;
+      } else {
+        return;  // already on the oldest message — nothing further back
+      }
+      e.preventDefault();
+      recall(sentHistory[historyIndex]);
+    } else if (e.key === "ArrowDown" && walking) {
+      e.preventDefault();
+      if (historyIndex < sentHistory.length - 1) {
+        historyIndex += 1;
+        recall(sentHistory[historyIndex]);
+      } else {
+        // Past the newest message: back to whatever you were typing.
+        historyIndex = null;
+        recall(draft);
+      }
     }
   });
 
@@ -345,6 +408,7 @@
     }
     const message = input.value.trim();
     if (!message) return;
+    recordSent(message);
     clearOffers();  // a new turn supersedes the last reply's redo offer
     addMessage("user", message);
     resetInput();
