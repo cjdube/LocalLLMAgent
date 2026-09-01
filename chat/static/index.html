@@ -56,6 +56,17 @@
     white-space: pre-wrap;
   }
   .msg.user { align-self: flex-end; background: #1f2328; color: white; }
+  /* A message typed while Wren was still answering. It waits its turn, so it
+     sits in the thread dimmed and labelled until it is actually sent. */
+  .msg.user.queued { opacity: 0.45; }
+  .msg.user.queued::after {
+    content: "queued";
+    display: block;
+    margin-top: 4px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
   .msg.wren { align-self: flex-start; background: #ffffff; border: 1px solid #e5e7eb; }
   .msg.wren a { overflow-wrap: anywhere; }
   .msg.system { align-self: center; background: transparent; color: #9ca3af; font-size: 13px; }

@@ -17,7 +17,8 @@
 //
 // Class names to style: .msg.user / .msg.wren / .msg.system, .msg.typing with
 // .typing-dot children, .confirm with .detail / .actions / .yes / .no, and
-// .offer (a row of .escalate buttons, used for the busy offer).
+// .offer (a row of .escalate buttons, used for the busy offer). A message
+// typed while a turn was running also carries .queued until it is sent.
 // Note .typing-dot, not .dot — a host page may already use .dot for something
 // else (the dashboard's run-history status dots), and that collision is what
 // forced the copies apart before.
@@ -97,6 +98,13 @@
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
+      // Wren is still answering: line the message up rather than interrupt her.
+      // Enter and the button part ways here — the button is showing "Stop".
+      if (busy) {
+        const waiting = input.value.trim();
+        if (waiting) enqueue(waiting);
+        return;
+      }
       form.requestSubmit ? form.requestSubmit() : sendBtn.click();
       return;
     }
@@ -327,13 +335,53 @@
   }
 
   // While a turn is running the Send button becomes a Stop button (it stays
-  // enabled so it can cancel); the input is disabled until the turn ends.
+  // enabled so it can cancel). The composer stays usable throughout — see the
+  // queue below.
   let busy = false;
   function setBusy(b) {
     busy = b;
-    input.disabled = b;
     sendBtn.textContent = b ? "Stop" : "Send";
     sendBtn.classList.toggle("stop", b);
+  }
+
+  // Messages typed while a turn was running. The server allows one turn per
+  // session (a second POST for the same sid gets a 409), so a message typed
+  // mid-turn waits here instead of the composer locking you out until Wren
+  // answers. Each entry keeps the bubble it was drawn as: it is already in the
+  // thread, dimmed, and un-dims in place when it is sent.
+  //
+  // Only a completed reply releases the next one. A stopped or failed turn
+  // hands the queue back to the composer, and a confirm card or busy offer
+  // waiting for a tap holds it — so a queued message never fires itself into a
+  // decision that hasn't been made yet.
+  const queued = [];
+
+  function enqueue(message) {
+    const el = addMessage("user", message);
+    el.classList.add("queued");
+    queued.push({ message, el });
+    recordSent(message);
+    resetInput();
+  }
+
+  // Give the queue back to the composer, oldest first, when the turn it was
+  // waiting behind ended without a reply. Silently dropping what you typed
+  // would be worse than either sending it or handing it back, so it lands in
+  // the box, editable, ahead of whatever draft is already there.
+  function unqueueToComposer() {
+    if (!queued.length) return;
+    const waiting = queued.splice(0).map((q) => { q.el.remove(); return q.message; });
+    if (input.value.trim()) waiting.push(input.value);
+    recall(waiting.join("\n\n"));
+  }
+
+  function sendNextQueued() {
+    const next = queued.shift();
+    if (!next) return;
+    next.el.classList.remove("queued");
+    clearOffers();  // this message supersedes the reply's redo offer
+    setBusy(true);
+    postTurn("/chat", { message: next.message }, addTyping());
   }
 
   // A dropped connection (laptop asleep, tailnet blip) rejects the fetch, and
@@ -374,12 +422,14 @@
       // A failed escalation leaves the local answer intact, so let it be retried.
       if (pendingEscalateBtn) { pendingEscalateBtn.disabled = false; pendingEscalateBtn = null; }
       setBusy(false);
+      unqueueToComposer();
       return;
     }
     if (result.type === "final") {
       pendingEscalateBtn = null;  // a successful escalation leaves its button spent
       renderFinal(result);
       setBusy(false);
+      sendNextQueued();
     } else if (result.type === "busy") {
       renderBusy(result, (body || {}).message || "");
       setBusy(false);
@@ -387,6 +437,7 @@
       if (pendingEscalateBtn) { pendingEscalateBtn.disabled = false; pendingEscalateBtn = null; }
       addMessage("system", "Stopped.");
       setBusy(false);
+      unqueueToComposer();
     } else if (result.type === "confirm") {
       addConfirm(result.summary, result.detail, (approved) => {
         setBusy(true);
@@ -424,6 +475,7 @@
     // landing, or a slow/failed request reintroduces the same stuck dock.
     fetch("/chat/new", { method: "POST" }).catch(() => {});
     setBusy(false);
+    queued.length = 0;  // its bubbles go with the thread below
     resetInput();
     messagesEl.replaceChildren();
     addMessage("wren", GREETING);

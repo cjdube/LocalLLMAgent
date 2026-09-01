@@ -197,6 +197,15 @@ having to wait out a runaway generation or the read timeout. The partial turn
 is rolled back so history stays clean. (Scheduled/background runs pass no
 `should_cancel`, so they're unaffected.)
 
+The composer stays usable while that turn runs. The server allows one turn per
+session (a second `POST /chat` for the same session gets a 409), so a message
+typed mid-turn is **queued in the browser**: Enter parks it in the thread,
+dimmed and labelled, and it is sent on its own the moment the reply lands. Only
+a completed reply releases the next one — a stopped or failed turn hands the
+queue back to the composer, and a confirmation card or busy offer holds it, so
+a queued message never fires itself into a decision you haven't made yet. The
+button is unaffected: while a turn runs it is still Stop.
+
 Every system prompt gets two persona layers prepended automatically (via
 `with_identity()`), in order:
 1. **`agent/wren.md`** — Wren's own identity: name, voice, personality traits.

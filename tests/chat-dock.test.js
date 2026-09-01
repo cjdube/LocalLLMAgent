@@ -165,11 +165,12 @@ describe("sending a turn", () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  test("locks the composer and shows typing dots while the turn runs", () => {
+  test("shows typing dots and turns Send into Stop while the turn runs", () => {
     pendingTurn();
     submit("hello");
     expect(dots()).toHaveLength(3);
-    expect(input().disabled).toBe(true);
+    // The composer is NOT locked: a message typed now is queued, not lost.
+    expect(input().disabled).toBe(false);
     // The button stays enabled during a turn — it is the Stop control.
     expect(sendBtn().disabled).toBe(false);
     expect(sendBtn().textContent).toBe("Stop");
@@ -511,7 +512,7 @@ describe("frontier escalation", () => {
     expect(escBtn()).toBeNull();
   });
 
-  test("clicking redo posts to /chat/escalate and locks the composer", async () => {
+  test("clicking redo posts to /chat/escalate and runs it as a turn", async () => {
     resolvesWith(LOCAL);
     submit("hello");
     await settle();
@@ -523,7 +524,7 @@ describe("frontier escalation", () => {
       body: JSON.stringify({}),
     }));
     expect(dots()).toHaveLength(3);
-    expect(input().disabled).toBe(true);
+    expect(sendBtn().textContent).toBe("Stop");
   });
 
   test("an escalated reply is badged and offers no further redo", async () => {
@@ -642,6 +643,133 @@ describe("the busy offer", () => {
 // both are asserted here: Up recalls, AND Up still moves the caret between the
 // lines of a message you are writing. Gating recall on caret position is what
 // buys the second half, so the caret tests are as load-bearing as the rest.
+describe("queueing a message mid-turn", () => {
+  function press(key, opts = {}) {
+    return input().dispatchEvent(new KeyboardEvent("keydown",
+      { key, bubbles: true, cancelable: true, ...opts }));
+  }
+
+  const queuedBubbles = () => messages().querySelectorAll(".msg.user.queued");
+
+  // Type into the composer while a turn is running and press Enter.
+  function queue(text) {
+    input().value = text;
+    press("Enter");
+  }
+
+  test("Enter mid-turn queues instead of posting a second turn", () => {
+    pendingTurn();
+    submit("first");
+    queue("second");
+    // Still one POST: the server allows one turn per session, so the second
+    // message waits rather than earning a 409.
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(queuedBubbles()).toHaveLength(1);
+    expect(queuedBubbles()[0].textContent).toBe("second");
+    expect(input().value).toBe("");  // the composer is free for the next one
+  });
+
+  test("the queued message is sent when the reply lands, in its own bubble", async () => {
+    resolvesWith({ type: "final", text: "answer one" });
+    submit("first");
+    queue("second");
+    await settle();
+
+    expect(global.fetch).toHaveBeenLastCalledWith("/chat", expect.objectContaining({
+      body: JSON.stringify({ message: "second" }),
+    }));
+    expect(queuedBubbles()).toHaveLength(0);  // it un-dims where it already sat
+    expect(messages().querySelectorAll(".msg.user")).toHaveLength(2);
+    expect(messages().querySelectorAll(".msg.wren:not(.typing)")).toHaveLength(3);
+  });
+
+  test("several queued messages go one at a time, oldest first", async () => {
+    resolvesWith({ type: "final", text: "ok" });
+    submit("first");
+    queue("second");
+    queue("third");
+    expect(queuedBubbles()).toHaveLength(2);
+    expect(global.fetch).toHaveBeenCalledTimes(1);  // one turn at a time
+
+    await settle();
+    const sent = global.fetch.mock.calls.map((c) => JSON.parse(c[1].body).message);
+    expect(sent).toEqual(["first", "second", "third"]);
+    expect(queuedBubbles()).toHaveLength(0);
+  });
+
+  test("the button still stops the running turn — Stop is not a send", () => {
+    pendingTurn();
+    submit("first");
+    queue("second");
+    submit();
+    expect(global.fetch).toHaveBeenLastCalledWith("/chat/cancel", { method: "POST" });
+  });
+
+  test("a stopped turn hands the queue back to the composer", async () => {
+    resolvesWith({ type: "cancelled" });
+    submit("first");
+    queue("second");
+    await settle();
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);  // nothing auto-sent
+    expect(queuedBubbles()).toHaveLength(0);
+    expect(input().value).toBe("second");
+  });
+
+  test("a failed turn hands the queue back too — nothing typed is lost", async () => {
+    global.fetch = jest.fn(() => Promise.reject(new TypeError("Failed to fetch")));
+    submit("first");
+    queue("second");
+    await settle();
+    expect(input().value).toBe("second");
+  });
+
+  test("a queue handed back keeps the draft that was already in the box", async () => {
+    resolvesWith({ type: "cancelled" });
+    submit("first");
+    queue("second");
+    input().value = "half a thought";
+    await settle();
+    expect(input().value).toBe("second\n\nhalf a thought");
+  });
+
+  test("a confirm card holds the queue — nothing fires into a pending decision", async () => {
+    resolvesWith({ type: "confirm", summary: "Send email", detail: "" });
+    submit("email them");
+    queue("and then what?");
+    await settle();
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(queuedBubbles()).toHaveLength(1);   // still waiting
+    expect(input().value).toBe("");            // and not handed back
+  });
+
+  test("the queue goes with the thread on a new chat", async () => {
+    pendingTurn();
+    submit("first");
+    queue("second");
+    document.getElementById("newChat").click();
+    await settle();
+    expect(queuedBubbles()).toHaveLength(0);
+
+    // Nothing left over to fire when the next turn lands.
+    resolvesWith({ type: "final", text: "ok" });
+    const before = global.fetch.mock.calls.length;
+    submit("fresh");
+    await settle();
+    expect(global.fetch.mock.calls.length).toBe(before + 1);
+  });
+
+  test("a queued message joins the Up-arrow history when it is queued", () => {
+    pendingTurn();
+    submit("first");
+    queue("second");
+    input().setSelectionRange(0, 0);
+    press("ArrowUp");
+    expect(input().value).toBe("second");
+  });
+});
+
 describe("message history", () => {
   function press(key, opts = {}) {
     return input().dispatchEvent(new KeyboardEvent("keydown",
