@@ -32,6 +32,14 @@ config/*.lock
 config/*.corrupt-*
 logs/*.log
 logs/*.log.bak
+# The model-usage ledger (agent/usage_ledger.py). Deliberately NOT a *.log — the
+# log viewer globs logs/*.log and this is structured data, not text — which also
+# means neither glob above covers it and it needs its own line.
+logs/usage.jsonl
+# locked() drops a sidecar lock file beside whatever it guards, and it now
+# guards something outside config/ — so the config/*.lock rule above no longer
+# covers every one of them.
+logs/*.lock
 # Retired tasks' logs, moved out of the *.log glob so they stop showing up in
 # `ls logs/`. Same personal data as the live logs, so ignore the whole dir —
 # logs/*.log above does NOT match a subdirectory. (Currently empty: its contents

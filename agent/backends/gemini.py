@@ -235,9 +235,18 @@ def _gemini_chat(
     message: dict = {"role": "assistant", "content": "".join(content_parts)}
     if tool_calls:
         message["tool_calls"] = tool_calls
+    # finish_reason may be an enum; str() so it logs — and stores — readably.
+    reason = str(finish_reason) if finish_reason is not None else None
+    # Popped by _llm_chat before this message goes any further. See the matching
+    # block in agent/loop.py:_ollama_chat.
+    message["_usage"] = {
+        "model": model,
+        "prompt_tokens": prompt_tokens,
+        "output_tokens": output_tokens,
+        "thinking_tokens": thinking_tokens,
+        "finish_reason": reason,
+    }
     if logger:
-        # finish_reason may be an enum; str() so it logs readably regardless.
-        reason = str(finish_reason) if finish_reason is not None else None
         logger.info(
             "gemini_chat model=%s prompt_tokens=%s output_tokens=%s "
             "thinking_tokens=%s finish_reason=%s",

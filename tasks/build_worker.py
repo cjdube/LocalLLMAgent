@@ -49,6 +49,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent.tools import clickup
+from agent.usage_ledger import record as record_usage
 from agent.tools.notify import notify
 from tasks import build_queue
 from tasks._common import notify_failure, setup_logger
@@ -290,6 +291,56 @@ def claude_argv(prompt: str, settings_path: Path) -> list:
     return argv
 
 
+def _record_claude_usage(payload: dict) -> None:
+    """Put one Claude Code run into the usage ledger.
+
+    This is the only place Wren spends Anthropic tokens, and until now the run's
+    own accounting was read, printed into the ClickUp report, and dropped — so
+    /activity would have shown a $0 month beside builds that plainly cost money.
+    Unlike the Ollama and Gemini paths the price is not estimated here: the CLI
+    reports what it was actually charged, and that figure is passed straight
+    through as cost_usd.
+
+    `modelUsage` breaks a run down per model when the CLI reports it (one run can
+    touch more than one), and a row per model is what keeps the by-model chart
+    honest. Without it the run is still recorded, attributed to "claude-code" —
+    a row with no model name is far less of a loss than a spend with no row.
+    """
+    per_model = payload.get("modelUsage")
+    if isinstance(per_model, dict) and per_model:
+        for name, raw in per_model.items():
+            u = raw if isinstance(raw, dict) else {}
+            record_usage(
+                agent="wren", task="build_worker", backend="anthropic",
+                model=name, caller="claude_code",
+                prompt_tokens=u.get("inputTokens") or u.get("input_tokens"),
+                output_tokens=u.get("outputTokens") or u.get("output_tokens"),
+                duration_ms=payload.get("duration_ms"),
+                cost_usd=u.get("costUSD"),
+                finish_reason=_turns_note(payload),
+            )
+        return
+    raw_usage = payload.get("usage")
+    usage = raw_usage if isinstance(raw_usage, dict) else {}
+    record_usage(
+        agent="wren", task="build_worker", backend="anthropic",
+        model="claude-code", caller="claude_code",
+        prompt_tokens=usage.get("input_tokens"),
+        output_tokens=usage.get("output_tokens"),
+        duration_ms=payload.get("duration_ms"),
+        cost_usd=payload.get("total_cost_usd"),
+        finish_reason=_turns_note(payload),
+    )
+
+
+def _turns_note(payload: dict) -> str | None:
+    """A Claude Code run has no single stop reason — it is many turns. How many
+    it took is the nearest useful thing, and it is what distinguishes a build
+    that went round in circles from one that landed first try."""
+    turns = payload.get("num_turns")
+    return f"{turns} turns" if turns is not None else None
+
+
 def run_claude(worktree: Path, prompt: str, logger) -> dict:
     """One Claude Code run. Never raises; returns {"summary", "cost", "turns"}
     or {"error": ...}."""
@@ -327,6 +378,7 @@ def run_claude(worktree: Path, prompt: str, logger) -> dict:
     # In full, because report_text trims it and tells the reader to look here.
     if summary:
         logger.info(f"claude summary:\n{summary}")
+    _record_claude_usage(payload)
     return {
         "summary": summary,
         "cost": payload.get("total_cost_usd"),

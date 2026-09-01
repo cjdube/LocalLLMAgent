@@ -579,6 +579,29 @@ says which. Backed by `GET /api/logs` and `GET /api/logs/entries` in
 `chat/routes_logs.py`, over the reader in `chat/logview.py`. See
 [docs/logs.md](docs/logs.md).
 
+### Activity
+
+`http://127.0.0.1:8420/activity` shows how the models are actually being used
+(same auth as the dashboard), over a 7 / 30 / 90 day window: total tokens with
+the prompt/output split, call count and median duration, cloud cost, and a count
+of calls that were cut off or failed — then tokens per day stacked by model, and
+breakdowns by agent and by job.
+
+Every model call appends one JSON line to `logs/usage.jsonl` (`agent/usage_ledger.py`),
+written at the single backend seam in `agent/loop.py`, so local Ollama calls,
+Gemini calls and Claude Code build runs all land in the same ledger.
+**Local calls are free**, and the page says so rather than hiding them — the
+cost card reads `$0.00` next to "198 of 214 free on device", which is the number
+that makes a small cloud bill make sense. Cloud cost is *estimated* from a
+hand-maintained price table; Claude Code runs report what they were actually
+charged. A model missing from that table counts as *unpriced*, never as free.
+
+History starts the day this shipped — nothing was back-filled from the old log
+lines. The page also reads ScribeJay's and ObsidianWikiAgent's ledgers when
+those exist; until each is instrumented, its row simply reads empty. Backed by
+`GET /api/usage` in `chat/routes_usage.py` over `chat/usage.py`. See
+[docs/usage-ledger.md](docs/usage-ledger.md).
+
 ### Memories
 
 `http://127.0.0.1:8420/memories` is a read-only view of `memory.py`'s store

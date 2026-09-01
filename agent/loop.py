@@ -24,6 +24,7 @@ from agent import prefs
 # local-only path. (Imported here rather than lazily inside _llm_chat so the
 # tests' loop._gemini_chat reference resolves.)
 from agent.backends.gemini import GEMINI_DEFAULT_MODEL, _gemini_chat
+from agent.usage_ledger import record as record_usage
 
 _ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(_ROOT / "config" / ".env")
@@ -255,7 +256,7 @@ def _ollama_chat(
 
     content_parts: list[str] = []
     tool_calls: list[dict] = []
-    prompt_tokens = eval_tokens = None
+    prompt_tokens = eval_tokens = done_reason = None
     # Tracked so a timeout can say whether the stream never started (queued
     # behind another request, or a wedged runner) or died mid-reply.
     got_bytes = False
@@ -280,6 +281,10 @@ def _ollama_chat(
                     # The terminal chunk carries the token accounting.
                     prompt_tokens = chunk.get("prompt_eval_count")
                     eval_tokens = chunk.get("eval_count")
+                    # 'stop' normally, 'length' when num_predict cut the reply
+                    # off. The warning below infers that from the counts; the
+                    # ledger records the server's own word for it.
+                    done_reason = chunk.get("done_reason")
     except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
         # Both arrive as a bare "connection failed" that blames the network for
         # what is usually a busy or wedged server; _diagnose_stall probes Ollama
@@ -293,6 +298,17 @@ def _ollama_chat(
     message: dict = {"role": "assistant", "content": "".join(content_parts)}
     if tool_calls:
         message["tool_calls"] = tool_calls
+    # Handed up to _llm_chat, which POPS it before the message goes anywhere
+    # else. It rides on the message rather than changing this function's return
+    # type because advance() and every test that stubs a backend expect a plain
+    # message dict back; see _llm_chat for why the pop is load-bearing.
+    message["_usage"] = {
+        "model": model,
+        "prompt_tokens": prompt_tokens,
+        "output_tokens": eval_tokens,
+        "num_ctx": num_ctx,
+        "finish_reason": done_reason,
+    }
 
     if logger:
         # prompt_eval_count is the actual prompt size Ollama processed; compare
@@ -609,6 +625,19 @@ def _latex_to_unicode(text: str) -> str:
     return _LATEX_RE.sub(lambda m: _LATEX_SYMBOLS[m.group(1) or m.group(2)], text)
 
 
+def _default_model(backend: str, model: Optional[str]) -> Optional[str]:
+    """The model name a backend would resolve to, for a call that failed before
+    it could report one. Mirrors the defaulting inside _ollama_chat and
+    _gemini_chat — a failure row naming no model is a row you can't act on."""
+    if model:
+        return model
+    if backend == "ollama":
+        return os.getenv("OLLAMA_MODEL", "gemma4")
+    if backend in ("gemini", "google"):
+        return os.getenv("WREN_GEMINI_MODEL", GEMINI_DEFAULT_MODEL)
+    return None
+
+
 def _llm_chat(
     messages: list[dict],
     backend: Optional[str] = None,
@@ -619,6 +648,7 @@ def _llm_chat(
     logger: Optional[logging.Logger] = None,
     should_cancel: Optional[Callable[[], bool]] = None,
     think: Optional[bool] = None,
+    caller: Optional[str] = None,
 ) -> dict:
     """Dispatch a chat completion to the selected backend, returning the same
     canonical `message` dict shape regardless of provider.
@@ -627,17 +657,64 @@ def _llm_chat(
     scratchpad shouldn't compete for it. Only the Ollama path acts on it; the
     Gemini backend already defaults its thinking budget to 0 and exposes
     WREN_GEMINI_THINKING_BUDGET as the per-model override (some models reject
-    0 outright), so forcing it there would break more than it fixed."""
+    0 outright), so forcing it there would break more than it fixed.
+
+    Being the one seam both backends pass through, this is also where every
+    model call is written to the usage ledger — one write site, so a third
+    backend cannot be added and silently go unmeasured. `caller` says which
+    entry point asked ("advance" or "complete_text"), which is the only thing
+    separating a chat turn from a scheduled one-shot inside wren.log's rows."""
     b = _resolve_backend(backend)
-    if b == "ollama":
-        message = _ollama_chat(messages, model=model, host=host, tools=tools,
-                               timeout=timeout, logger=logger, should_cancel=should_cancel,
-                               think=think)
-    elif b in ("gemini", "google"):
-        message = _gemini_chat(messages, model=model, tools=tools, timeout=timeout,
-                               logger=logger, should_cancel=should_cancel, think=think)
-    else:
-        raise ValueError(f"unknown WREN_LLM_BACKEND {b!r} (expected 'ollama' or 'gemini')")
+    t0 = time.monotonic()
+
+    def _record(usage: dict, ok: bool = True, error: Optional[str] = None,
+                finish_reason: Optional[str] = None) -> None:
+        record_usage(
+            agent="wren",
+            # setup_logger names each logger after its task, so this is
+            # "morning_brief"/"daily_synthesis"/... for free, and "wren" for the
+            # chat server. A call made without a logger has nothing to say.
+            task=(logger.name if logger is not None else "unknown"),
+            backend=b,
+            model=usage.get("model") or model,
+            prompt_tokens=usage.get("prompt_tokens"),
+            output_tokens=usage.get("output_tokens"),
+            thinking_tokens=usage.get("thinking_tokens"),
+            num_ctx=usage.get("num_ctx"),
+            duration_ms=round((time.monotonic() - t0) * 1000),
+            finish_reason=finish_reason or usage.get("finish_reason"),
+            caller=caller,
+            tools_offered=(len(tools) if tools is not None else 0),
+            ok=ok,
+            error=error,
+        )
+
+    try:
+        if b == "ollama":
+            message = _ollama_chat(messages, model=model, host=host, tools=tools,
+                                   timeout=timeout, logger=logger, should_cancel=should_cancel,
+                                   think=think)
+        elif b in ("gemini", "google"):
+            message = _gemini_chat(messages, model=model, tools=tools, timeout=timeout,
+                                   logger=logger, should_cancel=should_cancel, think=think)
+        else:
+            raise ValueError(f"unknown WREN_LLM_BACKEND {b!r} (expected 'ollama' or 'gemini')")
+    except TurnCancelled:
+        # The user pressed stop. Tokens were still generated and the wait was
+        # still real, so the call is recorded — but ok stays True, because
+        # counting a cancel as a failure would bury the failures that matter.
+        _record({"model": _default_model(b, model)}, finish_reason="cancelled")
+        raise
+    except Exception as e:
+        _record({"model": _default_model(b, model)}, ok=False,
+                error=f"{e.__class__.__name__}: {e}")
+        raise
+
+    # POP, not read: advance() appends this message straight into the history it
+    # re-sends on the next iteration, so a leaked _usage key would be shipped
+    # back to the model as part of its own prior turn.
+    usage = message.pop("_usage", None) or {}
+    _record(usage)
     content = _strip_think_markup(message.get("content") or "")
     message["content"] = _latex_to_unicode(content)
     return message
@@ -856,6 +933,7 @@ def advance(
         message = _llm_chat(
             messages, backend=backend, model=model, host=host, tools=tools,
             logger=logger, should_cancel=should_cancel, timeout=timeout,
+            caller="advance",
         )
         messages.append(message)
 
@@ -976,6 +1054,7 @@ def advance(
     message = _llm_chat(
         messages, backend=backend, model=model, host=host, tools=None,
         logger=logger, should_cancel=should_cancel, timeout=timeout,
+        caller="advance_out_of_steps",
     )
     messages.append(message)
     return {"type": "final", "text": message.get("content", ""),
@@ -1048,5 +1127,6 @@ def complete_text(
         timeout=timeout,
         logger=logger,
         think=think,
+        caller="complete_text",
     )
     return message.get("content", "").strip()

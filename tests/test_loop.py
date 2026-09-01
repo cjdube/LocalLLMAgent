@@ -1542,3 +1542,141 @@ def test_every_probe_outcome_writes_exactly_one_line(monkeypatch, caplog):
         lines = [r for r in caplog.records if "local model probe:" in r.message]
         assert len(lines) == 1, f"{verdict}: {[r.message for r in lines]}"
         assert verdict in caplog.text
+
+
+# --- usage ledger ---------------------------------------------------------
+#
+# _llm_chat is the one write site for the model-usage ledger. The guarantee has
+# two halves and both are asserted: the row IS written, and the private _usage
+# key the backends use to carry the counts is POPPED off the returned message.
+#
+# The pop is the half that would rot silently. advance() appends the returned
+# message straight into the history it re-sends, so a leaked _usage key gets
+# shipped back to the model as part of its own prior turn — which no test of
+# "was a row written?" would ever notice.
+
+
+@pytest.fixture
+def ledger(monkeypatch):
+    """Capture record_usage kwargs instead of writing a file."""
+    rows = []
+    monkeypatch.setattr(loop, "record_usage", lambda **kw: rows.append(kw))
+    return rows
+
+
+def _one_ollama_call(monkeypatch, chunks=None, **kwargs):
+    captured = {}
+    _patch_post_chunks(monkeypatch, captured, chunks or [{
+        "message": {"role": "assistant", "content": "hi"},
+        "done": True, "done_reason": "stop",
+        "prompt_eval_count": 1234, "eval_count": 56,
+    }])
+    return loop._llm_chat([{"role": "user", "content": "hey"}], **kwargs)
+
+
+def test_llm_chat_records_the_ollama_call(monkeypatch, ledger):
+    monkeypatch.setenv("WREN_LLM_BACKEND", "ollama")
+    monkeypatch.setenv("OLLAMA_NUM_CTX", "49152")
+    logger = logging.getLogger("morning_brief")
+
+    _one_ollama_call(monkeypatch, logger=logger, caller="complete_text")
+
+    assert len(ledger) == 1
+    row = ledger[0]
+    assert row["agent"] == "wren"
+    assert row["task"] == "morning_brief"      # setup_logger already named it
+    assert row["backend"] == "ollama"
+    assert row["caller"] == "complete_text"
+    assert row["prompt_tokens"] == 1234
+    assert row["output_tokens"] == 56
+    assert row["num_ctx"] == 49152
+    assert row["finish_reason"] == "stop"
+    assert row["ok"] is True
+    assert isinstance(row["duration_ms"], int)
+
+
+def test_llm_chat_pops_usage_off_the_returned_message(monkeypatch, ledger):
+    """The other half. A leaked key is fed back to the model, not just to us."""
+    monkeypatch.setenv("WREN_LLM_BACKEND", "ollama")
+
+    message = _one_ollama_call(monkeypatch)
+
+    assert ledger, "no row written — the pop test would pass vacuously"
+    assert "_usage" not in message
+    assert message["content"] == "hi"
+
+
+def test_tools_offered_separates_a_chat_turn_from_a_template_fill(monkeypatch, ledger):
+    monkeypatch.setenv("WREN_LLM_BACKEND", "ollama")
+
+    _one_ollama_call(monkeypatch)                       # complete_text: no tools
+    _one_ollama_call(monkeypatch, tools=[{"a": 1}, {"b": 2}])
+
+    assert ledger[0]["tools_offered"] == 0
+    assert ledger[1]["tools_offered"] == 2
+
+
+def test_a_cut_off_reply_records_the_reason(monkeypatch, ledger):
+    # 'length' is Ollama's word for "ran out of budget", not "was done".
+    monkeypatch.setenv("WREN_LLM_BACKEND", "ollama")
+    _one_ollama_call(monkeypatch, chunks=[{
+        "message": {"role": "assistant", "content": "half a "},
+        "done": True, "done_reason": "length",
+        "prompt_eval_count": 10, "eval_count": 2048,
+    }])
+    assert ledger[0]["finish_reason"] == "length"
+
+
+def test_a_failed_call_is_recorded_and_still_raises(monkeypatch, ledger):
+    monkeypatch.setenv("WREN_LLM_BACKEND", "ollama")
+
+    def boom(*a, **kw):
+        raise loop.OllamaUnavailable("ollama is not answering")
+    monkeypatch.setattr(loop, "_ollama_chat", boom)
+
+    with pytest.raises(loop.OllamaUnavailable):
+        loop._llm_chat([{"role": "user", "content": "hey"}])
+
+    assert ledger[0]["ok"] is False
+    assert "OllamaUnavailable" in ledger[0]["error"]
+
+
+def test_a_user_cancel_is_recorded_but_is_not_a_failure(monkeypatch, ledger):
+    # Counting cancels as failures would bury the failures that matter.
+    monkeypatch.setenv("WREN_LLM_BACKEND", "ollama")
+
+    def cancelled(*a, **kw):
+        raise loop.TurnCancelled()
+    monkeypatch.setattr(loop, "_ollama_chat", cancelled)
+
+    with pytest.raises(loop.TurnCancelled):
+        loop._llm_chat([{"role": "user", "content": "hey"}])
+
+    assert ledger[0]["ok"] is True
+    assert ledger[0]["finish_reason"] == "cancelled"
+
+
+def test_the_gemini_path_records_thinking_tokens(monkeypatch, ledger):
+    monkeypatch.setenv("WREN_LLM_BACKEND", "gemini")
+
+    def fake_gemini(messages, **kwargs):
+        return {"role": "assistant", "content": "ok", "_usage": {
+            "model": "gemini-2.5-flash", "prompt_tokens": 900,
+            "output_tokens": 40, "thinking_tokens": 128, "finish_reason": "STOP"}}
+    monkeypatch.setattr(loop, "_gemini_chat", fake_gemini)
+
+    message = loop._llm_chat([{"role": "user", "content": "hey"}], caller="advance")
+
+    row = ledger[0]
+    assert row["backend"] == "gemini"
+    assert row["model"] == "gemini-2.5-flash"
+    assert row["thinking_tokens"] == 128
+    assert "_usage" not in message
+
+
+def test_recording_never_breaks_a_turn(monkeypatch):
+    """record() swallows its own errors, but assert the seam too — this runs on
+    every single chat turn."""
+    monkeypatch.setenv("WREN_LLM_BACKEND", "ollama")
+    message = _one_ollama_call(monkeypatch)   # real record_usage, tmp_path ledger
+    assert message["content"] == "hi"

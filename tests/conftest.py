@@ -127,6 +127,7 @@ from agent.tools import opportunities as _opportunities
 from agent.tools import projects as _projects_tool
 from agent.tools import push_log as _push_log
 from agent.tools import reminders as _reminders
+from agent import usage_ledger as _usage_ledger
 from chat import insights as _insights
 from agent.tools import clickup as _clickup
 from chat import wikilint as _wikilint
@@ -155,6 +156,13 @@ _REAL_LOGS_DIR = Path(_common.__file__).resolve().parent.parent / "logs"
 _TEST_LOGS_DIR = Path(tempfile.mkdtemp(prefix="wren-test-logs-"))
 os.environ["WREN_LOGS_DIR"] = str(_TEST_LOGS_DIR)
 _common.LOGS_DIR = _TEST_LOGS_DIR
+# Same import-time binding, same fix: agent/usage_ledger.py resolves its path
+# once at import, and agent.loop imports it — which the line above is far too
+# late to catch, because conftest's own imports have already run it. Every model
+# call in the suite writes a row, so without this the real logs/usage.jsonl
+# fills with fixture traffic and the /activity page reports it as real usage.
+_usage_ledger.LOGS_DIR = _TEST_LOGS_DIR
+_usage_ledger.LEDGER_PATH = _TEST_LOGS_DIR / "usage.jsonl"
 
 
 def _forbid_production_log_handlers() -> None:
@@ -185,6 +193,18 @@ def _forbid_production_log_handlers() -> None:
 
 
 _forbid_production_log_handlers()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_usage_ledger(tmp_path, monkeypatch):
+    """Per-test ledger, on top of the import-time redirect above.
+
+    The redirect at import is what stops production from being touched; this is
+    what stops one test's rows from being visible to the next, so a test can
+    assert "exactly one row was written" and mean it.
+    """
+    monkeypatch.setattr(_usage_ledger, "LOGS_DIR", tmp_path)
+    monkeypatch.setattr(_usage_ledger, "LEDGER_PATH", tmp_path / "usage.jsonl")
 
 
 @pytest.fixture(autouse=True)

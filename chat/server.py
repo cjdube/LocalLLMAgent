@@ -60,6 +60,7 @@ from chat.login_throttle import LoginThrottle
 from chat.routes_dashboard import dashboard_bp
 from chat.routes_games import games_bp
 from chat.routes_logs import logs_bp
+from chat.routes_usage import usage_bp
 from chat.routes_opportunities import opportunities_bp
 from chat.routes_starred import starred_bp
 from chat.routes_wiki import wiki_bp
@@ -210,6 +211,7 @@ app.register_blueprint(dashboard_bp)
 app.register_blueprint(opportunities_bp)
 app.register_blueprint(games_bp)
 app.register_blueprint(logs_bp)
+app.register_blueprint(usage_bp)
 app.register_blueprint(starred_bp)
 app.register_blueprint(wiki_bp)
 
@@ -1085,6 +1087,7 @@ VIEW_PAGES = {
     "/opportunities": "opportunities.html",
     "/starred": "starred.html",
     "/logs": "logs.html",
+    "/activity": "activity.html",
     "/wiki": "wiki.html",
     "/wiki/lint": "wiki-lint.html",
     "/games": "games.html",
