@@ -3,6 +3,7 @@ model-facing send_email hardening, and the confirmation describers used by both
 the chat card and the background approval push."""
 
 import importlib
+import re
 import pkgutil
 
 import agent.tools
@@ -448,3 +449,34 @@ def test_reply_summary_reads_no_thread_when_there_is_no_thread_id(monkeypatch):
 def test_reply_detail_shows_the_body_being_sent():
     detail = toolset.describe_call_detail(_reply_call(thread_id="t1", body="Thursday works."))
     assert detail == "Thursday works."
+
+
+# Prose telling the model to invoke something: "use X", "call X", "via X".
+# Narrow on purpose. A bare snake_case word in a description is usually a
+# parameter (`days_ago`), a JSON field (`awaiting_approval`) or Gmail search
+# syntax (`newer_than`), and flagging those would need an allow-list that rots.
+# A directive is unambiguous: it is an instruction to dispatch.
+_DIRECTIVE_RE = re.compile(
+    r"\b(?:use|call|calling|via|through|then)\s+`?([a-z][a-z0-9]*(?:_[a-z0-9]+)+)`?"
+)
+
+
+def test_every_tool_a_description_tells_the_model_to_call_actually_dispatches():
+    """A description is the only place the model learns a tool exists, so a name
+    that never dispatches is a dead end it cannot recover from — it emits the
+    call, gets "unknown tool", and the user sees a turn that did nothing.
+
+    list_clickup_tasks pointed at `list_tasks` for a dated personal chore. There
+    is no list_tasks; the Google Tasks read is get_tasks. The same wrong name sat
+    in a comment three lines up and in README.md.
+    """
+    referenced = [
+        (tool["function"]["name"], target)
+        for tool in toolset.TOOLS
+        for target in _DIRECTIVE_RE.findall(tool["function"].get("description", ""))
+    ]
+    assert referenced, "no directives found — this guard would pass vacuously"
+
+    dangling = [f"{owner} -> {target}" for owner, target in referenced
+                if target not in toolset.DISPATCH]
+    assert dangling == []

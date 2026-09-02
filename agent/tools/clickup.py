@@ -1016,7 +1016,7 @@ def download_attachment(url: str, max_bytes: int = _MAX_ATTACHMENT_BYTES) -> dic
 # particular — the names come from the account on every call.
 #
 # Every tool is named "clickup" so the model can tell these apart from Google
-# Tasks' create_task/list_tasks, which are always loaded and own the bare word
+# Tasks' create_task/get_tasks, which are always loaded and own the bare word
 # "task". The name is the separator; the keyword gate is only the pre-loader.
 
 LIST_CLICKUP_SPACES_SCHEMA = {
@@ -1045,7 +1045,7 @@ LIST_CLICKUP_TASKS_SCHEMA = {
             "work he tracks. Each Task comes back with the Space and List it sits in, "
             "its status, its tags and when it last moved. Filter by Space, by List, or "
             "by status, or call it with nothing to see everything. This is ClickUp, not "
-            "his Google Tasks list — for a dated personal chore use list_tasks instead. "
+            "his Google Tasks list — for a dated personal chore use get_tasks instead. "
             "His ClickUp is NOT something you know: only the Tasks this tool returns "
             "exist. Never name a Task from your own knowledge, never guess that one is "
             "there, and if the tool returns nothing, say there are none. Use "
