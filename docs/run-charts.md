@@ -126,7 +126,7 @@ shows.
     The dashboard uses this: one grid per agent, drawn inside that agent's box,
     so a chart sits with the agent that owns the job. A page with no `#runChart`
     never fetches — the driven caller already has the data.
-- `chat/static/dashboard.html` — the agent boxes, the fold behaviour, and all
+- `chat/views/dashboard.html` — the agent boxes, the fold behaviour, and all
   the CSS. The chart line and card tint read `--ag` / `--ag-bg` off the
   enclosing `.house`, so a chart is drawn in its owner's colour.
 

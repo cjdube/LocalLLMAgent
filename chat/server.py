@@ -189,7 +189,26 @@ def _system_message_content() -> str:
     return with_identity(dated, logger)
 
 
-STATIC_DIR = Path(__file__).resolve().parent / "static"
+# Two directories, and the split is a security boundary, not tidiness.
+#
+# chat/static/ is served by Flask's own /static/<path:filename> route, which
+# runs before any of our handlers and checks nothing. Everything in it is
+# PUBLIC: the login page itself pulls /static/favicon.svg and
+# /static/apple-touch-icon.png before anyone has authenticated, so that route
+# has to stay open.
+#
+# chat/views/ is not served by that route at all. The page shells live here and
+# are reachable only through their gated handlers below (/ and VIEW_PAGES),
+# each of which calls _authenticated() first. They used to sit in static/, so
+# GET /static/dashboard.html handed the whole page to anyone who asked while
+# GET /dashboard correctly showed the login form — the shells carry no data,
+# but they carry the full internal API surface, the inline JS and the name of
+# every routine, on the one internet-adjacent surface we have.
+#
+# Keeping them in a directory Flask does not serve makes that structural. A new
+# page dropped in chat/views/ is private because of where it is, not because
+# someone remembered a rule.
+VIEWS_DIR = Path(__file__).resolve().parent / "views"
 
 app = Flask(__name__)
 app.secret_key = FLASK_SECRET_KEY
@@ -763,7 +782,7 @@ def _run_turn(sid: str, history: list, checkpoint: int, cancel: threading.Event,
 def index():
     if not _authenticated():
         return LOGIN_PAGE.format(error="")
-    return send_from_directory(STATIC_DIR, "index.html")
+    return send_from_directory(VIEWS_DIR, "index.html")
 
 
 @app.route("/login", methods=["POST"])
@@ -1098,7 +1117,7 @@ def _view_page(filename: str):
     def view():
         if not _authenticated():
             return LOGIN_PAGE.format(error="")
-        return send_from_directory(STATIC_DIR, filename)
+        return send_from_directory(VIEWS_DIR, filename)
     return view
 
 

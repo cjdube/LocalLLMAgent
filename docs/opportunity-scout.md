@@ -9,7 +9,7 @@ time.
 Code: `tasks/opportunity_digest.py` (pollers, scoring, digest),
 `agent/tools/opportunities.py` (the store and chat tools),
 `agent/tools/research.py` (company research briefs),
-`chat/static/opportunities.html` + routes in `chat/server.py` (the triage
+`chat/views/opportunities.html` + routes in `chat/server.py` (the triage
 page). It deliberately does NOT scrape LinkedIn or use paid data SaaS — see
 `AGENTS.md`'s data sourcing policy.
 

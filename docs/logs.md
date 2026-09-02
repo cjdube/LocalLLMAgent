@@ -122,7 +122,7 @@ catalogue `chat/logview.py` builds or 404s, so a key naming a file outside
 | --- | --- |
 | `chat/logview.py` | Catalogue, bounded reads, entry folding, filtering. No Flask. |
 | `chat/routes_logs.py` | `GET /api/logs`, `GET /api/logs/entries` |
-| `chat/static/logs.html` | The page and its CSS |
+| `chat/views/logs.html` | The page and its CSS |
 | `chat/static/log-view.js` | Rendering, highlighting, folding, paging |
 
 `chat/logview.py` runs standalone, like `chat/insights.py`:

@@ -168,8 +168,46 @@ def test_every_view_page_is_actually_registered_and_serves_its_file(auth_client)
     for rule, filename in srv.VIEW_PAGES.items():
         resp = auth_client.get(rule)
         assert resp.status_code == 200, rule
-        expected = (srv.STATIC_DIR / filename).read_bytes()
+        expected = (srv.VIEWS_DIR / filename).read_bytes()
         assert resp.get_data() == expected, rule
+
+
+def test_the_page_shells_are_not_reachable_through_flasks_static_route(client):
+    """Flask registers /static/<path:filename> itself, before any of our
+    handlers, and it authenticates nothing. While the shells lived in
+    chat/static/, GET /static/dashboard.html returned the whole page to an
+    unauthenticated caller — the full internal API surface, the inline JS and
+    the name of every routine — while GET /dashboard correctly showed the login
+    form. They live in chat/views/ now, which that route cannot reach.
+
+    Asserted against VIEW_PAGES rather than a hand-list so a page added later is
+    covered without anyone remembering to add it here."""
+    for filename in list(srv.VIEW_PAGES.values()) + ["index.html"]:
+        resp = client.get(f"/static/{filename}")
+        assert resp.status_code == 404, f"/static/{filename} is still served"
+
+
+def test_the_shells_really_do_live_outside_the_served_directory(client):
+    """Guard on the guard. The case above passes for the wrong reason if the
+    files were simply deleted, or if VIEW_PAGES went empty — both would 404 too.
+    Pin that each shell exists on disk in chat/views/, is absent from
+    chat/static/, and is still served by its own gated route."""
+    served = pathlib.Path(srv.__file__).resolve().parent / "static"
+    names = list(srv.VIEW_PAGES.values()) + ["index.html"]
+    assert names, "VIEW_PAGES is empty — the case above would pass vacuously"
+    for filename in names:
+        assert (srv.VIEWS_DIR / filename).is_file(), f"{filename} missing from views/"
+        assert not (served / filename).exists(), f"{filename} is back in static/"
+
+
+def test_the_public_assets_the_login_page_needs_are_still_public(client):
+    """The other half: the login form is rendered to callers who have not
+    authenticated and pulls its icons from /static/, so that route must stay
+    open. A fix that closed /static/ outright would break the login page's
+    appearance and nothing else would notice."""
+    for asset in ("favicon.svg", "apple-touch-icon.png", "nav.js", "chat-dock.js"):
+        resp = client.get(f"/static/{asset}")
+        assert resp.status_code == 200, f"/static/{asset} should be public"
 
 
 def test_the_auth_sweep_actually_covers_the_app():

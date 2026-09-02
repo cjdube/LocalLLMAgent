@@ -7,7 +7,7 @@ each repo's README and cached; the "latest release" and "installed" columns are
 filled from separate caches. All are precomputed by scheduled tasks, so the page
 loads instantly and the model never sits on the request path.
 
-Code: `chat/static/starred.html` + the `/starred` page route in `chat/server.py`
+Code: `chat/views/starred.html` + the `/starred` page route in `chat/server.py`
 and the `/api/starred` blueprint in `chat/routes_starred.py` (the view),
 `tasks/starred_blurbs.py` (the cached-blurb job),
 `tasks/starred_releases.py` (the cached-release job), `tasks/starred_installed.py`

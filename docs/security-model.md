@@ -174,6 +174,33 @@ it ingests untrusted web content *and* runs unattended — pointing it at a clou
 backend is the riskiest single switch. See [llm-backend.md](llm-backend.md) and
 [frontier-escalation.md](frontier-escalation.md).
 
+## The page shells sit outside the directory Flask serves
+
+Flask registers `/static/<path:filename>` itself, over `chat/static/`. That route
+runs **before** any handler here and authenticates nothing — which it must,
+because the login form is rendered to callers who have not authenticated yet and
+pulls its icons from `/static/`.
+
+Every gate in `chat/server.py` is a per-handler `if not _authenticated()`; there
+is no `before_request`. So while the eleven page shells lived in `chat/static/`,
+`GET /dashboard` correctly returned the login form while `GET
+/static/dashboard.html` returned the whole page to anybody. The shells hold no
+data — their APIs still answer 401 — but they do hold the complete internal API
+surface, all inline JS, and the name of every routine, on the one
+internet-adjacent surface there is.
+
+They live in `chat/views/` now (`VIEWS_DIR`), which that route cannot reach, and
+which `_view_page` and `/` read directly with `send_from_directory`. The property
+is structural rather than a rule to remember: a page is private because of the
+directory it is in.
+
+Closing `/static` outright is **not** the fix — it breaks the login page's icons,
+and nothing else would notice. `tests/test_server.py` pins both halves: no shell
+is reachable under `/static/`, and `favicon.svg` / `apple-touch-icon.png` /
+`nav.js` still are. A third case pins that the shells exist in `views/` and are
+absent from `static/`, so the first case cannot pass by the files simply having
+been deleted.
+
 ## Credentials never ride out inside an error string
 
 `requests` puts the request URL — query string and all, unredacted — inside its

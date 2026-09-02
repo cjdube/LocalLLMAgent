@@ -355,12 +355,21 @@ chat/
   routes_logs.py           # log-viewer JSON API (blueprint)
   insights.py              # no-Flask data layer: plists, logs, capabilities, /map
   logview.py               # no-Flask log reader behind routes_logs.py
-  static/index.html        # single-page chat UI (vanilla JS, no build step)
+  views/index.html         # single-page chat UI (vanilla JS, no build step)
+  static/chat-dock.js      # browser-side composer, rendering and link handling
 ```
 
 The conversation engine and auth stay in `server.py`; every feature API is a
 Flask blueprint, and `insights.py` and `logview.py` import no Flask at all so
 they stay unit-testable and runnable standalone.
+
+**`views/` and `static/` are a security boundary, not tidiness.** Flask serves
+`chat/static/` itself at `/static/<file>`, before any handler and without
+checking anything — so everything in it is public, which the login page needs
+for its icons. The page shells live in `chat/views/`, which that route cannot
+reach, so each one is reachable only through its gated handler. A new page goes
+in `views/`; put one in `static/` and it is readable by anyone who can reach the
+server.
 
 - **Tools available in chat:** the whole registry in `agent/toolset.py` — the
   same tools listed in the [`agent/tools/` table](#agenttools--one-module-per-capability)
@@ -484,8 +493,8 @@ chat server's token auth, so no separate login.
 chat/
   insights.py         # read/parse layer: plists -> schedules, logs -> runs,
                       # tool schemas -> capabilities, plus the run-now manager
-  static/dashboard.html  # single-page dashboard UI (vanilla JS, no build step)
-  static/run-chart.js # the run-duration charts (hand-rolled SVG, no library)
+  views/dashboard.html   # single-page dashboard UI — gated, not web-served
+  static/run-chart.js    # the run-duration charts (hand-rolled SVG, no library)
   static/favicon.svg  # Wren mark (cream wren on terracotta) — header logo + favicon
   static/{favicon-32,apple-touch-icon,icon-512}.png  # raster fallbacks
   static/scribejay.svg   # ScribeJay mark (cream jay on blue) — agent box + map node

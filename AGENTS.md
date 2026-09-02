@@ -10,7 +10,7 @@ Wren is a local-first personal AI agent: a Gemma model served by Ollama on a Mac
 
 Per-module detail is in [docs/module-map.md](docs/module-map.md). What binds a change:
 
-- `chat/` — Flask chat server (phone-reachable UI + API); pauses on gated writes for tap-to-confirm. A new API gets a `chat/routes_*.py` blueprint, never another route in `server.py`; a new **page** is one row in the `VIEW_PAGES` table, never a hand-written handler.
+- `chat/` — Flask chat server (phone-reachable UI + API); pauses on gated writes for tap-to-confirm. A new API gets a `chat/routes_*.py` blueprint, never another route in `server.py`; a new **page** is one row in the `VIEW_PAGES` table, never a hand-written handler, and its shell goes in `chat/views/` — Flask serves `chat/static/` itself at `/static/<file>` with no auth check, so a page left there is readable by anyone who can reach the server.
 - `agent/loop.py` — `advance()` (tool-calling loop) and `complete_text()` (one-shot, tool-free — what scheduled tasks use), both routed through the `_llm_chat` backend seam. `agent/backends/` holds the opt-in adapters.
 - `agent/toolset.py` — the single tool registry (`TOOLS`, `DISPATCH`) and gating sets (`WRITE_TOOLS`, `CONSEQUENTIAL_TOOLS`, `UNATTENDED_EXCLUDED_TOOLS`); one module per capability in `agent/tools/*.py`.
 - `agent/store.py` — locked/atomic JSON store primitives used by every store under `config/`.
