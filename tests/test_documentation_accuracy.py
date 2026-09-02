@@ -71,3 +71,33 @@ def test_canonical_rule_links_point_to_agents_md():
         if re.search(r"\]\([^)]*CLAUDE\.md", text):
             stale.append(str(path.relative_to(ROOT)))
     assert stale == []
+
+
+def _external_root_names(line: str) -> set[str]:
+    """The root NAMEs out of one WREN_EXTERNAL_TASK_ROOTS value.
+
+    Entries are `name=path`, comma-separated, and a path may carry a
+    `#local.<prefix>.` suffix — only the name before `=` matters here.
+    """
+    value = line.split("=", 1)[1].strip()
+    return {entry.split("=", 1)[0].strip() for entry in value.split(",") if "=" in entry}
+
+
+def test_env_example_federates_every_root_the_docs_describe():
+    """A root documented but missing from the example default is invisible: a
+    fresh checkout gets zero rows for it on /dashboard, /map and /logs, with no
+    error anywhere. That is what happened to ScribeJay when it split out on
+    2026-08-30 — four documents named it and the example did not.
+    """
+    pattern = re.compile(r"^WREN_EXTERNAL_TASK_ROOTS=.+$", re.MULTILINE)
+
+    documented: set[str] = set()
+    for path in sorted((ROOT / "docs").glob("*.md")):
+        for line in pattern.findall(path.read_text(encoding="utf-8")):
+            documented |= _external_root_names(line)
+    assert documented, "no documented roots found — this guard would pass vacuously"
+
+    example = pattern.findall((ROOT / "config" / ".env.example").read_text(encoding="utf-8"))
+    assert len(example) == 1, f"expected one active default, found {example}"
+
+    assert documented <= _external_root_names(example[0])
