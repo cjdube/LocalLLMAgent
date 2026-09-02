@@ -368,3 +368,93 @@ def test_clickup_state_round_trips_and_leaves_no_temp_files(tmp_path, monkeypatc
 
     assert mb._read_clickup_state() == 1787826143872
     assert list(tmp_path.glob("*.tmp")) == []
+
+
+# --------------------------------------------------------------------------- #
+# build_and_send_brief — the run-boundary lines the dashboard reads
+# --------------------------------------------------------------------------- #
+
+@pytest.fixture
+def brief_pipeline(monkeypatch, tmp_path):
+    """Stub every collaborator of build_and_send_brief and record the writes.
+
+    The pipeline itself is not under test here — the log lines it emits are, so
+    the fetches return the smallest shape each caller reads and `send_email` is
+    swapped per test.
+    """
+    written = {"starred": [], "clickup": []}
+
+    monkeypatch.setattr(mb, "fetch_weather", lambda **k: {"summary": "clear"})
+    monkeypatch.setattr(mb, "get_upcoming_events", lambda **k: {"events": []})
+    monkeypatch.setattr(mb, "get_tasks_due_soon", lambda **k: {"tasks": []})
+    monkeypatch.setattr(mb, "fetch_scores", lambda **k: {"games": []})
+    monkeypatch.setattr(mb, "resolve_backend", lambda *a, **k: "ollama")
+    monkeypatch.setattr(mb, "warm_model", lambda **k: None)
+    monkeypatch.setattr(mb, "complete_text", lambda **k: "a calm morning")
+    monkeypatch.setattr(mb, "fetch_starred_repos", lambda **k: {"repos": []})
+    monkeypatch.setattr(mb, "clickup_digest", lambda **k: {"checked_ms": 1787826143872})
+    monkeypatch.setattr(mb, "_read_starred_state", lambda: None)
+    monkeypatch.setattr(mb, "_read_clickup_state", lambda: None)
+    monkeypatch.setattr(mb, "_write_starred_state",
+                        lambda ts: written["starred"].append(ts))
+    monkeypatch.setattr(mb, "_write_clickup_state",
+                        lambda ms: written["clickup"].append(ms))
+    return written
+
+
+def _run_and_parse(logger_name="morning_brief"):
+    """Run the brief through a real setup_logger and hand the log it wrote to
+    the dashboard's own parser. Asserting on the parsed run — not on a
+    substring — is the point: the promise is what /map reports, and only
+    parse_runs decides that."""
+    from chat import insights
+    from tasks._common import LOGS_DIR, setup_logger
+
+    logger = setup_logger(logger_name)
+    result = mb.build_and_send_brief(logger=logger)
+    for handler in logger.handlers:
+        handler.flush()
+    runs = insights.parse_runs(LOGS_DIR / f"{logger_name}.log")
+    return result, runs
+
+
+def test_a_failed_send_is_not_reported_as_a_completed_run(brief_pipeline, monkeypatch):
+    """The dashboard reads run history out of these log lines, never out of exit
+    codes, so an unsent brief that still logged "run complete" showed a good
+    morning on exactly the mornings nothing arrived."""
+    monkeypatch.setattr(mb, "send_email", lambda **k: {"error": "SMTP refused"})
+
+    result, runs = _run_and_parse()
+
+    assert result == {"error": "SMTP refused"}
+    assert len(runs) == 1, f"expected one parsed run, got {runs}"
+    assert runs[0]["status"] == "failure"
+    assert "SMTP refused" in runs[0]["error"]
+
+
+def test_a_failed_send_does_not_advance_either_cursor(brief_pipeline, monkeypatch):
+    """Both cursors mean "reported through here". Advancing one on a brief that
+    was never delivered silently drops a day of starred activity or ClickUp
+    movement, with nothing to replay it from."""
+    monkeypatch.setattr(mb, "send_email", lambda **k: {"error": "SMTP refused"})
+
+    mb.build_and_send_brief(logger=None)
+
+    assert brief_pipeline["starred"] == []
+    assert brief_pipeline["clickup"] == []
+
+
+def test_a_delivered_brief_still_completes_and_advances_both_cursors(
+    brief_pipeline, monkeypatch
+):
+    """The other half of the guarantee. Without this case, deleting the
+    "run complete" line outright would pass the failure test above."""
+    monkeypatch.setattr(mb, "send_email", lambda **k: {"sent": True})
+
+    result, runs = _run_and_parse()
+
+    assert result == {"sent": True}
+    assert len(runs) == 1, f"expected one parsed run, got {runs}"
+    assert runs[0]["status"] == "success"
+    assert brief_pipeline["starred"], "starred cursor should advance on a good send"
+    assert brief_pipeline["clickup"] == [1787826143872]

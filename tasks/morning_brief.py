@@ -534,12 +534,22 @@ def build_and_send_brief(logger: Optional[logging.Logger] = None) -> dict:
         )
         if logger:
             logger.info(f"send_email -> {result}")
+        if "error" in result:
+            # send_email reports a failure by returning, not by raising, so
+            # without this the run fell through to the "run complete" line below
+            # and the dashboard showed a good morning on every morning the brief
+            # never arrived — it reads run history out of these lines, never out
+            # of exit codes. The ERROR line has to be written here: main() calls
+            # notify_failure() next, and that deliberately does not log.
+            if logger:
+                logger.error(f"Morning brief run failed: {result['error']}")
+            return result
 
-        if "error" not in result and not starred_error:
+        if not starred_error:
             _write_starred_state(starred_check_time)
         # Advanced independently of the starred cursor: a GitHub outage must not
         # skip a day of ClickUp activity, or the other way round.
-        if "error" not in result and not backlog_error and backlog.get("checked_ms"):
+        if not backlog_error and backlog.get("checked_ms"):
             _write_clickup_state(backlog["checked_ms"])
 
         if logger:
