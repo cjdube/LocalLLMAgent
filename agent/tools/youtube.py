@@ -7,7 +7,7 @@ what was loaded, not what was engaged with. The watch-history playlist has been
 non-functional through the API since ~2016, but the Likes playlist works.
 
 Library module, not a registered chat tool. Wren stopped carrying the capture
-tools when journaling moved to ScribeJay (scribejay/__init__.py): the callers now are
+tools when journaling moved to the ScribeJay repo: the callers now are
 ScribeJay's daily entries and Wren's tasks/daily_synthesis.py, which import the
 function directly. There is deliberately no TOOL_SCHEMA here — if you add one
 back, register it in agent/toolset.py or tests/test_toolset.py will fail.

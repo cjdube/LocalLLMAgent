@@ -33,12 +33,16 @@ activity to notes and projects, which is reasoning.
 
 That asymmetry is deliberate and it is the rule a change here can break:
 
-- Wren names ScribeJay in exactly four places — `WREN_EXTERNAL_TASK_ROOTS` in
-  `config/.env`, the `local.scribejay.` branch in `chat/insights.py:_agent_of`,
-  the `scribejay-` routine rows in the same file, and `SCRIBEJAY_CONFIG`
-  (`~/.scribejay/config.json`), which that file reads one key out of for the
-  `/map` agent's model label. All four are display, and the fourth is a plain
-  file read — no import, no shell — like the plists and logs.
+- Wren names ScribeJay only where a row or a label has to say the word, and
+  every one of those is display: `WREN_EXTERNAL_TASK_ROOTS` in `config/.env`;
+  in `chat/insights.py`, the `local.scribejay.` branch of `_agent_of`, the
+  `scribejay-` routine rows, the `_SOURCE_TITLES` spelling fix (so a row reads
+  "ScribeJay" and not "Scribejay"), and `SCRIBEJAY_CONFIG`
+  (`~/.scribejay/config.json`), which it reads one key out of for the `/map`
+  agent's model label; a log-grouping comment in `chat/logview.py`; and the
+  agent's colour and icon assets under `chat/static/` and `chat/views/map.html`.
+  Not one is an import or a shell-out. The config read is a plain file read,
+  like the plists and logs — that is the whole extent of the coupling.
 - ScribeJay names Wren nowhere. It has its own `.env`, its own venv, its own
   Google token, its own `SCRIBEJAY_*` backend chain, and its own copy of the
   launchd healer. Nothing it does depends on this repo existing.
@@ -57,7 +61,9 @@ and the group tables:
   `activity` tool group, and its `GROUP_KEYWORDS` entry.
 - `recolor_event` — coloring the past is journaling.
 
-Wren went from 55 registered tools to 51.
+Wren went from 55 registered tools to 51 at the time of the split. The registry
+has grown since — `len(TOOLS)` is 57 today — so read that as what the split
+removed, not as a current count.
 
 Two capture modules **stay** in `agent/tools/`: `tasks/daily_synthesis.py` calls
 `fetch_chrome_history` and `fetch_liked_videos`, and synthesis is Wren's. They

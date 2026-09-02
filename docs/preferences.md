@@ -195,8 +195,9 @@ overrides.
 - **The EDGAR fund-name noise filter** (`_FUND_NAME_RE` in
   `tasks/opportunity_digest.py`) — SEC Form D mechanics, not a preference;
   anyone scouting the same source wants the same filter.
-- **`agent/wren.md` / `agent/wren_chat.md`** — Wren's own voice and her
-  interactive behavior, deliberately impersonal; edit them directly if you want
+- **`agent/wren.md` / `agent/wren_chat.md` / `agent/wren_chat_tools.md`** —
+  Wren's own voice, her interactive behavior and what she can do with her tools,
+  all deliberately impersonal; edit them directly if you want
   a different agent. `agent/identity.md` (who she serves) is the personal one:
   gitignored like `preferences.json`, templated by
   `agent/identity.example.md`.

@@ -1,17 +1,20 @@
-"""Shared helpers for the daily activity reviews — ScribeJay's journaling entries
-(scribejay/daily_chrome_learnings.py, scribejay/daily_youtube_learnings.py,
-scribejay/ai_chat_learnings.py) and Wren's tasks/daily_synthesis.py.
+"""Helpers for the daily activity reviews, used here by tasks/daily_synthesis.py.
 
-They all follow the same shape — resolve the prior day, compact the fetched data
-to bound the prompt for the small local model, draft with the model, then persist
-to the Obsidian vault (emailing the draft if the vault write fails so an entry is
-never silently lost). This module holds the pieces they share.
+The shape is: resolve the prior day, compact the fetched data to bound the prompt
+for the small local model, draft with the model, then persist to the Obsidian
+vault (emailing the draft if the vault write fails, so an entry is never silently
+lost).
 
-It lives in agent/ rather than in either caller precisely BECAUSE both agents use
-it: ScribeJay must never import from tasks/, and Wren must never import from
-scribejay/, so anything they both need belongs to the shared substrate. Journaling-
-only rendering (the Liked-videos list, the empty-draft check) is not here — it is
-in scribejay/journal.py.
+ScribeJay's journaling entries follow the same shape and once shared this file.
+They no longer do: journaling left for its own repo on 2026-08-30 and took a COPY
+of these helpers with it (~/Projects/ScribeJay/scribejay/activity.py). The two are
+separate repos now, not two callers of one module — nothing here may import that
+checkout, and nothing there knows this repo exists (AGENTS.md, "One agent lives
+here"). So a fix made here does not reach ScribeJay's copy, or the other way
+round; that is the price of the split, and it was paid deliberately.
+
+Where a comment elsewhere in agent/ says "ScribeJay's <file>.py", it points into
+that sibling checkout for orientation. There is no scribejay/ directory here.
 """
 
 from datetime import datetime, timedelta

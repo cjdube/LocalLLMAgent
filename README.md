@@ -206,6 +206,17 @@ queue back to the composer, and a confirmation card or busy offer holds it, so
 a queued message never fires itself into a decision you haven't made yet. The
 button is unaffected: while a turn runs it is still Stop.
 
+The composer also recalls what you already sent, the way a shell does: **Up**
+walks back through your own past messages and **Down** walks forward, with
+whatever you were part-way through typing kept and handed back at the end of the
+walk. A repeated message is only stored once. Up is shared with the caret, so it
+only means "the message before this one" from the very start of the box —
+otherwise it keeps moving between the lines of a long message — and typing
+anything ends the walk and gives both arrows straight back. The list lives for
+the life of the page and deliberately survives **New chat**: re-asking the last
+question in a fresh thread is the common reason to reach for it. Nothing is
+persisted, so a reload starts empty.
+
 Every system prompt gets two persona layers prepended automatically (via
 `with_identity()`), in order:
 1. **`agent/wren.md`** — Wren's own identity: name, voice, personality traits.
@@ -217,14 +228,14 @@ Every system prompt gets two persona layers prepended automatically (via
    A checkout without it just runs on `wren.md` alone.
 
 Both are hand-maintained and deliberately short — every token is paid for on
-every call, scheduled or chat. A third file, **`agent/wren_chat.md`**, holds
-*behavioral* instructions (ask questions when useful; call a gated tool in the
-same turn rather than promising to — see
-[docs/model-constraints.md](docs/model-constraints.md)) that only make sense in
-an interactive session — it's loaded only by
-`chat/server.py`, not injected into scheduled tasks, since those are
-explicitly told not to ask questions or wait for confirmation (there's nobody
-to ask at 5am). Since every task and the chat server talk to Ollama through
+every call, scheduled or chat. Two more files are chat-only, split by what they
+describe. **`agent/wren_chat.md`** holds *behavioral* instructions (ask
+questions when useful; call a gated tool in the same turn rather than promising
+to — see [docs/model-constraints.md](docs/model-constraints.md)), and
+**`agent/wren_chat_tools.md`** describes what she can do with the tools she has.
+Both are loaded only by `chat/server.py`, not injected into scheduled tasks,
+since those are explicitly told not to ask questions or wait for confirmation
+(there's nobody to ask at 5am). Since every task and the chat server talk to Ollama through
 these functions, this is the only place persona/identity needs to be wired
 in — nothing new inherits it automatically.
 
@@ -233,6 +244,7 @@ in — nothing new inherits it automatically.
 | Module | Purpose |
 |---|---|
 | `weather.py` | OpenWeatherMap forecast for `DEFAULT_LOCATION` |
+| `sports.py` | Final scores for the followed teams (`fetch_scores`), from ESPN's public scoreboard API — one parser covers MLB, NBA and NFL. No key, three requests a day. ESPN buckets a day by **US Eastern** but stamps each event UTC, so the day asked for is the day taken, deliberately without re-filtering. The source is undocumented and outside the letter of the official-APIs-only rule in `AGENTS.md`; the tradeoff is written up in the module's own docstring |
 | `web_search.py` | Web search via Tavily API |
 | `web_fetch.py` | Fetch one web page as clean markdown via the Firecrawl API (`fetch_webpage`) — search finds pages, this reads one. Content is untrusted, scheme-validated, and capped (`WEB_FETCH_MAX_CHARS`) |
 | `evaluate_app.py` | Strategic teardown of a product from its website URL (`evaluate_app`) — a fixed pipeline (Firecrawl fetch → deterministic compaction → one model call) producing a skeptical VC-style analysis: hidden risks, adoption friction, missing technical constraints. See [docs/app-evaluator.md](docs/app-evaluator.md) |
@@ -254,6 +266,7 @@ in — nothing new inherits it automatically.
 | `skills.py` | Procedural memory (chat-only) — reusable how-to procedures composing the other tools: `list_skills`, `read_skill`, `write_skill` (create/overwrite), `delete_skill`. One Markdown file per skill under `skills/` (override with `WREN_SKILLS_DIR`); a capped title+one-line index is injected into the chat prompt so Wren knows what procedures exist, reading a body on demand. Writes are confirmation-gated |
 | `reminders.py` | Scheduled reminders — `set_reminder` (parses the time in Python via `dates.resolve_reminder_time`, not the model), `list_reminders`, `cancel_reminder`. Stored in `config/reminders.json`; the `reminder_sweep` task fires each due one as an `ntfy` phone push, then clears it — `push_log.py` keeps the record of what was sent. Set/cancel are confirmation-gated |
 | `schedule.py` | Read-only view of Wren's *own* launchd-scheduled tasks (`list_scheduled_tasks`) — the same schedule/next-run/last-status data the dashboard shows, so chat can answer "what do you run?" / "what's next?". Reuses the `chat.insights` dashboard data layer; distinct from the user's Google Tasks and reminders |
+| `games.py` | The registry of games Wren can play (`list_games`) — a game lives in its own repo and Wren is the front door: the `/games` page, a link that works from the phone, and the same local model chat runs. Read-only, and `available` is a live probe rather than a cached flag, so a game whose service is down is listed and greyed instead of offered as a dead link. The tool description states outright that the list is **not** something the model knows — without that it invented games. See [docs/games.md](docs/games.md) |
 | `background.py` | Background tasks — `run_in_background`, `list_background_jobs`, `get_job_result`. Jobs live in the bounded `config/bg_jobs.json` store; the `bg_worker` task runs them. Posture is "read/draft freely, tap-to-approve consequential actions". A job carries an `origin` recording where it came from, and `toolset.confirm_set_for()` turns that into the gate set — which is why `run_in_background` takes no origin parameter: the model must not choose its own gates. Also owns the HMAC-signed approval tokens and 24-hour approval expiry. See [docs/background.md](docs/background.md) |
 | `opportunities.py` | Opportunity signal store for the fractional-work scout — `list_opportunities`, `update_opportunity` (mark interested/dismissed), `watch_company`/`unwatch_company`. The `opportunity_digest` task fills it; full lifecycle in [docs/opportunity-scout.md](docs/opportunity-scout.md) |
 | `research.py` | Company research — a fixed pipeline, not a freeform agent task: bounded Tavily searches summarized into a fixed-template brief. `research_opportunity` enriches a scout item; `research_company` researches any company by name and returns the brief directly. Read-only; web snippets are untrusted display text. See [docs/opportunity-scout.md](docs/opportunity-scout.md) |
@@ -353,8 +366,13 @@ chat/
   routes_starred.py        # starred-repo API, live list + cached fallback (blueprint)
   routes_games.py          # games API, hosted bundles, AI proxy (blueprint)
   routes_logs.py           # log-viewer JSON API (blueprint)
+  routes_wiki.py           # wiki graph and lint API (blueprint)
+  routes_usage.py          # model-usage ledger API (blueprint)
   insights.py              # no-Flask data layer: plists, logs, capabilities, /map
   logview.py               # no-Flask log reader behind routes_logs.py
+  usage.py                 # no-Flask reader for logs/usage.jsonl behind routes_usage.py
+  wikigraph.py             # no-Flask link graph over the wiki vault
+  wikilint.py              # runs the sibling ObsidianWikiAgent checkout as a subprocess
   views/index.html         # single-page chat UI (vanilla JS, no build step)
   static/chat-dock.js      # browser-side composer, rendering and link handling
 ```
@@ -1012,9 +1030,15 @@ mostly useful if the Python process fails to start at all).
    register each in `agent/toolset.py` — `TOOLS`, `DISPATCH`, the right gating
    set — and slot it into `CORE_TOOL_NAMES` or a `TOOL_GROUP_NAMES` group so
    chat can offer it. The partition test in `tests/test_toolset.py` fails if you
-   skip the slotting; see [docs/tool-loading.md](docs/tool-loading.md).
+   skip the slotting; see [docs/tool-loading.md](docs/tool-loading.md). Then map
+   it in `chat/insights.py` `TOOL_SERVICES`, under the service it talks to — a
+   second drift-guard test fails otherwise, and an unmapped tool draws on `/map`
+   in a nameless "other" bucket.
 2. Write `tasks/<name>.py` with a `main() -> int`, using `setup_logger` and
-   `notify_failure` from `tasks/_common.py`. Decide upfront whether it needs the
+   `notify_failure` from `tasks/_common.py`. Log `Starting <name> run` on entry
+   and `<name> run complete` on every success path, and `logger.error` on the
+   failure path — the dashboard builds its run history from those lines and
+   never from exit codes, so a task without them reads as *has not run*. Decide upfront whether it needs the
    `advance()`/`resolve()` tool-calling loop (multi-step, like
    `tasks/bg_worker.py`) or `complete_text` (deterministic Python structure +
    one narrative paragraph from the model). Prefer `complete_text`
@@ -1039,11 +1063,13 @@ Run the suite from the repo root:
 .venv/bin/pytest        # or: .venv/bin/pytest -q
 ```
 
-The one exception to "this project is Python" is a quartet of shared browser
+The one exception to "this project is Python" is a handful of shared browser
 scripts. `chat/static/chat-dock.js` is the chat page's dock,
-`chat/static/run-chart.js` the dashboard's duration charts, and
+`chat/static/run-chart.js` the dashboard's duration charts,
 `chat/static/log-view.js` the `/logs` viewer's renderer (see
-[docs/logs.md](docs/logs.md)).
+[docs/logs.md](docs/logs.md)), `chat/static/usage-chart.js` the `/activity`
+cost charts, and `chat/static/wiki-graph.js` and `chat/static/wiki-lint.js` the
+two wiki views.
 `chat/static/nav.js` renders the top-nav menu on
 every view from one canonical list, with `chat/static/nav.css` owning its look
 and mobile-wrap behavior — so the menu stays consistent instead of drifting per
@@ -1051,10 +1077,9 @@ page. **Adding a new view?** Give its page three things and it inherits the menu
 automatically: `<link rel="stylesheet" href="/static/nav.css">` in the head, a
 `<nav id="wren-nav" class="wren-nav"></nav>` mount in the header, and
 `<script src="/static/nav.js"></script>` before `</body>`; then add the view to
-the `VIEWS` list in `nav.js` so every page links to it. All four have their own
-jest/jsdom suite under `tests/` (`chat-dock.test.js`, `run-chart.test.js`,
-`log-view.test.js`, `nav.test.js`) — install with `npm install` and run from the
-repo root:
+the `VIEWS` list in `nav.js` so every page links to it. Every one of the seven has its own
+jest/jsdom suite under `tests/`, named after it — install with `npm install`
+and run from the repo root:
 
 ```bash
 npm test

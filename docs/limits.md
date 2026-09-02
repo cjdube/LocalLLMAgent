@@ -301,6 +301,7 @@ tool-result problem. Their limits bound the **input** they compact into a prompt
 | `starred_blurbs` | `README_CHARS` 2000 |
 | `log_inspector` | `MAX_DETAIL_LINE` 150, and it fits its whole push inside `notify._MAX_MESSAGE_CHARS` |
 | `bg_worker` | `MAX_TRANSIENT_ATTEMPTS` 3 |
+| `build_worker` | `DEFAULT_TIMEOUT_S` 1800 (the whole Claude Code run, overridable with `WREN_BUILD_TIMEOUT_S`), `PYTEST_TIMEOUT_S` 600, `GIT_TIMEOUT_S` 60 — three separate bounds because a wedged test run and a wedged `git` fail differently, and neither should spend the build's whole budget |
 
 **`MAX_SYNTHESIS_ATTEMPTS = 2` is a different kind of limit** — it's a retry, not
 a cap. `daily_synthesis` keeps thinking **on** (it must reason past its prompt),
@@ -328,6 +329,7 @@ Listed for completeness, so they don't get confused with the ones above.
 | `chat/logview.py` | `WINDOW_BYTES` 512,000; `DEFAULT_LIMIT` 300; `MAX_LIMIT` 1000; `MAX_MSG_CHARS` 4000; `MAX_EXTRA_LINES` 200 | Bounded reads of append-only launchd logs that nothing rotates. |
 | `chat/routes_games.py` | `AI_TIMEOUT_S` 160, `WARMUP_TIMEOUT_S` 620, `MAX_GAME_BODY_BYTES` 2 MB | Proxy timeouts must stay **above** the browser's own budgets. |
 | `agent/escalations.py` | `MAX_RECORDS` 200 | Store pruning. |
+| `agent/usage_ledger.py` | `WREN_USAGE_MAX_BYTES` 5,000,000; `WREN_USAGE_RETENTION_DAYS` 90 | Size is the trigger, age is the rule: the size check is one `stat()` per model call, the rewrite is not. `logs/` is not blanket-gitignored and this file is written on every call. |
 | `agent/tools/push_log.py` | `_PRUNE_AFTER_DAYS` 30, `_MAX_ROWS` 500 | Age first, then a hard cap so a burst can't outrun the age window. |
 | `agent/tools/background.py` | `_TOKEN_MAX_AGE_S` 3600, `_MAX_APPROVAL_REPUSHES` 3, `_EXPIRE_AWAITING_AFTER_S` 86400, `_MAX_NONTERMINAL_JOBS` 100, `_MAX_STORED_JOBS` 500, `_LIST_LIMIT` 20 | Bounded approval reminders, job lifetime, polling store, and model-facing list. |
 | `chat/insights.py` | `_MEMORY_TEXT_MAX` 300, `_WIKI_PAGES_MAX` 150 | Dashboard rendering only. |

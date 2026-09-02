@@ -6,7 +6,7 @@ while Chrome is running) and returns meaningful site visits as JSON.
 Day boundaries are interpreted in the system's local timezone (not UTC).
 
 Library module, not a registered chat tool. Wren stopped carrying the capture
-tools when journaling moved to ScribeJay (scribejay/__init__.py): the callers now are
+tools when journaling moved to the ScribeJay repo: the callers now are
 ScribeJay's daily entries and Wren's tasks/daily_synthesis.py, which import the
 function directly. There is deliberately no TOOL_SCHEMA here — if you add one
 back, register it in agent/toolset.py or tests/test_toolset.py will fail.
@@ -174,13 +174,13 @@ def fetch_chrome_history(start: str = None, end: str = None, days_ago: int = Non
 
     `pages_per_domain` is a Python-only argument, deliberately absent from
     TOOL_SCHEMA: the model never sees it and chat's result shape is unchanged.
-    scribejay/daily_chrome_learnings.py passes it to get each domain's top paths.
+    ScribeJay's daily_chrome_learnings.py passes it to get each domain's top paths.
 
     `max_sites` is Python-only for the same reason, and defaults to capped
     rather than whole: a single day of browsing is 8897 chars, over the loop's
     8000-char tool-result cap, and the cut took `total_meaningful_visits` with
     it — the count is the LAST key, so the model got a short list and nothing
-    saying it was short. The two batch callers (scribejay/daily_chrome_learnings.py,
+    saying it was short. The two batch callers (ScribeJay's daily_chrome_learnings.py,
     tasks/daily_synthesis.py) pass max_sites=None: they summarize the whole day
     and have no context window to protect. Capped is the default so a new caller
     is safe by accident rather than broken by it.
