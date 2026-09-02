@@ -73,3 +73,9 @@ scratchpad
 # work not done yet, and the repo they are about is the one that should record
 # them once it lands. Craig carries these across by hand.
 docs/handoff/
+
+# Atomic-write leftovers. agent/store.py and agent/usage_ledger.py both write a
+# dot-prefixed mkstemp beside the target and unlink it on failure, so one only
+# survives a hard kill mid-write — but logs/ is not blanket-ignored, so when one
+# does survive it shows up as an untracked file staged by a careless `git add`.
+.*.tmp

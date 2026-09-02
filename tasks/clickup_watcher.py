@@ -310,9 +310,12 @@ def main() -> int:
         return 0
 
     if state.get("failures"):
+        # Only on a real change. Unconditionally this took locked() and rewrote
+        # the file to put {"failures": 0} over {"failures": 0}, every five
+        # minutes, forever. The guard was already here.
         logger.info(f"ClickUp reachable again after {state['failures']} failed poll(s)")
-    state["failures"] = 0
-    _save_state(state)
+        state["failures"] = 0
+        _save_state(state)
 
     for task in found["tasks"]:
         for tag in task["watched"]:

@@ -1180,6 +1180,22 @@ def test_every_registered_chat_tool_is_mapped_to_a_service():
     assert registered <= mapped, f"unmapped tools: {sorted(registered - mapped)}"
 
 
+def test_tool_services_has_no_entries_for_tools_that_do_not_exist():
+    # The other direction of the same drift, and the one nothing caught: a
+    # renamed or deleted tool leaves its old name behind in TOOL_SERVICES,
+    # where it goes on drawing an edge on /map to a service nothing talks to
+    # any more. ROUTINE_WRITES already has this reverse guard; this map did
+    # not. Both halves of the promise now bite.
+    import os
+    os.environ.setdefault("WREN_CHAT_TOKEN", "test-token")
+    os.environ.setdefault("FLASK_SECRET_KEY", "test-secret")
+    from chat import server as srv
+    mapped = {name for _, names in insights.TOOL_SERVICES.values() for name in names}
+    registered = {t["function"]["name"] for t in srv.TOOLS}
+    stale = mapped - registered
+    assert not stale, f"TOOL_SERVICES names tools that no longer exist: {sorted(stale)}"
+
+
 def test_system_map_routines_exclude_daemons(tmp_path, monkeypatch):
     _isolate_map_sources(tmp_path, monkeypatch)
     _write_plist(tmp_path / "foo.plist", {"Hour": 6, "Minute": 0})

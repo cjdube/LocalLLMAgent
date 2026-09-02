@@ -274,6 +274,38 @@ def test_the_failure_count_resets_once_clickup_answers(stub, monkeypatch):
     assert pushes == [], "the counter did not reset, so a blip still alerts"
 
 
+def test_a_healthy_poll_does_not_rewrite_the_state_file(stub, monkeypatch):
+    # This poller runs every five minutes and is healthy essentially always, so
+    # an unconditional save took the cross-process lock and rewrote the file to
+    # put {"failures": 0} over {"failures": 0}, 288 times a day, forever. The
+    # guard for it was already one line above the call.
+    saves = []
+    monkeypatch.setattr(clickup_watcher, "_save_state", lambda state: saves.append(state))
+    clickup_watcher.main()
+    assert saves == [], "a healthy poll rewrote the state file"
+
+
+def test_a_recovery_still_writes_the_reset(stub, monkeypatch):
+    # The other half: skipping the write when nothing changed must not skip it
+    # when something did, or the failure count never comes back down.
+    saves = []
+    real_save = clickup_watcher._save_state
+
+    def spy(state):
+        # Calls through: the guard reads the count back off disk on the next
+        # poll, so a recording-only stub would make the reset unobservable.
+        saves.append(dict(state))
+        real_save(state)
+
+    monkeypatch.setattr(clickup_watcher, "_save_state", spy)
+    stub.state["fetch_error"] = "connection refused"
+    clickup_watcher.main()
+    assert saves and saves[-1]["failures"] == 1
+    stub.state["fetch_error"] = None
+    clickup_watcher.main()
+    assert saves[-1]["failures"] == 0, "the reset was never persisted"
+
+
 def test_an_unreachable_clickup_is_not_a_failed_launchd_job(stub):
     stub.state["fetch_error"] = "connection refused"
     assert clickup_watcher.main() == 0

@@ -75,7 +75,13 @@ def api_runs(task_key: str):
     task = task_by_key(task_key)
     if task is None:
         return jsonify({"error": "unknown task"}), 404
-    runs = parse_runs(task["log_path"], limit=50)
+    # Same guard as /api/schedules one function up, and for the same two
+    # reasons: a daemon has no runs to show (parse_runs skips it by design), and
+    # its log is the one that never stops growing — wren.log and
+    # startup_recovery.log are 1.0 MB each, against 385 KB for the largest
+    # scheduled task. The runs cache is keyed on (mtime, size), so a log being
+    # appended to right now misses on every single request.
+    runs = [] if task["is_daemon"] else parse_runs(task["log_path"], limit=50)
     return jsonify({
         "task": {"key": task["key"], "display_name": task["display_name"],
                  "human_schedule": task["human_schedule"], "is_daemon": task["is_daemon"]},

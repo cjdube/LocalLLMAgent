@@ -26,6 +26,7 @@ showing up there as a "log" a human is invited to tail.
 import json
 import logging
 import os
+import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -129,9 +130,19 @@ def _prune_if_large(path: Path) -> None:
                 continue
             if not ts or ts >= cutoff:
                 kept.append(line)
-    tmp = path.with_suffix(".jsonl.tmp")
-    tmp.write_text("".join(kept), encoding="utf-8")
-    tmp.replace(path)
+    # Same shape as agent/store.py:atomic_write_json — a dot-prefixed mkstemp
+    # beside the target, replaced into place, and unlinked if anything throws.
+    # `path.with_suffix(".jsonl.tmp")` left a visible, untracked, multi-megabyte
+    # logs/usage.jsonl.tmp behind on a crash mid-prune, with nothing to clean it
+    # up and no .gitignore rule covering it.
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write("".join(kept))
+        os.replace(tmp, path)
+    except BaseException:
+        os.unlink(tmp)
+        raise
 
 
 def record(

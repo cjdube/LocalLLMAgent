@@ -172,3 +172,43 @@ def test_a_junk_env_value_falls_back_to_the_default(monkeypatch):
     monkeypatch.setenv("WREN_USAGE_MAX_BYTES", "lots")
     assert ul._retention_days() == 90
     assert ul._max_bytes() == 5_000_000
+
+
+def _tmp_leftovers():
+    """Any temp file the prune failed to clean up, dot-prefixed ones included."""
+    return sorted(p.name for p in ul.LEDGER_PATH.parent.glob("*.tmp"))
+
+
+def test_a_prune_leaves_no_leftover_beside_the_ledger(monkeypatch):
+    # logs/ is not blanket-gitignored, so a leftover shows up as an untracked
+    # multi-megabyte file with nothing to clean it up. Dot-prefixed and unique,
+    # the same shape agent/store.py:atomic_write_json uses.
+    ul.LEDGER_PATH.parent.mkdir(parents=True, exist_ok=True)
+    ul.LEDGER_PATH.write_text(
+        json.dumps({"ts": "2999-01-01T00:00:00", "model": "new"}) + "\n",
+        encoding="utf-8")
+    monkeypatch.setenv("WREN_USAGE_MAX_BYTES", "1")
+    ul.record("wren", "wren", "ollama", "m", prompt_tokens=1)
+    assert _tmp_leftovers() == [], "prune left a temp file behind"
+
+
+def test_a_crash_mid_prune_keeps_the_ledger_and_drops_the_temp_file(monkeypatch):
+    # The replace is the step that can fail on a full disk. Both halves: the
+    # rows already on disk survive, and the temp file is gone.
+    ul.LEDGER_PATH.parent.mkdir(parents=True, exist_ok=True)
+    ul.LEDGER_PATH.write_text(
+        json.dumps({"ts": "2999-01-01T00:00:00", "model": "new"}) + "\n",
+        encoding="utf-8")
+    monkeypatch.setenv("WREN_USAGE_MAX_BYTES", "1")
+
+    def boom(src, dst):
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(ul.os, "replace", boom)
+    # record() swallows everything by contract, so the failure shows up in what
+    # it left on disk, not in an exception.
+    ul.record("wren", "wren", "ollama", "crashed-during", prompt_tokens=1)
+
+    models = [r.get("model") for r in rows()]
+    assert models == ["new", "crashed-during"], "the ledger lost rows"
+    assert _tmp_leftovers() == [], "a failed prune left a temp file behind"

@@ -1447,6 +1447,51 @@ def test_api_schedules_says_which_agent_owns_each_task(auth_client, monkeypatch)
 
 
 # --------------------------------------------------------------------------- #
+# /api/runs/<task_key> (the dashboard's drill-in)
+# --------------------------------------------------------------------------- #
+
+def _runs_probe(monkeypatch, task):
+    """Route /api/runs at one task and record whether its log got parsed."""
+    from chat import routes_dashboard
+    parsed = []
+
+    def spy(log_path, limit=None):
+        parsed.append(log_path)
+        return [{"id": "r1", "start": "2026-09-02 06:00:00", "end": None,
+                 "duration_s": 1.0, "status": "success", "summary": "",
+                 "tool_calls": [], "error": None}]
+
+    monkeypatch.setattr(routes_dashboard, "task_by_key", lambda key: task)
+    monkeypatch.setattr(routes_dashboard, "parse_runs", spy)
+    return parsed
+
+
+def test_the_drill_in_does_not_parse_a_daemons_log(auth_client, monkeypatch):
+    # The two logs that never stop growing are both daemons — wren.log and
+    # startup_recovery.log, 1.0 MB each against 385 KB for the biggest
+    # scheduled task — and parse_runs finds nothing in them anyway, because
+    # daemons write no run boundaries. /api/schedules has always guarded this;
+    # the drill-in is the same call and needs the same guard.
+    task = _fake_task("bg_worker", "local.wren.bgworker", is_daemon=True)
+    parsed = _runs_probe(monkeypatch, task)
+    body = auth_client.get("/api/runs/bg_worker").get_json()
+    assert parsed == [], "a daemon's log was read"
+    assert body["runs"] == []
+    # The row still says what it is, so the page can explain the empty list.
+    assert body["task"]["is_daemon"] is True
+
+
+def test_the_drill_in_still_reads_a_scheduled_tasks_log(auth_client, monkeypatch):
+    # The other half: the guard must not empty the drill-in for the tasks it
+    # exists to show.
+    task = _fake_task("brief", "local.wren.brief")
+    parsed = _runs_probe(monkeypatch, task)
+    body = auth_client.get("/api/runs/brief").get_json()
+    assert parsed == [task["log_path"]]
+    assert [r["id"] for r in body["runs"]] == ["r1"]
+
+
+# --------------------------------------------------------------------------- #
 # /api/run_stats (the dashboard's duration charts)
 # --------------------------------------------------------------------------- #
 

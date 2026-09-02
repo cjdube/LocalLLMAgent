@@ -101,3 +101,104 @@ def test_env_example_federates_every_root_the_docs_describe():
     assert len(example) == 1, f"expected one active default, found {example}"
 
     assert documented <= _external_root_names(example[0])
+
+
+# --------------------------------------------------------------------------- #
+# "Every HTTP call has an explicit timeout." — AGENTS.md, Data sourcing policy
+# --------------------------------------------------------------------------- #
+
+_HTTP_METHODS = frozenset(
+    {"get", "post", "put", "patch", "delete", "head", "options", "request"}
+)
+
+
+def _unbounded_requests_calls(path: Path) -> list[str]:
+    """`requests.<method>(...)` call sites in one file with no `timeout=`."""
+    found = []
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        if node.func.attr not in _HTTP_METHODS:
+            continue
+        # Only the module itself. Matching any receiver named `session` caught
+        # Flask's `session.get("authenticated")` in chat/auth.py, which is a
+        # dict read and not a request at all.
+        if not (isinstance(node.func.value, ast.Name) and node.func.value.id == "requests"):
+            continue
+        if not any(kw.arg == "timeout" for kw in node.keywords):
+            found.append(f"{path.relative_to(ROOT)}:{node.lineno}")
+    return found
+
+
+def test_every_http_call_carries_an_explicit_timeout():
+    """A request with no timeout waits forever, and every caller here is either
+    a scheduled task or a chat turn: one dead endpoint hangs the whole run, and
+    a poller that hangs stops silently rather than failing. The rule was written
+    down and followed by hand — `tasks/startup_recovery.py` still lost both of
+    its launchctl calls to it — so it is checked mechanically now.
+    """
+    paths = [
+        *sorted((ROOT / "agent").rglob("*.py")),
+        *sorted((ROOT / "chat").rglob("*.py")),
+        *sorted((ROOT / "tasks").rglob("*.py")),
+    ]
+    checked = sum(
+        1
+        for path in paths
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in _HTTP_METHODS
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "requests"
+    )
+    assert checked > 20, f"only {checked} call sites found — the scan missed them"
+
+    unbounded = [site for path in paths for site in _unbounded_requests_calls(path)]
+    assert not unbounded, f"HTTP calls with no timeout: {unbounded}"
+
+
+def _unbounded_subprocess_calls(path: Path) -> list[str]:
+    """Blocking `subprocess.*` call sites in one file with no `timeout=`."""
+    found = []
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        # Popen is deliberately absent: it does not block and takes no timeout
+        # at construction. chat/insights.py uses it to launch a task and return.
+        if node.func.attr not in {"run", "check_output", "call", "check_call"}:
+            continue
+        if not (isinstance(node.func.value, ast.Name) and node.func.value.id == "subprocess"):
+            continue
+        if not any(kw.arg == "timeout" for kw in node.keywords):
+            found.append(f"{path.relative_to(ROOT)}:{node.lineno}")
+    return found
+
+
+def test_every_blocking_subprocess_call_carries_an_explicit_timeout():
+    """Same failure as an unbounded HTTP call, one process further out. The two
+    `launchctl` calls in `tasks/startup_recovery.py` had no bound, and that
+    poller fires every 60 seconds: one wedged launchctl would have stopped
+    every catch-up run after a reboot, silently and forever.
+    """
+    paths = [
+        *sorted((ROOT / "agent").rglob("*.py")),
+        *sorted((ROOT / "chat").rglob("*.py")),
+        *sorted((ROOT / "tasks").rglob("*.py")),
+    ]
+    checked = sum(
+        1
+        for path in paths
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in {"run", "check_output", "call", "check_call"}
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "subprocess"
+    )
+    assert checked >= 8, f"only {checked} call sites found — the scan missed them"
+
+    unbounded = [site for path in paths for site in _unbounded_subprocess_calls(path)]
+    assert not unbounded, f"blocking subprocess calls with no timeout: {unbounded}"

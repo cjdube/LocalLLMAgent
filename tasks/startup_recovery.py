@@ -28,6 +28,9 @@ _ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(_ROOT / "config" / ".env")
 STORE_PATH = _ROOT / "config" / "startup_recovery.json"
 DOMAIN = f"gui/{os.getuid()}"
+# launchctl print/kickstart answer in milliseconds; anything near this bound is
+# a wedged launchd, not a slow one.
+LAUNCHCTL_TIMEOUT_S = 15
 MAX_ATTEMPTS = 3
 RETRY_DELAYS_S = (60, 300, 900)
 
@@ -101,6 +104,10 @@ def _launchctl_output(label: str) -> str:
     result = subprocess.run(
         ["launchctl", "print", f"{DOMAIN}/{label}"], text=True,
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False,
+        # This poller fires every 60s. A hung launchctl with no bound would
+        # wedge it silently and forever; seven of the repo's nine subprocess
+        # calls already carry one.
+        timeout=LAUNCHCTL_TIMEOUT_S,
     )
     return result.stdout if result.returncode == 0 else ""
 
@@ -123,6 +130,7 @@ def start(label: str) -> bool:
     return subprocess.run(
         ["launchctl", "kickstart", f"{DOMAIN}/{label}"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+        timeout=LAUNCHCTL_TIMEOUT_S,
     ).returncode == 0
 
 
