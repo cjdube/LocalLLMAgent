@@ -218,3 +218,31 @@ def test_ntfy_egress_is_stubbed_for_both_verbs():
             "conftest's _block_ntfy_egress is not in effect, and the suite can "
             "reach the user's actual ntfy server"
         )
+
+
+def test_launching_a_real_scheduled_task_is_refused():
+    # RunManager.start spawns `<venv python> -m tasks.<name>` from the dashboard's
+    # POST /api/run/<task_key>. An escape emails, pushes to the phone and writes
+    # production stores from a child that outlives monkeypatch teardown. The
+    # repo's other two spawners were guarded suite-wide; this one had only a
+    # per-test stub. Same shape as the ntfy guard above: assert the refusal
+    # fires, not merely that a fixture exists.
+    import pytest as _pytest
+
+    from chat import insights
+
+    with _pytest.raises(AssertionError, match="real scheduled task"):
+        insights.subprocess.Popen(["true"])
+
+
+def test_the_task_spawn_guard_does_not_reach_into_the_shared_subprocess_module():
+    # The guard rebinds chat.insights' own `subprocess` global. Patching an
+    # attribute on the stdlib module instead would hand the stub to every
+    # importer of subprocess — the collision that turned _block_ntfy_egress into
+    # a blanket requests stub for the whole suite.
+    import subprocess as real_subprocess
+
+    from chat import insights
+
+    assert insights.subprocess is not real_subprocess
+    assert real_subprocess.Popen.__module__ == "subprocess"

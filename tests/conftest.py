@@ -622,6 +622,44 @@ def _block_build_subprocess(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _block_task_run_subprocess(monkeypatch):
+    """Stop any test from launching a real scheduled task.
+
+    chat/insights.py:RunManager.start spawns `<venv python> -m tasks.<name>`,
+    reachable from POST /api/run/<task_key>. An escape runs the real thing: a
+    morning brief actually emails, a digest actually pushes to the phone, and
+    every store it touches is production because a child process resolves paths
+    for itself, long after monkeypatch teardown.
+
+    The repo's other two spawners (_block_wiki_lint_subprocess above,
+    _block_build_subprocess just above) already had this; RunManager had only a
+    per-test stub in tests/test_insights.py, and _isolate_launchd_dir is not a
+    substitute -- its own docstring says it is about determinism, and it notes
+    that test_insights.py and test_logview.py write their own fixture plists,
+    which re-opens the path.
+
+    Rebinding the module's `subprocess` global, not an attribute on the shared
+    stdlib module, for the reason spelled out above. It also fixes the
+    per-test stub, which reached through insights.subprocess into the real
+    module and set Popen there for everything importing it.
+    """
+    class _NoSubprocess:
+        STDOUT = _real_subprocess.STDOUT
+        TimeoutExpired = _real_subprocess.TimeoutExpired
+
+        @staticmethod
+        def Popen(*a, **k):
+            raise AssertionError(
+                "a test launched a real scheduled task through "
+                "chat.insights.RunManager — that sends real email and real "
+                "pushes and writes production stores. Stub "
+                "insights.subprocess.Popen."
+            )
+
+    monkeypatch.setattr(_insights, "subprocess", _NoSubprocess)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_eval_results(tmp_path, monkeypatch):
     """Send the model bake-off's output to tmp_path.
 
