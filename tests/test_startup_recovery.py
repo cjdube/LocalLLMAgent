@@ -137,3 +137,52 @@ def test_healer_queues_reactive_work_instead_of_kickstarting_it():
     assert "tasks.startup_recovery" in source
     assert "--enqueue \"${queued[@]}\"" in source
     assert 'launchctl kickstart "$DOMAIN/$label"' not in source
+
+
+def _main_log_lines(monkeypatch, result):
+    """Run main() with run_once stubbed and return the lines it logged."""
+    import logging
+
+    monkeypatch.setattr(recovery, "run_once", lambda *a, **k: result)
+    lines = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record):
+            lines.append(record.getMessage())
+
+    logger = logging.getLogger("startup_recovery_test_capture")
+    logger.handlers = [_Capture()]
+    logger.propagate = False
+    logger.setLevel(logging.INFO)
+    monkeypatch.setattr(recovery, "setup_logger", lambda name: logger)
+
+    assert recovery.main([]) == 0
+    return lines
+
+
+def test_an_idle_poll_logs_nothing(monkeypatch):
+    """This fires every 60s and is idle essentially always — 5,474 of 5,474
+    polls when measured. Three unconditional lines per poll is 4,320 a day, and
+    half of them land in the .launchd.log mirror that nothing rotates: 1.0 MB in
+    four days, against the ~19 KB/day chat/logview.py states as expected."""
+    assert _main_log_lines(monkeypatch, {"status": "idle"}) == []
+
+
+def test_a_poll_that_did_something_still_says_so(monkeypatch):
+    """The other half. Silencing the idle case must not silence the recovery
+    itself — that line is the only record a reboot catch-up ever fired."""
+    lines = _main_log_lines(monkeypatch, {"status": "started", "label": "local.wren.one"})
+
+    assert len(lines) == 1
+    assert "local.wren.one" in lines[0]
+
+
+def test_no_run_boundary_lines_are_written(monkeypatch):
+    """startup_recovery is a daemon by chat/insights.py's rule (StartInterval,
+    no StartCalendarInterval), so parse_runs skips its log and AGENTS.md says to
+    leave the boundaries out. A future edit that adds them back would put 2,880
+    dead lines a day into an unrotated file."""
+    for result in ({"status": "idle"}, {"status": "started", "label": "x"}):
+        for line in _main_log_lines(monkeypatch, result):
+            assert "run complete" not in line.lower(), line
+            assert not line.lower().startswith("starting "), line

@@ -282,11 +282,19 @@ def main(argv: list[str] | None = None) -> int:
         print(enqueue(args.enqueue))
         return 0
     logger = setup_logger("startup_recovery")
-    logger.info("Starting startup recovery run")
     try:
         result = run_once()
-        logger.info("startup recovery -> %s", result)
-        logger.info("startup recovery run complete")
+        # No run-boundary lines here, and none on an idle poll. This fires every
+        # 60s and is idle essentially always — measured 5,474 of 5,474 polls —
+        # and it is a daemon by chat/insights.py's own rule (StartInterval, no
+        # StartCalendarInterval), so parse_runs skips it and AGENTS.md says to
+        # leave the boundaries out. The dashboard reads this task's state from
+        # status() instead. The three unconditional lines had no reader at all
+        # and wrote 4,320 a day, half of them into the .launchd.log mirror that
+        # nothing rotates and log_inspector deliberately skips: 1.0 MB in four
+        # days, against the ~19 KB/day chat/logview.py states as expected.
+        if result.get("status") != "idle":
+            logger.info("startup recovery -> %s", result)
         return 0
     except Exception as e:
         logger.exception("startup recovery run failed: %s", e)
