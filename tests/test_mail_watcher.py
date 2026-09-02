@@ -762,3 +762,60 @@ def test_labelling_a_thread_starts_one_job_on_its_newest_message(
     assert decide["seen"][0]["subject"] == "latest"
     # And none of the three was also pushed as a watch alert.
     assert [p["title"] for p in pushes] == ["Handed to Wren"]
+
+
+# --------------------------------------------------------------------------- #
+# Log volume: one line per notification
+# --------------------------------------------------------------------------- #
+
+def test_an_idle_notification_logs_exactly_one_line(gmail, pushes, model, logger):
+    """Nearly every notification is idle — 616 of 627 measured. Two lines each
+    ("notification for history id N", then "nothing new after dedupe") is double
+    what a quiet mailbox needs, and every line is mirrored into the
+    .launchd.log that nothing rotates."""
+    mail_state.commit(new_history_id="100")
+    gmail["history"] = {"message_ids": [], "history_id": "500", "resynced": False}
+
+    mail_watcher.handle_notification(_payload(), logger)
+
+    assert len(logger.infos) == 1, logger.infos
+
+
+def test_the_quiet_line_survives_and_names_the_notification(gmail, pushes, model,
+                                                            logger):
+    """The other half of the guarantee. Halving the volume must not cost the
+    liveness signal: this is a KeepAlive daemon, so parse_runs skips its log and
+    log_inspector reads only WARNING and above. This line is the ONLY on-disk
+    evidence the Gmail push pipe is alive — if the watch dies the lines simply
+    stop. Delete it and a dead subscription looks like a quiet mailbox."""
+    mail_state.commit(new_history_id="100")
+    gmail["history"] = {"message_ids": [], "history_id": "500", "resynced": False}
+
+    mail_watcher.handle_notification(_payload(history_id="777"), logger)
+
+    assert "777" in logger.infos[0]
+
+
+def test_a_notification_that_did_work_is_also_logged_once(gmail, pushes, model, logger):
+    """One line per notification on every path, not just the idle one — so
+    counting the id lines counts notifications."""
+    mail_state.commit(new_history_id="100")
+    gmail["history"] = {"message_ids": ["m1"], "history_id": "500", "resynced": False}
+    gmail["messages"]["m1"] = _mail()
+
+    mail_watcher.handle_notification(_payload(history_id="777"), logger)
+
+    assert [line for line in logger.infos if "777" in line] == [
+        "history id 777: 1 new item(s): m1"]
+
+
+def test_a_history_list_failure_still_names_the_notification(gmail, pushes, model,
+                                                             logger):
+    """The unconditional line is gone, so the raise carries the id instead.
+    Otherwise a broken pipe — three of them in the log already — says nothing
+    about which notification died."""
+    mail_state.commit(new_history_id="100")
+    gmail["history"] = {"error": "Broken pipe"}
+
+    with pytest.raises(RuntimeError, match="777"):
+        mail_watcher.handle_notification(_payload(history_id="777"), logger)

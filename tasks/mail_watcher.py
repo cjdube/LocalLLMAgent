@@ -229,8 +229,18 @@ def handle_notification(data: bytes, logger, label_id: str = None,
     # has decoded it for us. Decoding again raised "Incorrect padding" on the
     # first live notification.
     payload = json.loads(data.decode("utf-8"))
-    logger.info(f"notification for history id {payload.get('historyId')}")
+    notice_id = payload.get("historyId")
 
+    # No unconditional "a notification arrived" line here. Every path out of
+    # this function logs exactly once and carries notice_id itself, so one
+    # notification is one line instead of two. 616 of 627 notifications were
+    # idle when measured, and this is a KeepAlive daemon by chat/insights.py's
+    # rule, so parse_runs skips its log and log_inspector reads only WARNING and
+    # above — nothing automated reads these. They are kept, at one line each,
+    # because they are the ONLY on-disk evidence the Gmail push pipe is alive:
+    # if the watch dies the lines simply stop. Keep the terminating line on
+    # every path, or a dead subscription becomes indistinguishable from a quiet
+    # mailbox.
     watermark = mail_state.history_id()
     if not watermark:
         # No watch has been registered yet, so there is no window to walk. Seed
@@ -238,15 +248,19 @@ def handle_notification(data: bytes, logger, label_id: str = None,
         # would push hundreds of alerts.
         mail_state.commit(new_history_id=payload.get("historyId"))
         logger.warning(
-            "no stored history id — seeded the watermark from this notification "
-            "and reported nothing. Run `python -m tasks.mail_watch_renew` so the "
-            "watch and the watermark are registered together.")
+            f"history id {notice_id}: no stored history id — seeded the "
+            "watermark from this notification and reported nothing. Run "
+            "`python -m tasks.mail_watch_renew` so the watch and the watermark "
+            "are registered together.")
         return
 
     followed = [lid for lid in (label_id, act_label_id) if lid]
     history = gmail_read.list_history(watermark, followed, logger=logger)
     if "error" in history:
-        raise RuntimeError(f"history.list failed: {history['error']}")
+        # The id goes in the message because the caller's ERROR line is now the
+        # only record this notification arrived at all.
+        raise RuntimeError(
+            f"history.list failed for history id {notice_id}: {history['error']}")
 
     threads = history.get("threads", {})
     message_threads = history.get("message_threads", {})
@@ -284,10 +298,10 @@ def handle_notification(data: bytes, logger, label_id: str = None,
     targets = [t for t in targets if t[0] in fresh]
     if not targets:
         mail_state.commit(new_history_id=history["history_id"])
-        logger.info("nothing new after dedupe")
+        logger.info(f"history id {notice_id}: nothing new after dedupe")
         return
 
-    logger.info(f"{len(targets)} new item(s): "
+    logger.info(f"history id {notice_id}: {len(targets)} new item(s): "
                 f"{', '.join(key for key, _, _ in targets)}")
     handled, unreadable, unpushed = [], [], []
     for key, message_id, is_act in targets:
