@@ -480,3 +480,95 @@ def test_every_tool_a_description_tells_the_model_to_call_actually_dispatches():
     dangling = [f"{owner} -> {target}" for owner, target in referenced
                 if target not in toolset.DISPATCH]
     assert dangling == []
+
+
+# Arguments a confirmation card may leave out, and why. Everything else the
+# model can supply must be visible on the card or its detail line: the tap is
+# the only human check on a write, and what is not rendered is not checked.
+#
+# Adding a name here is a deliberate "the human does not need this to decide"
+# call, exactly like TASK_ONLY_SCHEMAS at the top of this file. The bar is that
+# the card already shows something BETTER (a resolved title in place of an id)
+# or that the field is not the model's content at all.
+CARD_EXEMPT_ARGS = {
+    # Resolved: the card shows the memory's own text instead of its id, which
+    # is the thing a person can actually judge before deleting it.
+    ("archive", "memory_id"),
+    ("forget", "memory_id"),
+    # Same: the card shows task_title. Opaque ids never reach the model anyway
+    # (docs/opaque-identifiers.md) — they are filled in by Python.
+    ("complete_task", "task_id"),
+    ("complete_task", "tasklist_id"),
+    ("update_task_due_date", "task_id"),
+    ("update_task_due_date", "tasklist_id"),
+    # Internal wiring, not content: the calendar colour and the provenance tag
+    # Wren stamps on events it created.
+    ("log_calendar_event", "color_id"),
+    ("log_calendar_event", "source_id"),
+    # The card shows the skill's name and a preview of its body. A one-line
+    # description on top of both adds nothing to the decision.
+    ("write_skill", "description"),
+}
+
+
+def test_every_confirmation_card_shows_what_the_model_chose():
+    """A write tool pauses for a tap, and the card is all the human reads. An
+    argument the model filled in and the card never renders is approved unseen.
+
+    add_clickup_task hid `tags` and `priority` that way, and tags are not
+    decoration: tasks/clickup_watcher.py treats wren-research and wren-context
+    as job triggers. It also read args["list"] where the schema says
+    `list_name`, so that branch never fired at all.
+
+    reply_to_thread is skipped because its describer reads the live thread to
+    name the recipients, which needs Gmail.
+    """
+    schemas = {tool["function"]["name"]: tool["function"] for tool in toolset.TOOLS}
+    hidden = []
+    checked = []
+
+    for name in sorted(toolset.WRITE_TOOLS - {"reply_to_thread"}):
+        props = (schemas[name].get("parameters") or {}).get("properties") or {}
+        args = {}
+        for prop, spec in props.items():
+            if spec.get("enum"):
+                args[prop] = spec["enum"][0]
+            elif spec.get("type") == "array":
+                args[prop] = [f"SENT{prop}Z"]
+            elif spec.get("type") in ("integer", "number"):
+                args[prop] = 7
+            elif spec.get("type") == "boolean":
+                args[prop] = True
+            else:
+                # No angle brackets: _body_preview strips anything tag-shaped.
+                args[prop] = f"SENT{prop}Z"
+
+        call = {"function": {"name": name, "arguments": args}}
+        rendered = (toolset.describe_call(call) or "") + " " \
+            + (toolset.describe_call_detail(call) or "")
+        for prop in props:
+            if (name, prop) in CARD_EXEMPT_ARGS:
+                continue
+            checked.append(f"{name}.{prop}")
+            if f"SENT{prop}Z" in rendered or str(args[prop]) in rendered:
+                continue
+            hidden.append(f"{name}.{prop}")
+
+    # send_morning_brief and send_opportunity_digest take no arguments at all,
+    # so "every tool has parameters" is the wrong vacuity check — this is.
+    assert len(checked) > 20, f"only {len(checked)} arguments examined"
+    assert hidden == []
+
+
+def test_the_card_exemptions_all_still_refer_to_real_arguments():
+    """Half of the guarantee the case above cannot make. An exemption naming a
+    renamed or deleted argument silently widens the guard forever — and a
+    renamed argument is exactly how add_clickup_task's `list` branch went dead.
+    """
+    schemas = {tool["function"]["name"]: tool["function"] for tool in toolset.TOOLS}
+    stale = []
+    for name, prop in sorted(CARD_EXEMPT_ARGS):
+        props = (schemas.get(name, {}).get("parameters") or {}).get("properties") or {}
+        if prop not in props:
+            stale.append(f"{name}.{prop}")
+    assert stale == []

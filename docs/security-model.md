@@ -67,9 +67,19 @@ dropped rather than silently honored — the loop's `fn(**fn_args)` dispatch wou
 otherwise forward it. The chat card and the background approval push render
 through the same describers (`toolset.describe_call` /
 `describe_call_detail`), so the two surfaces can't drift on what they disclose.
-A drift-guard test (`tests/test_toolset.py`) fails if a newly gated tool has no
-describer, since the fallback would show raw JSON on the one surface a human
-reads before approving.
+Two drift-guard tests (`tests/test_toolset.py`) hold this. The first fails if a
+newly gated tool has no describer, since the fallback would show raw JSON on the
+one surface a human reads before approving. The second fails if any argument the
+model can supply is rendered by *neither* describer — asserting a describer
+merely exists is not enough, because a card can be perfectly readable and still
+omit the part that matters. `add_clickup_task` hid `tags` that way, and a tag is
+not decoration: `tasks/clickup_watcher.py` treats `wren-research` and
+`wren-context` as job triggers. The same describer also read `args["list"]` where
+the schema says `list_name`, so that branch never fired at all and the card never
+named the List. `CARD_EXEMPT_ARGS` in that file lists what a card may leave out
+and why — an opaque id the card resolves to a title, or an internal field that is
+not the model's content — and a third case fails if an exemption names an
+argument that no longer exists.
 
 **The prose scheduled tasks keep the model out of the write path entirely.**
 `morning_brief`, `daily_synthesis`, `opportunity_digest`, `project_scan` and

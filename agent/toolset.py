@@ -639,6 +639,13 @@ def _reply_recipients(thread_id: str) -> str:
     return ", ".join(plan["to"])
 
 
+def _category_suffix(args: dict) -> str:
+    """" under <category>", or "" — the bucket a memory is filed under decides
+    which future prompts it reaches, so it belongs on the card."""
+    category = (args.get("category") or "").strip()
+    return f" under {category}" if category else ""
+
+
 def describe_call(call: dict) -> str:
     """One human line summarizing a tool call awaiting confirmation."""
     name = call["function"]["name"]
@@ -653,7 +660,9 @@ def describe_call(call: dict) -> str:
         return f'Create calendar event "{args.get("summary", "")}" from {args.get("start", "?")} to {args.get("end", "?")}'
     if name == "create_task":
         due = args.get("due")
-        return f'Create task "{args.get("title", "")}"' + (f" (due {due})" if due else "")
+        where = f' on {args["list_name"]}' if args.get("list_name") else ""
+        return (f'Create task "{args.get("title", "")}"' + where
+                + (f" (due {due})" if due else ""))
     if name == "update_task_due_date":
         label = args.get("task_title") or args.get("task_id", "")
         return f'Change due date of "{label}" to {args.get("due", "?")}'
@@ -664,9 +673,10 @@ def describe_call(call: dict) -> str:
         label = args.get("memory_text") or args.get("memory_id", "?")
         return f'Delete memory "{label}"'
     if name == "remember":
-        return f'Remember "{args.get("text", "")}"'
+        return f'Remember "{args.get("text", "")}"' + _category_suffix(args)
     if name == "pin":
-        return f'Pin memory "{args.get("text", "")}" (kept in mind every conversation)'
+        return (f'Pin memory "{args.get("text", "")}"' + _category_suffix(args)
+                + " (kept in mind every conversation)")
     if name == "archive":
         label = args.get("memory_text") or args.get("memory_id", "?")
         return f'Archive memory "{label}" (no longer kept in mind every conversation)'
@@ -696,9 +706,26 @@ def describe_call(call: dict) -> str:
         return f'Run in the background: "{task}"'
     if name == "add_clickup_task":
         where = args.get("space", "?")
-        if args.get("list"):
-            where += f' / {args["list"]}'
-        return f'Add "{args.get("title", "")}" to {where} in ClickUp'
+        # `list_name`, not `list` — that is what the schema declares and what the
+        # function takes, so the old key never fired and the card never named the
+        # List even when the model had chosen one among several.
+        if args.get("list_name"):
+            where += f' / {args["list_name"]}'
+        summary = f'Add "{args.get("title", "")}" to {where} in ClickUp'
+        # Tags are not decoration here: tasks/clickup_watcher.py treats
+        # wren-research and wren-context as job triggers, so a tag is substance
+        # in the sense docs/security-model.md means it, and the card is the one
+        # surface a human reads before approving. Priority is shown with them
+        # because it is the other free argument the model picks unprompted.
+        extras = []
+        tags = [str(t) for t in (args.get("tags") or []) if str(t).strip()]
+        if tags:
+            extras.append("tagged " + ", ".join(tags))
+        if args.get("priority"):
+            extras.append(f'{args["priority"]} priority')
+        if extras:
+            summary += f" ({'; '.join(extras)})"
+        return summary
     if name == "move_clickup_task":
         return f'Move "{args.get("title", "")}" to {args.get("status", "?")} in ClickUp'
     if name == "comment_on_clickup_task":
@@ -738,5 +765,15 @@ def describe_call_detail(call: dict) -> str | None:
     if name == "comment_on_clickup_task":
         return _body_preview(args.get("comment"))
     if name == "add_clickup_task":
+        return _body_preview(args.get("description"))
+    # Free text the MODEL wrote, invisible on the card until now. A skill body is
+    # the sharpest case: skills are procedural memory read into future prompts,
+    # which is why write_skill is in UNATTENDED_EXCLUDED_TOOLS — approving one
+    # unread is approving whatever it says, forever.
+    if name == "write_skill":
+        return _body_preview(args.get("body"))
+    if name == "create_task":
+        return _body_preview(args.get("notes"))
+    if name == "log_calendar_event":
         return _body_preview(args.get("description"))
     return None
