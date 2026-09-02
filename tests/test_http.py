@@ -29,6 +29,57 @@ def test_missing_key_error_names_the_key():
     assert "TAVILY_API_KEY" in err["error"]
 
 
+# Credential redaction. These cases build the exceptions the way requests
+# itself does — with a real message carrying a real URL — because the tests
+# below them passed for months against message-less stubs while the live path
+# was emailing the OpenWeatherMap key into the morning brief.
+
+_URL = ("https://api.openweathermap.org/data/2.5/forecast"
+        "?q=Bedford&appid=SENTINELKEY&units=imperial&cnt=24")
+
+
+def test_raise_for_status_does_not_leak_the_key_in_the_query_string():
+    # The real shape: requests builds "401 Client Error: ... for url: <url>"
+    # from response.url, which carries the whole query string.
+    resp = requests.Response()
+    resp.status_code = 401
+    resp.reason = "Unauthorized"
+    resp.url = _URL
+    try:
+        resp.raise_for_status()
+    except requests.exceptions.HTTPError as exc:
+        err = _http.http_error(exc)["error"]
+    assert "SENTINELKEY" not in err
+    assert err.startswith("HTTP 401")
+    # The parameter names survive, so the message still says which call failed.
+    assert "appid=<redacted>" in err
+
+
+def test_connection_error_does_not_leak_the_key_either():
+    # The leak is not specific to raise_for_status: a ConnectionError embeds
+    # "Max retries exceeded with url: <path?query>" as a bare path, no scheme.
+    exc = requests.exceptions.ConnectionError(
+        "HTTPSConnectionPool(host='api.openweathermap.org', port=443): "
+        "Max retries exceeded with url: /data/2.5/forecast"
+        "?q=Bedford&appid=SENTINELKEY (Caused by NewConnectionError())")
+    err = _http.http_error(exc)["error"]
+    assert "SENTINELKEY" not in err
+    assert err.startswith("network error")
+
+
+def test_the_catch_all_branch_redacts_too():
+    # An exception type nobody anticipated is the one that would carry a URL
+    # out, so the phase branch is redacted as well.
+    err = _http.http_error(ValueError(f"boom while fetching {_URL}"), phase="parse")["error"]
+    assert "SENTINELKEY" not in err
+    assert err.startswith("parse error")
+
+
+def test_redaction_keeps_text_without_a_query_string_intact():
+    assert _http.redact_query_values("Read timed out. (read timeout=10)") == (
+        "Read timed out. (read timeout=10)")
+
+
 def test_http_error_maps_status_when_response_present():
     resp = requests.Response()
     resp.status_code = 503

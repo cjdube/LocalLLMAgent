@@ -10,6 +10,7 @@ tool stays short and a new tool has less to copy.
 
 import json
 import os
+import re
 from pathlib import Path
 
 import requests
@@ -38,18 +39,48 @@ def missing_key_error(name: str) -> dict:
     return {"error": f"{name} not set (checked arg, config/.env, env var)"}
 
 
+# Any `?name=value` or `&name=value` pair, with the value running to the next
+# `&` or whitespace.
+_QUERY_PAIR_RE = re.compile(r"([?&][A-Za-z0-9_.\-]+=)([^&\s]*)")
+
+
+def redact_query_values(text: str) -> str:
+    """Blank the value of every query parameter in `text`, keeping its name.
+
+    requests puts the request URL inside its exception messages — verbatim,
+    query string and all, with no redaction of any kind. `raise_for_status()`
+    raises "401 Client Error: Unauthorized for url: <url>", and a
+    ConnectionError carries "Max retries exceeded with url: <path?query>". Most
+    of our APIs authenticate by header, but weather.py passes its key as
+    `appid=` in the query string, so the raw exception text is a live
+    credential — and http_error's dicts are rendered into the morning brief
+    email, handed to the model as a tool result, and written to logs/.
+
+    Values go rather than just the credential-looking ones: a name allow-list
+    is a guess about the next API's spelling, and the parameter *names* are
+    what make the message diagnostic ("it was the forecast call, with a q and
+    an appid"). The values were ours to begin with — we know what we sent.
+    """
+    return _QUERY_PAIR_RE.sub(r"\1<redacted>", text)
+
+
 def http_error(exc: Exception, phase: str = "fetch") -> dict:
     """Map a requests exception (or any other) onto the uniform error dict the
     tool entrypoints return. Reproduces the messages the tools used inline:
     HTTP status when available, "network error" for other request failures,
-    and "<phase> error" as the catch-all."""
+    and "<phase> error" as the catch-all.
+
+    Every branch goes through redact_query_values, including the catch-all: the
+    point is that no exception reaching here can carry a query string out, and
+    an exception type nobody anticipated is exactly the one that would.
+    """
     if isinstance(exc, requests.exceptions.HTTPError):
         resp = exc.response
         status = resp.status_code if resp is not None else "?"
-        return {"error": f"HTTP {status}: {exc}"}
+        return {"error": redact_query_values(f"HTTP {status}: {exc}")}
     if isinstance(exc, requests.exceptions.RequestException):
-        return {"error": f"network error: {exc}"}
-    return {"error": f"{phase} error: {exc}"}
+        return {"error": redact_query_values(f"network error: {exc}")}
+    return {"error": redact_query_values(f"{phase} error: {exc}")}
 
 
 def print_result(result: dict) -> int:

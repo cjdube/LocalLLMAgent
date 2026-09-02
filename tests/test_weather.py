@@ -78,6 +78,26 @@ def test_http_error_maps_status(monkeypatch):
     assert out["error"].startswith("HTTP 401")
 
 
+def test_the_api_key_never_reaches_the_error_dict(monkeypatch):
+    """weather.py is the only tool that authenticates by query string, so it is
+    the one whose exception text is a live credential. The two cases above
+    build message-less exceptions and so cannot see this; here the URL is the
+    one requests would really put in the message."""
+    monkeypatch.setenv("OPENWEATHERMAP_API_KEY", "SENTINELKEY")
+    resp = requests.Response()
+    resp.status_code = 401
+    resp.reason = "Unauthorized"
+    resp.url = ("https://api.openweathermap.org/data/2.5/forecast"
+                "?q=Portland,OR,US&appid=SENTINELKEY&units=imperial&cnt=24")
+    try:
+        resp.raise_for_status()
+    except requests.exceptions.HTTPError as exc:
+        monkeypatch.setattr(weather, "fetch_forecast", _raise(exc))
+    out = weather.fetch_weather("Portland,OR,US")
+    assert "SENTINELKEY" not in out["error"]
+    assert out["error"].startswith("HTTP 401")
+
+
 def test_network_error_maps_uniformly(monkeypatch):
     monkeypatch.setenv("OPENWEATHERMAP_API_KEY", "k")
     monkeypatch.setattr(weather, "fetch_forecast",

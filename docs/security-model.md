@@ -174,6 +174,34 @@ it ingests untrusted web content *and* runs unattended — pointing it at a clou
 backend is the riskiest single switch. See [llm-backend.md](llm-backend.md) and
 [frontier-escalation.md](frontier-escalation.md).
 
+## Credentials never ride out inside an error string
+
+`requests` puts the request URL — query string and all, unredacted — inside its
+exception messages: `raise_for_status()` raises "401 Client Error: Unauthorized
+for url: <url>", and a `ConnectionError` carries "Max retries exceeded with url:
+<path?query>". Almost every API here authenticates by header, but
+`agent/tools/weather.py:62` passes its key as `appid=` in the query string, so
+that exception text *is* a live credential.
+
+That matters because the `{"error": ...}` dicts those exceptions become do not
+stay local. They are rendered into the morning brief and **emailed**, handed to
+the model as a tool result, and written to `logs/`. Between 2026-07 and
+2026-09-02 a single failed weather call sent the OpenWeatherMap key to
+`BRIEF_TO_EMAIL`.
+
+`agent/tools/_http.py:redact_query_values` now blanks the value of every query
+parameter on **every** branch of `http_error`, including the catch-all — an
+exception type nobody anticipated is exactly the one that would carry a URL out.
+Parameter names survive, so the message still says which call failed. The rule
+for new work: a credential belongs in a header, and if it cannot be, assume its
+exception text is public.
+
+The tests that missed this are worth knowing about. `tests/test_weather.py` and
+`tests/test_http.py` both built `HTTPError(response=resp)` with **no message**,
+then asserted `startswith("HTTP 401")` — green for months against a string that
+could not contain a URL. The replacements build the exception the way `requests`
+does, and were confirmed to fail with the redaction disabled.
+
 ## Related
 
 - `AGENTS.md` — the "Untrusted content boundary" and data-sourcing rules that
