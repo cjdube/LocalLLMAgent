@@ -26,6 +26,10 @@ from agent import toolset
 from agent.tools import memory
 from chat import server as srv
 
+# Captured at import, before the autouse research_spy fixture replaces it, so
+# test_research_threads_run_one_at_a_time can exercise the real function.
+from chat.routes_opportunities import _start_research as _REAL_START_RESEARCH
+
 
 @pytest.fixture(autouse=True)
 def compaction_model(monkeypatch):
@@ -1827,3 +1831,51 @@ def test_frontier_turn_compacts_off_device_too(
 
     assert compaction_model, "the history should have been compacted"
     assert compaction_model[-1]["backend"] == "gemini"
+
+
+def test_research_threads_run_one_at_a_time(monkeypatch):
+    """Ollama serves one request at a time, so ten "Interested" taps used to put
+    ten model calls in the queue and chat failed with a bare ReadTimeout behind
+    them. The slot bounds what a chat turn waits on to one research call.
+
+    The real _start_research is captured at import, above research_spy — that
+    autouse fixture replaces the module attribute, so reading it here would get
+    the recorder. No thread is spawned: routes_opportunities' own `threading`
+    global is swapped for a recorder and the captured body is called inline,
+    per the no-real-threads rule in tests/conftest.py.
+    """
+    from chat import routes_opportunities as ro
+
+    observed = {}
+
+    def fake_research_one(item):
+        # Inside the body, the slot is held — so a second acquire must fail.
+        got = ro._RESEARCH_SLOT.acquire(blocking=False)
+        observed["slot_free_during_run"] = got
+        if got:
+            ro._RESEARCH_SLOT.release()
+
+    bodies = []
+
+    class _RecordingThreading:
+        @staticmethod
+        def Thread(target, **kwargs):
+            bodies.append(target)
+            return type("_T", (), {"start": lambda self: None})()
+
+    monkeypatch.setattr(ro, "_research_one", fake_research_one)
+    monkeypatch.setattr(ro.opportunities, "set_research", lambda *a, **k: None)
+    monkeypatch.setattr(ro, "threading", _RecordingThreading)
+
+    _REAL_START_RESEARCH({"id": "abc", "company": "Acme"})
+
+    assert len(bodies) == 1, "expected exactly one thread body"
+    bodies[0]()
+
+    assert observed["slot_free_during_run"] is False, (
+        "_research_one ran without holding _RESEARCH_SLOT — concurrent research "
+        "calls can queue ahead of an interactive chat turn again"
+    )
+    # Released on the way out, or the second tap would hang forever.
+    assert ro._RESEARCH_SLOT.acquire(blocking=False)
+    ro._RESEARCH_SLOT.release()

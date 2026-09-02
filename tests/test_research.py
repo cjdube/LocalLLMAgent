@@ -194,3 +194,19 @@ def test_brief_does_not_spend_the_budget_on_thinking(stubbed_pipeline):
     rs.research("Quorum")
 
     assert stubbed_pipeline["prompts"][0]["think"] is False
+
+
+def test_the_summary_call_is_bounded_by_the_interactive_timeout(
+    seeded_item, stubbed_pipeline
+):
+    """No timeout= meant this inherited OLLAMA_TIMEOUT (300s), the budget for a
+    scheduled task nobody waits on. Research is triggered from a page by someone
+    still holding the phone, and with OLLAMA_NUM_PARALLEL=1 every second it holds
+    the slot is a second a chat turn is queued behind it — and chat gives up at
+    120s. Assert the value, not merely that the key is present: 300 would pass a
+    presence check and change nothing."""
+    rs.research_opportunity(seeded_item)
+
+    kwargs = stubbed_pipeline["prompts"][0]
+    assert kwargs["timeout"] == rs.MODEL_TIMEOUT
+    assert rs.MODEL_TIMEOUT == 120

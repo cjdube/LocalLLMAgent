@@ -21,6 +21,19 @@ logger = logging.getLogger("wren")
 
 opportunities_bp = Blueprint("opportunities", __name__)
 
+# Ollama serves one request at a time (OLLAMA_NUM_PARALLEL=1), so concurrent
+# research calls do not run in parallel — they queue, and an interactive chat
+# turn queues behind all of them. Tapping "Interested" down a page of ten
+# opportunities used to put ten model calls in that queue in a few seconds;
+# chat then failed with a bare ReadTimeout at 120s, the 2026-08-03 incident
+# shape, reachable from the phone in a few taps.
+#
+# One at a time. The work still all happens — the user asked for ten briefs —
+# but a chat turn now waits behind at most one of them instead of ten. The
+# threads holding this are idle, and each has already written its "pending"
+# marker, so the page reads correctly the whole time.
+_RESEARCH_SLOT = threading.Semaphore(1)
+
 
 def _start_research(item: dict) -> None:
     """Kick off the research pipeline for one opportunity on a daemon thread —
@@ -28,20 +41,28 @@ def _start_research(item: dict) -> None:
     two, far too long to hold the page's request open. The pending marker is
     written synchronously so the page shows "researching…" on its next load;
     the thread overwrites it with done/failed and pings the phone (the whole
-    point of async: the user has usually navigated away by the time it lands)."""
+    point of async: the user has usually navigated away by the time it lands).
+
+    Threads run one at a time — see _RESEARCH_SLOT above."""
     opportunities.set_research(item["id"], {"status": "pending", "summary": None})
 
     def run():
-        result = research_opportunity(item["id"])
-        if "error" in result:
-            logger.warning(f"research {item['id']} failed: {result['error']}")
-            notify(title="Wren: research failed", message=f"{item['company']}: {result['error']}")
-        else:
-            logger.info(f"research {item['id']} done")
-            notify(title="Wren: research ready",
-                   message=f"{item['company']} brief is on the opportunities page.")
+        with _RESEARCH_SLOT:
+            _research_one(item)
 
     threading.Thread(target=run, daemon=True, name=f"research-{item['id']}").start()
+
+
+def _research_one(item: dict) -> None:
+    """The body of one research thread, holding _RESEARCH_SLOT."""
+    result = research_opportunity(item["id"])
+    if "error" in result:
+        logger.warning(f"research {item['id']} failed: {result['error']}")
+        notify(title="Wren: research failed", message=f"{item['company']}: {result['error']}")
+    else:
+        logger.info(f"research {item['id']} done")
+        notify(title="Wren: research ready",
+               message=f"{item['company']} brief is on the opportunities page.")
 
 
 @opportunities_bp.route("/api/opportunities", methods=["GET"])

@@ -47,6 +47,15 @@ load_env()
 logger = logging.getLogger("wren")
 
 _TIMEOUT_S = 15
+
+# The summary call ran with no timeout=, so it inherited OLLAMA_TIMEOUT (300s)
+# — the budget for a scheduled task nobody is waiting on. Research is neither:
+# it is triggered from a page by a person who is still at the phone, and with
+# OLLAMA_NUM_PARALLEL=1 every second it holds the slot is a second an
+# interactive turn is queued behind it, and chat gives up at 120s. So it gets
+# the same bound chat has. The brief is a fixed seven-label template with
+# think=False (measured: 4% of the num_predict budget), so 120s is not tight.
+MODEL_TIMEOUT = float(os.getenv("WREN_RESEARCH_MODEL_TIMEOUT", "120"))
 # Bounds for the summarization prompt: a few results per search, snippets cut
 # to a sentence or three. Three searches ≈ nine snippets ≈ a small prompt.
 _RESULTS_PER_SEARCH = 3
@@ -194,6 +203,7 @@ def research(company: str, context: str = None, filing: dict = None) -> dict:
         # the same facts. See AGENTS.md.
         summary = complete_text(system_prompt=RESEARCH_SYSTEM_PROMPT, user_prompt=user_prompt,
                                 backend=resolve_backend("research"), think=False,
+                                timeout=MODEL_TIMEOUT,
                                 logger=logger)  # surfaces loop.py's num_predict cut-off warning
         if not summary.strip():
             return {"error": f"the model returned an empty brief for {company!r} — retry"}

@@ -76,6 +76,7 @@ is what the code falls back to when the variable is unset.
 |---|---|---|---|
 | `WREN_CHAT_MAX_HISTORY_CHARS` | 16000 | **48000** | Conversation history re-sent each turn. At ~4 chars/token, 48000 ≈ 12k tokens. |
 | `WREN_CHAT_MODEL_TIMEOUT` | 120 | unset | Read timeout for an *interactive* turn. Deliberately tighter than `OLLAMA_TIMEOUT`: someone is waiting, and a fast "Ollama is busy" beats a five-minute spinner. |
+| `WREN_RESEARCH_MODEL_TIMEOUT` | 120 | unset | Read timeout for the `/opportunities` research summary. Page-triggered, so it takes chat's bound rather than `OLLAMA_TIMEOUT`'s 300 — every second it holds the single slot is a second a chat turn is queued behind it. Research also runs **one at a time** (`_RESEARCH_SLOT` in `chat/routes_opportunities.py`), so ten "Interested" taps put one call in that queue, not ten. |
 
 > **These two move together.** `OLLAMA_NUM_CTX` and `WREN_CHAT_MAX_HISTORY_CHARS`
 > are coupled — the `.env.example` comment and AGENTS.md both say raise them
