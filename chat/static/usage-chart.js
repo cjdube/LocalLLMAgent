@@ -20,9 +20,8 @@
 // and the whole point of this chart is that a bar twice as tall cost twice as
 // much. A log axis would flatten exactly the spike worth seeing.
 (() => {
-  const W = 640, H = 200;
+  const FALLBACK_W = 640, H = 200;
   const PAD = { top: 10, right: 8, bottom: 22, left: 44 };
-  const PLOT_W = W - PAD.left - PAD.right;
   const PLOT_H = H - PAD.top - PAD.bottom;
   const MAX_BAR = 34;
 
@@ -105,9 +104,13 @@
     const stacks = days.map((d) => bandFor(d.models || {}, series));
     const totals = stacks.map((b) => Object.values(b).reduce((a, n) => a + n, 0));
     const peak = Math.max.apply(null, totals.concat([0]));
+    // Match SVG units to the rendered widget so preserveAspectRatio="none"
+    // remains responsive without widening bars and text on a desktop card.
+    const width = mount.clientWidth || FALLBACK_W;
+    const plotW = width - PAD.left - PAD.right;
 
     const svg = svgEl("svg", {
-      viewBox: `0 0 ${W} ${H}`, class: "usage-svg", role: "img",
+      viewBox: `0 0 ${width} ${H}`, class: "usage-svg", role: "img",
       preserveAspectRatio: "none",
     });
     const label = svgEl("title", {});
@@ -121,14 +124,14 @@
     [0, 0.5, 1].forEach((f) => {
       const y = (PAD.top + PLOT_H * (1 - f)).toFixed(1);
       svg.appendChild(svgEl("line", {
-        class: "usage-grid", x1: PAD.left, x2: W - PAD.right, y1: y, y2: y,
+        class: "usage-grid", x1: PAD.left, x2: width - PAD.right, y1: y, y2: y,
       }));
       const t = svgEl("text", { class: "usage-axis", x: PAD.left - 6, y: y, dy: "0.32em" });
       t.textContent = fmtTokens(Math.round(peak * f));
       svg.appendChild(t);
     });
 
-    const slot = days.length ? PLOT_W / days.length : PLOT_W;
+    const slot = days.length ? plotW / days.length : plotW;
     const barW = Math.min(MAX_BAR, Math.max(3, slot * 0.62));
 
     days.forEach((day, i) => {

@@ -61,9 +61,14 @@ function payload(over = {}) {
   };
 }
 
-async function render(data) {
+async function render(data, chartWidth) {
   global.fetch = jest.fn(() => Promise.resolve({ json: async () => data }));
   document.body.innerHTML = MARKUP;
+  if (chartWidth) {
+    Object.defineProperty(document.getElementById("usageChart"), "clientWidth", {
+      configurable: true, value: chartWidth,
+    });
+  }
   new Function(SRC)();
   await settle();
 }
@@ -120,6 +125,18 @@ describe("metric cards", () => {
 });
 
 describe("stacked daily bars", () => {
+  test("uses the widget's real width so a seven-day chart is not stretched", async () => {
+    const days = Array.from({ length: 7 }, (_, i) => ({
+      day: `2026-08-${25 + i}`,
+      models: { a: 100 },
+    }));
+    await render(payload({ by_day: days, by_model: [{ model: "a", tokens: 700 }] }), 1000);
+
+    expect(document.querySelector("svg.usage-svg").getAttribute("viewBox"))
+      .toBe("0 0 1000 200");
+    expect(Number(bars()[0].getAttribute("width"))).toBeLessThanOrEqual(34);
+  });
+
   test("draws one bar per model per day, and none for a quiet day", async () => {
     await render(payload({
       by_day: [

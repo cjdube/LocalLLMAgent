@@ -63,8 +63,8 @@
   .legend-item { display: inline-flex; align-items: center; gap: 6px; }
   .legend-swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
 
-  /* Fluid width, fixed height: the SVG uses preserveAspectRatio="none", so the
-     bars stretch horizontally on a wide screen without the labels growing. */
+  /* Fluid width, fixed height. The script matches its viewBox to this rendered
+     width, keeping bars and labels proportionate instead of stretching them. */
   .usage-svg { width: 100%; height: 200px; display: block; }
   .usage-grid { stroke: #eceef1; stroke-width: 1; }
   .usage-axis { font-size: 9px; fill: #9ca3af; text-anchor: end; }
