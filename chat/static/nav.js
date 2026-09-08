@@ -19,6 +19,7 @@
     { href: "/wiki", label: "wiki" },
     { href: "/wiki/lint", label: "lint" },
     { href: "/map", label: "map" },
+    { href: "/settings", label: "settings" },
   ];
 
   const mount = document.getElementById("wren-nav");

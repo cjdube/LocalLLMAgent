@@ -61,6 +61,7 @@ from chat.routes_games import games_bp
 from chat.routes_logs import logs_bp
 from chat.routes_usage import usage_bp
 from chat.routes_opportunities import opportunities_bp
+from chat.routes_settings import settings_bp
 from chat.routes_starred import starred_bp
 from chat.routes_wiki import wiki_bp
 from tasks._common import setup_logger
@@ -116,6 +117,14 @@ if not WREN_CHAT_TOKEN or not FLASK_SECRET_KEY:
 
 logger = setup_logger("wren")
 logger.setLevel(logging.INFO)
+
+# Surfaced twice, and this is the half that reaches /logs and the log inspector.
+# The other half is the banner GET /api/settings returns. A key still assigned
+# in config/.env outranks the settings document forever, so its field on
+# /settings renders, accepts an edit, saves, and changes nothing — the one
+# failure on that page that looks exactly like success.
+for _warning in config.STARTUP_WARNINGS:
+    logger.warning(_warning)
 
 # TOOLS and WRITE_TOOLS come straight from the shared registry; only the brief
 # and digest dispatches are overridden to bind the server's "wren" logger (via
@@ -221,13 +230,14 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 # surface, the log viewer, the starred-repo API and the wiki lint/graph API live
 # in their own blueprint modules (see chat/routes_dashboard.py,
 # chat/routes_opportunities.py, chat/routes_games.py, chat/routes_logs.py,
-# chat/routes_starred.py, chat/routes_wiki.py); the conversation engine and auth
-# stay here.
+# chat/routes_starred.py, chat/routes_wiki.py, chat/routes_settings.py); the
+# conversation engine and auth stay here.
 app.register_blueprint(dashboard_bp)
 app.register_blueprint(opportunities_bp)
 app.register_blueprint(games_bp)
 app.register_blueprint(logs_bp)
 app.register_blueprint(usage_bp)
+app.register_blueprint(settings_bp)
 app.register_blueprint(starred_bp)
 app.register_blueprint(wiki_bp)
 
@@ -1107,6 +1117,7 @@ VIEW_PAGES = {
     "/wiki": "wiki.html",
     "/wiki/lint": "wiki-lint.html",
     "/games": "games.html",
+    "/settings": "settings.html",
 }
 
 
