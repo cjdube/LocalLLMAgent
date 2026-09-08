@@ -21,13 +21,13 @@ Usage:
 """
 
 import argparse
-import os
 import re
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from agent import config
 from agent import prefs
 from agent.dates import local_timezone
 from agent.tools._http import load_env, print_result
@@ -71,7 +71,7 @@ _FILENAME_RE = re.compile(rf"^{re.escape(FILE_PREFIX)}(\d{{4}}-\d{{2}}-\d{{2}})\
 def _synthesis_dir() -> Path:
     """Read at call time, like learnings_file._learnings_dir(), so a .env edit
     (and the test suite's monkeypatch) takes effect without reimporting."""
-    return Path(os.getenv("SYNTHESIS_DIR", DEFAULT_SYNTHESIS_DIR)).expanduser()
+    return Path(config.getenv("SYNTHESIS_DIR", DEFAULT_SYNTHESIS_DIR)).expanduser()
 
 
 def _today() -> date:

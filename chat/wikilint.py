@@ -23,11 +23,11 @@ Usage:
 """
 
 import json
-import os
 import subprocess
 import threading
 from pathlib import Path
 
+from agent import config
 from agent.tools.wiki import _vault
 
 DEFAULT_LINT_ROOT = "~/Projects/ObsidianWikiAgent"
@@ -53,7 +53,7 @@ _LINT_CACHE_LOCK = threading.Lock()
 
 
 def _lint_root() -> Path:
-    return Path(os.getenv("WREN_WIKI_LINT_ROOT", DEFAULT_LINT_ROOT)).expanduser()
+    return Path(config.getenv("WREN_WIKI_LINT_ROOT", DEFAULT_LINT_ROOT)).expanduser()
 
 
 def _wiki_signature() -> tuple:

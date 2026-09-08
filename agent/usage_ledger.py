@@ -30,6 +30,7 @@ import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from agent import config
 from agent.store import locked
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -47,14 +48,14 @@ logger = logging.getLogger(__name__)
 
 def _retention_days() -> int:
     try:
-        return int(os.getenv("WREN_USAGE_RETENTION_DAYS", "90"))
+        return int(config.getenv("WREN_USAGE_RETENTION_DAYS", "90"))
     except ValueError:
         return 90
 
 
 def _max_bytes() -> int:
     try:
-        return int(os.getenv("WREN_USAGE_MAX_BYTES", "5000000"))
+        return int(config.getenv("WREN_USAGE_MAX_BYTES", "5000000"))
     except ValueError:
         return 5_000_000
 

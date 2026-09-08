@@ -30,6 +30,8 @@ from google_auth_httplib2 import AuthorizedHttp
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
+from agent import config
+
 _ROOT = Path(__file__).resolve().parent.parent.parent
 _ENV_PATH = _ROOT / "config" / ".env"
 load_dotenv(_ENV_PATH)
@@ -82,8 +84,8 @@ def get_credentials() -> Credentials:
         if _CACHED_CREDS and _CACHED_CREDS.valid:
             return _CACHED_CREDS
 
-        creds_path = _ROOT / os.getenv("GOOGLE_CREDENTIALS_PATH", "config/google_credentials.json")
-        token_path = _ROOT / os.getenv("GOOGLE_TOKEN_PATH", "config/google_token.json")
+        creds_path = _ROOT / config.getenv("GOOGLE_CREDENTIALS_PATH", "config/google_credentials.json")
+        token_path = _ROOT / config.getenv("GOOGLE_TOKEN_PATH", "config/google_token.json")
 
         # The OAuth client-secret file is placed by hand (downloaded from Google
         # Cloud Console) and defaults to a world-readable 0644 — unlike every
@@ -123,7 +125,7 @@ def get_credentials() -> Credentials:
                 # forwards that port here — and a tunnel needs a port known in
                 # advance. Default 0 keeps the random-port behavior for anyone
                 # sitting at a machine with its own browser.
-                port = int(os.getenv("GOOGLE_OAUTH_PORT", "0"))
+                port = int(config.getenv("GOOGLE_OAUTH_PORT", "0"))
                 creds = flow.run_local_server(port=port, prompt="select_account")
             token_path.write_text(creds.to_json())
             # Contains a refresh token — keep it readable only by the owner.

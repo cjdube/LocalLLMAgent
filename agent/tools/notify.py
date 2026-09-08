@@ -16,12 +16,12 @@ Usage:
 """
 
 import argparse
-import os
 import sys
 from urllib.parse import urlsplit
 
 import requests
 
+from agent import config
 from agent.tools import push_log
 from agent.tools._http import http_error, load_env, print_result
 
@@ -99,13 +99,13 @@ def notify(
     rollup); leave it off for anything retried or anything whose value is in the
     action buttons an email can't carry (bg_worker's push-to-approve)."""
     load_env()
-    url = os.getenv("NTFY_URL")
+    url = config.getenv("NTFY_URL")
     if not url:
         # Deliberately no fallback: an unset NTFY_URL means push is switched
         # off on purpose (see README), not that delivery failed.
         return {"error": "NTFY_URL not set in config/.env"}
 
-    token = os.getenv("NTFY_TOKEN")
+    token = config.getenv("NTFY_TOKEN")
     auth = {"Authorization": f"Bearer {token}"} if token else {}
     body = message[:_MAX_MESSAGE_CHARS]
 
@@ -171,7 +171,7 @@ def ntfy_health() -> dict:
     only report faults can read `error` and ignore `state`.
     """
     load_env()
-    url = os.getenv("NTFY_URL")
+    url = config.getenv("NTFY_URL")
     if not url:
         return {"state": "off", "error": None}
 

@@ -704,7 +704,8 @@ def test_gemini_should_cancel_interrupts(monkeypatch):
 def test_resolve_backend_precedence(monkeypatch):
     monkeypatch.delenv("WREN_LLM_BACKEND", raising=False)
     monkeypatch.delenv("WREN_DAILY_CHROME_LEARNINGS_BACKEND", raising=False)
-    assert loop.resolve_backend("daily_chrome_learnings") is None
+    # Nothing configured resolves to the schema row's default, not to None.
+    assert loop.resolve_backend("daily_chrome_learnings") == "ollama"
 
     monkeypatch.setenv("WREN_LLM_BACKEND", "ollama")
     assert loop.resolve_backend("daily_chrome_learnings") == "ollama"

@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request, send_from_directory, session
 
+from agent import config
 from agent import prefs
 from agent.escalations import record_escalation
 from agent.loop import (
@@ -1217,7 +1218,7 @@ def _context_budget_warning() -> str | None:
     starts lying again."""
     head = _prompt_head_chars()
     worst_case = MAX_HISTORY_CHARS + head + (MAX_TOOL_ITERATIONS * MAX_TOOL_RESULT_CHARS)
-    num_ctx = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
+    num_ctx = int(config.getenv("OLLAMA_NUM_CTX", "8192"))
     capacity = num_ctx * _CHARS_PER_TOKEN
     if worst_case <= capacity:
         return None

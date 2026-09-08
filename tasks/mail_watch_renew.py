@@ -15,7 +15,6 @@ Usage:
     python -m tasks.mail_watch_renew
 """
 
-import os
 import sys
 from pathlib import Path
 
@@ -23,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dotenv import load_dotenv
 
+from agent import config
 from agent.tools import gmail_read, mail_state
 from tasks._common import notify_failure, setup_logger
 
@@ -39,8 +39,8 @@ def topic_name() -> str:
     """The fully-qualified Pub/Sub topic Gmail publishes to. Assembled here
     rather than stored whole, so the project id stays one value shared with the
     subscriber."""
-    project = os.getenv("MAIL_PUBSUB_PROJECT", "")
-    topic = os.getenv("MAIL_PUBSUB_TOPIC", "wren-mail")
+    project = config.getenv("MAIL_PUBSUB_PROJECT", "")
+    topic = config.getenv("MAIL_PUBSUB_TOPIC", "wren-mail")
     return f"projects/{project}/topics/{topic}"
 
 
@@ -53,7 +53,7 @@ def main() -> int:
     logger.info("Starting Gmail watch renewal run")
 
     try:
-        if not os.getenv("MAIL_PUBSUB_PROJECT"):
+        if not config.getenv("MAIL_PUBSUB_PROJECT"):
             raise RuntimeError(
                 "MAIL_PUBSUB_PROJECT is not set in config/.env — see docs/mail-watch.md")
 

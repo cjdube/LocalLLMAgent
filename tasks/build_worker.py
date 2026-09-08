@@ -48,6 +48,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from agent import config
 from agent.tools import clickup
 from agent.usage_ledger import record as record_usage
 from agent.tools.notify import notify
@@ -116,20 +117,20 @@ _MAX_SUMMARY_CHARS = 1200
 
 
 def _repo_root() -> Path:
-    return Path(os.getenv("WREN_BUILD_REPO_ROOT", DEFAULT_REPO_ROOT)).expanduser()
+    return Path(config.getenv("WREN_BUILD_REPO_ROOT", DEFAULT_REPO_ROOT)).expanduser()
 
 
 def _worktree_root() -> Path:
-    return Path(os.getenv("WREN_BUILD_WORKTREE_ROOT", DEFAULT_WORKTREE_ROOT)).expanduser()
+    return Path(config.getenv("WREN_BUILD_WORKTREE_ROOT", DEFAULT_WORKTREE_ROOT)).expanduser()
 
 
 def _claude_bin() -> Path:
-    return Path(os.getenv("WREN_CLAUDE_BIN", DEFAULT_CLAUDE_BIN)).expanduser()
+    return Path(config.getenv("WREN_CLAUDE_BIN", DEFAULT_CLAUDE_BIN)).expanduser()
 
 
 def _timeout_s() -> int:
     try:
-        return int(os.getenv("WREN_BUILD_TIMEOUT_S", DEFAULT_TIMEOUT_S))
+        return int(config.getenv("WREN_BUILD_TIMEOUT_S", DEFAULT_TIMEOUT_S))
     except ValueError:
         return DEFAULT_TIMEOUT_S
 
@@ -285,7 +286,7 @@ def claude_argv(prompt: str, settings_path: Path) -> list:
         "--settings", str(settings_path),
         "--strict-mcp-config",
     ]
-    model = os.getenv("WREN_BUILD_MODEL", "").strip()
+    model = config.getenv("WREN_BUILD_MODEL", "").strip()
     if model:
         argv += ["--model", model]
     return argv

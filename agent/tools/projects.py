@@ -30,11 +30,11 @@ Usage:
 
 import argparse
 import hashlib
-import os
 import subprocess
 import sys
 from pathlib import Path
 
+from agent import config
 from agent import prefs
 from agent.store import load_json
 from agent.tools._http import load_env, print_result
@@ -76,7 +76,7 @@ _README_NAMES = ("README.md", "README.rst", "README.txt", "readme.md")
 
 
 def _projects_dir() -> Path:
-    return Path(os.getenv("PROJECTS_DIR", DEFAULT_PROJECTS_DIR)).expanduser()
+    return Path(config.getenv("PROJECTS_DIR", DEFAULT_PROJECTS_DIR)).expanduser()
 
 
 def _git(path: Path, *args: str) -> str | None:

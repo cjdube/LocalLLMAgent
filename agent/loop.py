@@ -16,6 +16,7 @@ from typing import Callable, Optional
 import requests
 from dotenv import load_dotenv
 
+from agent import config
 from agent import prefs
 
 # The Gemini backend lives behind the _llm_chat seam in its own module; import
@@ -221,14 +222,14 @@ def _ollama_chat(
     runner (no bytes at all) still trips it. Overridable via OLLAMA_TIMEOUT or
     per-call `timeout` — a large prompt can spend tens of seconds in prefill
     before the first chunk, so the default stays generous."""
-    model = model or os.getenv("OLLAMA_MODEL", "gemma4")
-    host = host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    model = model or config.getenv("OLLAMA_MODEL", "gemma4")
+    host = host or config.getenv("OLLAMA_HOST", "http://localhost:11434")
     if timeout is None:
-        timeout = float(os.getenv("OLLAMA_TIMEOUT", "300"))
+        timeout = float(config.getenv("OLLAMA_TIMEOUT", "300"))
     # Set num_ctx explicitly — otherwise Ollama falls back to a small default
     # (~4096) and silently truncates the FRONT of the prompt, where Wren's
     # system prompt (identity + tool-use rules) lives.
-    num_ctx = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
+    num_ctx = int(config.getenv("OLLAMA_NUM_CTX", "8192"))
     # Cap tokens generated per call: the small model can fall into a repetition
     # loop and, uncapped, run away for thousands of junk tokens that then live
     # in the session history (observed: a 5,459-token "list memories" reply).
@@ -236,7 +237,7 @@ def _ollama_chat(
     # Note this budget covers THINKING TOKENS TOO, and it was sized before the
     # model had a thinking channel: a reasoning-heavy call can spend all 3072 on
     # scratchpad and return empty content (see `think` below).
-    num_predict = int(os.getenv("OLLAMA_NUM_PREDICT", "3072"))
+    num_predict = int(config.getenv("OLLAMA_NUM_PREDICT", "3072"))
 
     payload = {
         "model": model,
@@ -244,7 +245,7 @@ def _ollama_chat(
         "stream": True,
         # Keep the (large, slow-to-load) model resident between calls so the
         # next one doesn't pay the cold-load cost inside its read-timeout window.
-        "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
+        "keep_alive": config.getenv("OLLAMA_KEEP_ALIVE", "30m"),
         "options": {"num_ctx": num_ctx, "num_predict": num_predict},
     }
     if tools is not None:
@@ -362,16 +363,16 @@ def warm_model(
     False on failure — the caller still attempts the generation cold."""
     if _resolve_backend(backend) != "ollama":
         return True
-    model = model or os.getenv("OLLAMA_MODEL", "gemma4")
-    host = host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    model = model or config.getenv("OLLAMA_MODEL", "gemma4")
+    host = host or config.getenv("OLLAMA_HOST", "http://localhost:11434")
     if timeout is None:
-        timeout = float(os.getenv("OLLAMA_WARM_TIMEOUT", "600"))
-    num_ctx = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
+        timeout = float(config.getenv("OLLAMA_WARM_TIMEOUT", "600"))
+    num_ctx = int(config.getenv("OLLAMA_NUM_CTX", "8192"))
     payload = {
         "model": model,
         "messages": [],
         "stream": False,
-        "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
+        "keep_alive": config.getenv("OLLAMA_KEEP_ALIVE", "30m"),
         "options": {"num_ctx": num_ctx},
     }
     try:
@@ -450,10 +451,10 @@ def probe_local_model(
     turn, which is what WREN_CHAT_BUSY_PROBE=0 exists to switch off."""
     if _resolve_backend(backend) != "ollama":
         return True, ""
-    model = os.getenv("OLLAMA_MODEL", "gemma4")
-    host = host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    model = config.getenv("OLLAMA_MODEL", "gemma4")
+    host = host or config.getenv("OLLAMA_HOST", "http://localhost:11434")
     if timeout is None:
-        timeout = float(os.getenv("WREN_CHAT_BUSY_PROBE_TIMEOUT", "3"))
+        timeout = float(config.getenv("WREN_CHAT_BUSY_PROBE_TIMEOUT", "3"))
 
     t_start = time.monotonic()
 
@@ -486,8 +487,8 @@ def probe_local_model(
         # and a one-token budget so a healthy Ollama can't look slow by
         # spending the probe on a scratchpad.
         "think": False,
-        "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
-        "options": {"num_ctx": int(os.getenv("OLLAMA_NUM_CTX", "8192")),
+        "keep_alive": config.getenv("OLLAMA_KEEP_ALIVE", "30m"),
+        "options": {"num_ctx": int(config.getenv("OLLAMA_NUM_CTX", "8192")),
                     "num_predict": 1},
     }
     t0 = time.monotonic()
@@ -514,15 +515,22 @@ def probe_local_model(
 
 def _resolve_backend(backend: Optional[str] = None) -> str:
     """explicit arg -> WREN_LLM_BACKEND env -> 'ollama' fallback."""
-    return (backend or os.getenv("WREN_LLM_BACKEND") or "ollama").strip().lower()
+    return (backend or config.getenv("WREN_LLM_BACKEND") or "ollama").strip().lower()
 
 
 def resolve_backend(task_key: str) -> Optional[str]:
     """Per-task backend override for scheduled tasks: WREN_<TASK_KEY>_BACKEND
-    falls back to the global WREN_LLM_BACKEND. Returns None when neither is set,
-    which lets _llm_chat apply its own 'ollama' default. Lets chat stay local
-    while an individual task (e.g. opportunity_digest) opts into a cloud model."""
-    return os.getenv(f"WREN_{task_key.upper()}_BACKEND") or os.getenv("WREN_LLM_BACKEND") or None
+    falls back to the global WREN_LLM_BACKEND. Lets chat stay local while an
+    individual task (e.g. opportunity_digest) opts into a cloud model.
+
+    Returns 'ollama' when nothing is configured, because WREN_LLM_BACKEND's
+    schema row carries that default. It used to return None here and let
+    _llm_chat apply the same default one layer down; both callers that read the
+    value at all ((resolve_backend(...) or "ollama"), and _resolve_backend
+    inside _llm_chat) collapse the two to the same string, so nothing
+    downstream can tell them apart. The per-task key is deliberately still
+    resolved by name — it is built per call, so it has no row of its own."""
+    return config.getenv(f"WREN_{task_key.upper()}_BACKEND") or config.getenv("WREN_LLM_BACKEND") or None
 
 
 def active_model_label(backend: Optional[str] = None) -> str:
@@ -530,8 +538,8 @@ def active_model_label(backend: Optional[str] = None) -> str:
     dashboard so the UI reflects the model actually in use, not a hardcoded one."""
     b = _resolve_backend(backend)
     if b in ("gemini", "google"):
-        return f"{os.getenv('WREN_GEMINI_MODEL', GEMINI_DEFAULT_MODEL)} ({b})"
-    return f"{os.getenv('OLLAMA_MODEL', 'gemma4')} ({b})"
+        return f"{config.getenv('WREN_GEMINI_MODEL', GEMINI_DEFAULT_MODEL)} ({b})"
+    return f"{config.getenv('OLLAMA_MODEL', 'gemma4')} ({b})"
 
 
 def escalation_backend() -> Optional[str]:
@@ -542,7 +550,7 @@ def escalation_backend() -> Optional[str]:
     setup the global default is 'ollama', which names no frontier target, so
     reusing it couldn't say where an escalation should go. Provider-neutral by
     design — see docs/frontier-escalation.md."""
-    b = os.getenv("WREN_ESCALATION_BACKEND")
+    b = config.getenv("WREN_ESCALATION_BACKEND")
     return b.strip().lower() if b and b.strip() else None
 
 
@@ -554,7 +562,7 @@ def escalation_available() -> bool:
     means the button is simply not shown. Adding a provider adds a branch here."""
     b = escalation_backend()
     if b in ("gemini", "google"):
-        return bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"))
+        return bool(config.getenv("GEMINI_API_KEY") or config.getenv("GOOGLE_API_KEY"))
     return False
 
 
@@ -632,9 +640,9 @@ def _default_model(backend: str, model: Optional[str]) -> Optional[str]:
     if model:
         return model
     if backend == "ollama":
-        return os.getenv("OLLAMA_MODEL", "gemma4")
+        return config.getenv("OLLAMA_MODEL", "gemma4")
     if backend in ("gemini", "google"):
-        return os.getenv("WREN_GEMINI_MODEL", GEMINI_DEFAULT_MODEL)
+        return config.getenv("WREN_GEMINI_MODEL", GEMINI_DEFAULT_MODEL)
     return None
 
 

@@ -43,6 +43,7 @@ from dotenv import load_dotenv
 
 import requests
 
+from agent import config
 from agent import prefs
 from agent.loop import complete_text, resolve_backend, warm_model
 from agent.store import atomic_write_json, load_json
@@ -93,16 +94,16 @@ _JOB_PREFS = prefs.job_search()
 
 def _states() -> list:
     # Env wins; otherwise the states list from config/preferences.json.
-    configured = os.getenv("OPP_STATES") or ",".join(_JOB_PREFS.get("states", []))
+    configured = config.getenv("OPP_STATES") or ",".join(_JOB_PREFS.get("states", []))
     return [s.strip().upper() for s in configured.split(",") if s.strip()]
 
 
 def _stalled_days() -> int:
-    return int(os.getenv("OPP_STALLED_DAYS", "45"))
+    return int(config.getenv("OPP_STALLED_DAYS", "45"))
 
 
 def _score_threshold() -> int:
-    return int(os.getenv("OPP_SCORE_THRESHOLD", "8"))
+    return int(config.getenv("OPP_SCORE_THRESHOLD", "8"))
 
 
 # Who the leads are scored for comes from config/preferences.json; the output
@@ -632,7 +633,7 @@ def _item_html(item: dict) -> str:
 def _triage_footer() -> str:
     """Link to the dashboard's /opportunities triage page — the digest itself
     is read-only. Empty when WREN_PUBLIC_URL isn't configured."""
-    base = os.getenv("WREN_PUBLIC_URL", "").rstrip("/")
+    base = config.getenv("WREN_PUBLIC_URL", "").rstrip("/")
     url = safe_url(f"{base}/opportunities") if base else ""
     if not url:
         return ""

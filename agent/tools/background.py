@@ -26,7 +26,6 @@ Usage:
 
 import argparse
 import json
-import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -35,6 +34,7 @@ from uuid import uuid4
 from dotenv import load_dotenv
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
+from agent import config
 from agent import prefs
 from agent.store import atomic_write_json, load_json, locked
 
@@ -392,7 +392,7 @@ def resolve_job(job_id: str, approved: bool) -> bool:
 # ---- approval tokens & phone-push actions ---------------------------------
 
 def _serializer() -> URLSafeTimedSerializer:
-    secret = os.getenv("FLASK_SECRET_KEY")
+    secret = config.getenv("FLASK_SECRET_KEY")
     if not secret:
         raise RuntimeError("FLASK_SECRET_KEY must be set to sign background-approval tokens")
     return URLSafeTimedSerializer(secret, salt=_TOKEN_SALT)
@@ -413,7 +413,7 @@ def read_approval_token(token: str) -> dict | None:
 def approval_actions(job_id: str) -> list | None:
     """ntfy action buttons for the approval push, or None if WREN_PUBLIC_URL isn't
     set (in which case the push still goes, just without tap-to-approve buttons)."""
-    base = os.getenv("WREN_PUBLIC_URL", "").rstrip("/")
+    base = config.getenv("WREN_PUBLIC_URL", "").rstrip("/")
     if not base:
         return None
     endpoint = f"{base}/api/bg/resolve"

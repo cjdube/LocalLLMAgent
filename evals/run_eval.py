@@ -24,7 +24,6 @@ at a time, so interleaving them would pay a full model load per case.
 import argparse
 import json
 import logging
-import os
 import re
 import sys
 import time
@@ -33,6 +32,7 @@ from pathlib import Path
 
 import requests
 
+from agent import config
 from agent.loop import OllamaUnavailable, advance, complete_text, resolve, warm_model
 from agent.toolset import DISPATCH, TOOL_GROUPS, WRITE_TOOLS, groups_for_message, tools_for
 from evals.cases_chat import CASES as CHAT_CASES, DEFAULT_TOOL_RESULT
@@ -86,7 +86,7 @@ def unload(model: str) -> bool:
     only way a num_ctx change takes effect on an already-resident model.
 
     Best-effort: a failure here costs accuracy, not the run."""
-    host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    host = config.getenv("OLLAMA_HOST", "http://localhost:11434")
     try:
         requests.post(f"{host}/api/chat",
                       json={"model": model, "messages": [], "keep_alive": 0},

@@ -31,6 +31,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from statistics import median
 
+from agent import config
 from agent.loop import active_model_label
 from agent.tools.memory import recall
 # _git is the same "degrade to None, never raise" wrapper project_scan reads its
@@ -129,7 +130,7 @@ def _external_roots() -> list[tuple[str, Path, str]]:
     500 on every dashboard poll.
     """
     roots = []
-    for entry in os.getenv(EXTERNAL_ROOTS_ENV, "").split(","):
+    for entry in config.getenv(EXTERNAL_ROOTS_ENV, "").split(","):
         name, sep, rest = entry.partition("=")
         path, _, prefix = rest.partition("#")
         name, path, prefix = name.strip(), path.strip(), prefix.strip()

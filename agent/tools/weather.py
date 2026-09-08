@@ -14,12 +14,12 @@ Key resolution order: --api-key arg > config/.env file > OPENWEATHERMAP_API_KEY 
 """
 
 import argparse
-import os
 import sys
 from datetime import datetime, timedelta, timezone
 
 import requests
 
+from agent import config
 from agent import prefs
 from agent.tools._http import http_error, load_env, missing_key_error, print_result, resolve_key
 
@@ -146,7 +146,7 @@ def fetch_weather(location: str = None, units: str = "imperial", days: int = 1, 
         return missing_key_error("OPENWEATHERMAP_API_KEY")
 
     # Env wins; otherwise the location from config/preferences.json.
-    location = location or os.getenv("DEFAULT_LOCATION") or prefs.PREFS.get("location", "")
+    location = location or config.getenv("DEFAULT_LOCATION") or prefs.PREFS.get("location", "")
     location = _normalize_location(location)
     days = _clamp_days(days)
 

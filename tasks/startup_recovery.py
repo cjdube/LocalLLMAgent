@@ -20,6 +20,7 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
+from agent import config
 from agent.loop import resolve_backend
 from agent.store import atomic_write_json, load_json, locked
 from tasks._common import notify_failure, setup_logger
@@ -91,7 +92,7 @@ def _backend_uses_ollama(label: str) -> bool:
 
 def ollama_ready() -> bool:
     """A short startup probe; warming happens inside each selected task."""
-    host = os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+    host = config.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
     try:
         response = requests.get(f"{host}/api/tags", timeout=3)
         response.raise_for_status()

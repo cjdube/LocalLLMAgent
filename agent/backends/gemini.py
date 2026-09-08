@@ -14,8 +14,9 @@ keep the import one-way — agent.loop imports this module, not vice versa)."""
 import base64
 import json
 import logging
-import os
 from typing import Callable, Optional
+
+from agent import config
 
 # Default cloud model when the Gemini backend is selected but no model is pinned.
 GEMINI_DEFAULT_MODEL = "gemini-2.5-flash"
@@ -131,7 +132,7 @@ def _gemini_client(timeout: float = None):
     from google import genai
     from google.genai import types
 
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    api_key = config.getenv("GEMINI_API_KEY") or config.getenv("GOOGLE_API_KEY")
     kwargs = {"api_key": api_key}
     if timeout is not None:
         kwargs["http_options"] = types.HttpOptions(timeout=int(timeout * 1000))  # ms
@@ -156,8 +157,8 @@ def _gemini_chat(
 
     from agent.loop import TurnCancelled
 
-    model = model or os.getenv("WREN_GEMINI_MODEL", GEMINI_DEFAULT_MODEL)
-    max_out = int(os.getenv("WREN_GEMINI_MAX_OUTPUT_TOKENS", "8192"))
+    model = model or config.getenv("WREN_GEMINI_MODEL", GEMINI_DEFAULT_MODEL)
+    max_out = int(config.getenv("WREN_GEMINI_MAX_OUTPUT_TOKENS", "8192"))
     # Gemini models are *thinking* models, and thinking tokens count against
     # max_output_tokens. Left unbounded, the model can spend nearly the whole
     # budget on invisible reasoning and get cut off mid-answer (observed: a
@@ -171,7 +172,7 @@ def _gemini_chat(
     # for the answer you need. At max_output_tokens=200 thinking ate 194 of them
     # and returned 3 characters with finish_reason=MAX_TOKENS; at the 8192
     # default there is ample headroom.
-    thinking_budget = int(os.getenv("WREN_GEMINI_THINKING_BUDGET", "0"))
+    thinking_budget = int(config.getenv("WREN_GEMINI_THINKING_BUDGET", "0"))
     # `think` is deliberately NOT honoured here. The seam's think=False means
     # "don't spend the answer's budget on scratchpad", which this backend already
     # aims at via the budget above — and forcing 0 would override the per-model
@@ -196,14 +197,14 @@ def _gemini_chat(
         cfg_kwargs["system_instruction"] = system
     if tools:
         cfg_kwargs["tools"] = [_tools_to_gemini(tools)]
-    config = types.GenerateContentConfig(**cfg_kwargs)
+    gen_config = types.GenerateContentConfig(**cfg_kwargs)
 
     client = _gemini_client(timeout=timeout)
     content_parts: list[str] = []
     tool_calls: list[dict] = []
     prompt_tokens = output_tokens = thinking_tokens = None
     finish_reason = None
-    stream = client.models.generate_content_stream(model=model, contents=contents, config=config)
+    stream = client.models.generate_content_stream(model=model, contents=contents, config=gen_config)
     for chunk in stream:
         if should_cancel is not None and should_cancel():
             raise TurnCancelled()

@@ -37,7 +37,6 @@ Usage:
 """
 
 import json
-import os
 import sys
 import time
 from pathlib import Path
@@ -47,6 +46,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from dotenv import load_dotenv
 from google.cloud import pubsub_v1
 
+from agent import config
 from agent import prefs
 from agent.loop import complete_text
 from agent.tools import background, gmail_read, mail_state
@@ -129,8 +129,8 @@ def _log_idle(notice_id: str, logger) -> None:
 
 
 def subscription_path() -> str:
-    project = os.getenv("MAIL_PUBSUB_PROJECT", "")
-    subscription = os.getenv("MAIL_PUBSUB_SUBSCRIPTION", "wren-mail-sub")
+    project = config.getenv("MAIL_PUBSUB_PROJECT", "")
+    subscription = config.getenv("MAIL_PUBSUB_SUBSCRIPTION", "wren-mail-sub")
     return f"projects/{project}/subscriptions/{subscription}"
 
 
@@ -448,7 +448,7 @@ def main() -> int:
     logger = setup_logger("mail_watcher")
 
     try:
-        if not os.getenv("MAIL_PUBSUB_PROJECT"):
+        if not config.getenv("MAIL_PUBSUB_PROJECT"):
             raise RuntimeError(
                 "MAIL_PUBSUB_PROJECT is not set in config/.env — see docs/mail-watch.md")
 

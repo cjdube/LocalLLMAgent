@@ -7,7 +7,6 @@ Usage:
 
 import argparse
 import json
-import os
 import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -15,6 +14,7 @@ from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
+from agent import config
 from agent import prefs
 from agent.dates import DATE_ARG_GUIDANCE, local_timezone as _local_timezone, resolve_date
 from agent.tools.google_auth import build_service
@@ -145,7 +145,7 @@ def get_events_in_range(time_min: str, time_max: str) -> dict:
     is a multi-month *past* range through get_events_by_date. Add the pageToken
     loop here when that question starts mattering — the chat-side caps above
     already bound what reaches the model, so nothing else has to change."""
-    calendar_id = os.getenv("GOOGLE_CALENDAR_ID", "primary")
+    calendar_id = config.getenv("GOOGLE_CALENDAR_ID", "primary")
 
     try:
         service = build_service("calendar", "v3")
@@ -291,7 +291,7 @@ def log_calendar_event(
     color_id: str = None,
     source_id: str = None,
 ) -> dict:
-    calendar_id = os.getenv("GOOGLE_CALENDAR_ID", "primary")
+    calendar_id = config.getenv("GOOGLE_CALENDAR_ID", "primary")
     tz = _local_timezone()
 
     try:

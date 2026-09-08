@@ -28,7 +28,6 @@ Usage:
 
 import argparse
 import json
-import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -36,6 +35,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from agent import config
 from agent.dates import local_timezone
 from agent.tools import clickup
 from agent.tools._http import print_result
@@ -71,11 +71,11 @@ _MAX_TRANSCRIPT_BYTES = 64 * 1024 * 1024
 
 
 def _projects_root() -> Path:
-    return Path(os.getenv("WREN_CLAUDE_PROJECTS_ROOT", _PROJECTS_ROOT)).expanduser()
+    return Path(config.getenv("WREN_CLAUDE_PROJECTS_ROOT", _PROJECTS_ROOT)).expanduser()
 
 
 def _plans_root() -> Path:
-    return Path(os.getenv("WREN_CLAUDE_PLANS_ROOT", _PLANS_ROOT)).expanduser()
+    return Path(config.getenv("WREN_CLAUDE_PLANS_ROOT", _PLANS_ROOT)).expanduser()
 
 
 def _human_text(rec: dict) -> str | None:

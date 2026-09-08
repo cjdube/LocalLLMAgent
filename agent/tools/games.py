@@ -20,11 +20,11 @@ Usage:
 """
 
 import json
-import os
 import socket
 import sys
 from pathlib import Path
 
+from agent import config
 from agent import prefs
 
 # The user's name, for the model-facing tool description below. From
@@ -43,7 +43,7 @@ def _weigh_anchor_dir() -> Path:
     """Read at call time, not import time, so tests (and a .env edit) can point
     this somewhere else without reimporting the module."""
     return Path(
-        os.getenv("WEIGH_ANCHOR_DIR") or (Path.home() / "Projects" / "WeighAnchor")
+        config.getenv("WEIGH_ANCHOR_DIR") or (Path.home() / "Projects" / "WeighAnchor")
     ).expanduser()
 
 
@@ -66,7 +66,7 @@ def games() -> list[dict]:
             "players": "You plus 1-5 AI seats. At 2 seats it is cooperative: you and Wren play together against a par, not against each other.",
             "path": "/games/weigh-anchor/",
             "dist": _weigh_anchor_dir() / "dist",
-            "api_port": int(os.getenv("WEIGH_ANCHOR_PORT", "3002")),
+            "api_port": int(config.getenv("WEIGH_ANCHOR_PORT", "3002")),
             # The AI seats run on the same local model chat uses, and Ollama serves one
             # generation at a time, so game turns and chat turns queue behind each other.
             "note": "The AI seats think with the same local model as chat, so a game turn and a chat message wait for each other.",
@@ -100,7 +100,7 @@ def list_games() -> dict:
     The URL is absolute when WREN_PUBLIC_URL is set, because this answer is
     routinely read on the phone, where a bare path is not tappable.
     """
-    base = (os.getenv("WREN_PUBLIC_URL") or "").rstrip("/")
+    base = (config.getenv("WREN_PUBLIC_URL") or "").rstrip("/")
     out = []
     for game in games():
         reason = _unavailable_reason(game)

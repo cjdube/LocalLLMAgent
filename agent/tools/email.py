@@ -22,7 +22,6 @@ Usage:
 import argparse
 import base64
 import json
-import os
 import sys
 from email.mime.text import MIMEText
 from email.utils import formataddr, getaddresses
@@ -30,6 +29,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from agent import config
 from agent import prefs
 from agent.tools import gmail_read
 from agent.tools.google_auth import build_service
@@ -114,7 +114,7 @@ def send_email_tool(subject: str, body: str, **ignored) -> dict:
 
 
 def send_email(subject: str, body: str, to: str = None, html: bool = False) -> dict:
-    to = to or os.getenv("BRIEF_TO_EMAIL")
+    to = to or config.getenv("BRIEF_TO_EMAIL")
     if not to:
         return {"error": "BRIEF_TO_EMAIL not set in config/.env"}
 
@@ -191,7 +191,7 @@ def reply_plan(thread_id: str) -> dict:
     # The fallback keeps a transient profile failure from killing the reply. The
     # cost of not knowing his own address is a copy to himself, which is visible
     # and harmless; the cost of failing is a reply he believes was sent.
-    me = gmail_read.my_address() or os.getenv("BRIEF_TO_EMAIL", "")
+    me = gmail_read.my_address() or config.getenv("BRIEF_TO_EMAIL", "")
     to = _thread_participants(messages, me)
     if not to:
         return {"error": f"thread {thread_id} has no one on it but you"}

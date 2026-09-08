@@ -18,7 +18,6 @@ Usage:
 
 import argparse
 import json
-import os
 import sys
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
@@ -26,6 +25,7 @@ from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
+from agent import config
 from agent.dates import DATE_ARG_GUIDANCE, local_timezone as _local_timezone, resolve_date
 from agent.tools.google_auth import build_service
 
@@ -172,7 +172,7 @@ def _read_tasklists() -> list[dict]:
     """Which list(s) get_tasks()/get_tasks_due_soon() read from — every list
     on the account by default (see module docstring for why), or just
     GOOGLE_TASKLIST_ID if that's set."""
-    override = os.getenv("GOOGLE_TASKLIST_ID")
+    override = config.getenv("GOOGLE_TASKLIST_ID")
     if override:
         return [{"id": override, "title": override}]
     return _all_tasklists()
@@ -183,7 +183,7 @@ def _resolve_tasklist_id(list_name: str = None) -> str:
     case-insensitively against real list titles) wins; otherwise falls back
     to GOOGLE_TASKLIST_ID if set, otherwise Google's '@default' list."""
     if not list_name:
-        return os.getenv("GOOGLE_TASKLIST_ID") or "@default"
+        return config.getenv("GOOGLE_TASKLIST_ID") or "@default"
     for tl in _all_tasklists():
         if tl["title"].strip().lower() == list_name.strip().lower():
             return tl["id"]

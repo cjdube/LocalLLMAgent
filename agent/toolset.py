@@ -17,6 +17,7 @@ import json
 import os
 import re
 
+from agent import config
 from agent import prefs
 from agent.tools.background import (
     GET_JOB_RESULT_TOOL_SCHEMA,
@@ -614,7 +615,7 @@ def _email_recipient() -> str:
     # The model-facing send_email pins the recipient (see send_email_tool), so
     # the effective recipient is always BRIEF_TO_EMAIL — show it anyway: the
     # human approving a send should see where it goes, not infer it.
-    return os.getenv("BRIEF_TO_EMAIL") or "(BRIEF_TO_EMAIL unset)"
+    return config.getenv("BRIEF_TO_EMAIL") or "(BRIEF_TO_EMAIL unset)"
 
 
 def _reply_recipients(thread_id: str) -> str:

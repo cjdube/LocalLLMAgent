@@ -9,29 +9,37 @@ tool stays short and a new tool has less to copy.
 """
 
 import json
-import os
 import re
 from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
 
+from agent import config
+
 # config/.env lives at the repo root, three levels up from agent/tools/.
 ENV_PATH = Path(__file__).resolve().parent.parent.parent / "config" / ".env"
 
 
 def load_env() -> None:
-    """Load config/.env so os.getenv() sees keys from the file and the env."""
+    """Load config/.env so a lookup sees keys from the file and the env."""
     load_dotenv(ENV_PATH)
 
 
 def resolve_key(name: str, arg: str | None = None) -> str | None:
     """Resolve a credential: an explicit arg wins, else config/.env / env var.
 
-    load_env() folds .env into the process environment, so a single os.getenv()
-    covers both the file and a real environment variable.
+    The single choke point for every API key in the repo — weather, search,
+    page fetch, GitHub and ClickUp all come through here. That is what makes it
+    the place a real secret store would hang one day; nothing else would have
+    to change.
+
+    It goes through config.getenv for uniformity, not for storage: a key with a
+    secret row can never be written into config/settings.json (agent/config.py's
+    set_value refuses it), so the file layer is always empty here and the
+    resolution is the same environment lookup it always was.
     """
-    return arg or os.getenv(name)
+    return arg or config.getenv(name)
 
 
 def missing_key_error(name: str) -> dict:

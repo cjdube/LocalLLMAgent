@@ -47,6 +47,7 @@ import re
 import sys
 from pathlib import Path
 
+from agent import config
 from agent import prefs
 from agent.tools._http import load_env, print_result
 
@@ -135,7 +136,7 @@ _H2_RE = re.compile(r"^## (.+?)\s*$", re.MULTILINE)
 
 
 def _vault() -> Path:
-    return Path(os.getenv("WIKI_VAULT_PATH", DEFAULT_WIKI_VAULT)).expanduser()
+    return Path(config.getenv("WIKI_VAULT_PATH", DEFAULT_WIKI_VAULT)).expanduser()
 
 
 def _require_vault() -> tuple[Path | None, dict | None]:

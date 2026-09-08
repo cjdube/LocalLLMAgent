@@ -32,11 +32,11 @@ Usage:
 """
 
 import argparse
-import os
 import re
 import sys
 from pathlib import Path
 
+from agent import config
 from agent.tools._http import load_env, print_result
 
 load_env()
@@ -54,7 +54,7 @@ _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", re.DOTALL)
 
 
 def _skills_dir() -> Path:
-    return Path(os.getenv("WREN_SKILLS_DIR", str(DEFAULT_SKILLS_DIR)))
+    return Path(config.getenv("WREN_SKILLS_DIR", str(DEFAULT_SKILLS_DIR)))
 
 
 def _slugify(name: str) -> str:

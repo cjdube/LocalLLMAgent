@@ -9,12 +9,13 @@ drop `DATE_ARG_GUIDANCE` into the tool's JSON schema so the model is told how
 to pass the argument.
 """
 
-import os
 import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
+
+from agent import config
 
 # Reusable JSON-schema description for a "which day" tool argument. Append it
 # to a tool's own lead-in (e.g. "The day to look up. " + DATE_ARG_GUIDANCE) so
@@ -43,7 +44,7 @@ def local_timezone() -> str:
     abbreviations like 'EDT', so we read the real zoneinfo path via
     /etc/localtime rather than relying on tzinfo.__str__. Overridable with the
     TIMEZONE env var; falls back to 'UTC' if the path can't be resolved."""
-    override = os.getenv("TIMEZONE")
+    override = config.getenv("TIMEZONE")
     if override:
         return override
     try:
