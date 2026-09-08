@@ -1,58 +1,131 @@
-"""Tests for agent/prefs.py and the contract of the shipped preferences file.
+"""Tests for agent/prefs.py and the contract every preference section must meet.
 
-The shipped config/preferences.json is committed data that several modules
-consume at import time; these tests are the schema guard that keeps an edit
-from silently breaking a consumer.
+The sections several modules consume at import time now arrive through
+agent/config.py, layered: the shipped config/preferences.example.json, then the
+pre-settings config/preferences.json, then whatever the /settings page has
+saved. The invariants that used to live as assertions in this file live in
+prefs.validate_section() instead, so the save route rejects a bad section with
+the same words this file would print — a test the page cannot disagree with.
+
+The suite pins WREN_PREFERENCES_FILE at a path that does not exist (see
+tests/conftest.py), so what these tests read is the shipped example file.
 """
 
-import json
-
-from agent import prefs
+from agent import prefs, schema
 
 
-# ---- shipped file satisfies every consumer's contract ----------------------
+# ---- shipped sections satisfy every consumer's contract --------------------
 
 def test_shipped_file_parses():
     assert isinstance(prefs.PREFS, dict) and prefs.PREFS, \
-        "config/preferences.json failed to load"
+        "the shipped preferences failed to load"
 
 
-def test_persona_complete():
-    persona = prefs.persona()
-    for field in ("user_name", "positioning", "engagement_model"):
-        assert persona.get(field), f"persona.{field} missing or empty"
+def test_every_shipped_section_passes_its_own_validator():
+    # The old per-section assertions, now asserted through the function the save
+    # route uses. Every section at once, so a new section with no validator
+    # cannot slip past by simply not having a test written for it.
+    for name in schema.PREFERENCE_SECTIONS:
+        problems = prefs.validate_section(name, prefs.PREFS.get(name, {}))
+        assert not problems, f"shipped {name} section: {problems}"
 
 
-def test_calendar_categories_complete():
-    categories = prefs.calendar_categories()
-    assert categories, "no valid calendar categories"
-    for c in categories:
-        for field in ("name", "color_id", "color_name"):
-            assert c.get(field), f"category {c} missing {field}"
+def test_every_shipped_section_has_a_validator():
+    # Guard on the guard above: a section absent from _VALIDATORS would make
+    # validate_section return "not a known preference section" — which the loop
+    # above would catch — but a section added to _VALIDATORS and NOT to the
+    # schema would go unchecked in the other direction.
+    assert set(prefs._VALIDATORS) == set(schema.PREFERENCE_SECTIONS)
 
 
-def test_calendar_roles_present():
-    roles = [c.get("role") for c in prefs.calendar_categories() if c.get("role")]
-    # strava_download needs fitness, calendar_colorizer needs exactly one fallback.
-    # work/meetings/appointments have no consumer since calendar bucketing was
-    # dropped from the learnings tasks; pinned as legacy (see docs/preferences.md).
+# ---- validate_section actually bites ---------------------------------------
+#
+# Without these, a validator that returned [] unconditionally would keep every
+# assertion above green forever. Each case breaks exactly one invariant that a
+# real consumer depends on.
+
+def test_persona_needs_all_three_fields():
+    assert prefs.validate_section("persona", {"user_name": "A", "positioning": "B"}) \
+        == ["persona.engagement_model is missing or empty"]
+
+
+def test_calendar_needs_exactly_one_fallback():
+    # calendar_colorizer picks the first fallback; two make the choice arbitrary
+    # and none makes it crash.
+    two = {"categories": [
+        {"name": "a", "color_id": "1", "color_name": "x", "role": "fallback"},
+        {"name": "b", "color_id": "2", "color_name": "y", "role": "fallback"},
+    ]}
+    problems = prefs.validate_section("calendar", two)
+    assert any("exactly one" in p for p in problems), problems
+
+
+def test_calendar_needs_the_roles_its_consumers_look_up():
+    # strava_download looks up 'fitness'; work/meetings/appointments are pinned
+    # as legacy (see docs/preferences.md).
+    one = {"categories": [
+        {"name": "a", "color_id": "1", "color_name": "x", "role": "fallback"}]}
+    problems = prefs.validate_section("calendar", one)
     for role in ("work", "meetings", "appointments", "fitness"):
-        assert role in roles, f"no category has role {role!r}"
-    assert roles.count("fallback") == 1, "exactly one category must have role 'fallback'"
+        assert f"no calendar category has role {role!r}" in problems
 
 
-def test_job_search_lists_nonempty():
-    job_search = prefs.job_search()
-    for key in ("seniority_terms", "function_terms", "title_acronyms",
-                "hn_phrases", "states"):
-        values = job_search.get(key)
-        assert isinstance(values, list) and values, f"job_search.{key} missing or empty"
-        assert all(isinstance(v, str) and v for v in values), \
-            f"job_search.{key} has non-string entries"
+def test_calendar_category_needs_its_display_fields():
+    missing = {"categories": [{"name": "a", "role": "fallback"}]}
+    problems = prefs.validate_section("calendar", missing)
+    assert "calendar.categories[0].color_id is missing or empty" in problems
+    assert "calendar.categories[0].color_name is missing or empty" in problems
 
 
-def test_location_present():
-    assert prefs.PREFS.get("location")
+def test_job_search_rejects_an_emptied_list():
+    # An emptied list does not narrow the scout's search, it silently matches
+    # nothing — the whole reason this is a refusal and not a warning.
+    full = {key: ["x"] for key in prefs._JOB_SEARCH_LISTS}
+    assert prefs.validate_section("job_search", full) == []
+    emptied = dict(full, states=[])
+    assert prefs.validate_section("job_search", emptied) == \
+        ["job_search.states must be a non-empty list"]
+
+
+def test_job_search_rejects_non_string_entries():
+    full = dict({key: ["x"] for key in prefs._JOB_SEARCH_LISTS}, hn_phrases=["ok", 7])
+    assert prefs.validate_section("job_search", full) == \
+        ["job_search.hn_phrases must hold non-empty strings"]
+
+
+def test_projects_rejects_a_path():
+    # The scanner reads these from a project root it does not otherwise trust,
+    # so a separator would widen that boundary.
+    problems = prefs.validate_section("projects", {"instruction_files": ["../x.md"]})
+    assert problems == ["projects.instruction_files[0] must be a bare filename, not a path"]
+
+
+def test_morning_brief_rejects_a_window_of_zero():
+    assert prefs.validate_section("morning_brief", {"calendar_hours_ahead": 0})
+    assert prefs.validate_section("morning_brief", {"calendar_hours_ahead": "48"})
+    assert prefs.validate_section("morning_brief", {}) == []
+
+
+def test_sports_allows_no_teams_but_not_a_broken_one():
+    # No teams means the Scores block is off, which is a choice, not a fault.
+    assert prefs.validate_section("sports", {"teams": []}) == []
+    assert prefs.validate_section("sports", {"teams": [{"league": "mlb"}]}) == \
+        ["sports.teams[0] needs a league and an id"]
+
+
+def test_an_unknown_section_is_a_message_not_a_crash():
+    # The caller is a save route handling a form.
+    assert prefs.validate_section("nope", {}) == ["nope is not a known preference section"]
+    assert prefs.validate_section("persona", "not a dict") == ["persona must be an object"]
+
+
+def test_the_location_left_the_sections_for_a_schema_row():
+    # It is a string, not a section, so it could never be one. It is
+    # DEFAULT_LOCATION now, resolved through the same four layers as every other
+    # key — which also collapsed the hand-rolled fallback in morning_brief and
+    # weather.
+    assert "location" not in prefs.PREFS
+    assert schema.by_key("DEFAULT_LOCATION") is not None
 
 
 # ---- morning_brief.calendar_hours_ahead ------------------------------------
@@ -129,24 +202,14 @@ def test_project_instruction_files_fall_back_when_no_entry_is_safe(monkeypatch):
         assert prefs.project_instruction_files() == ("AGENTS.md",)
 
 
-# ---- loader degradation -----------------------------------------------------
+# ---- reload -----------------------------------------------------------------
 
-def test_load_missing_file_returns_empty(tmp_path):
-    assert prefs._load(tmp_path / "nope.json") == {}
-
-
-def test_load_invalid_json_returns_empty_and_keeps_file(tmp_path):
-    bad = tmp_path / "preferences.json"
-    bad.write_text("{not json")
-    assert prefs._load(bad) == {}
-    # Unlike store.load_json, no quarantine rename — the file stays put.
-    assert bad.exists() and bad.read_text() == "{not json"
-
-
-def test_load_non_object_returns_empty(tmp_path):
-    lst = tmp_path / "preferences.json"
-    lst.write_text(json.dumps([1, 2]))
-    assert prefs._load(lst) == {}
+def test_reload_picks_up_a_section_saved_since_import(monkeypatch):
+    # What the save route calls, so a section edited on the page reaches this
+    # process without a restart. Values bound at import still need one.
+    monkeypatch.setattr(prefs, "PREFS", {})
+    prefs.reload()
+    assert prefs.PREFS.get("persona"), "reload did not re-read the sections"
 
 
 # ---- helper fallbacks -------------------------------------------------------

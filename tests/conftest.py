@@ -136,6 +136,15 @@ import pytest
 # developer's config/.env. A test that fails because of this line has a real
 # hidden dependency on that file; fix the test, don't re-point the variable.
 os.environ["WREN_ENV_FILE"] = str(Path(tempfile.mkdtemp(prefix="wren-test-env-")) / ".env")
+# Same shape, same reason, one layer up: agent/prefs.py binds PREFS at ITS import
+# from config.preferences(), whose middle layer is the pre-settings
+# config/preferences.json. Unpinned, every preference assertion in the suite would
+# read the developer's own persona and calendar categories, so the shipped
+# defaults would be untested and a personal edit could turn the suite red. Also a
+# path that does not exist, which leaves exactly the shipped example file.
+# Transitional, with the layer it pins — see agent/config.py:_legacy_preferences.
+os.environ["WREN_PREFERENCES_FILE"] = str(
+    Path(tempfile.mkdtemp(prefix="wren-test-prefs-")) / "preferences.json")
 
 from agent import escalations as _escalations
 from agent import loop as _loop

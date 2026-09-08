@@ -70,6 +70,13 @@ def env_path() -> Path:
     return Path(override) if override else _ROOT / "config" / ".env"
 
 
+def preferences_path() -> Path:
+    """Where the pre-settings config/preferences.json lives. Transitional; see
+    _legacy_preferences below."""
+    override = os.environ.get("WREN_PREFERENCES_FILE")
+    return Path(override) if override else _ROOT / "config" / "preferences.json"
+
+
 # Fold config/.env into the process environment so layer 1 covers both a real
 # environment variable and the file. load_dotenv does not override a variable
 # that is already set, so a real one still wins over the file.
@@ -207,10 +214,46 @@ def is_set(key: str) -> bool:
     return bool(getenv(key))
 
 
+def _legacy_preferences() -> dict:
+    """Sections still living in config/preferences.json, the file this document
+    replaces.
+
+    TRANSITIONAL. agent/migrate_settings.py folds this file into settings.json
+    and renames it to preferences.json.migrated; the commit that adds the script
+    deletes this function and the layer below it. Until then the file is the
+    live source of the user's own persona, calendar, learnings and projects
+    sections, and reading only the shipped defaults would quietly swap every
+    one of them for the example file's placeholder values — a morning brief
+    addressed to the wrong name.
+
+    Whole sections only, and only known ones: the same filter the saved layer
+    applies, so the two layers can never disagree about what a section is.
+    """
+    path = preferences_path()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
+        # Logged, not quarantined — a hand-maintained file. Same rule as _load.
+        logger.error(f"could not load preferences from {path}: {e}")
+        return {}
+    if not isinstance(raw, dict):
+        logger.error(f"preferences file {path} is not a JSON object")
+        return {}
+    return {name: value for name, value in raw.items()
+            if name in schema.PREFERENCE_SECTIONS and isinstance(value, dict)}
+
+
 def preferences() -> dict:
-    """The structured sections: the shipped defaults, with each section the
-    user has saved replacing its shipped counterpart whole."""
+    """The structured sections: the shipped defaults, then the pre-settings
+    config/preferences.json, then each section the user has saved through the
+    page. A section replaces its predecessor whole; it is never merged into it.
+
+    The middle layer is transitional — see _legacy_preferences.
+    """
     merged = dict(schema.STRUCTURED_DEFAULTS)
+    merged.update(_legacy_preferences())
     for name, value in CONFIG["preferences"].items():
         if name in schema.PREFERENCE_SECTIONS and isinstance(value, dict):
             merged[name] = value

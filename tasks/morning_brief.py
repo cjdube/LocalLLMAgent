@@ -44,8 +44,10 @@ from tasks._urls import safe_url
 
 _ROOT = Path(__file__).resolve().parent.parent
 
-# Env wins; otherwise the location from config/preferences.json.
-DEFAULT_LOCATION = config.getenv("DEFAULT_LOCATION") or prefs.PREFS.get("location", "")
+# One schema row now, resolved through the four layers like every other key.
+# It used to fall back to preferences.json's "location" — a string, so it was
+# never a preference section, and the two-layer lookup was the seam.
+DEFAULT_LOCATION = config.getenv("DEFAULT_LOCATION", "")
 # How far ahead the Calendar section looks, from config/preferences.json.
 CALENDAR_HOURS_AHEAD = prefs.brief_calendar_hours()
 STARRED_STATE_PATH = _ROOT / "config" / "github_starred_state.json"

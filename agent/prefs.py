@@ -1,47 +1,42 @@
-"""Personal preferences loaded from config/preferences.json (gitignored, not a secret).
+"""Personal preferences: who the agent serves, and how.
 
-Separates who the agent serves (name, positioning, calendar categories, job-search
-terms) from the operational code that uses them, so a cloner can edit one JSON
-file instead of Python. Loaded once at import — tool-schema enums and digest
-regexes are built at module import time and need the values then.
+Separates the personal part (name, positioning, calendar categories, job-search
+terms) from the operational code that uses them, so a cloner edits data instead
+of Python. Read once at import — tool-schema enums and digest regexes are built
+at module import time and need the values then.
 
-The real file is gitignored so personal details stay out of the repo;
-config/preferences.example.json is the committed template and the fallback, so a
-fresh clone boots with a valid schema before anyone has edited anything.
+The values come from agent/config.py, which layers them: the shipped
+config/preferences.example.json, then the pre-settings config/preferences.json,
+then whichever sections have been saved through the /settings page. A saved
+section replaces its predecessor whole; it is never merged into it, because a
+half-merged list of calendar categories is a worse answer than either version
+alone.
 
-Deliberately not agent/store.py's load_json: its corrupt-file quarantine
-os.replace()s the file aside, which is wrong for a hand-maintained file. A
-missing or unparseable file degrades to {} — callers fall back to their coded
-defaults.
+This module keeps its own shape. PREFS is still a module global that every
+accessor reads, so the ~22 modules that bind `_NAME = prefs.user_name()` at
+import are unchanged, and the tests that monkeypatch PREFS still work. reload()
+is for the save route: a section saved from the page lands in the running
+process without a restart.
+
+validate_section() holds the invariants the shipped file has always had to
+satisfy. It is the guard both ways — the test suite asserts through it, and the
+save route rejects through it — so the page refuses an emptied job-search list
+with the same message the test would print.
 """
 
-import json
-import logging
-from pathlib import Path
+from agent import config
 
-logger = logging.getLogger(__name__)
-
-_ROOT = Path(__file__).resolve().parent.parent
-_PREFS_PATH = _ROOT / "config" / "preferences.json"
-if not _PREFS_PATH.exists():
-    # Fresh clone: nobody has made their own copy yet. The example file is the
-    # same schema with generic values, so every consumer still gets valid data.
-    _PREFS_PATH = _ROOT / "config" / "preferences.example.json"
+PREFS = config.preferences()
 
 
-def _load(path: Path) -> dict:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
-        logger.error(f"could not load preferences from {path}: {e}")
-        return {}
-    if not isinstance(data, dict):
-        logger.error(f"preferences file {path} is not a JSON object")
-        return {}
-    return data
+def reload() -> None:
+    """Re-read the sections after a save, so a change from the page reaches this
+    process without a restart. Values bound at import (a tool-schema enum, a
+    digest regex) still need one — that is what the schema row's `applies` says.
+    """
+    global PREFS
+    PREFS = config.preferences()
 
-
-PREFS = _load(_PREFS_PATH)
 
 _DEFAULT_PROJECT_INSTRUCTION_FILES = ("AGENTS.md",)
 
@@ -121,3 +116,125 @@ def project_instruction_files() -> tuple[str, ...]:
         if entry not in safe:
             safe.append(entry)
     return tuple(safe) or _DEFAULT_PROJECT_INSTRUCTION_FILES
+
+
+# --------------------------------------------------------------------------- #
+# Validation
+# --------------------------------------------------------------------------- #
+
+# The job-search lists the opportunity scout builds its matchers from. Every one
+# has to be a non-empty list of non-empty strings: an emptied list does not
+# narrow the search, it silently matches nothing.
+_JOB_SEARCH_LISTS = ("seniority_terms", "function_terms", "title_acronyms",
+                     "hn_phrases", "states")
+
+# Calendar roles with a consumer, plus the three kept as legacy. strava_download
+# needs `fitness`; calendar_colorizer needs exactly one `fallback`.
+_REQUIRED_CALENDAR_ROLES = ("work", "meetings", "appointments", "fitness")
+
+
+def validate_section(name: str, value: dict) -> list[str]:
+    """Problems with one preference section, as sentences a person can act on.
+
+    Empty means the section is usable. The accessors above already degrade
+    safely on a bad section — this is the layer that says so out loud, before a
+    save lands, rather than letting the Scores block quietly go missing.
+
+    Unknown section names return one problem rather than raising: the caller is
+    a save route handling a form, and a name it does not know is a message to
+    show, not a crash.
+    """
+    if name not in _VALIDATORS:
+        return [f"{name} is not a known preference section"]
+    if not isinstance(value, dict):
+        return [f"{name} must be an object"]
+    return _VALIDATORS[name](value)
+
+
+def _validate_persona(value: dict) -> list[str]:
+    return [f"persona.{field} is missing or empty"
+            for field in ("user_name", "positioning", "engagement_model")
+            if not value.get(field)]
+
+
+def _validate_calendar(value: dict) -> list[str]:
+    entries = value.get("categories")
+    if not isinstance(entries, list) or not entries:
+        return ["calendar.categories must be a non-empty list"]
+
+    problems = []
+    for i, category in enumerate(entries):
+        if not isinstance(category, dict):
+            problems.append(f"calendar.categories[{i}] is not an object")
+            continue
+        for field in ("name", "color_id", "color_name"):
+            if not category.get(field):
+                problems.append(f"calendar.categories[{i}].{field} is missing or empty")
+
+    roles = [c.get("role") for c in entries if isinstance(c, dict) and c.get("role")]
+    problems += [f"no calendar category has role {role!r}"
+                 for role in _REQUIRED_CALENDAR_ROLES if role not in roles]
+    if roles.count("fallback") != 1:
+        problems.append("exactly one calendar category must have role 'fallback', "
+                        f"found {roles.count('fallback')}")
+    return problems
+
+
+def _validate_job_search(value: dict) -> list[str]:
+    problems = []
+    for key in _JOB_SEARCH_LISTS:
+        entries = value.get(key)
+        if not isinstance(entries, list) or not entries:
+            problems.append(f"job_search.{key} must be a non-empty list")
+            continue
+        if not all(isinstance(v, str) and v for v in entries):
+            problems.append(f"job_search.{key} must hold non-empty strings")
+    return problems
+
+
+def _validate_projects(value: dict) -> list[str]:
+    entries = value.get("instruction_files")
+    if not isinstance(entries, list) or not entries:
+        return ["projects.instruction_files must be a non-empty list"]
+    # A bare filename, never a path: the scanner reads these from a project root
+    # it does not otherwise trust, so a separator would widen that boundary.
+    return [f"projects.instruction_files[{i}] must be a bare filename, not a path"
+            for i, entry in enumerate(entries)
+            if (not isinstance(entry, str) or not entry or entry in (".", "..")
+                or "/" in entry or "\\" in entry)]
+
+
+def _validate_morning_brief(value: dict) -> list[str]:
+    hours = value.get("calendar_hours_ahead")
+    if hours is None:
+        return []
+    if not isinstance(hours, int) or isinstance(hours, bool) or hours <= 0:
+        return ["morning_brief.calendar_hours_ahead must be a positive whole "
+                "number of hours"]
+    return []
+
+
+def _validate_sports(value: dict) -> list[str]:
+    entries = value.get("teams")
+    if entries is None or entries == []:
+        return []  # no teams means the Scores block is off, which is allowed
+    if not isinstance(entries, list):
+        return ["sports.teams must be a list"]
+    return [f"sports.teams[{i}] needs a league and an id"
+            for i, team in enumerate(entries)
+            if not isinstance(team, dict) or not team.get("league") or not team.get("id")]
+
+
+def _validate_learnings(value: dict) -> list[str]:
+    return []  # no consumer asserts a shape here yet
+
+
+_VALIDATORS = {
+    "persona": _validate_persona,
+    "calendar": _validate_calendar,
+    "job_search": _validate_job_search,
+    "projects": _validate_projects,
+    "morning_brief": _validate_morning_brief,
+    "sports": _validate_sports,
+    "learnings": _validate_learnings,
+}
