@@ -192,7 +192,7 @@ because the login form is rendered to callers who have not authenticated yet and
 pulls its icons from `/static/`.
 
 Every gate in `chat/server.py` is a per-handler `if not _authenticated()`; there
-is no `before_request`. So while the eleven page shells lived in `chat/static/`,
+is no `before_request`. So while the page shells lived in `chat/static/`,
 `GET /dashboard` correctly returned the login form while `GET
 /static/dashboard.html` returned the whole page to anybody. The shells hold no
 data — their APIs still answer 401 — but they do hold the complete internal API
@@ -210,6 +210,41 @@ is reachable under `/static/`, and `favicon.svg` / `apple-touch-icon.png` /
 `nav.js` still are. A third case pins that the shells exist in `views/` and are
 absent from `static/`, so the first case cannot pass by the files simply having
 been deleted.
+
+## A secret's value never leaves the process
+
+`/settings` renders a field for every configuration key Wren has, which makes
+`chat/routes_settings.py` the one route here that both reads the whole
+configuration and writes it. Ten of those rows are marked `secret: true` in
+`agent/schema.py`.
+
+For those rows the API sends **no `value` key at all** — absent, not redacted,
+not an empty string — and only `is_set`. The distinction is the point. A
+redacted value is a key a later edit to the page can render by mistake, or a
+placeholder that gets submitted back verbatim; an absent one cannot be either.
+`config.set_value` refuses a secret whatever the caller is, so there is no
+write path either.
+
+Secrets therefore stay in `config/.env`, the file already treated as the
+credential store, and are never copied into `config/settings.json`.
+`agent/migrate_settings.py` leaves every one of them exactly where it is:
+moving a credential into a second file to gain a set/not-set indicator that
+already works is a net loss.
+
+`tests/test_routes_settings.py` sets **every** key in `schema.secret_keys()` to
+a marker string and asserts none of them appears anywhere in the response body
+— not just in its own row. A secret leaking through the `preferences` blob or
+inside a startup-warning string would pass a per-row assertion, and that is the
+shape this guard exists to catch.
+
+The form script is subject to the section above: `chat/static/settings-form.js`
+is public, so it carries no keys, no values and no copy of the schema. It
+renders only what the gated endpoint hands it, and inserts every string with
+`textContent`.
+
+The save is logged with **key names only**. A configuration change is worth an
+audit line, and the values are what the rest of this is protecting. Both
+halves are asserted: the key appears in the log, the value does not.
 
 ## Credentials never ride out inside an error string
 
@@ -246,4 +281,6 @@ does, and were confirmed to fail with the redaction disabled.
 - [background.md](background.md) — the approval flow and exclusions in full.
 - [memory.md](memory.md) — why the memory writes are gated, and the friction
   tradeoff.
+- [settings.md](settings.md) — the settings page in full: the schema table, the
+  four-layer resolve, and why the environment still outranks the file.
 - Periodic audits of this posture land in [reviews/](reviews/).

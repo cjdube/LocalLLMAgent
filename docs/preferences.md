@@ -1,24 +1,39 @@
-# Personal preferences — `config/preferences.json`
+# Personal preferences — the sections of `config/settings.json`
 
 Wren separates three kinds of configuration:
 
 - **Secrets** (API keys, tokens) — `config/.env`, gitignored, documented in
-  `config/.env.example`.
+  `config/.env.example`. Never editable from the page.
 - **Runtime state** (memories, reminders, opportunity items) — gitignored JSON
   stores under `config/`, managed by the code.
-- **Personal preferences** (who Wren serves and what they care about) —
-  `config/preferences.json`, **gitignored**. Not secret, just personal — it
-  holds your name, where you live, and what you do, none of which belongs in a
-  shared repo. `config/preferences.example.json` is the committed template:
-  copy it, edit your copy, and never edit Python.
+- **Personal preferences** (who Wren serves and what they care about) — named
+  sections inside `config/settings.json`, **gitignored**. Not secret, just
+  personal — they hold your name, where you live, and what you do, none of
+  which belongs in a shared repo.
 
-The file is loaded once at import by `agent/prefs.py`, which falls back to
-`preferences.example.json` when you haven't made your own copy yet — so a fresh
-clone boots with a valid schema. A file that exists but is unparseable degrades
-to coded defaults (nothing crashes), but the consumers below then run with
-generic/empty values, so keep it valid — `tests/test_prefs.py` guards the
-schema of whichever file is live. **Restart the chat server after editing**
-(module-level values, including tool-schema enums, are built at import).
+**Edit them at `/settings`**, one JSON block per section, alongside every other
+setting. [settings.md](settings.md) covers the page, the resolver and the
+one-time migration. `config/preferences.example.json` is still the committed
+template and still supplies the shape a fresh clone boots with; you no longer
+copy it by hand.
+
+A section is saved **whole, never merged**, and a bad shape is refused with the
+validator's own sentence before anything is written — the same sentence
+`tests/test_prefs.py` asserts, so the page and the suite can never disagree
+about what a good section is. Bad JSON is caught in the browser, so a stray
+comma costs no round trip.
+
+A missing or unparseable document degrades to coded defaults (nothing crashes),
+but the consumers below then run with generic or empty values.
+
+**A saved section lands after a chat-server restart.** Module-level values,
+including tool-schema enums, are built at import. The page says so, and shows
+the command.
+
+> Coming from an older checkout with a `config/preferences.json`? Run
+> `.venv/bin/python -m agent.migrate_settings` (dry run), then `--apply`. It
+> moves the sections in and renames the old file — but only once every section
+> moved, so a refused section can never go missing behind a name nothing loads.
 
 ## Keys
 
@@ -26,10 +41,9 @@ schema of whichever file is live. **Restart the chat server after editing**
 
 `instruction_files` is the ordered allowlist of root-level instruction files
 read by the local-project scanner. The first existing file wins. It defaults to
-`["AGENTS.md"]`; add compatibility filenames to your gitignored
-`preferences.json` when older repositories use another spelling. Entries must
-be plain filenames — paths are ignored so this preference cannot expand the
-scanner beyond a checkout's root.
+`["AGENTS.md"]`; add compatibility filenames on `/settings` when older
+repositories use another spelling. Entries must be plain filenames — paths are
+ignored so this preference cannot expand the scanner beyond a checkout's root.
 
 ### `persona`
 
@@ -183,10 +197,14 @@ within 40 characters of a function term, or a title acronym appears on its
 own. All terms are matched case-insensitively and regex-escaped — plain words
 and phrases only, no regex syntax.
 
-### `location`
+### `location` — gone, it is a setting now
 
-`City,ST,US` for weather and the morning brief. Env `DEFAULT_LOCATION`
-overrides.
+`City,ST,US` for weather and the morning brief. It was a **string**, not an
+object, so it could never be a section. It is the `DEFAULT_LOCATION` row now,
+under **You** on `/settings`, resolved through the same four layers as every
+other key — which also collapsed the hand-rolled two-layer fallback in
+`morning_brief` and `weather`. `tests/test_prefs.py` pins that it is gone from
+the sections and present in the schema.
 
 ## Deliberately NOT externalized (for now)
 
@@ -199,5 +217,6 @@ overrides.
   Wren's own voice, her interactive behavior and what she can do with her tools,
   all deliberately impersonal; edit them directly if you want
   a different agent. `agent/identity.md` (who she serves) is the personal one:
-  gitignored like `preferences.json`, templated by
-  `agent/identity.example.md`.
+  gitignored like `config/settings.json`, templated by
+  `agent/identity.example.md`, and still edited by hand — it is prose, not a
+  key/value row.

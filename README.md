@@ -16,16 +16,22 @@ ways:
 a product. It assumes a specific setup — a Mac mini, Ollama, launchd, and
 Tailscale — and no support or compatibility is promised.
 
-**Make it yours.** Personal preferences — whose agent this is, calendar
-categories and colors, which job titles the opportunity scout flags, default
-location — live in `config/preferences.json`, not in Python. Copy
-`config/preferences.example.json` to `config/preferences.json`, edit it, do the
-same for `agent/identity.example.md` → `agent/identity.md`, and Wren serves you
-instead. Both real files are **gitignored** — they hold your name and where you
-live, so they stay out of the repo; the `.example` versions are the committed
-templates, and the code falls back to them so a fresh clone still runs. Every
-key is documented in [docs/preferences.md](docs/preferences.md). Secrets stay
-in the gitignored `config/.env`.
+**Make it yours.** Every setting Wren has — the model, whose agent this is,
+calendar categories and colors, which job titles the opportunity scout flags,
+default location — is editable from the phone at **`/settings`**, and lands in
+the gitignored `config/settings.json`. No SSH session, no text editor. Each
+field says when it takes effect, and a save that needs a chat-server restart
+hands you the exact command. Secrets are the exception: they stay in the
+gitignored `config/.env`, and the page is only ever told whether one is set,
+never its value. See [docs/settings.md](docs/settings.md); the personal
+sections are documented key by key in
+[docs/preferences.md](docs/preferences.md).
+
+Copy `agent/identity.example.md` to `agent/identity.md` and edit it — that one
+is prose, not a key/value row, so it stays a file. It is gitignored for the
+same reason: it holds your name and where you live. The `.example` versions are
+the committed templates, and the code falls back to them so a fresh clone still
+runs.
 
 ## Architecture
 
@@ -70,8 +76,9 @@ Where each module lives and why it is shaped that way:
 [docs/module-map.md](docs/module-map.md).
 
 **The model is swappable.** Nothing in this codebase is Gemma-specific — the
-model name is just `OLLAMA_MODEL` in `config/.env`. Swap models with
-`ollama pull <model>` + edit that one line. The one thing to verify after a
+model name is just the `OLLAMA_MODEL` setting. Swap models with
+`ollama pull <model>`, then change that one field on `/settings` and restart
+the chat server when it tells you to. The one thing to verify after a
 swap: the **chat server** relies on Ollama's tool-calling protocol (`tools` /
 `tool_calls`), so a model with weak tool-calling support may not drive it
 reliably — the scheduled tasks only need plain text completion (or, for
@@ -335,7 +342,8 @@ It's failures-only (no "success" pings), and
 leaving `NTFY_URL` unset simply disables it. Self-hosting on the always-on Mac
 mini behind Tailscale keeps alerts private and off the public internet;
 `auth-default-access: deny-all` plus a publish token means nobody else can
-inject fake notifications. Set `NTFY_URL` and `NTFY_TOKEN` in `config/.env`
+inject fake notifications. `NTFY_TOKEN` is a secret, so it goes in
+`config/.env`; `NTFY_URL` is an ordinary setting you can edit on `/settings`
 (see Setup).
 
 Every push that *is* delivered — alerts, fired reminders, synthesis nudges,
@@ -628,6 +636,44 @@ lines. The page also reads ScribeJay's and ObsidianWikiAgent's ledgers when
 those exist; until each is instrumented, its row simply reads empty. Backed by
 `GET /api/usage` in `chat/routes_usage.py` over `chat/usage.py`. See
 [docs/usage-ledger.md](docs/usage-ledger.md).
+
+### Settings
+
+`http://127.0.0.1:8420/settings` edits Wren's whole configuration from the
+phone (same auth as the dashboard) — the model, the chat server's bounds, the
+Google account, the scout's search terms, and the personal preference sections
+as JSON blocks. It writes the gitignored `config/settings.json`. Before this,
+changing the morning brief's window meant an SSH session and a text editor.
+
+Each field says **when it takes effect**, because the chat server runs for
+weeks: `live` is already done, `next_run` lands at a scheduled task's next run,
+and `restart` needs the chat server bounced — the page then shows the exact
+`launchctl` line with a copy button, computed from the keys that actually
+changed. There is no restart button: the server runs under launchd `KeepAlive`,
+so a route that killed its own process would be a self-DoS if the save that
+preceded it was wrong.
+
+**Secrets are never sent to the browser.** The ten `secret` rows come back with
+no value key at all — only whether one is set — and a save that names one is
+refused. They stay in `config/.env`.
+
+A save is all-or-nothing: everything is validated first, every bad field is
+reported at once, and a rejected save leaves the file byte-identical. The log
+line carries key names only, never values.
+
+One catch worth knowing: a key still assigned in `config/.env` **wins over this
+page**, because the environment is the top layer of the resolve. Such a field
+is locked, and both the page and the startup log say so. Run the migration once
+to clear it:
+
+```bash
+.venv/bin/python -m agent.migrate_settings          # dry run, prints the plan
+.venv/bin/python -m agent.migrate_settings --apply
+```
+
+Backed by `GET`/`POST /api/settings` in `chat/routes_settings.py`, over the
+table in `agent/schema.py` and the resolver in `agent/config.py`. See
+[docs/settings.md](docs/settings.md).
 
 ### Memories
 
@@ -951,7 +997,16 @@ mostly useful if the Python process fails to start at all).
    full dependency closure at exact versions. `requirements.txt` declares only
    what we import directly and says why each is held; bumping anything means
    editing it and regenerating the lock (steps in the lock's header).
-3. Copy `config/.env.example` to `config/.env` and fill in:
+3. Copy `config/.env.example` to `config/.env` and fill in the values below.
+
+   **You do not have to fill all of them in here.** Only the secrets must live
+   in this file; everything else is editable at `/settings` once the chat
+   server is up, and a key left assigned here **wins over that page forever**
+   (the environment is the top layer of the resolve — see
+   [docs/settings.md](docs/settings.md)). So: set the secrets, comment out any
+   non-secret line you would rather manage from the page, and come back to
+   `/settings` after step 6. Existing installs move everything in one go with
+   `.venv/bin/python -m agent.migrate_settings --apply`.
    - `OPENWEATHERMAP_API_KEY` — [openweathermap.org](https://openweathermap.org/api)
    - `TAVILY_API_KEY` — [tavily.com](https://tavily.com) (used for web search)
    - `GITHUB_TOKEN` — a GitHub personal access token, used to list starred repos.
@@ -1164,9 +1219,11 @@ recipient is pinned, and what to hold onto when adding a write tool — is in
   summarizes the prior day's Claude Code and Codex Desktop chats, but it reads
   their **local** session logs off disk — file reads, no transcript API — and it
   is a separate repo.)
-- `config/.env`, `config/google_credentials.json`, `config/google_token.json`,
-  `config/github_starred_state.json`, and `logs/*.log` are gitignored — they
-  contain secrets/tokens and machine-specific state.
+- `config/.env`, `config/settings.json`, `config/google_credentials.json`,
+  `config/google_token.json`, `config/github_starred_state.json`, and
+  `logs/*.log` are gitignored — they contain secrets/tokens, personal
+  preferences, and machine-specific state. `config/.env.example` and
+  `config/preferences.example.json` are the committed shapes.
 
 ## License
 

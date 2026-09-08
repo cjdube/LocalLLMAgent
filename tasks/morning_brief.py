@@ -48,7 +48,8 @@ _ROOT = Path(__file__).resolve().parent.parent
 # It used to fall back to preferences.json's "location" — a string, so it was
 # never a preference section, and the two-layer lookup was the seam.
 DEFAULT_LOCATION = config.getenv("DEFAULT_LOCATION", "")
-# How far ahead the Calendar section looks, from config/preferences.json.
+# How far ahead the Calendar section looks, from the morning_brief section of
+# the settings document.
 CALENDAR_HOURS_AHEAD = prefs.brief_calendar_hours()
 STARRED_STATE_PATH = _ROOT / "config" / "github_starred_state.json"
 CLICKUP_STATE_PATH = _ROOT / "config" / "clickup_state.json"
@@ -444,7 +445,7 @@ def build_and_send_brief(logger: Optional[logging.Logger] = None) -> dict:
         tasks_error = tasks_result.get("error")
         tasks = [] if tasks_error else tasks_result.get("tasks", [])
 
-        # Yesterday's finals for the teams in config/preferences.json. No model
+        # Yesterday's finals for the teams in the sports section. No model
         # call: scores are facts with a fixed layout, so Python owns them end to
         # end and the glance prompt below is never shown them to restate.
         scores_result = fetch_scores(day="yesterday")
