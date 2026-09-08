@@ -104,7 +104,10 @@ async function flush() {
 function mountShell() {
   document.body.innerHTML = `
     <div id="settingsBanners"></div>
-    <div id="settingsGroups"><p class="empty">Loading…</p></div>
+    <div class="settings-tabs">
+      <nav class="rail" id="settingsRail" aria-label="Settings sections"></nav>
+      <div class="panels" id="settingsGroups"><p class="empty">Loading…</p></div>
+    </div>
     <div class="savebar">
       <span class="status" id="settingsStatus"></span>
       <button type="button" id="settingsSave" disabled>Save</button>
@@ -131,6 +134,15 @@ async function save(result, status = 200) {
 }
 
 const field = (key) => document.querySelector(`[data-key="${key}"]`);
+const rail = () => [...document.getElementById("settingsRail").children];
+const railLabels = () => rail().map((b) => b.textContent.replace("!", ""));
+const openTab = () => {
+  const card = document.querySelector("#settingsGroups .card.active");
+  return card ? card.dataset.group : null;
+};
+const flagged = () =>
+  rail().filter((b) => b.querySelector(".flag")).map((b) => b.textContent.replace("!", ""));
+const railButton = (name) => rail().find((b) => b.textContent.replace("!", "") === name);
 const input = (key) => document.getElementById(`set-${key}`);
 const banners = () => [...document.getElementById("settingsBanners").children];
 const bannerText = () => banners().map((b) => b.textContent);
@@ -255,6 +267,104 @@ test("a failed load says so instead of rendering an empty form", async () => {
   expect(document.getElementById("settingsGroups").textContent)
     .toContain("Session expired");
   expect(document.getElementById("settingsSave").disabled).toBe(true);
+});
+
+// --------------------------------------------------------------------------- //
+// The tab rail
+// --------------------------------------------------------------------------- //
+
+// Two groups with rows in them, so "the tab you are not looking at" is a real
+// place. The Port lives away from Model on purpose: the save that fails below
+// must fail on a card that is hidden when Save is pressed.
+const twoGroups = () => payload({
+  groups: [
+    { name: "Model", rows: [row()] },
+    { name: "Nothing here", rows: [] },
+    { name: "Chat server", rows: [
+      row({ key: "WREN_CHAT_PORT", label: "Port", type: "int", applies: "restart",
+            value: "8420", default: "8420" }),
+    ] },
+  ],
+});
+
+test("every group with rows gets one rail button, and only the first is open", async () => {
+  await start(twoGroups());
+  // "Nothing here" has no rows, so it gets no card and therefore no tab.
+  expect(railLabels()).toEqual(["Model", "Chat server", "Preferences"]);
+  expect(openTab()).toBe("Model");
+  expect(document.querySelectorAll("#settingsGroups .card.active")).toHaveLength(1);
+  expect(railButton("Model").getAttribute("aria-current")).toBe("true");
+});
+
+test("each tab carries its own accent, and its panel carries the same one", async () => {
+  await start(twoGroups());
+  const accents = rail().map((b) => b.style.getPropertyValue("--accent"));
+  // A colour per tab is the whole point — three tabs sharing one would read as
+  // one place. And the panel must match its own tab, not just have some colour.
+  expect(new Set(accents).size).toBe(accents.length);
+  for (const button of rail()) {
+    const name = button.textContent.replace("!", "");
+    const card = document.querySelector(`#settingsGroups [data-group="${name}"]`);
+    expect(card.style.getPropertyValue("--accent"))
+      .toBe(button.style.getPropertyValue("--accent"));
+    expect(button.querySelector(".dot")).not.toBeNull();
+  }
+});
+
+test("clicking a rail button opens that panel and closes the last one", async () => {
+  await start(twoGroups());
+  railButton("Chat server").click();
+  expect(openTab()).toBe("Chat server");
+  expect(document.querySelectorAll("#settingsGroups .card.active")).toHaveLength(1);
+  expect(railButton("Chat server").getAttribute("aria-current")).toBe("true");
+  expect(railButton("Model").hasAttribute("aria-current")).toBe(false);
+});
+
+test("every field stays in the document, so a hidden tab is still saved", async () => {
+  await start(twoGroups());
+  // Model is the open tab; Port is on the other one and must still be editable
+  // and still be collected, because Save writes every tab at once.
+  input("WREN_CHAT_PORT").value = "9000";
+  await save({ changed: ["WREN_CHAT_PORT"], restart_required: ["WREN_CHAT_PORT"],
+               next_run_only: [], restart_command: RESTART_COMMAND, warnings: [] });
+  expect(postedBody().values).toEqual({ WREN_CHAT_PORT: "9000" });
+});
+
+test("a refused field on a hidden tab flags that tab AND opens it", async () => {
+  await start(twoGroups());
+  expect(openTab()).toBe("Model");
+  input("WREN_CHAT_PORT").value = "notanumber";
+  await save({
+    error: "some fields were not accepted",
+    field_errors: { WREN_CHAT_PORT: "WREN_CHAT_PORT must be a whole number" },
+  }, 400);
+  // Both halves. A flag on a tab you are not on explains nothing, and a jump
+  // with no flag loses the error the moment you click away.
+  expect(flagged()).toEqual(["Chat server"]);
+  expect(openTab()).toBe("Chat server");
+  expect(field("WREN_CHAT_PORT").textContent).toContain("must be a whole number");
+});
+
+test("a later save clears the rail flags too", async () => {
+  await start(twoGroups());
+  input("WREN_CHAT_PORT").value = "notanumber";
+  await save({ error: "some fields were not accepted",
+               field_errors: { WREN_CHAT_PORT: "no" } }, 400);
+  expect(flagged()).toEqual(["Chat server"]);
+  await save({ changed: [], restart_required: [], next_run_only: [],
+               restart_command: RESTART_COMMAND, warnings: [] });
+  expect(flagged()).toEqual([]);
+});
+
+test("the open tab survives the re-read a save triggers", async () => {
+  await start();
+  railButton("Preferences").click();
+  expect(openTab()).toBe("Preferences");
+  await save({ changed: [], restart_required: [], next_run_only: [],
+               restart_command: RESTART_COMMAND, warnings: [] });
+  // A save re-renders the whole form. Landing back on the first tab every time
+  // would undo the reason the tabs are here.
+  expect(openTab()).toBe("Preferences");
 });
 
 // --------------------------------------------------------------------------- //

@@ -163,6 +163,41 @@ so a stray comma costs no round trip.
 `config/preferences.example.json` is still the committed template, and still
 supplies `schema.STRUCTURED_DEFAULTS` — the shape a fresh clone boots with.
 
+## One group on screen at a time
+
+The page has thirteen groups and about sixty fields. Stacked, finding one meant
+scrolling past all the others, so the groups are tabs: a rail down the left on a
+laptop, and under 720px a single row of chips that scrolls sideways. Thirteen
+chips wrapped onto four lines would eat the screen the tabs exist to give back.
+
+The rail is built in `chat/static/settings-form.js` from the group order
+`GET /api/settings` already sends. Nothing on the server knows about it.
+
+Each tab has an accent, the way ScribeJay's does: a dot in the rail, a wash and
+a left border on the open tab, and a rule under the panel heading, so the rail
+reads as thirteen places rather than thirteen words. Text never sits on an
+accent, only those four things, so no accent has a contrast bar to clear.
+Colours are handed out **by position, not by group name** — a name table in
+that file would be a second copy of something `agent/schema.py` already owns, in
+a file served with no auth check, and by position a group added to the schema
+gets a colour with no edit to the script at all.
+
+Two things follow from the Save button writing every tab at once:
+
+- **Every card stays in the document**, hidden rather than absent. `collect()`
+  reads the inputs on the tabs you are not looking at, and it must.
+- **A refused field flags its tab and opens it.** Otherwise the page says "Not
+  saved" and shows nothing that explains why, because the bad field is three
+  tabs away. Both halves are asserted in `tests/settings-form.test.js` — a flag
+  with no jump is as useless as a jump with no flag.
+
+The open tab survives the re-read that follows a save. Landing back on "Model"
+after every save would undo the point.
+
+ScribeJay's settings screen does the same thing with CSS-only radio tabs
+(`scribejay/cli/settings_form.py`), because that page ships no JavaScript. This
+one already builds its whole DOM in a script, so the rail is built there too.
+
 ## Saving is all-or-nothing
 
 `config.apply` raises on the first bad key, which is right for a script and

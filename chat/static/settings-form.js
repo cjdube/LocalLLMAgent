@@ -10,6 +10,7 @@
 // typed.
 (() => {
   const groupsEl = document.getElementById("settingsGroups");
+  const railEl = document.getElementById("settingsRail");
   const bannersEl = document.getElementById("settingsBanners");
   const statusEl = document.getElementById("settingsStatus");
   const saveEl = document.getElementById("settingsSave");
@@ -22,6 +23,28 @@
   let loaded = { values: {}, sections: {} };
   const inputs = new Map();                              // key -> input element
   const fields = new Map();                              // key -> its .field row
+
+  // One group on screen at a time. Both maps are keyed by group name, which is
+  // what the API sends and what the rail button reads.
+  const cards = new Map();                               // group name -> .card
+  const railButtons = new Map();                         // group name -> button
+
+  // One accent per tab, so the rail reads as thirteen places rather than
+  // thirteen words. Mid-ramp values: text never sits on one, only a dot, a rule
+  // under the panel heading and a 10% wash behind the open tab.
+  //
+  // Handed out by position, not keyed by group name. A name table here would be
+  // a second copy of something the schema already owns, in a file served with
+  // no auth check — and by position a group added to agent/schema.py gets a
+  // colour with no edit to this file.
+  const ACCENTS = [
+    "#534ab7", "#378add", "#1d9e75", "#d4537e", "#ef9f27", "#e24b4a", "#8e24aa",
+    "#0f6e56", "#639922", "#d85a30", "#0891b2", "#6b7280", "#888780",
+  ];
+  // Which tab is open. Held across a re-render because a save re-reads the
+  // whole document, and being thrown back to the first tab after every save
+  // would undo the point of having tabs.
+  let activeGroup = "";
 
   const el = (tag, cls, text) => {
     const node = document.createElement(tag);
@@ -126,32 +149,84 @@
     return field;
   }
 
+  // ---- the tab rail -------------------------------------------------------
+
+  // One card and one rail button per group. The card keeps its group name in a
+  // data attribute so a field can name its own tab later, when a save comes
+  // back with an error against a row that is not on screen.
+  function addPanel(name) {
+    const accent = ACCENTS[cards.size % ACCENTS.length];
+
+    const card = el("div", "card");
+    card.dataset.group = name;
+    card.style.setProperty("--accent", accent);
+    card.appendChild(el("h2", null, name));
+    groupsEl.appendChild(card);
+    cards.set(name, card);
+
+    if (railEl) {
+      const button = el("button");
+      button.type = "button";
+      button.style.setProperty("--accent", accent);
+      // The dot carries the colour, so the label stays plain text at full
+      // contrast. A coloured label would have to pass a contrast bar the accent
+      // was not picked for.
+      button.appendChild(el("span", "dot"));
+      button.appendChild(el("span", "rail-label", name));
+      button.addEventListener("click", () => activate(name));
+      railEl.appendChild(button);
+      railButtons.set(name, button);
+    }
+    return card;
+  }
+
+  function activate(name) {
+    if (!cards.has(name)) return;
+    activeGroup = name;
+    for (const [group, card] of cards) {
+      card.classList.toggle("active", group === name);
+    }
+    for (const [group, button] of railButtons) {
+      if (group === name) button.setAttribute("aria-current", "true");
+      else button.removeAttribute("aria-current");
+    }
+    // Keep the open chip in view on a phone, where the rail scrolls sideways
+    // and the tab a save jumped to may be off the right edge.
+    const button = railButtons.get(name);
+    if (button && button.scrollIntoView) {
+      button.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  }
+
   function render(data, keepBanners) {
     groupsEl.replaceChildren();
+    if (railEl) railEl.replaceChildren();
     inputs.clear();
     fields.clear();
+    cards.clear();
+    railButtons.clear();
     loaded = { values: {}, sections: {} };
 
     for (const group of data.groups) {
       const rows = group.rows || [];
       if (!rows.length) continue;
-      const card = el("div", "card");
-      card.appendChild(el("h2", null, group.name));
+      const card = addPanel(group.name);
       for (const row of rows) {
         if (!row.secret) loaded.values[row.key] = row.value || "";
         card.appendChild(renderField(row));
       }
-      groupsEl.appendChild(card);
     }
 
-    const card = el("div", "card");
-    card.appendChild(el("h2", null, "Preferences"));
+    const card = addPanel("Preferences");
     for (const name of data.sections) {
       const value = (data.preferences || {})[name] || {};
       loaded.sections[name] = JSON.stringify(value, null, 2);
       card.appendChild(renderSection(name, value));
     }
-    groupsEl.appendChild(card);
+
+    // Back to the tab that was open, if it still exists. It will not on the
+    // first load, so that falls through to the first one.
+    activate(cards.has(activeGroup) ? activeGroup : (cards.keys().next().value || ""));
 
     saveEl.disabled = false;
     // A save re-reads the form, and that re-read must not wipe the banner the
@@ -199,18 +274,37 @@
       const message = field.querySelector(".field-error");
       if (message) message.remove();
     }
+    for (const button of railButtons.values()) {
+      const flag = button.querySelector(".flag");
+      if (flag) flag.remove();
+    }
   }
 
   function showFieldErrors(errors) {
     // Looked up in the map built during render, not by a selector: a key comes
     // back from the server inside an error, and building a selector out of it
     // would need escaping to stay correct.
+    const bad = new Set();
     for (const [key, message] of Object.entries(errors || {})) {
       const field = fields.get(key);
       if (!field) continue;
       field.classList.add("bad");
       field.appendChild(el("p", "field-error", message));
+      const card = field.closest(".card");
+      if (card && card.dataset.group) bad.add(card.dataset.group);
     }
+    if (!bad.size) return;
+
+    // The Save button writes every tab at once, so a refused field is usually
+    // on a tab you are not looking at. Flag those tabs and open the first one:
+    // otherwise the page says "Not saved" and shows nothing that explains it.
+    let first = "";
+    for (const [group, button] of railButtons) {
+      if (!bad.has(group)) continue;
+      if (!first) first = group;
+      if (!button.querySelector(".flag")) button.appendChild(el("span", "flag", "!"));
+    }
+    if (first && first !== activeGroup) activate(first);
   }
 
   // Only what the user actually changed. Also where a malformed section is

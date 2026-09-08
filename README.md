@@ -645,6 +645,11 @@ Google account, the scout's search terms, and the personal preference sections
 as JSON blocks. It writes the gitignored `config/settings.json`. Before this,
 changing the morning brief's window meant an SSH session and a text editor.
 
+The groups are **tabs**, one on screen at a time — a rail down the left on a
+laptop, a row of chips you swipe sideways on a phone, each with its own accent
+colour. Save still writes every tab at once, so a field the server refuses on a
+tab you are not looking at flags that tab and opens it.
+
 Each field says **when it takes effect**, because the chat server runs for
 weeks: `live` is already done, `next_run` lands at a scheduled task's next run,
 and `restart` needs the chat server bounced — the page then shows the exact
