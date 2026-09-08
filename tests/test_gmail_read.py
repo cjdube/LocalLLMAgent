@@ -510,9 +510,12 @@ def test_list_history_resolves_each_thread_once(gmail):
     assert lookups == ["t1"]
 
 
-def test_an_unreadable_thread_is_dropped_but_says_so(gmail):
-    """Degrading is only allowed out loud: a thread we cannot classify is
-    treated as unwatched, so real mail may go unreported."""
+def test_a_thread_that_left_the_mailbox_is_not_a_miss(gmail):
+    """A 404 thread has been deleted, so there is no mail behind it. Reporting
+    that as a miss cried wolf seven times in thirteen days. It must say what
+    happened at INFO, warn about nothing, and let the watermark advance -- an
+    error here would hold the window open forever for mail that never returns.
+    """
     gmail.history_pages = [{
         "history": [{"messagesAdded": [
             {"message": {"id": "m1", "threadId": "gone"}},
@@ -524,9 +527,42 @@ def test_an_unreadable_thread_is_dropped_but_says_so(gmail):
 
     result = gmail_read.list_history("100", "Label_7", logger=logger)
 
+    assert "error" not in result
     assert result["message_ids"] == []
+    assert result["history_id"] == "500"
+    assert logger.warnings == []
+    assert len(logger.infos) == 1
+    assert "gone" in logger.infos[0]
+
+
+def test_a_thread_gmail_would_not_answer_for_holds_the_window(gmail):
+    """The other half, and the opposite answer. A 500 means the thread is still
+    there and may still carry his label, so the question has an answer we did
+    not get. Returning empty would read as "nothing on this thread": the watcher
+    would advance the watermark and that mail would be gone for good. An error
+    is what makes the watcher hold the watermark and walk this window again."""
+    gmail.history_pages = [{
+        "history": [{"messagesAdded": [
+            {"message": {"id": "m1", "threadId": "t1"}},
+        ]}],
+        "historyId": "500",
+    }]
+
+    class _Failing:
+        def get(self, **kwargs):
+            raise RuntimeError("gmail 500")
+
+    gmail.threads = lambda: _Failing()
+    logger = _Recorder()
+
+    result = gmail_read.list_history("100", "Label_7", logger=logger)
+
+    assert "error" in result
+    assert "t1" in result["error"]
+    # And no empty-but-successful shape hiding underneath it.
+    assert "message_ids" not in result
     assert len(logger.warnings) == 1
-    assert "gone" in logger.warnings[0]
+    assert "t1" in logger.warnings[0]
 
 
 def test_list_history_skips_mail_he_sent_himself(gmail):
@@ -601,10 +637,16 @@ def test_list_history_follows_pages(gmail):
 
 
 class _Recorder:
-    """Stands in for the task logger, so a test can read what was warned about."""
+    """Stands in for the task logger, so a test can read what was said. INFO and
+    WARNING are kept apart because which level a thread failure lands at is the
+    behaviour under test: a deleted thread is routine, an unanswered one is not."""
 
     def __init__(self):
         self.warnings = []
+        self.infos = []
+
+    def info(self, message):
+        self.infos.append(message)
 
     def warning(self, message):
         self.warnings.append(message)
@@ -767,8 +809,9 @@ def test_list_history_still_takes_a_single_label_id(gmail):
 
 
 def test_thread_state_returns_nothing_for_a_thread_it_cannot_read(gmail):
-    """Unreadable means no labels and no message to act on, so the mail is
-    neither reported nor acted on, and the log says why."""
+    """Unreadable means no labels and no message to act on -- and `unreadable`
+    set, which is what tells list_history to fail the window rather than call it
+    empty. The log says why."""
     class _Failing:
         def get(self, **kwargs):
             raise RuntimeError("gmail 500")
@@ -777,9 +820,9 @@ def test_thread_state_returns_nothing_for_a_thread_it_cannot_read(gmail):
     logger = _Recorder()
 
     assert gmail_read._thread_state("t1", ["Label_7"], logger) == {
-        "labels": set(), "newest": None}
+        "labels": set(), "newest": None, "unreadable": True}
     assert len(logger.warnings) == 1
-    assert "NOT acted on" in logger.warnings[0]
+    assert "holding the history watermark" in logger.warnings[0]
 
 
 def test_thread_state_reads_no_thread_when_there_is_nothing_to_look_for(gmail):
@@ -791,8 +834,9 @@ def test_thread_state_reads_no_thread_when_there_is_nothing_to_look_for(gmail):
 
     gmail.threads = lambda: _Exploding()
 
-    assert gmail_read._thread_state("t1", []) == {"labels": set(), "newest": None}
-    assert gmail_read._thread_state("t1", [None]) == {"labels": set(), "newest": None}
+    empty = {"labels": set(), "newest": None, "unreadable": False}
+    assert gmail_read._thread_state("t1", []) == empty
+    assert gmail_read._thread_state("t1", [None]) == empty
 
 
 # --------------------------------------------------------------------------- #

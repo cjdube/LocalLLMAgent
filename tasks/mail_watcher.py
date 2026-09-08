@@ -39,6 +39,7 @@ Usage:
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -88,6 +89,43 @@ MAX_SUMMARY_CHARS = 200
 # Mail arrives seconds apart, not milliseconds, so serializing costs nothing
 # real: a push takes about a second end to end.
 FLOW_CONTROL = pubsub_v1.types.FlowControl(max_messages=1)
+
+# How long the idle line stays quiet before it says something again.
+#
+# Nearly every notification is idle — 616 of 627 measured, 867 of 1574 log
+# lines. That is not a fault to fix: the Gmail watch is deliberately unfiltered
+# (gmail_read.register_watch), so it publishes for reads, archives and spam
+# purges too, and filtering it would break hand-labelled threads.
+#
+# The line itself cannot go. This is a KeepAlive daemon, so chat/insights.py's
+# parse_runs skips its log and log_inspector reads only WARNING and above:
+# these lines are the ONLY on-disk evidence the push pipe is alive. So roll
+# them up instead — one an hour, carrying the count of the ones it stands for.
+# Liveness is unharmed, because liveness is the lines STOPPING.
+IDLE_ROLLUP_SECONDS = 3600
+
+# Safe as module state because FLOW_CONTROL leases one notification at a time,
+# so the callbacks run one at a time (see above). tests/test_mail_watcher.py
+# resets both between tests.
+_idle_logged_at = None
+_idle_suppressed = 0
+
+
+def _log_idle(notice_id: str, logger) -> None:
+    """Say a notification was idle, at most once an hour, naming how many it
+    covers. The first one after a restart always logs, so a freshly started
+    watcher proves itself immediately rather than after an hour of silence."""
+    global _idle_logged_at, _idle_suppressed
+    now = time.monotonic()
+    if _idle_logged_at is not None and now - _idle_logged_at < IDLE_ROLLUP_SECONDS:
+        _idle_suppressed += 1
+        return
+    covered = _idle_suppressed
+    _idle_logged_at, _idle_suppressed = now, 0
+    logger.info(
+        f"history id {notice_id}: nothing new after dedupe"
+        + (f" (and {covered} more idle notification(s) since the last of these)"
+           if covered else ""))
 
 
 def subscription_path() -> str:
@@ -232,15 +270,12 @@ def handle_notification(data: bytes, logger, label_id: str = None,
     notice_id = payload.get("historyId")
 
     # No unconditional "a notification arrived" line here. Every path out of
-    # this function logs exactly once and carries notice_id itself, so one
-    # notification is one line instead of two. 616 of 627 notifications were
-    # idle when measured, and this is a KeepAlive daemon by chat/insights.py's
-    # rule, so parse_runs skips its log and log_inspector reads only WARNING and
-    # above — nothing automated reads these. They are kept, at one line each,
-    # because they are the ONLY on-disk evidence the Gmail push pipe is alive:
-    # if the watch dies the lines simply stop. Keep the terminating line on
-    # every path, or a dead subscription becomes indistinguishable from a quiet
-    # mailbox.
+    # this function logs at most once and carries notice_id itself, so one
+    # notification is one line instead of two. The idle path — nearly all of
+    # them — goes through _log_idle and is rolled up to one line an hour; see
+    # IDLE_ROLLUP_SECONDS for why the line has to survive at all. Keep the
+    # terminating line on every path, or a dead subscription becomes
+    # indistinguishable from a quiet mailbox.
     watermark = mail_state.history_id()
     if not watermark:
         # No watch has been registered yet, so there is no window to walk. Seed
@@ -259,6 +294,10 @@ def handle_notification(data: bytes, logger, label_id: str = None,
     if "error" in history:
         # The id goes in the message because the caller's ERROR line is now the
         # only record this notification arrived at all.
+        #
+        # Raising is what holds the watermark, and that is the point: an error
+        # here covers a thread Gmail would not answer for, so the mail behind it
+        # is still waiting and the next notification re-walks this window.
         raise RuntimeError(
             f"history.list failed for history id {notice_id}: {history['error']}")
 
@@ -298,7 +337,7 @@ def handle_notification(data: bytes, logger, label_id: str = None,
     targets = [t for t in targets if t[0] in fresh]
     if not targets:
         mail_state.commit(new_history_id=history["history_id"])
-        logger.info(f"history id {notice_id}: nothing new after dedupe")
+        _log_idle(notice_id, logger)
         return
 
     logger.info(f"history id {notice_id}: {len(targets)} new item(s): "

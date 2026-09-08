@@ -494,23 +494,36 @@ def _thread_state(thread_id: str, wanted_label_ids, logger=None) -> dict:
     Costs one `threads.get` per distinct new thread. That is single digits a day
     on this mailbox; revisit the trade if it ever becomes thousands.
 
+    **A 404 and a 500 are not the same failure and must not read the same.** A
+    404 means the thread has left the mailbox between history.list naming it and
+    this read — deleted, or a draft destroyed on send. There is no mail behind
+    it and it never comes back, so it is not a miss: it says so at INFO and the
+    caller carries on. Anything else is Gmail failing to answer a question that
+    still has an answer, so the thread may really carry his label. That sets
+    `unreadable`, which makes list_history return an error rather than an empty
+    result — the watcher then holds the watermark and the next notification
+    re-walks the same window instead of losing the mail.
+
     Answers empty when it cannot tell, and logs why. Silently degrading is what
     AGENTS.md forbids — degrading out loud is the allowed kind.
     """
     wanted = {lid for lid in (wanted_label_ids or []) if lid}
-    empty = {"labels": set(), "newest": None}
+    empty = {"labels": set(), "newest": None, "unreadable": False}
     if not thread_id or not wanted:
         return empty
     try:
         thread = _service().users().threads().get(
             userId="me", id=thread_id, format="minimal").execute()
+    except HttpError as e:
+        if getattr(e, "resp", None) is not None and e.resp.status == 404:
+            if logger:
+                logger.info(
+                    f"thread {thread_id} is no longer in the mailbox (404), so "
+                    "there is nothing on it to report or act on")
+            return empty
+        return _unreadable_thread(thread_id, e, logger)
     except Exception as e:
-        if logger:
-            logger.warning(
-                f"could not read thread {thread_id} to check for Wren's labels "
-                f"({e}) — treating it as unlabelled, so any new mail on it was "
-                "NOT reported and NOT acted on.")
-        return empty
+        return _unreadable_thread(thread_id, e, logger)
 
     found, newest, newest_at = set(), None, -1
     for message in thread.get("messages") or []:
@@ -528,7 +541,18 @@ def _thread_state(thread_id: str, wanted_label_ids, logger=None) -> dict:
         at = int(message.get("internalDate") or 0)
         if message.get("id") and at >= newest_at:
             newest, newest_at = message["id"], at
-    return {"labels": found, "newest": newest}
+    return {"labels": found, "newest": newest, "unreadable": False}
+
+
+def _unreadable_thread(thread_id: str, error, logger=None) -> dict:
+    """Gmail could not answer a question that still has an answer. The mail is
+    not lost — the caller holds the watermark and tries again."""
+    if logger:
+        logger.warning(
+            f"could not read thread {thread_id} to check for Wren's labels "
+            f"({error}) — holding the history watermark so the next "
+            "notification walks this window again.")
+    return {"labels": set(), "newest": None, "unreadable": True}
 
 
 # Labels that mean "he wrote this", so the watcher must not alert him about it.
@@ -572,7 +596,12 @@ def list_history(start_history_id: str, watch_label_id=None,
     gone and the call 404s. That is not a crash and it is not "no new mail":
     it is a lost watermark. So it logs a WARNING naming the stale id, resets to
     the mailbox's current history id, and returns empty — a degrade that says so,
-    which is the only kind this repo allows."""
+    which is the only kind this repo allows.
+
+    Returns `{"error": ...}` when Gmail would not say whether a thread carries a
+    label (see `_thread_state`). Empty and error mean opposite things to the
+    caller — empty advances the watermark, an error holds it — so a thread we
+    could not read must never come back as empty."""
     if not start_history_id:
         return {"error": "list_history needs a start_history_id"}
 
@@ -685,6 +714,19 @@ def list_history(start_history_id: str, watch_label_id=None,
     # and the answer cannot change inside a single call.
     states = {tid: _thread_state(tid, wanted, logger)
               for tid in ({tid for _, tid in ordered if tid} | labelled_threads)}
+
+    # One thread Gmail would not answer for poisons the whole window, on
+    # purpose. Returning what we *can* see would look like a complete answer:
+    # the watcher would find nothing to do on that thread, advance the
+    # watermark, and the mail behind it would be past the watermark, absent
+    # from `seen`, and acked — gone for good. An error holds the watermark
+    # instead, and the next notification walks the same window. Nothing is
+    # double-reported by that: nothing was committed, so nothing was said yet.
+    unreadable = sorted(tid for tid, state in states.items() if state["unreadable"])
+    if unreadable:
+        return {"error": "could not read thread(s) "
+                         f"{', '.join(unreadable)} to check for Wren's labels"}
+
     threads = {tid: {"labels": sorted(state["labels"]), "newest": state["newest"]}
                for tid, state in states.items() if state["labels"]}
     # Only messages whose thread survived the filter, so a caller never sees a

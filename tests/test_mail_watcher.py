@@ -52,6 +52,15 @@ def _isolate_store(tmp_path, monkeypatch):
     monkeypatch.setattr(mail_state, "_STORE_PATH", tmp_path / "mail_state.json")
 
 
+@pytest.fixture(autouse=True)
+def _reset_idle_rollup(monkeypatch):
+    """_log_idle keeps module state -- when it last spoke, and how many idle
+    notifications it has swallowed since. Left alone, the first test to log an
+    idle line would silence every test after it for an hour of wall clock."""
+    monkeypatch.setattr(mail_watcher, "_idle_logged_at", None)
+    monkeypatch.setattr(mail_watcher, "_idle_suppressed", 0)
+
+
 @pytest.fixture
 def logger():
     return _Logger()
@@ -779,6 +788,44 @@ def test_an_idle_notification_logs_exactly_one_line(gmail, pushes, model, logger
     mail_watcher.handle_notification(_payload(), logger)
 
     assert len(logger.infos) == 1, logger.infos
+
+
+def test_idle_notifications_inside_the_hour_are_rolled_up(gmail, pushes, model,
+                                                          logger):
+    """867 of 1574 log lines were this one line. They cannot be dropped (see the
+    test below), so they are rolled up: one line an hour, carrying the count of
+    the ones it stands for."""
+    mail_state.commit(new_history_id="100")
+    gmail["history"] = {"message_ids": [], "history_id": "500", "resynced": False}
+
+    for _ in range(20):
+        mail_watcher.handle_notification(_payload(), logger)
+
+    assert len(logger.infos) == 1, logger.infos
+    assert mail_watcher._idle_suppressed == 19
+
+
+def test_the_rollup_line_says_how_many_it_covers(gmail, pushes, model, logger,
+                                                 monkeypatch):
+    """A count that is only ever hidden is the silent degrade AGENTS.md forbids.
+    Once the hour is up, the next idle line has to name the ones it swallowed."""
+    mail_state.commit(new_history_id="100")
+    gmail["history"] = {"message_ids": [], "history_id": "500", "resynced": False}
+
+    for _ in range(20):
+        mail_watcher.handle_notification(_payload(), logger)
+
+    # An hour later, by the same clock _log_idle reads.
+    now = mail_watcher.time.monotonic()
+    monkeypatch.setattr(mail_watcher.time, "monotonic",
+                        lambda: now + mail_watcher.IDLE_ROLLUP_SECONDS + 1)
+    mail_watcher.handle_notification(_payload(history_id="888"), logger)
+
+    assert len(logger.infos) == 2, logger.infos
+    assert "19 more" in logger.infos[1]
+    assert "888" in logger.infos[1]
+    # And the counter starts over, so the next line does not re-report them.
+    assert mail_watcher._idle_suppressed == 0
 
 
 def test_the_quiet_line_survives_and_names_the_notification(gmail, pushes, model,

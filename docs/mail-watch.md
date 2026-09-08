@@ -468,6 +468,24 @@ it and `messages.get` then 404'd, which means it left the mailbox — that never
 recovers, and holding the watermark for it would re-walk the same window forever.
 It is not reported, and the WARNING says so.
 
+### A thread Gmail will not classify
+
+`_thread_state` asks Gmail whether a thread carries one of Wren's labels. Two
+failures can come back, and they get opposite treatment:
+
+| Failure | Meaning | What happens |
+| --- | --- | --- |
+| **404** | The thread has left the mailbox — deleted, or a draft destroyed on send. | INFO line, nothing reported, watermark advances. Not a miss: there is no mail behind it and it never comes back. |
+| **Anything else** (500, timeout) | Gmail failed to answer a question that still has an answer. The thread may really carry the label. | WARNING, and `list_history` returns an **error** rather than an empty result — so the watcher holds the watermark and the next notification re-walks the window. |
+
+Both used to read the same, and both used to advance the watermark. That made a
+routine deletion warn that mail was lost (seven times in thirteen days to
+2026-09-06, all of them 404s), while a genuine Gmail hiccup lost the mail
+silently. Empty and error mean opposite things to the caller, so a thread that
+could not be read must never come back as empty.
+
+The retry rides on the next notification, exactly like a failed push above.
+
 ### A poison message must not kill the stream
 
 A raised exception inside a Pub/Sub callback cancels the subscription. Under
@@ -485,6 +503,8 @@ is lost, which is the lesser failure and is at least audible in the log.
 | First run pushed nothing and warned "no stored history id" | Expected on a cold start. Walking history from nothing would report the whole mailbox as new. Run `tasks.mail_watch_renew` so the watch and the watermark are registered together. |
 | The alert text is just the Gmail snippet | The model returned an empty summary — logged as a WARNING with the body length. Usually the thinking budget; see [docs/model-constraints.md](model-constraints.md). |
 | `history.list failed: [Errno 32] Broken pipe` | Google closed the daemon's idle connection. `list_history` is the first Gmail call after every quiet gap, so it is the one that finds the dead socket — it now reconnects and retries once, logging a WARNING when it does. Two in a row (it happened on 2026-08-25, five minutes apart) was httplib2 handing the *same* dead connection back; see `google_auth.reset_service`. A second failure after a reconnect is a real outage. |
+| `could not read thread ... holding the history watermark` | Gmail would not say whether the thread carries a label, so the window is held and re-walked. One is a hiccup. A run of them is a Gmail outage — the mail is safe, but nothing pushes until it clears. A *404* on a thread is the routine case and logs at INFO, not WARNING. |
+| `nothing new after dedupe (and N more ...)` | Normal. The Gmail watch is unfiltered on purpose, so it publishes for reads, archives and spam purges too; nearly every notification is idle. The line is rolled up to one an hour and carries the count it stands for. It is the only evidence the push pipe is alive — if it stops entirely, the watch is dead. |
 | Alerts stopped after a `brew python` upgrade | Same as every other launchd job here — re-bootstrap the agent with `./launchd/install.sh launchd/local.wren.mailwatcher.plist`, which boots it out first. |
 
 ## Replying on a thread
