@@ -43,7 +43,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dotenv import load_dotenv
 from google.cloud import pubsub_v1
 
 from agent import config
@@ -55,8 +54,6 @@ from agent.tools.notify import notify
 from tasks import _mail_action
 from tasks._common import notify_failure, setup_logger
 
-_ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(_ROOT / "config" / ".env")
 
 _NAME = prefs.user_name()
 

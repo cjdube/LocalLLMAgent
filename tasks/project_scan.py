@@ -38,7 +38,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dotenv import load_dotenv
 
 from agent import prefs
 from agent.loop import complete_text, resolve_backend, warm_model
@@ -47,8 +46,6 @@ from agent.tools import projects as projects_tool
 from agent.tools.projects import load_registry, scan_projects
 from tasks._common import notify_failure, setup_logger
 
-_ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(_ROOT / "config" / ".env")
 
 # How many topic terms to keep. The anchor's token set is name + summary +
 # topics; a wiki-page anchor (name + a one-line summary) lands around 20-25

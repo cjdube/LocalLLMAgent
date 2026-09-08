@@ -20,7 +20,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dotenv import load_dotenv
 from flask import Flask, jsonify, request, send_from_directory, session
 
 from agent import config
@@ -68,8 +67,6 @@ from tasks._common import setup_logger
 from tasks.morning_brief import brief_dispatch
 from tasks.opportunity_digest import digest_dispatch
 
-_ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(_ROOT / "config" / ".env")
 
 WREN_CHAT_TOKEN = config.getenv("WREN_CHAT_TOKEN")
 FLASK_SECRET_KEY = config.getenv("FLASK_SECRET_KEY")

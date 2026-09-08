@@ -9,18 +9,14 @@ import argparse
 import json
 import sys
 from datetime import date, datetime, timedelta, timezone
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from dotenv import load_dotenv
 
 from agent import config
 from agent import prefs
 from agent.dates import DATE_ARG_GUIDANCE, local_timezone as _local_timezone, resolve_date
 from agent.tools.google_auth import build_service
 
-_ROOT = Path(__file__).resolve().parent.parent.parent
-load_dotenv(_ROOT / "config" / ".env")
 
 # source_id prefix for the events ScribeJay's claude_time_blocks.py logs. It lives here,
 # next to log_calendar_event (which owns source_id), so the writer and the

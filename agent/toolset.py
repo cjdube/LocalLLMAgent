@@ -14,7 +14,6 @@ that keeps a launchd task from having to import the web server.
 """
 
 import json
-import os
 import re
 
 from agent import config

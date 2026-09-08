@@ -25,17 +25,13 @@ import json
 import sys
 from email.mime.text import MIMEText
 from email.utils import formataddr, getaddresses
-from pathlib import Path
 
-from dotenv import load_dotenv
 
 from agent import config
 from agent import prefs
 from agent.tools import gmail_read
 from agent.tools.google_auth import build_service
 
-_ROOT = Path(__file__).resolve().parent.parent.parent
-load_dotenv(_ROOT / "config" / ".env")
 
 _NAME = prefs.user_name()
 

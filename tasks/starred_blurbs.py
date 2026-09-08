@@ -25,7 +25,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dotenv import load_dotenv
 
 from agent.loop import complete_text, resolve_backend, warm_model
 from agent.store import atomic_write_json, load_json, locked
@@ -33,7 +32,6 @@ from agent.tools.github_starred import fetch_readme, fetch_starred_repos
 from tasks._common import notify_failure, setup_logger
 
 _ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(_ROOT / "config" / ".env")
 
 BLURBS_PATH = _ROOT / "config" / "starred_blurbs.json"
 

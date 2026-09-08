@@ -23,7 +23,6 @@ import threading
 from pathlib import Path
 
 import httplib2
-from dotenv import load_dotenv
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_httplib2 import AuthorizedHttp
@@ -33,8 +32,6 @@ from googleapiclient.discovery import build
 from agent import config
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
-_ENV_PATH = _ROOT / "config" / ".env"
-load_dotenv(_ENV_PATH)
 
 # Outbound timeout (seconds) for every Google API call. Without it the
 # client's default httplib2 transport has NO timeout — the one HTTP surface in

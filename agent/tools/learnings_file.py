@@ -10,12 +10,9 @@ the caller's email fallback fires.
 
 from pathlib import Path
 
-from dotenv import load_dotenv
 
 from agent import config
 
-_ROOT = Path(__file__).resolve().parent.parent.parent
-load_dotenv(_ROOT / "config" / ".env")
 
 DEFAULT_LEARNINGS_DIR = str(Path.home() / "Vaults" / "llm-wiki-learnings" / "raw")
 

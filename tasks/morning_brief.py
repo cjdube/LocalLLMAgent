@@ -26,7 +26,6 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dotenv import load_dotenv
 
 from agent import config
 from agent import prefs
@@ -44,7 +43,6 @@ from tasks._common import notify_failure, setup_logger, today_str
 from tasks._urls import safe_url
 
 _ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(_ROOT / "config" / ".env")
 
 # Env wins; otherwise the location from config/preferences.json.
 DEFAULT_LOCATION = config.getenv("DEFAULT_LOCATION") or prefs.PREFS.get("location", "")

@@ -38,7 +38,6 @@ from xml.etree import ElementTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dotenv import load_dotenv
 
 import requests
 
@@ -53,7 +52,6 @@ from tasks._common import notify_failure, setup_logger, today_str
 from tasks._urls import safe_url
 
 _ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(_ROOT / "config" / ".env")
 
 STATE_PATH = _ROOT / "config" / "opportunities_state.json"
 

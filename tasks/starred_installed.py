@@ -39,13 +39,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dotenv import load_dotenv
 
 from agent.store import atomic_write_json, load_json, locked
 from tasks._common import notify_failure, setup_logger
 
 _ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(_ROOT / "config" / ".env")
 
 SOURCE_PATH = _ROOT / "config" / "starred_installed.json"
 INSTALLED_PATH = _ROOT / "config" / "starred_installed_versions.json"

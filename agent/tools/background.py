@@ -31,7 +31,6 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
-from dotenv import load_dotenv
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from agent import config
@@ -39,7 +38,6 @@ from agent import prefs
 from agent.store import atomic_write_json, load_json, locked
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
-load_dotenv(_ROOT / "config" / ".env")
 
 _STORE_PATH = _ROOT / "config" / "bg_jobs.json"
 

@@ -10,20 +10,23 @@ tool stays short and a new tool has less to copy.
 
 import json
 import re
-from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
 
 from agent import config
 
-# config/.env lives at the repo root, three levels up from agent/tools/.
-ENV_PATH = Path(__file__).resolve().parent.parent.parent / "config" / ".env"
-
 
 def load_env() -> None:
-    """Load config/.env so a lookup sees keys from the file and the env."""
-    load_dotenv(ENV_PATH)
+    """Re-load the .env so a lookup sees a key added since this process started.
+
+    agent/config.py already loaded it at import, and load_dotenv never
+    overrides a variable that is already set, so this only ever adds keys — it
+    is here for the callers that re-read at call time (notify.py) rather than
+    at import. The path comes from config.env_path(), not a constant, so
+    WREN_ENV_FILE points this at the same file as every other reader.
+    """
+    load_dotenv(config.env_path())
 
 
 def resolve_key(name: str, arg: str | None = None) -> str | None:

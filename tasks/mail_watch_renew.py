@@ -20,14 +20,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dotenv import load_dotenv
 
 from agent import config
 from agent.tools import gmail_read, mail_state
 from tasks._common import notify_failure, setup_logger
 
-_ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(_ROOT / "config" / ".env")
 
 # Below this many hours to expiry, push an alert even though the renewal
 # succeeded. A fresh watch is ~168 hours out, so anything under 48 means at

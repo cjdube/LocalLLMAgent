@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import requests
-from dotenv import load_dotenv
 
 from agent import config
 from agent import prefs
@@ -26,8 +25,6 @@ from agent import prefs
 from agent.backends.gemini import GEMINI_DEFAULT_MODEL, _gemini_chat
 from agent.usage_ledger import record as record_usage
 
-_ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(_ROOT / "config" / ".env")
 
 # Bounds the number of model round-trips in one agent turn. 6 was enough for
 # the original single-fetch tools, but navigating the learnings wiki

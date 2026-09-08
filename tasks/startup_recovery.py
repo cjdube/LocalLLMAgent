@@ -18,7 +18,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import requests
-from dotenv import load_dotenv
 
 from agent import config
 from agent.loop import resolve_backend
@@ -26,7 +25,6 @@ from agent.store import atomic_write_json, load_json, locked
 from tasks._common import notify_failure, setup_logger
 
 _ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(_ROOT / "config" / ".env")
 STORE_PATH = _ROOT / "config" / "startup_recovery.json"
 DOMAIN = f"gui/{os.getuid()}"
 # launchctl print/kickstart answer in milliseconds; anything near this bound is

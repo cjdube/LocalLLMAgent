@@ -39,7 +39,6 @@ Usage:
 
 import argparse
 import json
-import os
 import re
 import shlex
 import subprocess
@@ -57,8 +56,8 @@ from tasks._common import notify_failure, setup_logger
 
 _ROOT = Path(__file__).resolve().parent.parent
 
-# Where a build happens, and with what. All os.getenv with inline defaults, per
-# the repo convention; every one is documented in config/.env.example.
+# Where a build happens, and with what. All config.getenv with inline defaults,
+# per the repo convention; every one is documented in config/.env.example.
 DEFAULT_REPO_ROOT = "~/Projects/LocalLLMAgent"
 DEFAULT_WORKTREE_ROOT = "~/Projects/.wren-builds"
 DEFAULT_CLAUDE_BIN = "~/.local/bin/claude"

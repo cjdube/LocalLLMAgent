@@ -26,10 +26,8 @@ import json
 import re
 import sys
 from datetime import datetime
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from dotenv import load_dotenv
 from googleapiclient.errors import HttpError
 
 from agent import config
@@ -37,8 +35,6 @@ from agent import prefs
 from agent.dates import local_timezone
 from agent.tools.google_auth import build_service, reset_service
 
-_ROOT = Path(__file__).resolve().parent.parent.parent
-load_dotenv(_ROOT / "config" / ".env")
 
 _NAME = prefs.user_name()
 

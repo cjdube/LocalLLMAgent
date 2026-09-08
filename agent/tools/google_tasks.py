@@ -20,17 +20,13 @@ import argparse
 import json
 import sys
 from datetime import date, datetime, time, timedelta, timezone
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from dotenv import load_dotenv
 
 from agent import config
 from agent.dates import DATE_ARG_GUIDANCE, local_timezone as _local_timezone, resolve_date
 from agent.tools.google_auth import build_service
 
-_ROOT = Path(__file__).resolve().parent.parent.parent
-load_dotenv(_ROOT / "config" / ".env")
 
 GET_TASKS_TOOL_SCHEMA = {
     "type": "function",

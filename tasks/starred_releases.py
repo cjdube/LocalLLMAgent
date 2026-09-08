@@ -21,14 +21,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dotenv import load_dotenv
 
 from agent.store import atomic_write_json, locked
 from agent.tools.github_starred import fetch_latest_release, fetch_starred_repos
 from tasks._common import notify_failure, setup_logger
 
 _ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(_ROOT / "config" / ".env")
 
 RELEASES_PATH = _ROOT / "config" / "starred_releases.json"
 # The star list itself, cached so /starred has something to render when GitHub is
