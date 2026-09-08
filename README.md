@@ -705,6 +705,17 @@ is the one job that starts without a tap on your phone; a precondition that
 fails always leaves a comment saying which one.
 See [docs/clickup-build.md](docs/clickup-build.md).
 
+**Run `/clickup-ticket` in Claude Code and the session files itself.** The
+plan's heading becomes the Task title, your first prompt of that session and the
+reply it drew become quotes in the description under **Asked** and **Answered**,
+the plan `.md` is attached, and the Task lands in
+`designed` — which is exactly the state `wren-build` needs, so the two fit
+together. Priority is an argument and defaults to `normal`. **It needs a plan
+file**; a session with none is refused rather than filed half-built. Running it
+twice refuses instead of filing a duplicate. The skill lives in
+`~/.claude/skills/clickup-ticket/` so it works from any repo, but the logic is
+`agent/session_ticket.py` here. See [docs/session-ticket.md](docs/session-ticket.md).
+
 Every tool is named `*_clickup_*` because Google Tasks owns the bare word
 *task* and its tools are always loaded. **Say "ClickUp" and you always get
 these**; say "task" on its own and you get a Google Task.

@@ -642,8 +642,21 @@ def test_add_clickup_task_sends_the_right_payload_to_the_right_list(stub):
     assert method == "POST"
     assert path == "/list/901419409898/task"
     assert payload["name"] == "Better logging"
-    assert payload["description"] == "Rotate the launchd logs."
+    assert payload["markdown_content"] == "Rotate the launchd logs."
     assert payload["tags"] == ["maintenance"]
+
+
+def test_add_clickup_task_sends_the_description_as_markdown_not_plain_text(stub):
+    """ClickUp stores `description` verbatim: a blockquote filed that way shows
+    its own '>' on the board. `markdown_content` is the parsed field, and
+    ClickUp ignores `description` entirely when both are sent — so sending both
+    would be the same bug wearing a second name."""
+    body = "**Asked**\n\n> Can we do this?"
+    clickup.add_clickup_task("Markdown", "wren", description=body)
+
+    (_, _, payload), = stub.writes
+    assert payload["markdown_content"] == body
+    assert "description" not in payload
 
 
 def test_add_clickup_task_opens_at_the_spaces_own_not_started_status(stub):
@@ -1284,3 +1297,109 @@ def test_the_download_has_an_explicit_timeout(download):
     seen = download([b"x"])
     clickup.download_attachment(ATTACHMENT["url"])
     assert seen[0][1]["timeout"] == clickup.TIMEOUT_S
+
+
+# --------------------------------------------------------------------------- #
+# find_task_id and upload_attachment — the two calls the clickup-ticket skill
+# needs, and the reason neither is a chat tool.
+# --------------------------------------------------------------------------- #
+
+# The real upload, captured before conftest's guard replaces it, for the same
+# reason as _REAL_DOWNLOAD above: it is a third HTTP door and does not go
+# through _get or _write.
+_REAL_UPLOAD = clickup.upload_attachment
+
+
+@pytest.fixture
+def upload(monkeypatch):
+    """Put the real upload_attachment back and stub the HTTP layer under it."""
+    monkeypatch.setattr(clickup, "upload_attachment", _REAL_UPLOAD)
+    monkeypatch.setattr(clickup, "resolve_key", lambda name, arg=None: arg or "pk_test")
+
+    def _install(status_ok=True, body=None):
+        seen = []
+
+        def _post(url, **kwargs):
+            seen.append((url, kwargs))
+            return _FakeUploadResponse(status_ok, body or {"id": "att1", "title": "plan.md"})
+
+        monkeypatch.setattr(clickup.requests, "post", _post)
+        return seen
+    return _install
+
+
+class _FakeUploadResponse:
+    def __init__(self, ok, body):
+        self._ok, self._body = ok, body
+        self.content = b"{}"
+
+    def raise_for_status(self):
+        if not self._ok:
+            raise requests.exceptions.HTTPError("413 Payload Too Large", response=None)
+
+    def json(self):
+        return self._body
+
+
+def test_find_task_id_resolves_a_title_the_same_way_a_write_does(stub):
+    """It shares _find_task with every write, so it can never land on a
+    different Task than the write that follows it."""
+    _set_tasks(stub, [_task("File a session as a ticket", task_id="86bbnfav7")])
+    assert clickup.find_task_id("file a session as a ticket") == {
+        "id": "86bbnfav7", "title": "File a session as a ticket"}
+
+
+def test_find_task_id_refuses_an_ambiguous_title(stub):
+    _set_tasks(stub, [_task("Session ticket one", task_id="a"),
+                      _task("Session ticket two", task_id="b")])
+    result = clickup.find_task_id("session ticket")
+    assert "error" in result and "id" not in result
+
+
+def test_find_task_id_sees_closed_tasks(stub):
+    """A Task filed and shipped in the same day is still the one being asked
+    about; the default listing hides it."""
+    _set_tasks(stub, [_task("Done thing", task_id="z")])
+    clickup.find_task_id("Done thing")
+    assert any(q.get("include_closed") == "true" for _, q in stub.calls)
+
+
+def test_upload_sends_multipart_and_the_raw_token(upload):
+    """ClickUp's attachment endpoint is multipart, which is why this cannot go
+    through _write — requests must set the boundary itself, so no Content-Type
+    header may be passed. The personal token is sent raw, with no Bearer."""
+    seen = upload()
+    result = clickup.upload_attachment("86bbnfav7", "plan.md", b"# Plan\n")
+    url, kwargs = seen[0]
+    assert url.endswith("/task/86bbnfav7/attachment")
+    assert kwargs["files"] == {"attachment": ("plan.md", b"# Plan\n")}
+    assert kwargs["headers"] == {"Authorization": "pk_test"}
+    assert "Content-Type" not in kwargs["headers"]
+    assert result["attached"] == "plan.md"
+
+
+def test_the_upload_has_an_explicit_timeout(upload):
+    seen = upload()
+    clickup.upload_attachment("86bbnfav7", "plan.md", b"x")
+    assert seen[0][1]["timeout"] == clickup.TIMEOUT_S
+
+
+def test_an_oversized_upload_is_refused_before_it_is_sent(upload):
+    seen = upload()
+    result = clickup.upload_attachment("86bbnfav7", "plan.md",
+                                       b"x" * (clickup._MAX_ATTACHMENT_BYTES + 1))
+    assert "larger than" in result["error"]
+    assert seen == [], "an oversized attachment was uploaded anyway"
+
+
+def test_a_rejected_upload_degrades_to_an_error_dict(upload):
+    upload(status_ok=False)
+    assert "error" in clickup.upload_attachment("86bbnfav7", "plan.md", b"x")
+
+
+def test_the_id_taking_functions_are_not_offered_to_the_model():
+    """Same rule as the tag functions: every model-facing tool here takes a
+    title, so an id never reaches the model to be copied back."""
+    names = {s["function"]["name"] for s in clickup.CLICKUP_TOOL_SCHEMAS}
+    assert "find_task_id" not in names
+    assert "upload_attachment" not in names

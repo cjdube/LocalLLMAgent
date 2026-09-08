@@ -584,7 +584,11 @@ def add_clickup_task(title: str, space: str, list_name: str = None,
         list_id = target["id"]
         payload = {"name": title.strip(), "status": _opening_status(chosen)}
         if description and description.strip():
-            payload["description"] = description.strip()[:_MAX_NEW_DESCRIPTION_CHARS]
+            # `description` is stored verbatim as plain text, so a quote or a
+            # heading arrives on the board with its own markup showing.
+            # `markdown_content` is the same field parsed as Markdown, and
+            # plain prose parses to itself, so this is safe for every caller.
+            payload["markdown_content"] = description.strip()[:_MAX_NEW_DESCRIPTION_CHARS]
         if tags:
             payload["tags"] = [t for t in tags if t and t.strip()]
         if priority:
@@ -1007,6 +1011,81 @@ def download_attachment(url: str, max_bytes: int = _MAX_ATTACHMENT_BYTES) -> dic
         return {"text": body.decode("utf-8")}
     except UnicodeDecodeError:
         return {"error": "attachment is not UTF-8 text"}
+
+
+def find_task_id(title: str, api_key: str = None) -> dict:
+    """Resolve a title to one Task **id**. Library function, not a chat tool,
+    for the same reason as the three above: it hands back an id.
+
+    add_clickup_task deliberately does not return the id of what it created —
+    its result goes to the model, and an id in the model's context is one it
+    will eventually be asked to copy (docs/opaque-identifiers.md). So a caller
+    that has just created a Task and now needs to hang a file on it asks here,
+    by the title it chose itself.
+
+    Resolution is _find_task, the same one every write uses, so this can never
+    land on a different Task than the write did.
+    """
+    if not title or not title.strip():
+        return {"error": "title must not be empty"}
+    token, err = _client(api_key)
+    if err:
+        return err
+    try:
+        team_id = _team_id(token)
+        spaces = _spaces(token, team_id)
+        tasks = _fetch_tasks(token, team_id, [a["id"] for a in spaces], include_done=True)
+    except _ClickUpError as e:
+        return {"error": str(e)}
+    except Exception as e:
+        return http_error(e)
+
+    task, err = _find_task(tasks, title)
+    if err:
+        return err
+    return {"id": task["id"], "title": task.get("name", "")}
+
+
+def upload_attachment(task_id: str, filename: str, data: bytes,
+                      api_key: str = None) -> dict:
+    """Hang one file on one Task. Library function, not a chat tool — it takes
+    an id, and nothing the model can reach should be able to upload bytes.
+
+    **This is the only call in this module that does not go through _get or
+    _write.** ClickUp's attachment endpoint is multipart/form-data, and _write
+    hardcodes a JSON content type and a json= body. Do not try to route it
+    through _write: requests must set the multipart boundary itself, so the
+    header has to be left off, not overridden.
+
+    Because it is a third door, it is named in its own right in
+    tests/conftest.py:_block_clickup_egress. A new HTTP door that is not named
+    there reaches the live API from a green test run.
+    """
+    if not task_id:
+        return {"error": "task_id must not be empty"}
+    if not filename or not filename.strip():
+        return {"error": "filename must not be empty"}
+    if len(data or b"") > _MAX_ATTACHMENT_BYTES:
+        return {"error": f"attachment is larger than {_MAX_ATTACHMENT_BYTES} bytes"}
+    token, err = _client(api_key)
+    if err:
+        return err
+    try:
+        resp = requests.post(
+            f"{API_ROOT}/task/{task_id}/attachment",
+            headers={"Authorization": token},
+            files={"attachment": (filename.strip(), data)},
+            timeout=TIMEOUT_S,
+        )
+        resp.raise_for_status()
+        body = resp.json() if resp.content else {}
+    except Exception as e:
+        return http_error(e)
+    return {
+        "attached": body.get("title", filename.strip()),
+        "id": body.get("id", ""),
+        "task_id": task_id,
+    }
 
 
 # ClickUp's own three nouns, used exactly as ClickUp uses them, because the

@@ -192,6 +192,13 @@ Spaces disagree on the word.
 numeric (1 = Urgent, 4 = Low). The schema takes `urgent|high|normal|low` and
 Python maps it. Never make the model emit the digit.
 
+**The description is sent as `markdown_content`, not `description`.** ClickUp
+stores `description` verbatim, so a blockquote filed that way reaches the board
+with its own `>` showing — which is what `/clickup-ticket` produced until this
+was fixed. `markdown_content` is the same field parsed as Markdown, and plain
+prose parses to itself, so no caller loses anything. ClickUp ignores
+`description` outright when both are sent, so only one is ever sent.
+
 ### `move_clickup_task(title, status)`
 
 The status is validated against the statuses **that item's own Space** defines,
@@ -353,17 +360,28 @@ The watcher is a polling job (`StartInterval`, no `StartCalendarInterval`), so i
 is excluded from the `/map` dashboard's run history on purpose and needs no
 `Starting …` / `… run complete` log lines.
 
-### The two library functions
+### The library functions
 
-`tagged_clickup_tasks()` and `remove_clickup_tag()` live in
+`tagged_clickup_tasks()`, `remove_clickup_tag()`, `clickup_task_detail()`,
+`download_attachment()`, `find_task_id()` and `upload_attachment()` live in
 `agent/tools/clickup.py` but are **not** chat tools and have no schema. They are
-the only functions in that module that take a ClickUp **id**, which is exactly
-why: an id must never reach the model
+the only functions in that module that take a ClickUp **id** or a ClickUp URL,
+which is exactly why: an id must never reach the model
 ([docs/opaque-identifiers.md](opaque-identifiers.md)). Everything the model can
 call takes a title.
 
 `tagged_clickup_tasks` sets `include_closed`: a tag on a shipped Task is still a
 request.
+
+`find_task_id` and `upload_attachment` exist for
+[filing a session as a Task](session-ticket.md). `add_clickup_task` does not
+return the id of what it created — its result goes to the model — so a caller
+that must then hang a file on that Task asks for the id separately, by the title
+it chose itself. `upload_attachment` is the one call in the module that goes
+through neither `_get` nor `_write`: ClickUp's attachment endpoint is multipart,
+and `_write` hardcodes JSON. That makes it a third HTTP door, so it is named in
+its own right in `tests/conftest.py:_block_clickup_egress` — a door not named
+there reaches the live API from a green test run.
 
 ### The tag name may not contain a slash
 

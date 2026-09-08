@@ -462,6 +462,9 @@ def _block_clickup_egress(monkeypatch):
     # download_attachment does NOT go through _get — it fetches an attachment
     # host, not api.clickup.com, and so needs naming here in its own right.
     monkeypatch.setattr(_clickup, "download_attachment", _blocked)
+    # upload_attachment is the third door: multipart, so it cannot go through
+    # _write either. It POSTs to api.clickup.com with the real token.
+    monkeypatch.setattr(_clickup, "upload_attachment", _blocked)
 
 
 @pytest.fixture(autouse=True)
