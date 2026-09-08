@@ -261,6 +261,21 @@ def test_the_settings_store_is_redirected_out_of_the_repo():
     assert not str(config.settings_path()).startswith(str(real.parent))
 
 
+def test_the_settings_store_was_redirected_before_it_was_loaded():
+    # The half the test above cannot see. agent/config.py loads layer 2 ONCE, at
+    # its own import, so a redirect that lands after that import passes the path
+    # check above and still leaves CONFIG holding the developer's real document.
+    # That was the state until 2026-09-08 and nothing failed, because
+    # config/settings.json did not exist — an empty layer 2 is indistinguishable
+    # from a redirected one. The migration filled it with 26 real values and one
+    # test went red the same minute. Assert the load, not just the path.
+    from agent import config
+
+    assert config.CONFIG == {"values": {}, "preferences": {}}, (
+        "layer 2 was loaded before the redirect: every test now resolves against "
+        "the developer's own settings document")
+
+
 def test_the_suite_resolves_against_no_env_file_at_all():
     # WREN_ENV_FILE points at a file that does not exist, so load_dotenv is a
     # no-op and no key from the developer's config/.env reaches a test. Before

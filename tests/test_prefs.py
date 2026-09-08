@@ -1,14 +1,14 @@
 """Tests for agent/prefs.py and the contract every preference section must meet.
 
 The sections several modules consume at import time now arrive through
-agent/config.py, layered: the shipped config/preferences.example.json, then the
-pre-settings config/preferences.json, then whatever the /settings page has
-saved. The invariants that used to live as assertions in this file live in
-prefs.validate_section() instead, so the save route rejects a bad section with
-the same words this file would print — a test the page cannot disagree with.
+agent/config.py, layered: the shipped config/preferences.example.json, then
+whatever the /settings page has saved. The invariants that used to live as
+assertions in this file live in prefs.validate_section() instead, so the save
+route rejects a bad section with the same words this file would print — a test
+the page cannot disagree with.
 
-The suite pins WREN_PREFERENCES_FILE at a path that does not exist (see
-tests/conftest.py), so what these tests read is the shipped example file.
+The suite writes no saved sections, so what these tests read is the shipped
+example file.
 """
 
 from agent import prefs, schema

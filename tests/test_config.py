@@ -6,7 +6,6 @@ writes the real config/settings.json.
 """
 
 import json
-import logging
 import os
 import stat
 
@@ -210,51 +209,6 @@ def test_a_saved_section_replaces_the_shipped_one_whole(store):
     assert "positioning" not in persona
     # Other sections are untouched.
     assert config.preferences()["job_search"]["states"]
-
-
-def test_the_pre_settings_file_sits_between_the_two(store, tmp_path, monkeypatch):
-    # TRANSITIONAL layer — config/preferences.json, until agent/migrate_settings.py
-    # folds it in and renames it away. It has to outrank the shipped example (or a
-    # persona edit made before the page existed silently reverts to "Alex") and
-    # lose to a saved section (or the page would show a field it cannot change).
-    legacy = tmp_path / "preferences.json"
-    legacy.write_text(json.dumps({"persona": {"user_name": "Legacy"}}), encoding="utf-8")
-    monkeypatch.setenv("WREN_PREFERENCES_FILE", str(legacy))
-    assert config.preferences()["persona"] == {"user_name": "Legacy"}
-    config.apply({}, {"persona": {"user_name": "Saved"}})
-    assert config.preferences()["persona"] == {"user_name": "Saved"}
-
-
-def test_the_pre_settings_file_degrades_without_being_quarantined(store, tmp_path,
-                                                                  monkeypatch, caplog):
-    # Same promise as the settings document, for the same reason: a person may
-    # hand-edit this file, so a parse failure is logged and read as empty —
-    # store.load_json's rename-aside would lose their only copy.
-    bad = tmp_path / "preferences.json"
-    bad.write_text("{not json", encoding="utf-8")
-    monkeypatch.setenv("WREN_PREFERENCES_FILE", str(bad))
-    with caplog.at_level(logging.ERROR):
-        assert config.preferences()["persona"] == schema.STRUCTURED_DEFAULTS["persona"]
-    assert bad.read_text(encoding="utf-8") == "{not json"
-    assert "could not load preferences" in caplog.text
-
-
-def test_the_pre_settings_file_ignores_what_is_not_a_section(store, tmp_path, monkeypatch):
-    # A stray top-level key (the old "location" string, a "_comment") is not a
-    # section and must not become one.
-    legacy = tmp_path / "preferences.json"
-    legacy.write_text(json.dumps({"location": "Portland,OR,US", "_comment": "hi",
-                                  "sports": "not an object"}), encoding="utf-8")
-    monkeypatch.setenv("WREN_PREFERENCES_FILE", str(legacy))
-    merged = config.preferences()
-    assert "location" not in merged and "_comment" not in merged
-    assert merged["sports"] == schema.STRUCTURED_DEFAULTS["sports"]
-
-
-def test_a_missing_pre_settings_file_leaves_the_shipped_defaults(store, tmp_path,
-                                                                 monkeypatch):
-    monkeypatch.setenv("WREN_PREFERENCES_FILE", str(tmp_path / "nope.json"))
-    assert config.preferences()["persona"] == schema.STRUCTURED_DEFAULTS["persona"]
 
 
 def test_an_unknown_section_is_refused(store):

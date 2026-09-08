@@ -21,6 +21,7 @@ quietly matched nothing would make both guards pass forever.
 """
 
 import ast
+import plistlib
 from pathlib import Path
 
 import pytest
@@ -397,3 +398,19 @@ def test_no_row_claims_restart_without_an_import_time_read(
         "import any more — a banner nobody needs is a banner that trains you "
         f"to ignore the ones you do: {stale}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# The restart command names a service that exists
+# --------------------------------------------------------------------------- #
+
+def test_the_restart_command_names_the_real_launchd_label():
+    # The plist is named for the agent, not for the module it runs, so the
+    # obvious guess (local.wren.chat) is wrong. A wrong label prints "Could not
+    # find service ... in domain for user gui", which reads like a permissions
+    # problem, and the page would be handing that command to a phone.
+    plist = Path(__file__).resolve().parent.parent / "launchd" / "local.wren.wren.plist"
+    assert plist.exists(), "the chat server's plist moved; this guard needs the new path"
+    label = plistlib.loads(plist.read_bytes())["Label"]
+    assert schema.CHAT_SERVER_LABEL == label
+    assert schema.RESTART_COMMAND.endswith(label)

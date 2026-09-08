@@ -49,7 +49,13 @@ APPLIES = ("live", "next_run", "restart")
 # The command the page shows beside a restart-class save. No button: the server
 # runs under launchd KeepAlive, so a route that kills its own process is a
 # self-DoS if the save that preceded it was the wrong one.
-RESTART_COMMAND = "launchctl kickstart -k gui/$UID/local.wren.chat"
+#
+# The label is local.wren.wren, not local.wren.chat — the plist is named for the
+# agent, not for the module it runs. A wrong label does not error usefully; it
+# prints "Could not find service ... in domain for user gui", which reads like a
+# permissions problem. tests/test_schema.py pins this against launchd/.
+CHAT_SERVER_LABEL = "local.wren.wren"
+RESTART_COMMAND = f"launchctl kickstart -k gui/$UID/{CHAT_SERVER_LABEL}"
 
 
 @dataclass(frozen=True)

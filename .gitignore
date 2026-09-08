@@ -5,6 +5,11 @@ __pycache__/
 node_modules/
 config/.env
 config/preferences.json
+# What agent/migrate_settings.py leaves behind: an untouched copy of the .env it
+# rewrote, and the preferences file it folded into config/settings.json. Both
+# hold the same personal values the two lines above already keep out of git.
+config/.env.pre-settings-*
+config/preferences.json.migrated
 agent/identity.md
 config/google_credentials.json
 config/google_token.json

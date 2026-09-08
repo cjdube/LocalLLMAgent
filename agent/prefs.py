@@ -6,11 +6,13 @@ of Python. Read once at import — tool-schema enums and digest regexes are buil
 at module import time and need the values then.
 
 The values come from agent/config.py, which layers them: the shipped
-config/preferences.example.json, then the pre-settings config/preferences.json,
-then whichever sections have been saved through the /settings page. A saved
-section replaces its predecessor whole; it is never merged into it, because a
-half-merged list of calendar categories is a worse answer than either version
-alone.
+config/preferences.example.json, then whichever sections have been saved
+through the /settings page. A saved section replaces the shipped one whole; it
+is never merged into it, because a half-merged list of calendar categories is a
+worse answer than either version alone.
+
+config/preferences.json is gone — agent/migrate_settings.py folded it into the
+settings document and renamed it to preferences.json.migrated.
 
 This module keeps its own shape. PREFS is still a module global that every
 accessor reads, so the ~22 modules that bind `_NAME = prefs.user_name()` at

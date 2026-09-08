@@ -85,11 +85,14 @@ per-test monkeypatch stays the convention, this is what makes missing it
 harmless. (agent/prefs.py is deliberately absent: it is read-only at import.)
 
 config/settings.json — what the /settings page writes — is one of those stores,
-but it cannot wait for a fixture. agent/config.py resolves its path and loads it
-at import, and half the repo imports agent.config, so the redirect goes in
-through WREN_SETTINGS_FILE at conftest import time, beside the WREN_LOGS_DIR
-one below and for the same two reasons: it has to land before any test module's
-imports, and a child interpreter has to inherit it.
+but it cannot wait for a fixture, and it cannot even wait for conftest's own
+imports. agent/config.py resolves its path and loads it at import, and conftest
+imports agent modules itself, so WREN_SETTINGS_FILE is set above those imports
+beside WREN_ENV_FILE. It sat below them until 2026-09-08 and nothing failed,
+because config/settings.json did not exist yet — an empty layer 2 reads exactly
+like a redirected one. The migration filled it with 26 real values and
+test_background's "no WREN_PUBLIC_URL" case went red the same minute: delenv
+cleared layer 1, and layer 2 answered with the developer's own public URL.
 
 WREN_ENV_FILE is the same idea one layer down, and it is set even earlier —
 above conftest's own agent imports, because agent/config.py loads the .env at
@@ -136,15 +139,26 @@ import pytest
 # developer's config/.env. A test that fails because of this line has a real
 # hidden dependency on that file; fix the test, don't re-point the variable.
 os.environ["WREN_ENV_FILE"] = str(Path(tempfile.mkdtemp(prefix="wren-test-env-")) / ".env")
-# Same shape, same reason, one layer up: agent/prefs.py binds PREFS at ITS import
-# from config.preferences(), whose middle layer is the pre-settings
-# config/preferences.json. Unpinned, every preference assertion in the suite would
-# read the developer's own persona and calendar categories, so the shipped
-# defaults would be untested and a personal edit could turn the suite red. Also a
-# path that does not exist, which leaves exactly the shipped example file.
-# Transitional, with the layer it pins — see agent/config.py:_legacy_preferences.
+# Same shape, same reason, one file over. Nothing resolves through
+# config/preferences.json any more, but agent/migrate_settings.py still finds it
+# through config.preferences_path() — and that script's whole job is to read
+# that file, rewrite config/.env and rename things. Unpinned, a test of the
+# migration would do all three to the developer's own files. A path that does
+# not exist is also what a migrated machine looks like, so the suite runs
+# against the state the code now expects.
 os.environ["WREN_PREFERENCES_FILE"] = str(
     Path(tempfile.mkdtemp(prefix="wren-test-prefs-")) / "preferences.json")
+# The settings store, and it has to be here rather than below the imports: layer
+# 2 of the resolver is loaded once, at agent/config.py's import, so a line after
+# the first agent import is already too late. That was invisible until the
+# migration ran, because config/settings.json did not exist — an empty layer 2
+# reads exactly like a redirected one. Now it holds 26 real values, and an
+# unpinned suite resolves against the developer's own model, mail address and
+# public URL. The env var, not a constant, because test_bg_worker spawns a real
+# child interpreter that has to inherit the redirect. The directory stays empty
+# unless a test writes to it.
+_TEST_CONFIG_DIR = Path(tempfile.mkdtemp(prefix="wren-test-config-"))
+os.environ["WREN_SETTINGS_FILE"] = str(_TEST_CONFIG_DIR / "settings.json")
 
 from agent import escalations as _escalations
 from agent import loop as _loop
@@ -195,15 +209,6 @@ _common.LOGS_DIR = _TEST_LOGS_DIR
 # fills with fixture traffic and the /activity page reports it as real usage.
 _usage_ledger.LOGS_DIR = _TEST_LOGS_DIR
 _usage_ledger.LEDGER_PATH = _TEST_LOGS_DIR / "usage.jsonl"
-
-# The settings store (agent/config.py). Same shape, same two reasons: the module
-# loads the file at import, so a fixture is too late, and the env var is what a
-# spawned child interpreter inherits. It points at a directory that stays empty
-# unless a test writes to it — a suite that never saves a setting never creates
-# the file, and config.getenv then falls straight through to the schema.
-_TEST_CONFIG_DIR = Path(tempfile.mkdtemp(prefix="wren-test-config-"))
-os.environ["WREN_SETTINGS_FILE"] = str(_TEST_CONFIG_DIR / "settings.json")
-
 
 def _forbid_production_log_handlers() -> None:
     """Make a log handler on the real logs/ raise instead of quietly appending.

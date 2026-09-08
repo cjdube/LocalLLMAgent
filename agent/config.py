@@ -71,8 +71,11 @@ def env_path() -> Path:
 
 
 def preferences_path() -> Path:
-    """Where the pre-settings config/preferences.json lives. Transitional; see
-    _legacy_preferences below."""
+    """Where config/preferences.json lives — or lived. Nothing resolves through
+    it any more; agent/migrate_settings.py is the only reader, and it uses this
+    to find the file and rename it away. Same per-call resolution as the two
+    above, so a test can drive the migration without pointing it at the
+    developer's own sections."""
     override = os.environ.get("WREN_PREFERENCES_FILE")
     return Path(override) if override else _ROOT / "config" / "preferences.json"
 
@@ -214,46 +217,17 @@ def is_set(key: str) -> bool:
     return bool(getenv(key))
 
 
-def _legacy_preferences() -> dict:
-    """Sections still living in config/preferences.json, the file this document
-    replaces.
-
-    TRANSITIONAL. agent/migrate_settings.py folds this file into settings.json
-    and renames it to preferences.json.migrated; the commit that adds the script
-    deletes this function and the layer below it. Until then the file is the
-    live source of the user's own persona, calendar, learnings and projects
-    sections, and reading only the shipped defaults would quietly swap every
-    one of them for the example file's placeholder values — a morning brief
-    addressed to the wrong name.
-
-    Whole sections only, and only known ones: the same filter the saved layer
-    applies, so the two layers can never disagree about what a section is.
-    """
-    path = preferences_path()
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return {}
-    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
-        # Logged, not quarantined — a hand-maintained file. Same rule as _load.
-        logger.error(f"could not load preferences from {path}: {e}")
-        return {}
-    if not isinstance(raw, dict):
-        logger.error(f"preferences file {path} is not a JSON object")
-        return {}
-    return {name: value for name, value in raw.items()
-            if name in schema.PREFERENCE_SECTIONS and isinstance(value, dict)}
-
-
 def preferences() -> dict:
-    """The structured sections: the shipped defaults, then the pre-settings
-    config/preferences.json, then each section the user has saved through the
-    page. A section replaces its predecessor whole; it is never merged into it.
+    """The structured sections: the shipped defaults, then each section the user
+    has saved through the page. A saved section replaces the shipped one whole;
+    it is never merged into it, because a half-merged list of calendar
+    categories is a worse answer than either version alone.
 
-    The middle layer is transitional — see _legacy_preferences.
+    config/preferences.json is not read here. agent/migrate_settings.py folded
+    it into this document and renamed it to preferences.json.migrated, which is
+    what stops a stale loader from finding it.
     """
     merged = dict(schema.STRUCTURED_DEFAULTS)
-    merged.update(_legacy_preferences())
     for name, value in CONFIG["preferences"].items():
         if name in schema.PREFERENCE_SECTIONS and isinstance(value, dict):
             merged[name] = value
@@ -277,15 +251,26 @@ def _staged() -> dict:
     }
 
 
-def set_value(staged: dict, key: str, value: str) -> None:
+def set_value(staged: dict, key: str, value: str,
+              allow_locked: bool = False) -> None:
     """Stage one flat key. Raises ConfigError for anything the schema will not
-    accept; writes nothing to disk."""
+    accept; writes nothing to disk.
+
+    `allow_locked` lifts the `editable` check only, and only for
+    agent/migrate_settings.py. A locked row is locked against *editing* — the
+    reason text always describes a change breaking something outside this
+    process — but seven of them are set in config/.env today, and leaving them
+    there would keep the environment outranking the document and the startup
+    warning firing forever. The migration moves the value it already has; the
+    page still refuses to change it, and every type, range and choice check
+    below still runs.
+    """
     row = schema.by_key(key)
     if row is None:
         raise ConfigError(f"{key} is not a known setting")
     if row.secret:
         raise ConfigError(f"{key} is a secret and is not editable here")
-    if not row.editable:
+    if not row.editable and not allow_locked:
         raise ConfigError(f"{key} is not editable: {row.reason}")
     if not isinstance(value, str):
         raise ConfigError(f"{key} must be text")
