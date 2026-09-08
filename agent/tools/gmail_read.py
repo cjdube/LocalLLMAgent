@@ -23,7 +23,6 @@ import argparse
 import base64
 import html as html_lib
 import json
-import os
 import re
 import sys
 from datetime import datetime
@@ -33,6 +32,7 @@ from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from googleapiclient.errors import HttpError
 
+from agent import config
 from agent import prefs
 from agent.dates import local_timezone
 from agent.tools.google_auth import build_service, reset_service
@@ -46,18 +46,18 @@ _NAME = prefs.user_name()
 # rendered to text — runs to tens of thousands of characters, and the on-device
 # model's whole context is 32k. Compact at the source, the way
 # agent/activity_log.py does, rather than relying on the loop's backstop.
-MAIL_BODY_CHAR_BUDGET = int(os.getenv("MAIL_BODY_CHAR_BUDGET", "1500"))
+MAIL_BODY_CHAR_BUDGET = int(config.getenv("MAIL_BODY_CHAR_BUDGET", "1500"))
 
 # Whole-thread budget for read_email. A count cap never bounds a payload (a
 # 3-message thread can be larger than a 20-message one), so the two work
 # together: each message is trimmed to the budget above, and the assembled
 # thread is trimmed to this. Sits under the tool's loop.TOOL_RESULT_CHAR_CAPS
 # entry (14000) with room for the JSON wrapper — keep the two moving as a pair.
-MAIL_THREAD_CHAR_BUDGET = int(os.getenv("MAIL_THREAD_CHAR_BUDGET", "12000"))
+MAIL_THREAD_CHAR_BUDGET = int(config.getenv("MAIL_THREAD_CHAR_BUDGET", "12000"))
 
 # search_mail's payload budget, same reasoning as search_web's: the row cap
 # below bounds how many results come back, not how big they are.
-MAIL_SEARCH_CHAR_BUDGET = int(os.getenv("MAIL_SEARCH_CHAR_BUDGET", "6000"))
+MAIL_SEARCH_CHAR_BUDGET = int(config.getenv("MAIL_SEARCH_CHAR_BUDGET", "6000"))
 
 # Rows search_mail returns by default, and the ceiling on what the model can ask
 # for. A mailbox search matches thousands; neither number is about relevance,
@@ -71,11 +71,11 @@ SEARCH_MAX_LIMIT = 25
 # THREAD, so every later reply on a labelled thread reaches Wren with no further
 # action — that is the feature, and it is also why Wren/Do is worth peeling off
 # once the thing is done.
-MAIL_WATCH_LABEL = os.getenv("MAIL_WATCH_LABEL", "Wren/Watch")
+MAIL_WATCH_LABEL = config.getenv("MAIL_WATCH_LABEL", "Wren/Watch")
 
 # Tell Wren to act on the thread, not just report it. See tasks/mail_watcher.py
 # and docs/mail-watch.md for what "act" is allowed to mean.
-MAIL_ACT_LABEL = os.getenv("MAIL_ACT_LABEL", "Wren/Do")
+MAIL_ACT_LABEL = config.getenv("MAIL_ACT_LABEL", "Wren/Do")
 
 # Headers worth carrying out of a message. Message-ID/References/In-Reply-To
 # cost nothing here and are what a threaded reply needs later; returning them

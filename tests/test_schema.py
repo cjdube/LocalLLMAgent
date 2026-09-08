@@ -39,20 +39,11 @@ _WALKED_DIRS = ("agent", "chat", "tasks", "evals")
 # guard exists to funnel everyone else into.
 _RAW_ENV_EXEMPT_FILES = frozenset({"agent/config.py"})
 
-# Keys that have a row but are not migrated to config.getenv yet. What is left
-# is exactly the set bound at import — the ones whose row already says
-# applies="restart". The list goes empty in the next commit; a key may leave
-# it, never rejoin it.
-_RAW_ENV_EXEMPT_KEYS = frozenset({
-    "BRIEF_TO_EMAIL", "DEFAULT_LOCATION", "FLASK_SECRET_KEY",
-    "GOOGLE_HTTP_TIMEOUT_S", "MAIL_ACT_LABEL", "MAIL_BODY_CHAR_BUDGET",
-    "MAIL_SEARCH_CHAR_BUDGET", "MAIL_THREAD_CHAR_BUDGET",
-    "MAIL_WATCH_LABEL", "OLLAMA_MAX_TOOL_RESULT_CHARS",
-    "WEB_FETCH_MAX_CHARS", "WREN_CHAT_BUSY_PROBE", "WREN_CHAT_HOST",
-    "WREN_CHAT_MAX_HISTORY_CHARS", "WREN_CHAT_MODEL_TIMEOUT",
-    "WREN_CHAT_PORT", "WREN_CHAT_SUMMARY_CHARS", "WREN_CHAT_TOKEN",
-    "WREN_LOGS_DIR", "WREN_RESEARCH_MODEL_TIMEOUT",
-})
+# Keys that have a row but are not migrated to config.getenv yet. Empty, and it
+# stays empty: the migration is finished, so a key may never rejoin this list.
+# Anything added here is a field the page would show, accept an edit for, and
+# save — while the code went on reading the environment.
+_RAW_ENV_EXEMPT_KEYS: frozenset[str] = frozenset()
 
 
 # --------------------------------------------------------------------------- #

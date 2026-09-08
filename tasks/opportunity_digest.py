@@ -27,7 +27,6 @@ Usage:
 import html
 import json
 import logging
-import os
 import re
 import sys
 import time
@@ -63,7 +62,7 @@ HN_SEARCH_URL = "https://hn.algolia.com/api/v1/search_by_date"
 
 # EDGAR requires a descriptive User-Agent naming a contact; anonymous UAs get
 # throttled or blocked.
-_EDGAR_UA = f"Wren opportunity scout ({os.getenv('BRIEF_TO_EMAIL', 'contact unset')})"
+_EDGAR_UA = f"Wren opportunity scout ({config.getenv('BRIEF_TO_EMAIL', 'contact unset')})"
 
 _TIMEOUT_S = 15
 # EDGAR returns up to 100 hits per request and `from` strides by that much —

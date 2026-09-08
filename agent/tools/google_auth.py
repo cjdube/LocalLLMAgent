@@ -43,7 +43,7 @@ load_dotenv(_ENV_PATH)
 # between model chunks) or a launchd run past its next scheduled fire. 30s is
 # generous for calendar/gmail/tasks round-trips. (Token refresh goes through
 # google.auth's own transport, which defaults to a 120s timeout.)
-GOOGLE_HTTP_TIMEOUT_S = int(os.getenv("GOOGLE_HTTP_TIMEOUT_S", "30"))
+GOOGLE_HTTP_TIMEOUT_S = int(config.getenv("GOOGLE_HTTP_TIMEOUT_S", "30"))
 
 SCOPES = [
     "https://www.googleapis.com/auth/calendar",

@@ -11,12 +11,12 @@ Key resolution order: --api-key arg > config/.env file > FIRECRAWL_API_KEY env v
 """
 
 import argparse
-import os
 import sys
 from urllib.parse import urlparse
 
 import requests
 
+from agent import config
 from agent import prefs
 from agent.tools._http import http_error, load_env, missing_key_error, print_result, resolve_key
 
@@ -38,7 +38,7 @@ _TIMEOUT_S = 60  # a scrape renders the page server-side; slower than a plain GE
 # It was 8000, copied from OLLAMA_MAX_TOOL_RESULT_CHARS back when that was the
 # only budget. Everything else moved off that number and this didn't, so 7 of
 # the 12 fetches in the logs came back cut at 8000 — most real articles, halved.
-MAX_CHARS = int(os.getenv("WEB_FETCH_MAX_CHARS", "14000"))
+MAX_CHARS = int(config.getenv("WEB_FETCH_MAX_CHARS", "14000"))
 
 TOOL_SCHEMA = {
     "type": "function",

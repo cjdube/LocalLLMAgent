@@ -17,7 +17,6 @@ Usage:
 import html
 import json
 import logging
-import os
 import re
 import sys
 from datetime import date, datetime, timedelta, timezone
@@ -29,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dotenv import load_dotenv
 
+from agent import config
 from agent import prefs
 from agent.dates import local_timezone
 from agent.loop import complete_text, resolve_backend, warm_model
@@ -47,7 +47,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(_ROOT / "config" / ".env")
 
 # Env wins; otherwise the location from config/preferences.json.
-DEFAULT_LOCATION = os.getenv("DEFAULT_LOCATION") or prefs.PREFS.get("location", "")
+DEFAULT_LOCATION = config.getenv("DEFAULT_LOCATION") or prefs.PREFS.get("location", "")
 # How far ahead the Calendar section looks, from config/preferences.json.
 CALENDAR_HOURS_AHEAD = prefs.brief_calendar_hours()
 STARRED_STATE_PATH = _ROOT / "config" / "github_starred_state.json"

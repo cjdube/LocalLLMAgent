@@ -40,7 +40,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 # interpreter, which is what makes tests/conftest.py's isolation hold across a
 # subprocess. Copied rather than imported — agent/ importing tasks/ at module
 # scope would invert the dependency the two packages are arranged around.
-LOGS_DIR = Path(os.getenv("WREN_LOGS_DIR") or _ROOT / "logs")
+LOGS_DIR = Path(config.getenv("WREN_LOGS_DIR") or _ROOT / "logs")
 LEDGER_PATH = LOGS_DIR / "usage.jsonl"
 
 logger = logging.getLogger(__name__)

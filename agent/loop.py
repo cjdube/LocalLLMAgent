@@ -7,7 +7,6 @@ model returns a final text response or the iteration cap is hit.
 
 import json
 import logging
-import os
 import re
 import time
 from pathlib import Path
@@ -56,7 +55,7 @@ MAX_GATED_PAUSES_PER_TURN = 3
 # model tends to run away in a repetition loop. Trimming the result keeps the
 # window intact. ~8000 chars is roughly 2000 tokens — big enough for a useful
 # result, small enough that a few of them still fit a 16k window.
-MAX_TOOL_RESULT_CHARS = int(os.getenv("OLLAMA_MAX_TOOL_RESULT_CHARS", "8000"))
+MAX_TOOL_RESULT_CHARS = int(config.getenv("OLLAMA_MAX_TOOL_RESULT_CHARS", "8000"))
 
 # Per-tool overrides of that cap. The default is sized for a feed nobody bounds
 # — a search dumping listings until it runs out. A tool that returns ONE curated

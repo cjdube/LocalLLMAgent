@@ -10,7 +10,6 @@ Usage:
 import hmac
 import json
 import logging
-import os
 import re
 import sys
 import threading
@@ -72,13 +71,13 @@ from tasks.opportunity_digest import digest_dispatch
 _ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(_ROOT / "config" / ".env")
 
-WREN_CHAT_TOKEN = os.getenv("WREN_CHAT_TOKEN")
-FLASK_SECRET_KEY = os.getenv("FLASK_SECRET_KEY")
-WREN_CHAT_PORT = int(os.getenv("WREN_CHAT_PORT", "8420"))
+WREN_CHAT_TOKEN = config.getenv("WREN_CHAT_TOKEN")
+FLASK_SECRET_KEY = config.getenv("FLASK_SECRET_KEY")
+WREN_CHAT_PORT = int(config.getenv("WREN_CHAT_PORT", "8420"))
 # Bind to loopback by default: `tailscale serve` reverse-proxies to 127.0.0.1,
 # so binding 0.0.0.0 gains nothing and needlessly exposes the login page to the
 # local LAN. Override with WREN_CHAT_HOST only if you know you need a wider bind.
-WREN_CHAT_HOST = os.getenv("WREN_CHAT_HOST", "127.0.0.1")
+WREN_CHAT_HOST = config.getenv("WREN_CHAT_HOST", "127.0.0.1")
 MAX_MESSAGE_CHARS = 8000
 # Cap on the conversation history (system message included in the count) that
 # gets re-sent to Ollama each turn. ~4 chars/token, so the 16000-char default
@@ -86,13 +85,13 @@ MAX_MESSAGE_CHARS = 8000
 # other half for the tool schemas and the current turn's own growth (a user
 # message up to MAX_MESSAGE_CHARS plus tool results up to
 # OLLAMA_MAX_TOOL_RESULT_CHARS each). Raise together with OLLAMA_NUM_CTX.
-MAX_HISTORY_CHARS = int(os.getenv("WREN_CHAT_MAX_HISTORY_CHARS", "16000"))
+MAX_HISTORY_CHARS = int(config.getenv("WREN_CHAT_MAX_HISTORY_CHARS", "16000"))
 # Cap on the running summary that replaces the turns MAX_HISTORY_CHARS evicts.
 # The summary rides in the system message, so it is spent out of the very budget
 # it exists to protect: left ungrown it would eventually crowd out the live
 # conversation it is meant to make room for. Counted into the startup budget
 # warning below.
-SUMMARY_CHARS = int(os.getenv("WREN_CHAT_SUMMARY_CHARS", "1500"))
+SUMMARY_CHARS = int(config.getenv("WREN_CHAT_SUMMARY_CHARS", "1500"))
 # How much of the evicted transcript the summarizer is shown, and how much of
 # any single message counts toward that. The model is small: a bounded prompt it
 # can actually read beats a complete one it truncates.
@@ -104,12 +103,12 @@ SUMMARY_MESSAGE_CHARS = 600
 # full context, measured at ~50s cold on a 40k-token prompt. Past that, someone
 # waiting on their phone is better served by a fast, accurate "Ollama is busy"
 # than by a five-minute spinner — the value 300 gave us on 2026-08-03.
-CHAT_MODEL_TIMEOUT = float(os.getenv("WREN_CHAT_MODEL_TIMEOUT", "120"))
+CHAT_MODEL_TIMEOUT = float(config.getenv("WREN_CHAT_MODEL_TIMEOUT", "120"))
 # Before committing a turn to the local model, ask whether its one request slot
 # is free, and offer the frontier model instead when it isn't (probe_local_model
 # explains why the question has to come first). Costs ~0.3s per local turn
 # against a free, warm Ollama; WREN_CHAT_BUSY_PROBE=0 switches it off entirely.
-BUSY_PROBE_ENABLED = os.getenv("WREN_CHAT_BUSY_PROBE", "1") != "0"
+BUSY_PROBE_ENABLED = config.getenv("WREN_CHAT_BUSY_PROBE", "1") != "0"
 
 if not WREN_CHAT_TOKEN or not FLASK_SECRET_KEY:
     raise RuntimeError(

@@ -24,7 +24,6 @@ Usage:
 
 import argparse
 import logging
-import os
 import re
 import sys
 import xml.etree.ElementTree as ET
@@ -32,6 +31,7 @@ from datetime import datetime
 
 import requests
 
+from agent import config
 from agent import prefs
 from agent.loop import complete_text, resolve_backend
 from agent.tools import opportunities
@@ -55,13 +55,13 @@ _TIMEOUT_S = 15
 # interactive turn is queued behind it, and chat gives up at 120s. So it gets
 # the same bound chat has. The brief is a fixed seven-label template with
 # think=False (measured: 4% of the num_predict budget), so 120s is not tight.
-MODEL_TIMEOUT = float(os.getenv("WREN_RESEARCH_MODEL_TIMEOUT", "120"))
+MODEL_TIMEOUT = float(config.getenv("WREN_RESEARCH_MODEL_TIMEOUT", "120"))
 # Bounds for the summarization prompt: a few results per search, snippets cut
 # to a sentence or three. Three searches ≈ nine snippets ≈ a small prompt.
 _RESULTS_PER_SEARCH = 3
 _SNIPPET_CHARS = 400
 
-_EDGAR_UA = f"Wren opportunity scout ({os.getenv('BRIEF_TO_EMAIL', 'contact unset')})"
+_EDGAR_UA = f"Wren opportunity scout ({config.getenv('BRIEF_TO_EMAIL', 'contact unset')})"
 
 # Who the brief is for comes from config/preferences.json; the section
 # template below is operational and stays here.
