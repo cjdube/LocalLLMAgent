@@ -84,6 +84,13 @@ was in. Adding a new store means adding it there in the same commit; the
 per-test monkeypatch stays the convention, this is what makes missing it
 harmless. (agent/prefs.py is deliberately absent: it is read-only at import.)
 
+config/settings.json — what the /settings page writes — is one of those stores,
+but it cannot wait for a fixture. agent/config.py resolves its path and loads it
+at import, and half the repo imports agent.config, so the redirect goes in
+through WREN_SETTINGS_FILE at conftest import time, beside the WREN_LOGS_DIR
+one below and for the same two reasons: it has to land before any test module's
+imports, and a child interpreter has to inherit it.
+
 The games registry (agent/tools/games.py) is stubbed for a different reason than
 the stores above: it writes nothing, but it *reads* the machine — a loopback
 socket probe and a checkout under ~/Projects — so `available` would depend on
@@ -163,6 +170,14 @@ _common.LOGS_DIR = _TEST_LOGS_DIR
 # fills with fixture traffic and the /activity page reports it as real usage.
 _usage_ledger.LOGS_DIR = _TEST_LOGS_DIR
 _usage_ledger.LEDGER_PATH = _TEST_LOGS_DIR / "usage.jsonl"
+
+# The settings store (agent/config.py). Same shape, same two reasons: the module
+# loads the file at import, so a fixture is too late, and the env var is what a
+# spawned child interpreter inherits. It points at a directory that stays empty
+# unless a test writes to it — a suite that never saves a setting never creates
+# the file, and config.getenv then falls straight through to the schema.
+_TEST_CONFIG_DIR = Path(tempfile.mkdtemp(prefix="wren-test-config-"))
+os.environ["WREN_SETTINGS_FILE"] = str(_TEST_CONFIG_DIR / "settings.json")
 
 
 def _forbid_production_log_handlers() -> None:

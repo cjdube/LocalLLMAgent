@@ -79,3 +79,4 @@ docs/handoff/
 # survives a hard kill mid-write — but logs/ is not blanket-ignored, so when one
 # does survive it shows up as an untracked file staged by a careless `git add`.
 .*.tmp
+config/settings.json
