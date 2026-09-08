@@ -202,9 +202,9 @@ def test_the_wren_logger_server_binds_at_import_is_covered():
 
 
 def test_ntfy_egress_is_stubbed_for_both_verbs():
-    # notify() POSTs a push at the user's phone; ntfy_health() GETs the live server
-    # — and load_env()s the REAL config/.env to find its URL, so nothing a test
-    # sets in the environment keeps it local. Both verbs are guarded suite-wide;
+    # notify() POSTs a push at the user's phone; ntfy_health() GETs the server at
+    # whatever NTFY_URL resolves to, so one set by a test reaches the real box.
+    # Both verbs are guarded suite-wide;
     # only post was, until the dashboard's health pill added the second one.
     # Same shape as the logs guard: a regression here is silent (a real push, a
     # real probe), so assert it directly rather than trusting the fixture's
@@ -246,3 +246,29 @@ def test_the_task_spawn_guard_does_not_reach_into_the_shared_subprocess_module()
 
     assert insights.subprocess is not real_subprocess
     assert real_subprocess.Popen.__module__ == "subprocess"
+
+
+def test_the_settings_store_is_redirected_out_of_the_repo():
+    # config/settings.json is what the /settings page writes. agent/config.py
+    # resolves it at import, so a fixture is too late and the redirect has to be
+    # the env var conftest sets. A regression here is silent in the same way the
+    # logs one was: the suite would start saving fixture settings over the
+    # developer's real ones.
+    from agent import config
+
+    real = Path(config.__file__).resolve().parent.parent / "config" / "settings.json"
+    assert config.settings_path() != real
+    assert not str(config.settings_path()).startswith(str(real.parent))
+
+
+def test_the_suite_resolves_against_no_env_file_at_all():
+    # WREN_ENV_FILE points at a file that does not exist, so load_dotenv is a
+    # no-op and no key from the developer's config/.env reaches a test. Before
+    # this, OLLAMA_MODEL, WREN_CHAT_TOKEN and BRIEF_TO_EMAIL were all readable
+    # from inside a test, which made a green run here say nothing about a clean
+    # checkout. Assert both halves: the right path, and that it is really empty.
+    from agent import config
+
+    real = Path(config.__file__).resolve().parent.parent / "config" / ".env"
+    assert config.env_path() != real
+    assert not config.env_path().exists()

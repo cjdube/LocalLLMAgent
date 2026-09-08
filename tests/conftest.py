@@ -65,8 +65,8 @@ NTFY_URL is configured — firing an actual push to the user's phone every test 
 Stub the push egress (agent.tools.notify.requests.post) for every test so the suite
 can never send a real alert; test_notify.py re-patches it per-test to exercise the
 real code. `requests.get` is stubbed alongside it: ntfy_health() probes the live
-server, and it load_env()s the real config/.env to find it, so the dashboard's
-health endpoint would otherwise reach the real box from a server test.
+server at whatever NTFY_URL resolves to, so the dashboard's health endpoint
+would otherwise reach the real box from a server test that set one.
 
 The opportunities store gets the same blanket protection as the logs: tests
 isolate it by monkeypatching `opportunities._STORE_PATH`, but a research
@@ -90,6 +90,14 @@ at import, and half the repo imports agent.config, so the redirect goes in
 through WREN_SETTINGS_FILE at conftest import time, beside the WREN_LOGS_DIR
 one below and for the same two reasons: it has to land before any test module's
 imports, and a child interpreter has to inherit it.
+
+WREN_ENV_FILE is the same idea one layer down, and it is set even earlier —
+above conftest's own agent imports, because agent/config.py loads the .env at
+its import. It points at a file that does not exist, so the suite resolves
+against no .env at all. Without it every test inherited whatever happened to be
+in the developer's config/.env: OLLAMA_MODEL, WREN_CHAT_TOKEN and BRIEF_TO_EMAIL
+were all readable from inside a test, and a green run on this machine proved
+nothing about a clean one.
 
 The games registry (agent/tools/games.py) is stubbed for a different reason than
 the stores above: it writes nothing, but it *reads* the machine — a loopback
@@ -120,6 +128,14 @@ import tempfile
 from pathlib import Path
 
 import pytest
+
+# Before the first agent import: agent/config.py loads the .env at its own
+# import, and nothing later can unload it. This points at a path that does not
+# exist, and load_dotenv on a missing file is a no-op — so the suite resolves
+# against no .env at all, instead of against whichever keys happen to be in the
+# developer's config/.env. A test that fails because of this line has a real
+# hidden dependency on that file; fix the test, don't re-point the variable.
+os.environ["WREN_ENV_FILE"] = str(Path(tempfile.mkdtemp(prefix="wren-test-env-")) / ".env")
 
 from agent import escalations as _escalations
 from agent import loop as _loop
@@ -422,10 +438,9 @@ def _block_ntfy_egress(monkeypatch):
     """Stub BOTH verbs the ntfy module speaks — post (publish) and get (health).
 
     post: notify() fires a real push at the user's phone on every task-failure path
-    a test exercises. get: ntfy_health() probes the real ntfy server, and it
-    calls load_env() first, so it reads the REAL config/.env — a test hitting
-    /api/health/ntfy would reach the live box over the network no matter what
-    the test set in the environment.
+    a test exercises. get: ntfy_health() probes the ntfy server at whatever
+    NTFY_URL resolves to, so a test hitting /api/health/ntfy would reach the
+    live box over the network as soon as one is set.
 
     The get stub is why this fixture is no longer named _block_ntfy_push: the
     module's egress is two verbs now, and only the post one was ever guarded.
