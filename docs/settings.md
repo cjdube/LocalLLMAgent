@@ -256,9 +256,17 @@ schema refuses stays in `.env` and is reported; it never aborts the rest.
 still holds a refused section would hide that section behind a name nothing
 loads, and your persona would go missing with no message.
 
-Restart the chat server afterwards. The document is read at import and on
-save, so a hand-edit or a migration is not seen by the running process until
-it restarts.
+Restart the chat server afterwards. The document is read at import and on save,
+so a hand-edit or a migration is not seen by the running process until it
+restarts — `/settings` will render schema defaults where you have values, and
+the running server will resolve them that way too.
+
+Your values are safe if you forget. A save merges onto the document as it is on
+disk, under the lock, so it can no longer write this process's stale copy back
+over a migration; `agent/config.py:flush` logs a WARNING naming the keys that
+arrived from elsewhere, and reloads. Before that merge existed, one unrelated
+save undid the whole migration, and the values were already out of `config/.env`
+by then.
 
 ## Where the code lives
 

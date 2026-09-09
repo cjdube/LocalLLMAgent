@@ -182,13 +182,77 @@ def test_the_schema_refuses_what_it_should(store, values, fragment):
     assert not store.exists(), "a rejected save must write nothing"
 
 
-def test_the_store_is_locked_and_owner_only(store):
+def test_the_store_is_owner_only_and_drops_a_lock_sidecar(store):
+    # Named for what it checks. It used to be called "is_locked_and_owner_only",
+    # which read as a guarantee it never exercised: a sidecar existing says
+    # locked() was CALLED, not that the lock covers anything. The three tests
+    # below own that claim.
     config.apply({"OLLAMA_MODEL": "gemma5"}, {})
     mode = stat.S_IMODE(store.stat().st_mode)
     assert mode == 0o600, f"settings.json is {oct(mode)}, not owner-only"
-    # locked() drops its sidecar beside the store; .gitignore's config/*.lock
-    # rule is what keeps it out of the repo.
+    # .gitignore's config/*.lock rule is what keeps the sidecar out of the repo.
     assert (store.parent / f"{store.name}.lock").exists()
+
+
+def test_a_save_keeps_what_another_process_wrote(store, caplog):
+    """The migration case, which is the one that lost data.
+
+    agent/migrate_settings.py runs in its own process, writes the document and
+    prints "restart the chat server". Until that restart the server's CONFIG is
+    whatever it loaded at import — so a save from /settings used to write that
+    stale snapshot back whole, and the migrated values were already gone from
+    config/.env by then.
+    """
+    config.apply({"OLLAMA_MODEL": "gemma5"}, {})
+
+    # Another process migrates three keys in. Written straight to the file, NOT
+    # through write(), because write() reloads — and a reload is exactly the
+    # restart this test is about the user not doing.
+    store.write_text(json.dumps({"values": {
+        "OLLAMA_MODEL": "gemma5",
+        "TIMEZONE": "America/New_York",
+        "DEFAULT_LOCATION": "Portland,OR,US",
+        "BRIEF_TO_EMAIL": "me@example.com",
+    }, "preferences": {}}), encoding="utf-8")
+
+    with caplog.at_level("WARNING"):
+        changed = config.apply({"OLLAMA_MODEL": "gemma6"}, {})
+
+    values = json.loads(store.read_text())["values"]
+    assert values["TIMEZONE"] == "America/New_York"
+    assert values["DEFAULT_LOCATION"] == "Portland,OR,US"
+    assert values["BRIEF_TO_EMAIL"] == "me@example.com"
+    assert values["OLLAMA_MODEL"] == "gemma6"
+    assert changed == ["OLLAMA_MODEL"]
+    # The user was shown stale values, so the recovery is not allowed to be
+    # silent. Both halves: it fired, and it named the keys that arrived.
+    assert "changed outside this process" in caplog.text
+    assert "TIMEZONE" in caplog.text
+    # And the merge is the moment this process catches up.
+    assert config.getenv("TIMEZONE") == "America/New_York"
+
+
+def test_a_save_reports_what_changed_against_the_file_not_its_own_copy(store):
+    # CONFIG says gemma5; the file says gemma6 because someone else wrote it.
+    # Saving gemma6 changes nothing on disk, so it must raise no restart banner
+    # even though it differs from this process's stale copy.
+    config.apply({"OLLAMA_MODEL": "gemma5"}, {})
+    store.write_text(json.dumps(
+        {"values": {"OLLAMA_MODEL": "gemma6"}, "preferences": {}}), encoding="utf-8")
+    before = store.read_bytes()
+    assert config.apply({"OLLAMA_MODEL": "gemma6"}, {}) == []
+    assert store.read_bytes() == before
+
+
+def test_clearing_a_key_still_deletes_it_from_the_merged_document(store):
+    # The merge carries across what the caller touched. A cleared key is absent
+    # from the staged copy, so "carry it across" has to mean delete — not leave
+    # the on-disk value standing, which would make the clear a silent no-op.
+    config.apply({"OLLAMA_MODEL": "gemma5", "TIMEZONE": "UTC"}, {})
+    config.apply({"OLLAMA_MODEL": ""}, {})
+    values = json.loads(store.read_text())["values"]
+    assert "OLLAMA_MODEL" not in values
+    assert values["TIMEZONE"] == "UTC", "clearing one key must not drop the others"
 
 
 # --------------------------------------------------------------------------- #

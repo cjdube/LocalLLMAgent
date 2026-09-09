@@ -275,7 +275,10 @@ def apply(plan: Plan, staged: dict) -> list[str]:
         shutil.copy2(env_path, backup)
         done.append(f"backed up {env_path} to {backup}")
 
-    config.flush(staged)
+    # Only what this plan touched. flush() merges onto the document as it is on
+    # disk right now, so a key the running chat server saved while this script
+    # was building its plan survives instead of being written back over.
+    config.flush(staged, list(plan.values), list(plan.sections))
     done.append(f"wrote {config.settings_path()}: "
                 f"{len(plan.values)} values, {len(plan.sections)} sections")
 

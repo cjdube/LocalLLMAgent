@@ -24,7 +24,10 @@ string past every remaining layer.
 
 Writes go through agent/store.py's locked() + atomic_write_json(): the mandated
 primitive, already 0600 through mkstemp, and it adds the cross-process flock
-that the chat server (threaded) and the launchd workers both need.
+that the chat server (threaded) and the launchd workers both need. The lock
+covers the re-read as well as the write, per that module's own rule — CONFIG is
+a global loaded at import, so a save that wrote it back whole would discard
+whatever another process had written in the meantime. flush() merges instead.
 
 Reads deliberately do NOT go through store.load_json(). Its corrupt-file
 quarantine moves the file aside to <name>.corrupt-<ts>, which is right for a
@@ -94,7 +97,15 @@ load_dotenv(env_path())
 # "preferences", so a section the user saves replaces the shipped one entirely
 # rather than merging into it — a half-merged list of calendar categories is a
 # worse answer than either version alone.
-_EMPTY: dict = {"values": {}, "preferences": {}}
+def _empty() -> dict:
+    """A fresh empty document, inner dicts included.
+
+    A function, not a module-level constant: flush() mutates the document it
+    loads, and `dict(_EMPTY)` is a shallow copy — it would have handed out the
+    same two inner dicts every time, so the first merge onto a document that
+    does not exist yet would have written itself into every later load.
+    """
+    return {"values": {}, "preferences": {}}
 
 # Overlaps between config/.env and the settings document, collected at load and
 # surfaced twice: logged at WARNING by the chat server, and returned by
@@ -107,14 +118,14 @@ def _load() -> dict:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return dict(_EMPTY)
+        return _empty()
     except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
         # Logged, not quarantined. See the module docstring.
         logger.error(f"could not load settings from {path}: {e}")
-        return dict(_EMPTY)
+        return _empty()
     if not isinstance(raw, dict):
         logger.error(f"settings file {path} is not a JSON object")
-        return dict(_EMPTY)
+        return _empty()
     values = raw.get("values")
     prefs = raw.get("preferences")
     return {
@@ -306,33 +317,95 @@ def set_preference(staged: dict, name: str, value: dict) -> None:
     staged["preferences"][name] = value
 
 
-def flush(staged: dict) -> None:
-    """Write the staged document, then reload. One lock, one atomic replace."""
+def _written_elsewhere(current: dict) -> list[str]:
+    """Names the document holds that differ from this process's CONFIG — someone
+    else wrote them since we loaded.
+
+    Worth a WARNING even though the merge below preserves them: the page that
+    submitted this save rendered CONFIG, so the user was shown stale values and
+    does not know it. A silent recovery is still a surprise.
+    """
+    names = {k for k in set(current["values"]) | set(CONFIG["values"])
+             if current["values"].get(k) != CONFIG["values"].get(k)}
+    names |= {n for n in set(current["preferences"]) | set(CONFIG["preferences"])
+              if current["preferences"].get(n) != CONFIG["preferences"].get(n)}
+    return sorted(names)
+
+
+def flush(staged: dict, keys: list[str], sections: list[str]) -> list[str]:
+    """Merge the staged edits onto the CURRENT document, under one lock.
+
+    `staged` is this process's CONFIG plus the edits; `keys` and `sections` name
+    what the caller actually touched. Only those are carried across — the rest of
+    the staged copy is discarded, because CONFIG is a module global loaded at
+    import and the file may have moved on since.
+
+    That is not hypothetical, and it is why this no longer writes `staged` whole.
+    agent/migrate_settings.py writes ~40 keys from a separate process and prints
+    "restart the chat server"; nothing enforces it. Until the restart the running
+    server's CONFIG is still the empty document it started with, so one unrelated
+    save from /settings replaced the migrated file with that snapshot — and the
+    values were already gone from config/.env by then, which is what made it a
+    loss rather than a revert. agent/store.py states the rule this now follows:
+    hold the lock across the whole read-modify-write.
+
+    Returns the names whose value on disk actually changed, computed against the
+    document as it really was rather than against CONFIG. A key absent from
+    `staged["values"]` was cleared (set_value pops an empty value), so it is
+    deleted from the merged document rather than left standing.
+    """
     path = settings_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    changed: list[str] = []
     with locked(path):
-        atomic_write_json(path, staged)
+        current = _load()
+        arrived = _written_elsewhere(current)
+        for key in keys:
+            if staged["values"].get(key) != current["values"].get(key):
+                changed.append(key)
+            if key in staged["values"]:
+                current["values"][key] = staged["values"][key]
+            else:
+                current["values"].pop(key, None)
+        for name in sections:
+            if staged["preferences"].get(name) != current["preferences"].get(name):
+                changed.append(name)
+            if name in staged["preferences"]:
+                current["preferences"][name] = staged["preferences"][name]
+            else:
+                current["preferences"].pop(name, None)
+        if changed:
+            atomic_write_json(path, current)
+    if arrived:
+        logger.warning(
+            f"settings changed outside this process since it loaded: {arrived} — "
+            f"kept them and merged this save on top, but the page showed the "
+            f"stale values. Restart to pick them up: {schema.RESTART_COMMAND}")
+    # Always, even when nothing changed: the merge above is the moment this
+    # process learns the document moved, and reloading is what makes the rest of
+    # the run agree with the file it just wrote.
     reload()
+    return changed
 
 
 def apply(values: dict, prefs: dict) -> list[str]:
-    """Validate everything, then write once. All-or-nothing.
+    """Validate every flat key, then write once. All-or-nothing.
 
     Returns the keys and section names that actually changed, so a re-save of
     an unchanged form raises no restart banner. On any failure it raises
     ConfigError having written nothing — a half-applied config is how a 4:30 AM
     task dies unattended.
+
+    "Every flat key" is literal, and the asymmetry is deliberate. A value is
+    fully checked here — type, range, choices, editable, secret. A preference
+    section is checked for its NAME and that it is an object, and nothing else:
+    shape validation is prefs.validate_section(), which agent/prefs.py cannot be
+    called from here because it imports this module. Every caller must run it
+    first; chat/routes_settings.py and agent/migrate_settings.py both do.
     """
     staged = _staged()
     for key, value in (values or {}).items():
         set_value(staged, key, value)
     for name, value in (prefs or {}).items():
         set_preference(staged, name, value)
-
-    changed = [k for k in (values or {})
-               if staged["values"].get(k) != CONFIG["values"].get(k)]
-    changed += [n for n in (prefs or {})
-                if staged["preferences"].get(n) != CONFIG["preferences"].get(n)]
-    if changed:
-        flush(staged)
-    return changed
+    return flush(staged, list(values or {}), list(prefs or {}))
