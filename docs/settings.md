@@ -160,6 +160,14 @@ validator's own sentence before anything is written, and the page shows that
 sentence against the section it came from. Bad JSON is caught in the browser,
 so a stray comma costs no round trip.
 
+`validate_section` lives in `agent/schema.py`, beside the table of section
+names, and `agent/prefs.py` re-exports it. It sits there so that
+`config.set_preference` can run it on **every** save, from any caller. It used
+to live in `agent/prefs.py`, which `agent/config.py` cannot import — so the
+guarantee held only because the two callers that existed remembered to ask for
+it, and an emptied `job_search` list would otherwise have been written happily
+and then matched nothing, silently, until someone noticed the digest was thin.
+
 `config/preferences.example.json` is still the committed template, and still
 supplies `schema.STRUCTURED_DEFAULTS` — the shape a fresh clone boots with.
 

@@ -308,12 +308,23 @@ def set_value(staged: dict, key: str, value: str,
 
 
 def set_preference(staged: dict, name: str, value: dict) -> None:
-    """Stage one whole preference section. The section replaces its shipped
-    counterpart; it is never merged into it."""
+    """Stage one whole preference section, fully checked. The section replaces
+    its shipped counterpart; it is never merged into it.
+
+    The shape check is schema.validate_section, the same function agent/prefs.py
+    re-exports and the save route reports through. Running it here is what makes
+    "validate everything, then write once" true of sections as well as of flat
+    keys: before, this staged any object under a known name, and the two callers
+    that checked first were the only thing standing between an emptied
+    job_search list and a scout that silently matches nothing.
+    """
     if name not in schema.PREFERENCE_SECTIONS:
         raise ConfigError(f"{name} is not a known preference section")
     if not isinstance(value, dict):
         raise ConfigError(f"{name} must be an object")
+    problems = schema.validate_section(name, value)
+    if problems:
+        raise ConfigError("; ".join(problems))
     staged["preferences"][name] = value
 
 
@@ -389,19 +400,18 @@ def flush(staged: dict, keys: list[str], sections: list[str]) -> list[str]:
 
 
 def apply(values: dict, prefs: dict) -> list[str]:
-    """Validate every flat key, then write once. All-or-nothing.
+    """Validate everything, then write once. All-or-nothing.
 
     Returns the keys and section names that actually changed, so a re-save of
     an unchanged form raises no restart banner. On any failure it raises
     ConfigError having written nothing — a half-applied config is how a 4:30 AM
     task dies unattended.
 
-    "Every flat key" is literal, and the asymmetry is deliberate. A value is
-    fully checked here — type, range, choices, editable, secret. A preference
-    section is checked for its NAME and that it is an object, and nothing else:
-    shape validation is prefs.validate_section(), which agent/prefs.py cannot be
-    called from here because it imports this module. Every caller must run it
-    first; chat/routes_settings.py and agent/migrate_settings.py both do.
+    Both halves are fully checked. A flat value gets its type, range, choices,
+    editable and secret rules; a preference section gets schema.validate_section
+    on its contents, not just its name. Callers may still validate first to
+    collect every problem for a form — chat/routes_settings.py does — but a
+    caller that forgets is refused here instead of writing.
     """
     staged = _staged()
     for key, value in (values or {}).items():

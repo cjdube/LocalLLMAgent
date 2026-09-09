@@ -35,10 +35,15 @@ def test_every_shipped_section_has_a_validator():
     # validate_section return "not a known preference section" — which the loop
     # above would catch — but a section added to _VALIDATORS and NOT to the
     # schema would go unchecked in the other direction.
-    assert set(prefs._VALIDATORS) == set(schema.PREFERENCE_SECTIONS)
+    assert set(schema._VALIDATORS) == set(schema.PREFERENCE_SECTIONS)
 
 
 # ---- validate_section actually bites ---------------------------------------
+#
+# validate_section and its table live in agent/schema.py now, so agent/config.py
+# can run them on every save. They are still tested from here: prefs re-exports
+# the name, prefs is what the sections are FOR, and asserting through the
+# re-export proves the two callers that reach it that way still work.
 #
 # Without these, a validator that returned [] unconditionally would keep every
 # assertion above green forever. Each case breaks exactly one invariant that a
@@ -80,7 +85,7 @@ def test_calendar_category_needs_its_display_fields():
 def test_job_search_rejects_an_emptied_list():
     # An emptied list does not narrow the scout's search, it silently matches
     # nothing — the whole reason this is a refusal and not a warning.
-    full = {key: ["x"] for key in prefs._JOB_SEARCH_LISTS}
+    full = {key: ["x"] for key in schema._JOB_SEARCH_LISTS}
     assert prefs.validate_section("job_search", full) == []
     emptied = dict(full, states=[])
     assert prefs.validate_section("job_search", emptied) == \
@@ -88,7 +93,7 @@ def test_job_search_rejects_an_emptied_list():
 
 
 def test_job_search_rejects_non_string_entries():
-    full = dict({key: ["x"] for key in prefs._JOB_SEARCH_LISTS}, hn_phrases=["ok", 7])
+    full = dict({key: ["x"] for key in schema._JOB_SEARCH_LISTS}, hn_phrases=["ok", 7])
     assert prefs.validate_section("job_search", full) == \
         ["job_search.hn_phrases must hold non-empty strings"]
 

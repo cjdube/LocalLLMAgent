@@ -267,10 +267,16 @@ def test_preferences_start_at_the_shipped_defaults(store):
 def test_a_saved_section_replaces_the_shipped_one_whole(store):
     # Never merged: a half-merged list of calendar categories is a worse
     # answer than either version alone.
-    config.apply({}, {"persona": {"user_name": "Robin"}})
-    persona = config.preferences()["persona"]
-    assert persona == {"user_name": "Robin"}
-    assert "positioning" not in persona
+    #
+    # Shown with `learnings` because it is the one shipped section with two keys
+    # that a partial save can still be VALID with. persona used to carry this
+    # test, but all three of its fields are required now that set_preference
+    # validates, so a legal persona save can no longer prove a merge did not
+    # happen — every field would be there either way.
+    config.apply({}, {"learnings": {"excluded_keywords": ["x"]}})
+    learnings = config.preferences()["learnings"]
+    assert learnings == {"excluded_keywords": ["x"]}
+    assert "excluded_domains" not in learnings
     # Other sections are untouched.
     assert config.preferences()["job_search"]["states"]
 
@@ -278,6 +284,37 @@ def test_a_saved_section_replaces_the_shipped_one_whole(store):
 def test_an_unknown_section_is_refused(store):
     with pytest.raises(config.ConfigError):
         config.apply({}, {"astrology": {"sign": "leo"}})
+
+
+def test_a_malformed_section_is_refused_without_the_caller_checking_first(store):
+    """set_preference validates the section's CONTENTS, not just its name.
+
+    This is the seam that was open: apply() promised "validate everything, then
+    write once", and a section only had its name and object-ness checked. An
+    emptied job_search list does not narrow the opportunity scout's search — it
+    matches nothing, silently, for as long as nobody notices. The two live
+    callers happened to call prefs.validate_section first; nothing made them.
+    """
+    before = store.read_bytes() if store.exists() else None
+
+    with pytest.raises(config.ConfigError) as caught:
+        config.apply({}, {"job_search": {}})
+    # The message is the validator's own sentence, so the page and the CLI both
+    # say the same thing a test would print.
+    assert "job_search.seniority_terms must be a non-empty list" in str(caught.value)
+
+    # All-or-nothing: nothing reached the document.
+    assert (store.read_bytes() if store.exists() else None) == before
+    assert config.preferences()["job_search"]["states"]
+
+
+def test_a_bad_section_blocks_the_valid_keys_saved_beside_it(store):
+    # All-or-nothing across both halves. A form that carries one good value and
+    # one broken section must write neither, or the restart banner tells the
+    # truth about a config that is half old and half new.
+    with pytest.raises(config.ConfigError):
+        config.apply({"OLLAMA_MODEL": "gemma6"}, {"sports": {"teams": [{"league": "mlb"}]}})
+    assert config.getenv("OLLAMA_MODEL") != "gemma6"
 
 
 # --------------------------------------------------------------------------- #

@@ -725,3 +725,137 @@ def _load_structured_defaults() -> dict:
 
 
 STRUCTURED_DEFAULTS = _load_structured_defaults()
+
+
+# --------------------------------------------------------------------------- #
+# Section validation
+# --------------------------------------------------------------------------- #
+#
+# These live here, next to PREFERENCE_SECTIONS, and not in agent/prefs.py where
+# they were written. agent/prefs.py imports agent/config.py, so config could not
+# import it back — which left config.set_preference checking only that a section
+# NAME is known and the value is an object, while every flat key beside it got
+# the full schema check. "Validate everything, then write once" was true of one
+# half. Both live callers remembered to call the validator first; a third would
+# not have, and the accessors in prefs.py degrade a bad section silently (an
+# emptied job_search list matches nothing rather than erroring).
+#
+# agent/prefs.py re-exports validate_section, so its callers and the tests that
+# assert through it are unchanged. This module still imports nothing of ours.
+
+# The job-search lists the opportunity scout builds its matchers from. Every one
+# has to be a non-empty list of non-empty strings: an emptied list does not
+# narrow the search, it silently matches nothing.
+_JOB_SEARCH_LISTS = ("seniority_terms", "function_terms", "title_acronyms",
+                     "hn_phrases", "states")
+
+# Calendar roles with a consumer, plus the three kept as legacy. strava_download
+# needs `fitness`; calendar_colorizer needs exactly one `fallback`.
+_REQUIRED_CALENDAR_ROLES = ("work", "meetings", "appointments", "fitness")
+
+
+def validate_section(name: str, value) -> list[str]:
+    """Problems with one preference section, as sentences a person can act on.
+
+    Empty means the section is usable. The accessors in agent/prefs.py already
+    degrade safely on a bad section — this is the layer that says so out loud,
+    before a save lands, rather than letting the Scores block quietly go missing.
+
+    Unknown section names return one problem rather than raising: the callers
+    are a save route handling a form and a migration reporting a plan, and a
+    name they do not know is a message to show, not a crash.
+    """
+    if name not in _VALIDATORS:
+        return [f"{name} is not a known preference section"]
+    if not isinstance(value, dict):
+        return [f"{name} must be an object"]
+    return _VALIDATORS[name](value)
+
+
+def _validate_persona(value: dict) -> list[str]:
+    return [f"persona.{field} is missing or empty"
+            for field in ("user_name", "positioning", "engagement_model")
+            if not value.get(field)]
+
+
+def _validate_calendar(value: dict) -> list[str]:
+    entries = value.get("categories")
+    if not isinstance(entries, list) or not entries:
+        return ["calendar.categories must be a non-empty list"]
+
+    problems = []
+    for i, category in enumerate(entries):
+        if not isinstance(category, dict):
+            problems.append(f"calendar.categories[{i}] is not an object")
+            continue
+        for field in ("name", "color_id", "color_name"):
+            if not category.get(field):
+                problems.append(f"calendar.categories[{i}].{field} is missing or empty")
+
+    roles = [c.get("role") for c in entries if isinstance(c, dict) and c.get("role")]
+    problems += [f"no calendar category has role {role!r}"
+                 for role in _REQUIRED_CALENDAR_ROLES if role not in roles]
+    if roles.count("fallback") != 1:
+        problems.append("exactly one calendar category must have role 'fallback', "
+                        f"found {roles.count('fallback')}")
+    return problems
+
+
+def _validate_job_search(value: dict) -> list[str]:
+    problems = []
+    for key in _JOB_SEARCH_LISTS:
+        entries = value.get(key)
+        if not isinstance(entries, list) or not entries:
+            problems.append(f"job_search.{key} must be a non-empty list")
+            continue
+        if not all(isinstance(v, str) and v for v in entries):
+            problems.append(f"job_search.{key} must hold non-empty strings")
+    return problems
+
+
+def _validate_projects(value: dict) -> list[str]:
+    entries = value.get("instruction_files")
+    if not isinstance(entries, list) or not entries:
+        return ["projects.instruction_files must be a non-empty list"]
+    # A bare filename, never a path: the scanner reads these from a project root
+    # it does not otherwise trust, so a separator would widen that boundary.
+    return [f"projects.instruction_files[{i}] must be a bare filename, not a path"
+            for i, entry in enumerate(entries)
+            if (not isinstance(entry, str) or not entry or entry in (".", "..")
+                or "/" in entry or "\\" in entry)]
+
+
+def _validate_morning_brief(value: dict) -> list[str]:
+    hours = value.get("calendar_hours_ahead")
+    if hours is None:
+        return []
+    if not isinstance(hours, int) or isinstance(hours, bool) or hours <= 0:
+        return ["morning_brief.calendar_hours_ahead must be a positive whole "
+                "number of hours"]
+    return []
+
+
+def _validate_sports(value: dict) -> list[str]:
+    entries = value.get("teams")
+    if entries is None or entries == []:
+        return []  # no teams means the Scores block is off, which is allowed
+    if not isinstance(entries, list):
+        return ["sports.teams must be a list"]
+    return [f"sports.teams[{i}] needs a league and an id"
+            for i, team in enumerate(entries)
+            if not isinstance(team, dict) or not team.get("league") or not team.get("id")]
+
+
+def _validate_learnings(value: dict) -> list[str]:
+    return []  # no consumer asserts a shape here yet
+
+
+_VALIDATORS = {
+    "persona": _validate_persona,
+    "calendar": _validate_calendar,
+    "job_search": _validate_job_search,
+    "projects": _validate_projects,
+    "morning_brief": _validate_morning_brief,
+    "sports": _validate_sports,
+    "learnings": _validate_learnings,
+}

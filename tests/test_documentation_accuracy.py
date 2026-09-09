@@ -103,6 +103,29 @@ def test_env_example_federates_every_root_the_docs_describe():
     assert documented <= _external_root_names(example[0])
 
 
+def test_the_setup_documents_never_name_the_retired_preferences_file():
+    """`config/preferences.json` is retired — agent/migrate_settings.py folds it
+    into the settings document and renames it to `preferences.json.migrated`.
+
+    The two documents a fresh checkout is INSTRUCTED by must not send anyone
+    there. `config/.env.example` did, three times, for a week after the split;
+    one of the three described a `DEFAULT_LOCATION` fallback that had been
+    deleted, so the advice was wrong twice over.
+
+    Deliberately scoped to these two. `docs/settings.md`, `docs/preferences.md`
+    and `docs/module-map.md` all name the file legitimately, because explaining
+    the migration is their job.
+    """
+    named = [
+        path.name for path in (ROOT / "config" / ".env.example", ROOT / "README.md")
+        if "preferences.json" in path.read_text(encoding="utf-8")
+    ]
+    assert named == [], (
+        f"{named} name config/preferences.json, which nothing reads. Name the "
+        f"section of config/settings.json and /settings instead."
+    )
+
+
 # --------------------------------------------------------------------------- #
 # "Every HTTP call has an explicit timeout." — AGENTS.md, Data sourcing policy
 # --------------------------------------------------------------------------- #
