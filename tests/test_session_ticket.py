@@ -466,3 +466,121 @@ def test_a_plan_with_no_heading_is_refused(roots, stub):
     out = session_ticket.create_ticket(session_id=SESSION_ID)
     assert "no '# ' heading" in out["error"]
     assert stub["events"] == []
+
+
+# --------------------------------------------------------------------------- #
+# Document mode — a .md filed on its own, with no session behind it
+# --------------------------------------------------------------------------- #
+
+BRIEF = """# Handoff: the deep lint reads 5% of the vault
+
+Written 2026-09-10. This file is gitignored.
+
+The measurement behind it is tracked.
+
+## The problem in one number
+
+A deep lint run reads 27 pages out of 582.
+
+## Why this is not a budget problem
+
+Every cap is slack.
+
+### A deeper heading that is not a section
+
+Ignored on purpose.
+
+## `Related`
+
+Nothing.
+"""
+
+
+@pytest.fixture
+def brief(tmp_path):
+    path = tmp_path / "2026-09-10-deep-lint-coverage.md"
+    path.write_text(BRIEF, encoding="utf-8")
+    return path
+
+
+def test_the_documents_h1_is_the_title(brief):
+    facts = session_ticket.document_facts(str(brief))
+    assert facts["title"] == "Handoff: the deep lint reads 5% of the vault"
+
+
+def test_the_lede_stops_at_the_first_section(brief):
+    """Everything after the first '## ' belongs to a section, and the attached
+    file already carries it."""
+    facts = session_ticket.document_facts(str(brief))
+    assert facts["lede"].startswith("Written 2026-09-10.")
+    assert facts["lede"].endswith("is tracked.")
+    assert "27 pages" not in facts["lede"]
+
+
+def test_only_h2_headings_are_listed_as_sections(brief):
+    """'### ' is a subheading inside a section, not a section, and backticks are
+    Markdown decoration that would show up literally on the board."""
+    facts = session_ticket.document_facts(str(brief))
+    assert facts["sections"] == [
+        "The problem in one number",
+        "Why this is not a budget problem",
+        "Related",
+    ]
+
+
+def test_the_description_names_the_attached_file(brief):
+    facts = session_ticket.document_facts(str(brief))
+    body = session_ticket.description_for_document(facts)
+    assert "Written 2026-09-10." in body
+    assert "**Sections**" in body
+    assert "- The problem in one number" in body
+    assert "_Filed from `2026-09-10-deep-lint-coverage.md`, attached._" in body
+
+
+def test_a_long_lede_is_cut_out_loud(brief):
+    facts = session_ticket.document_facts(str(brief))
+    facts["lede"] = "word " * 800
+    body = session_ticket.description_for_document(facts)
+    assert "[cut here —" in body
+    assert "more characters before the first section]" in body
+
+
+def test_a_document_with_no_heading_is_refused(tmp_path, stub):
+    path = tmp_path / "nothing.md"
+    path.write_text("just prose, no heading\n", encoding="utf-8")
+    out = session_ticket.create_document_ticket(str(path))
+    assert "no '# ' heading" in out["error"]
+    assert stub["events"] == []
+
+
+def test_a_missing_document_is_refused_before_anything_is_written(tmp_path, stub):
+    out = session_ticket.create_document_ticket(str(tmp_path / "gone.md"))
+    assert "no document at" in out["error"]
+    assert stub["events"] == []
+
+
+def test_a_document_is_created_then_attached_then_moved(brief, stub):
+    """Same order as a session, for the same reason: the status must never say
+    'designed' while the document is still missing."""
+    out = session_ticket.create_document_ticket(str(brief))
+    assert out["created"] is True
+    assert out["document"] == brief.name
+    assert out["attached"] == brief.name
+    assert out["status"] == "designed"
+    assert _kinds(stub) == ["read", "add", "find", "upload", "move"]
+
+
+def test_a_document_dry_run_writes_nothing(brief, stub):
+    out = session_ticket.create_document_ticket(str(brief), dry_run=True)
+    assert out["dry_run"] is True
+    assert out["title"] == "Handoff: the deep lint reads 5% of the vault"
+    assert out["document"] == brief.name
+    assert stub["events"] == []
+
+
+def test_a_document_mode_ticket_carries_no_session_fields(brief, stub):
+    """A document has no session and no plan. Reporting an empty one would read
+    as a session that could not be found."""
+    out = session_ticket.create_document_ticket(str(brief))
+    assert "session" not in out
+    assert "plan" not in out

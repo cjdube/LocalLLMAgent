@@ -16,6 +16,12 @@ re-type any of it can only get it wrong (docs/model-constraints.md).
                     scratchpad folder, so the skill always has it
   --plan <path>     the plan file, whose basename IS the session's `slug` field
 
+**A document can be the source instead of a session.** `--document <path>`
+files a .md on its own: its H1 is the title, its opening and its `## ` headings
+are the description, and the file is attached. Use it for a handoff brief, which
+nobody typed as a prompt and which no transcript holds. The same rule still
+applies — the words come off the document, not out of a model.
+
 **Create, attach, then move.** The move to `designed` is last so the status
 never claims a Task is designed while its plan is still missing. Each step
 after the create can fail on its own, and the result says which did — a Task
@@ -24,6 +30,7 @@ that exists but has no plan on it must not read as "nothing happened".
 Usage:
     python -m agent.session_ticket --session <uuid> [--priority high] [--dry-run]
     python -m agent.session_ticket --plan ~/.claude/plans/some-plan.md
+    python -m agent.session_ticket --document docs/reviews/some-brief.md
 """
 
 import argparse
@@ -63,6 +70,10 @@ _INJECTED_PREFIXES = (
 # while the ask is the thing the Task is actually about.
 _QUOTE_BUDGET = 2200
 _REPLY_BUDGET = 1000
+# A document's opening only has to say what the Task is. The document itself
+# is attached, so there is no reason to push its whole first section onto the
+# board where nobody can search it.
+_LEDE_BUDGET = 1200
 
 # Reading a whole transcript to find one prompt and one title is cheap, but a
 # 13 MB session exists on this machine. Streaming keeps that bounded; this only
@@ -316,19 +327,23 @@ def session_facts(session_id: str = None, plan_path: str = None) -> dict:
     return facts
 
 
-def quote_block(first_prompt: str, budget: int = _QUOTE_BUDGET) -> str:
-    """The prompt as a Markdown blockquote, cut to a budget **out loud**.
+def _cut(text: str, budget: int) -> tuple:
+    """(text, characters dropped), cut on a word boundary.
 
-    ClickUp silently truncates an over-long description, which would leave a
-    quote ending mid-word with nothing to say it had been cut. Cutting here
-    means the Task can say so.
+    ClickUp silently truncates an over-long description, which would leave text
+    ending mid-word with nothing to say it had been cut. Cutting here means the
+    Task can say so, which is why the count comes back rather than just the text.
     """
-    text = (first_prompt or "").strip()
-    dropped = 0
-    if len(text) > budget:
-        cut = text[:budget].rsplit(None, 1)[0]
-        dropped = len(text) - len(cut)
-        text = cut
+    text = (text or "").strip()
+    if len(text) <= budget:
+        return text, 0
+    cut = text[:budget].rsplit(None, 1)[0]
+    return cut, len(text) - len(cut)
+
+
+def quote_block(first_prompt: str, budget: int = _QUOTE_BUDGET) -> str:
+    """The prompt as a Markdown blockquote, cut to a budget **out loud**."""
+    text, dropped = _cut(first_prompt, budget)
     lines = [f"> {line}" if line.strip() else ">" for line in text.splitlines()]
     if dropped:
         lines.append(">")
@@ -357,6 +372,72 @@ def description_for(facts: dict) -> str:
     return "\n".join(parts)
 
 
+def document_facts(doc_path: str) -> dict:
+    """Everything a Task is built from, for a standalone document.
+
+    The document mode exists because a handoff brief is not a session: it has
+    no transcript, no first prompt and no slug, so session_facts cannot reach
+    it. What it does have is a heading, an opening, and a set of sections.
+
+    **The same rule applies here as everywhere else in this module: nothing is
+    written by a model.** The title is the document's own H1, the opening is
+    its own prose, and the section list is its own '## ' headings. A caller who
+    wants different words edits the document, which is the copy that gets
+    attached and the copy somebody will actually read.
+    """
+    path = Path(doc_path).expanduser().resolve()
+    if not path.is_file():
+        return {"error": f"no document at {path}"}
+
+    text = path.read_text(encoding="utf-8")
+    title = _plan_heading(text)
+    if not title:
+        return {"error": f"{path.name} has no '# ' heading, so there is no "
+                         "title to file it under"}
+
+    lede, sections, seen_h1 = [], [], False
+    for line in text.splitlines():
+        if line.startswith("# ") and not seen_h1:
+            seen_h1 = True
+            continue
+        if line.startswith("## "):
+            sections.append(line[3:].replace("`", "").strip())
+            continue
+        # The opening is whatever sits between the title and the first section.
+        # Anything after that belongs to a section, and the attachment carries it.
+        if seen_h1 and not sections:
+            lede.append(line)
+
+    return {
+        "title": title,
+        "doc_path": str(path),
+        "lede": "\n".join(lede).strip(),
+        "sections": sections,
+    }
+
+
+def description_for_document(facts: dict) -> str:
+    """The Task description for a document: its opening, then its shape.
+
+    The section list is here because the opening of a brief is often throat
+    clearing — a date, a note that the file is gitignored — and the headings
+    are what tell a reader on the board whether this Task is the one they
+    want. Both are lifted verbatim; neither is summarised.
+    """
+    parts = []
+    lede, dropped = _cut(facts.get("lede", ""), _LEDE_BUDGET)
+    if lede:
+        parts += [lede]
+        if dropped:
+            parts += ["", f"_[cut here — {dropped} more characters before the "
+                          f"first section]_"]
+    if facts.get("sections"):
+        parts += ["", "**Sections**", ""]
+        parts += [f"- {name}" for name in facts["sections"]]
+    parts += ["", f"_Filed from `{Path(facts['doc_path']).name}`, attached._"]
+    return "\n".join(parts).strip()
+
+
 def _already_filed(title: str) -> dict:
     """Whether a Task of this title exists already. Returns {} when it does not.
 
@@ -374,33 +455,21 @@ def _already_filed(title: str) -> dict:
     return {"error": f"could not check for an existing task: {found['error']}"}
 
 
-def create_ticket(session_id: str = None, plan_path: str = None,
-                  priority: str = "normal", space: str = "Wren",
-                  status: str = "designed", dry_run: bool = False,
-                  force: bool = False) -> dict:
-    """File the session as a Task. Create, attach, then move."""
-    facts = session_facts(session_id, plan_path)
-    if "error" in facts:
-        return facts
-    if not facts["plan_path"]:
-        return {"error": f"no plan file at {_plans_root()}/{facts['slug']}.md — "
-                         "write the plan first, or pass --plan <path>"}
-    title = facts["plan_h1"]
-    if not title:
-        return {"error": f"{Path(facts['plan_path']).name} has no '# ' heading, "
-                         "so there is no title to file it under"}
+def _file_task(title: str, description: str, attach: Path, extra: dict,
+               priority: str, space: str, status: str,
+               dry_run: bool, force: bool) -> dict:
+    """Create the Task, attach the file, then move it — in that order.
 
-    plan_file = Path(facts["plan_path"])
-    description = description_for(facts)
-    preview = {
-        "title": title,
-        "space": space,
-        "priority": priority,
-        "status": status,
-        "plan": plan_file.name,
-        "session": facts["session_id"],
-        "description": description,
-    }
+    Both modes end here. A session and a document differ only in where the
+    title, the description and the attached file come from; what happens to
+    ClickUp afterwards is the same, including which step may fail on its own.
+
+    `extra` is whatever names the source — the plan and session for one mode,
+    the document for the other. It rides on the preview and on the result so a
+    caller can see what was filed without knowing which mode made it.
+    """
+    preview = {"title": title, "space": space, "priority": priority,
+               "status": status, **extra, "description": description}
     if dry_run:
         return {"dry_run": True, **preview}
 
@@ -422,8 +491,7 @@ def create_ticket(session_id: str = None, plan_path: str = None,
         "priority": priority,
         "url": created.get("url", ""),
         "status": created.get("status", ""),
-        "session": facts["session_id"],
-        "plan": plan_file.name,
+        **extra,
         "attached": "",
         "warnings": [],
     }
@@ -433,15 +501,16 @@ def create_ticket(session_id: str = None, plan_path: str = None,
     # read as though nothing had been filed.
     found = clickup.find_task_id(title)
     if "error" in found:
-        out["warnings"].append(f"filed, but the plan could not be attached: {found['error']}")
+        out["warnings"].append(f"filed, but {attach.name} could not be attached: "
+                               f"{found['error']}")
         return out
 
-    got = clickup.upload_attachment(found["id"], plan_file.name,
-                                    plan_file.read_bytes())
+    got = clickup.upload_attachment(found["id"], attach.name, attach.read_bytes())
     if "error" in got:
-        out["warnings"].append(f"filed, but the plan could not be attached: {got['error']}")
+        out["warnings"].append(f"filed, but {attach.name} could not be attached: "
+                               f"{got['error']}")
     else:
-        out["attached"] = got.get("attached", plan_file.name)
+        out["attached"] = got.get("attached", attach.name)
 
     moved = clickup.move_clickup_task(title=title, status=status)
     if "error" in moved:
@@ -452,10 +521,63 @@ def create_ticket(session_id: str = None, plan_path: str = None,
     return out
 
 
+def create_ticket(session_id: str = None, plan_path: str = None,
+                  priority: str = "normal", space: str = "Wren",
+                  status: str = "designed", dry_run: bool = False,
+                  force: bool = False) -> dict:
+    """File the session as a Task. Create, attach, then move."""
+    facts = session_facts(session_id, plan_path)
+    if "error" in facts:
+        return facts
+    if not facts["plan_path"]:
+        return {"error": f"no plan file at {_plans_root()}/{facts['slug']}.md — "
+                         "write the plan first, or pass --plan <path>"}
+    title = facts["plan_h1"]
+    if not title:
+        return {"error": f"{Path(facts['plan_path']).name} has no '# ' heading, "
+                         "so there is no title to file it under"}
+
+    plan_file = Path(facts["plan_path"])
+    return _file_task(
+        title=title, description=description_for(facts), attach=plan_file,
+        extra={"plan": plan_file.name, "session": facts["session_id"]},
+        priority=priority, space=space, status=status,
+        dry_run=dry_run, force=force,
+    )
+
+
+def create_document_ticket(doc_path: str, priority: str = "normal",
+                           space: str = "Wren", status: str = "designed",
+                           dry_run: bool = False, force: bool = False) -> dict:
+    """File a standalone document as a Task. Create, attach, then move.
+
+    The document is the source, not an anchor to a session. Use this for a
+    handoff brief or a review write-up — a file somebody wrote to be read by
+    the person who picks the Task up.
+    """
+    facts = document_facts(doc_path)
+    if "error" in facts:
+        return facts
+
+    doc_file = Path(facts["doc_path"])
+    return _file_task(
+        title=facts["title"], description=description_for_document(facts),
+        attach=doc_file, extra={"document": doc_file.name},
+        priority=priority, space=space, status=status,
+        dry_run=dry_run, force=force,
+    )
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="File a Claude Code session as a ClickUp Task.")
-    parser.add_argument("--session", default=None, help="session id (the scratchpad folder name)")
-    parser.add_argument("--plan", default=None, help="path to the plan .md, as an alternative anchor")
+    parser = argparse.ArgumentParser(
+        description="File a Claude Code session, or a document, as a ClickUp Task.")
+    # A document is a different SOURCE, not a different anchor, so it cannot be
+    # combined with the two that point at a session.
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument("--session", default=None, help="session id (the scratchpad folder name)")
+    source.add_argument("--plan", default=None, help="path to the plan .md, as an alternative anchor")
+    source.add_argument("--document", default=None,
+                        help="path to a .md to file on its own, with no session behind it")
     parser.add_argument("--priority", default="normal", choices=["urgent", "high", "normal", "low"])
     parser.add_argument("--space", default="Wren")
     parser.add_argument("--status", default="designed")
@@ -465,6 +587,11 @@ def main() -> int:
                         help="file it even though a Task of the same title exists")
     args = parser.parse_args()
 
+    if args.document:
+        return print_result(create_document_ticket(
+            doc_path=args.document, priority=args.priority, space=args.space,
+            status=args.status, dry_run=args.dry_run, force=args.force,
+        ))
     return print_result(create_ticket(
         session_id=args.session, plan_path=args.plan, priority=args.priority,
         space=args.space, status=args.status, dry_run=args.dry_run, force=args.force,
