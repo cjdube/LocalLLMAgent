@@ -84,7 +84,18 @@ describe("countFindings / fixableCount", () => {
   test("fixable counts only the sections apply_safe_fixes acts on", () => {
     const api = load();
     expect(api.fixableCount(SECTIONS)).toBe(1);      // the self-link, not the orphan
-    expect(api.FIXABLE_SECTIONS).toEqual(["Broken and self links", "Index integrity"]);
+    expect(api.FIXABLE_SECTIONS)
+      .toEqual(["Broken and self links", "Index integrity", "Escaped text"]);
+  });
+
+  test("escaped text alone still offers the button", () => {
+    // It was left out of FIXABLE_SECTIONS until 2026-09-12, so a vault whose only
+    // damage was escaped text hid the button that would have repaired it —
+    // apply_safe_fixes has decoded it since 2026-08-21. The button this count
+    // drives is asserted separately, in "the page" below.
+    const api = load();
+    const only = { "Escaped text": ["a.md holds 1 escaped line."], "Orphan pages": ["b.md is an orphan."] };
+    expect(api.fixableCount(only)).toBe(1);
   });
 
   test("a vault with only judgment calls has nothing to fix", () => {
@@ -186,6 +197,94 @@ describe("renderSections", () => {
   });
 });
 
+// --- the per-category explanations ----------------------------------------- //
+
+// The ten categories wiki_lint.py:structural_findings returns today. Pinned
+// here because that dict lives in the sibling repo: if a check is added there
+// this fails, which is the only warning we get that a card would render with
+// no explanation under it.
+const CATEGORIES = [
+  "Broken and self links", "Orphan pages", "Index integrity", "Source coverage",
+  "Page format", "Misspelled slugs", "Duplicate titles", "Template twins",
+  "Lens integrity", "Escaped text",
+];
+
+describe("category help", () => {
+  test("every category the lint can report has both halves of an explanation", () => {
+    const { HELP } = load();
+    CATEGORIES.forEach((name) => {
+      expect(HELP[name]).toBeDefined();
+      expect(HELP[name].what.length).toBeGreaterThan(20);
+      expect(HELP[name].fix.length).toBeGreaterThan(20);
+    });
+  });
+
+  test("renders closed, under the head and above the findings", () => {
+    const api = load();
+    const mount = document.createElement("div");
+    api.renderSections(mount, { "Orphan pages": ["lonely.md is an orphan."] },
+                       { onPeek: () => {} });
+
+    const help = mount.querySelector("details.lint-help");
+    expect(help.open).toBe(false);
+    expect(help.querySelector("summary").textContent).toBe("What does this mean?");
+    expect(help.querySelector(".lint-help-what").textContent)
+      .toBe(api.HELP["Orphan pages"].what);
+    expect(help.querySelector(".lint-help-fix").textContent)
+      .toBe(api.HELP["Orphan pages"].fix);
+
+    // Order matters: the button, then the explanation, then the findings.
+    const kids = [...help.parentElement.children].map((e) => e.className);
+    expect(kids).toEqual(["lint-head", "lint-help", "lint-items"]);
+  });
+
+  test("a clean section is explained too", () => {
+    // What a passing check guards is exactly what you cannot infer from "0 — clean".
+    const api = load();
+    const mount = document.createElement("div");
+    api.renderSections(mount, { "Template twins": [] }, { onPeek: () => {} });
+    expect(mount.querySelector(".lint-section.is-clean details.lint-help")).not.toBeNull();
+  });
+
+  test("a category we have no text for renders no expander, rather than an empty one", () => {
+    // The sibling repo owns the names, so it can ship one this map has never heard of.
+    const api = load();
+    const mount = document.createElement("div");
+    expect(() => api.renderSections(mount, { "Some New Check": ["a.md is wrong."] },
+                                    { onPeek: () => {} })).not.toThrow();
+    expect(mount.querySelector("details.lint-help")).toBeNull();
+    expect(mount.querySelector(".lint-item")).not.toBeNull();
+  });
+
+  test("an opened explanation survives the redraw that filtering causes", async () => {
+    // draw() rebuilds every section on each keystroke. Both halves are asserted:
+    // a test that only checked the opened one stays green if everything opens.
+    mountPage();
+    global.fetch = jest.fn(async () => ({ json: async () => payload() }));
+    load();
+    await flush();
+
+    const helpOf = (name) => [...document.querySelectorAll(".lint-section")]
+      .find((s) => s.querySelector(".lint-name").textContent === name)
+      .querySelector("details.lint-help");
+
+    const orphans = helpOf("Orphan pages");
+    orphans.open = true;
+    orphans.dispatchEvent(new Event("toggle"));
+
+    const filter = document.getElementById("lintFilter");
+    filter.value = "orphan";
+    filter.dispatchEvent(new Event("input"));
+
+    expect(helpOf("Orphan pages").open).toBe(true);
+
+    filter.value = "";
+    filter.dispatchEvent(new Event("input"));
+    expect(helpOf("Orphan pages").open).toBe(true);
+    expect(helpOf("Broken and self links").open).toBe(false);
+  });
+});
+
 describe("renderFixes", () => {
   test("lists what was written", () => {
     const api = load();
@@ -227,6 +326,18 @@ describe("the page", () => {
     load();
     await flush();
     expect(document.getElementById("lintFix").hidden).toBe(true);
+  });
+
+  test("shows the fix button when escaped text is the only damage", async () => {
+    // The other half of the 2026-09-12 regression: a count of 1 is worthless if
+    // the button it controls stays hidden. Mirrors the judgment-only case above.
+    mountPage();
+    global.fetch = jest.fn(async () => ({
+      json: async () => payload({ sections: { "Escaped text": ["a.md holds 1 escaped line."] } }),
+    }));
+    load();
+    await flush();
+    expect(document.getElementById("lintFix").hidden).toBe(false);
   });
 
   test("a broken lint repo shows its error instead of a blank page", async () => {

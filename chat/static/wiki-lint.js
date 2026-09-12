@@ -5,8 +5,9 @@
 // bind() below. The page owns all CSS; this file emits structure and class names.
 //
 // Class names to style: .lint-section with .is-clean / .is-open, .lint-head,
-// .lint-count, .lint-items, .lint-item, .lint-page, .lint-text, .lint-actions,
-// .lint-peek, .lint-fixes, .lint-error.
+// .lint-count, .lint-help with .lint-help-what / .lint-help-fix, .lint-items,
+// .lint-item, .lint-page, .lint-text, .lint-actions, .lint-peek, .lint-fixes,
+// .lint-error.
 //
 // Everything user-visible goes in through textContent. A finding quotes page
 // titles and citation strings written by a model out of web content, and a peek
@@ -23,9 +24,79 @@
 //     finding openable instead of merely readable.
 (() => {
   // Sections whose findings apply_safe_fixes can act on. The button is pointless
-  // when neither has anything, and offering it anyway invites a click that
+  // when none of them has anything, and offering it anyway invites a click that
   // writes to the vault and reports "no mechanical fixes needed".
-  const FIXABLE_SECTIONS = ["Broken and self links", "Index integrity"];
+  //
+  // "Escaped text" belongs here and was missing until 2026-09-12: the sibling's
+  // apply_safe_fixes has decoded it since 2026-08-21, so a vault whose only
+  // damage was escaped text hid the one button that would have repaired it.
+  // Keep this list equal to the three fixes that function applies, no fewer.
+  const FIXABLE_SECTIONS = ["Broken and self links", "Index integrity", "Escaped text"];
+
+  // What each check looks for and what to do about a hit, shown in a collapsed
+  // expander on the category card. The categories themselves are owned by the
+  // sibling repo (~/Projects/ObsidianWikiAgent, wiki_lint.py:structural_findings),
+  // so this map can fall behind it: a name with no entry here renders no
+  // expander rather than an empty one, and tests/wiki-lint.test.js pins the ten
+  // that exist today. Wording is grounded in each check_* docstring over there.
+  const HELP = {
+    "Broken and self links": {
+      what: "A [[wiki-link]] points at a page that does not exist, or a page links to itself.",
+      fix: "Create the missing page, correct the spelling, or drop the link. " +
+           "Self-links are mechanical — \u201cApply safe fixes\u201d strips them for you.",
+    },
+    "Orphan pages": {
+      what: "Nothing links to this page. Being listed in index.md does not count — a table " +
+            "of contents is not the same as being reachable from related work. Dated logs are exempt.",
+      fix: "Link it from a page it belongs beside, or decide it never earned its own page " +
+           "and fold the material into one that did.",
+    },
+    "Index integrity": {
+      what: "index.md and the vault disagree: a page missing from the index, an index link to a " +
+            "page that was deleted, a section heading written twice, or pages in the Unfiled " +
+            "backlog. Unfiled should always be zero, so any count at all is drift.",
+      fix: "Dead index links are mechanical — \u201cApply safe fixes\u201d de-links them. A twin " +
+           "heading or an Unfiled backlog means a heading was edited by hand; restore it and re-file.",
+    },
+    "Source coverage": {
+      what: "A dated source still in raw/ is marked ingested but produced no dated page of its own, " +
+            "which every dated capture is required to earn.",
+      fix: "Treat it as material that may have been lost. Read the source, find what never " +
+           "reached the vault, and write the dated page.",
+    },
+    "Page format": {
+      what: "The page breaks the format RULES.md requires — the title only repeats the slug, a date " +
+            "is a placeholder or in the future, or a citation names a source file that does not exist.",
+      fix: "Titles and dates are a hand edit. An invented citation means the model made the source " +
+           "up: check the claim against a real source, or take it out.",
+    },
+    "Misspelled slugs": {
+      what: "The filename is one character off its own title — a page titled \u2018Ollama Thread " +
+            "Wedges\u2019 filed as olloma-thread-wedges.md. No search for the real spelling finds it.",
+      fix: "Rename the file to the right slug, then repoint every link to it, index.md included.",
+    },
+    "Duplicate titles": {
+      what: "Two pages carry the same title, which makes them one page written twice.",
+      fix: "Merge them, keep the better slug, and repoint the links. Two pages on one concept under " +
+           "different titles are a judgment call and are left to the --deep pass instead.",
+    },
+    "Template twins": {
+      what: "Two pages are character-identical apart from what names them — one template filled in twice.",
+      fix: "Decide which one is real. The other is either a mistake or a page that was never " +
+           "actually written.",
+    },
+    "Lens integrity": {
+      what: "The page describes itself as an evaluation lens but no longer carries the " +
+            "`lens: true` frontmatter marker that makes it one, so evaluate_against cannot use it.",
+      fix: "Put `lens: true` back in the frontmatter, or reword the page if it is not a lens any more.",
+    },
+    "Escaped text": {
+      what: "JSON escaping was left in the prose as literal text — a backslash where a quote belongs, " +
+            "\\u2019 where a curly apostrophe does. Obsidian renders the backslashes.",
+      fix: "Mechanical — \u201cApply safe fixes\u201d decodes it back into the prose it " +
+           "damaged. That one rewrites a page body, so read the change log it prints.",
+    },
+  };
 
   // Findings open with the page they are about: "orphan.md is an orphan — …".
   const LEADING_PAGE = /^([A-Za-z0-9._-]+)\.md\b/;
@@ -99,6 +170,26 @@
     return row;
   }
 
+  // The category's own explanation. Closed by default, and its open state is
+  // owned by the caller: draw() rebuilds every section on each filter keystroke,
+  // so an expander that tracked its own state would snap shut as you type.
+  function renderHelp(name, opts) {
+    const text = HELP[name];
+    if (!text) return null;
+    const open = (opts && opts.openHelp) || null;
+    const box = el("details", "lint-help");
+    box.appendChild(el("summary", null, "What does this mean?"));
+    box.appendChild(el("p", "lint-help-what", text.what));
+    box.appendChild(el("p", "lint-help-fix", text.fix));
+    if (open) {
+      box.open = open.has(name);
+      box.addEventListener("toggle", () => {
+        if (box.open) open.add(name); else open.delete(name);
+      });
+    }
+    return box;
+  }
+
   function renderSection(name, items, opts) {
     const box = el("section", "lint-section" + (items.length ? "" : " is-clean"));
     const head = el("button", "lint-head");
@@ -106,6 +197,12 @@
     head.appendChild(el("span", "lint-name", name));
     head.appendChild(el("span", "lint-count", items.length ? String(items.length) : "0 — clean"));
     box.appendChild(head);
+
+    // Below the head, not inside it: .lint-head is a <button> and a <details>
+    // cannot nest in one. Clean sections get the expander too — what a passing
+    // check guards is the thing you most need it to tell you.
+    const help = renderHelp(name, opts);
+    if (help) box.appendChild(help);
 
     const list = el("ul", "lint-items");
     items.forEach((f) => list.appendChild(renderItem(f, opts.onPeek)));
@@ -157,7 +254,8 @@
     const fixBtn = document.getElementById("lintFix");
     const fixLog = document.getElementById("lintFixLog");
 
-    let current = null;   // the last good payload
+    let current = null;               // the last good payload
+    const openHelp = new Set();       // which explanations the reader has opened
 
     async function peek(slug, pane, button) {
       if (!pane.hidden) { pane.hidden = true; button.textContent = "peek"; return; }
@@ -177,7 +275,8 @@
 
     function draw() {
       if (!current) return;
-      renderSections(mount, filterSections(current.sections, filter.value), { onPeek: peek });
+      renderSections(mount, filterSections(current.sections, filter.value),
+                     { onPeek: peek, openHelp });
     }
 
     function show(result) {
@@ -211,9 +310,11 @@
       const n = current ? fixableCount(current.sections) : 0;
       const ok = window.confirm(
         `Apply the safe fixes to ${n} finding${n === 1 ? "" : "s"}?\n\n` +
-        "This writes to the vault. It strips self-links from wiki pages and " +
-        "de-links dead entries in index.md. Nothing else is touched — orphans, " +
-        "bad dates and invented citations are left for you.");
+        "This writes to the vault. It strips self-links from wiki pages, " +
+        "de-links dead entries in index.md, and decodes escaped text back into " +
+        "the prose it damaged — that last one rewrites the body of a page you " +
+        "wrote. Nothing else is touched: orphans, bad dates and invented " +
+        "citations are left for you.");
       if (!ok) return;
       fixBtn.disabled = true;
       await load("/api/wiki/lint/fix", { method: "POST" });
@@ -225,7 +326,7 @@
   }
 
   const api = { pageOf, countFindings, fixableCount, filterSections, summaryText,
-                renderSection, renderSections, renderFixes, FIXABLE_SECTIONS };
+                renderSection, renderSections, renderFixes, FIXABLE_SECTIONS, HELP };
   if (typeof window !== "undefined") window.WrenWikiLint = api;
   if (typeof document !== "undefined" && document.getElementById("lintSections")) bind();
 })();

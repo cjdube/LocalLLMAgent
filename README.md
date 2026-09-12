@@ -826,9 +826,10 @@ links to the page it names: **peek** reads it inline, **graph** opens it in
 `/wiki`.
 
 **Apply safe fixes** is the only thing in Wren that writes to the vault. It
-strips self-links and de-links dead `index.md` entries — never a judgment call —
-behind a confirm, and logs what it wrote. The button stays hidden when there is
-nothing mechanical to fix.
+strips self-links, de-links dead `index.md` entries and decodes escaped text —
+never a judgment call — behind a confirm, and logs what it wrote. The decode
+rewrites a page body, so the confirm says so. The button stays hidden when there
+is nothing mechanical to fix.
 
 Backed by `GET /api/wiki/lint`, `POST /api/wiki/lint/fix` and
 `GET /api/wiki/page/<name>` in `chat/routes_wiki.py`, over `chat/wikilint.py`.

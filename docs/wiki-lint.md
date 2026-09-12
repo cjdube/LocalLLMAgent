@@ -1,7 +1,7 @@
 # /wiki/lint — reviewing the learnings wiki audit
 
 The learnings vault is audited by `wiki_lint.py` in the sibling
-[ObsidianWikiAgent](https://github.com/cjdube/ObsidianWikiAgent) repo: nine
+[ObsidianWikiAgent](https://github.com/cjdube/ObsidianWikiAgent) repo: ten
 structural checks over every page, plus an opt-in model pass. It runs on a
 schedule (Sundays 10:00) and prints a prose report to a launchd log.
 
@@ -22,6 +22,26 @@ every check in the sibling repo writes them that way. The view parses that
 leading slug and turns it into two actions: **peek**, which reads the page inline
 via `/api/wiki/page/<name>`, and **graph**, which opens `/wiki?page=<slug>`.
 
+### What does this mean?
+
+Every card carries a collapsed **What does this mean?** expander — two lines
+saying what the check looks for and what to do about a hit. Closed by default,
+and clean cards get one too: what a passing check guards is precisely what
+`0 — clean` cannot tell you.
+
+The text lives in the `HELP` map in `chat/static/wiki-lint.js`, not in the
+sibling repo. That keeps it to one commit and adds no field to the JSON, at the
+cost of being able to fall behind: a check added to `structural_findings()` over
+there renders **no** expander until an entry is added here. `tests/wiki-lint.test.js`
+pins the ten categories that exist today, so the addition fails the suite rather
+than shipping a card with nothing under it.
+
+An opened expander stays open while you type in the filter. Filtering rebuilds
+every card on each keystroke, so `bind()` owns the set of opened categories and
+`renderHelp` reads it — the same trick `/opportunities` uses to keep a research
+brief open across its auto-refresh.
+
+
 ## Apply safe fixes
 
 The one write path Wren has into the vault. It runs the sibling's
@@ -29,11 +49,20 @@ The one write path Wren has into the vault. It runs the sibling's
 
 - self-links, flattened to their display text
 - dead `index.md` entries, de-linked
+- escaped text, decoded back into the prose it damaged
+
+The third one rewrites the body of a page a human wrote, so the confirm names it
+explicitly. It reuses the same decode the ingest applies, and the check and the
+fix read through one shared function, so the fix cannot touch damage the report
+did not name.
 
 Everything requiring judgment — orphans, duplicate concepts, invented citations,
-bad dates — is left alone by design. The button is hidden unless *Broken and self
-links* or *Index integrity* actually has findings, so it cannot be clicked into a
-no-op that still writes. It confirms first, and the applied changes are logged at
+bad dates — is left alone by design. The button is hidden unless one of those
+three sections actually has findings, so it cannot be clicked into a no-op that
+still writes. *Escaped text* was missing from that list until 2026-09-12, which
+hid the button from exactly the vault it would have repaired — keep the
+`FIXABLE_SECTIONS` list in `chat/static/wiki-lint.js` equal to the fixes
+`apply_safe_fixes` applies. It confirms first, and the applied changes are logged at
 INFO in `logs/wren.log`: a vault edit with no record of who made it is
 indistinguishable from an ingest bug.
 
