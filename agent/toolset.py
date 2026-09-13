@@ -501,8 +501,13 @@ GROUP_KEYWORDS = {
     # only way in was to say "wiki" out loud, and asked "what do my notes say
     # about X" Wren searched her memory store, found nothing, and answered that
     # she had nothing written down about a topic with a wiki page on it.
+    # The decision cues are the second half of the same lesson: asked "why did I
+    # choose X", the most natural way to question a second brain, no cue fired,
+    # so the wiki group never pre-loaded and Wren answered from her own memory
+    # store. "decid" covers decide/decided/decision on the prefix match.
     "wiki": ["wiki", "learn", "weekly review", "working on",
-             "notes", "wrote", "written", "write down", "read about"],
+             "notes", "wrote", "written", "write down", "read about",
+             "decid", "chose", "choose", "why", "rationale"],
     "background": ["background", "kick off", "hand off", "handoff"],
     "web": ["webpage", "web page", "fetch", "url", "evaluate", "starred", "github"],
     "authoring": ["skill"],

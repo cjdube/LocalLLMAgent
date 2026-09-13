@@ -55,9 +55,9 @@ def test_page_summaries_extracts_the_summary_line(tmp_path, monkeypatch):
 # The entry point. It replaced read_wiki_index and list_wiki_pages, both of which
 # outgrew the 8000-char tool-result cap and handed the model a silent prefix.
 
-def _add_page(root, name, summary):
+def _add_page(root, name, summary, body="Body."):
     (root / "wiki" / f"{name}.md").write_text(
-        f"# {name}\n\n**Summary**: {summary}\n\nBody.")
+        f"# {name}\n\n**Summary**: {summary}\n\n{body}")
 
 
 def test_search_matches_a_summary_the_filename_never_mentions(tmp_path, monkeypatch):
@@ -92,6 +92,105 @@ def test_search_ranks_a_name_hit_above_a_summary_hit(tmp_path, monkeypatch):
     assert names == ["duckdb-analytics", "grocery-lists"]
 
 
+# --- full-text body search ---------------------------------------------------
+# Scoring names and summaries alone says what a page is ABOUT but can't find a
+# decision written in the middle of one. On the real vault it returned 0 of the
+# 3 pages that discuss Stripe and 0 of the 1 that discusses Kubernetes.
+
+def test_search_finds_a_term_only_the_body_holds(tmp_path, monkeypatch):
+    # The exact miss being fixed. Nothing but body scoring can pass this: the
+    # term reaches neither the filename nor the summary.
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    _add_page(tmp_path, "billing-rebuild", "How he rebuilt the billing flow.",
+              body="Took the card handling off Stripe after the fee change.")
+
+    names = [m["name"] for m in wiki.search_wiki("stripe")["matches"]]
+    assert names == ["billing-rebuild"]
+
+
+def test_search_ranks_a_name_hit_above_a_body_hit(tmp_path, monkeypatch):
+    # Body matching must not drown the page actually named for the topic.
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    _add_page(tmp_path, "stripe-migration", "Moving off the old processor.")
+    _add_page(tmp_path, "billing-rebuild", "How he rebuilt the billing flow.",
+              body="Took the card handling off Stripe after the fee change.")
+
+    names = [m["name"] for m in wiki.search_wiki("stripe")["matches"]]
+    assert names == ["stripe-migration", "billing-rebuild"]
+
+
+def test_search_quotes_the_body_around_a_body_hit(tmp_path, monkeypatch):
+    # A body hit the model can't see is a page name it has no reason to open.
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    _add_page(tmp_path, "billing-rebuild", "How he rebuilt the billing flow.",
+              body="Took the card handling off Stripe after the fee change.")
+
+    context = wiki.search_wiki("stripe")["matches"][0]["context"]
+    assert "Stripe" in context
+    assert "fee change" in context  # the words around it, not the term alone
+
+
+def test_search_context_is_bounded_and_marks_what_it_cut(tmp_path, monkeypatch):
+    # The snippet is charged against MAX_SEARCH_CHARS, so it has to stay small;
+    # the ellipses stop a window through a long page reading as a whole thought.
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    _add_page(tmp_path, "billing-rebuild", "How he rebuilt the billing flow.",
+              body=("filler " * 400) + "we settled on Stripe " + ("filler " * 400))
+
+    context = wiki.search_wiki("stripe")["matches"][0]["context"]
+    assert "Stripe" in context
+    assert len(context) <= wiki.MAX_CONTEXT_CHARS + 4  # + the two ellipses
+    assert context.startswith("… ") and context.endswith(" …")
+
+
+def test_search_omits_context_when_only_the_name_matched(tmp_path, monkeypatch):
+    # The other half of the guarantee: a row whose summary already explains the
+    # match doesn't pay for a snippet as well.
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    _add_page(tmp_path, "duckdb-analytics", "A columnar engine.")
+
+    assert wiki.search_wiki("duckdb")["matches"] == [
+        {"name": "duckdb-analytics", "summary": "A columnar engine."}]
+
+
+def test_search_matches_body_terms_on_whole_words_only(tmp_path, monkeypatch):
+    # Substring matching is right for slugs and wrong for prose. Whole-vault
+    # body search is only usable because of this boundary: a short term like
+    # "we" is inside "power", "were" and "answer", so substring scoring would
+    # match nearly every page. With it, "we" reaches 6 of the real vault's 614.
+    #
+    # The page name here deliberately contains no "we" — name scoring stays
+    # substring-based (test_search_matches_inside_a_slug), so a slug hit would
+    # mask the thing this test is checking.
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    _add_page(tmp_path, "concentration-of-outcomes", "How outcomes concentrate.",
+              body="A power law describes the distribution, as we saw.")
+
+    # "power" is a whole word in the body and scores; "we" is only inside
+    # "power", and does not.
+    assert [m["name"] for m in wiki.search_wiki("power")["matches"]] \
+        == ["concentration-of-outcomes"]
+    assert wiki.search_wiki("wer")["matches"] == []
+
+
+def test_search_does_not_score_the_sources_line_as_body(tmp_path, monkeypatch):
+    # **Sources** is ObsidianWikiAgent's ingest provenance. Its filenames name
+    # topics the page itself never discusses, so a hit there is a false match.
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
+    _build_vault(tmp_path)
+    (tmp_path / "wiki" / "billing-rebuild.md").write_text(
+        "# billing-rebuild\n\n**Summary**: How he rebuilt the billing flow.\n"
+        "**Sources**: Kubernetes at scale.md\n\nNothing about clusters here.")
+
+    assert wiki.search_wiki("kubernetes")["matches"] == []
+
+
 def test_search_returns_summaries_with_the_names(tmp_path, monkeypatch):
     # read_wiki_page needs a name; the model needs the summary to pick which one.
     monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
@@ -116,11 +215,15 @@ def test_search_result_stays_under_the_tool_result_cap(tmp_path, monkeypatch):
     # can't tell is a prefix. A broad query against a big vault must not do that.
     monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path))
     _build_vault(tmp_path)
+    # Every page matches in its body too, so every kept row carries a snippet —
+    # the worst case for the budget now that a row can be three fields wide.
     for i in range(200):
-        _add_page(tmp_path, f"project-note-{i:03d}", "A project page. " * 12)
+        _add_page(tmp_path, f"project-note-{i:03d}", "A project page. " * 12,
+                  body="Notes on the project. " * 40)
 
     result = wiki.search_wiki("project")
     assert len(result["matches"]) <= wiki.MAX_SEARCH_RESULTS
+    assert all("context" in m for m in result["matches"])
     assert len(str(result)) < 8000  # OLLAMA_MAX_TOOL_RESULT_CHARS
     # Dropped matches are reported, not silent — the model can narrow instead of
     # assuming it saw the whole vault.

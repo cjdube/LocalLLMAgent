@@ -15,6 +15,12 @@ Both are unregistered now; search_wiki returns rows, so its size scales with the
 answer instead of the vault. ObsidianWikiAgent hit the same wall on its write
 side and replaced read_index with list_index_sections for the same reason.
 
+search_wiki reads every page's FULL TEXT. It scored names and summaries only
+until 2026-09-12, which answers "what is this page about" but not "where did I
+write down that decision" — the thing the wiki exists for. Measured on the real
+vault, that scoring returned 0 of the 3 pages that discuss Stripe and 0 of the 1
+that discusses Kubernetes, because neither word reaches a title or a summary.
+
 Vault layout (see ObsidianWikiAgent):
     <vault>/wiki/index.md   -- table of contents the model reads first
     <vault>/wiki/*.md       -- concept pages (excluding index.md, log.md)
@@ -72,9 +78,20 @@ MAX_INDEX_CHARS = 600
 # exact failure that made read_wiki_index useless. Summaries run ~150-200 chars,
 # so the row cap usually binds first; the char budget covers the long tail. A
 # summary can't exceed _HEAD_CHARS, so the last row can overshoot the budget by
-# at most that much and the worst case still lands under 8000.
+# at most that much, plus MAX_CONTEXT_CHARS once a row carries a body snippet —
+# ~6250 worst case, still under 8000.
 MAX_SEARCH_RESULTS = 20
 MAX_SEARCH_CHARS = 4000
+
+# How much of a page's body search_wiki quotes back around a body-only hit. The
+# row's other two fields say what the page is called and what it's about; this
+# one is the only evidence of *why* a page matched a term neither of them holds.
+MAX_CONTEXT_CHARS = 200
+
+# Scoring weights for _search_pages, highest signal first. The page NAMED for a
+# topic is more often that topic's page than one whose summary mentions it,
+# which in turn beats one that merely says the word somewhere in its body.
+_NAME_WEIGHT, _SUMMARY_WEIGHT, _BODY_WEIGHT = 3, 2, 1
 
 # read_wiki_page's own budget, in page chars — under the 16000-char backstop
 # agent/loop.py gives this tool (TOOL_RESULT_CHAR_CAPS), because that backstop
@@ -132,6 +149,10 @@ _TERM_RE = re.compile(r"[a-z0-9]+")
 _SOURCES_LINE_RE = re.compile(r"^\*\*Sources\*\*:.*$\n?", re.MULTILINE)
 _RELATED_RE = re.compile(r"^## Related pages\b.*", re.MULTILINE | re.DOTALL)
 _H2_RE = re.compile(r"^## (.+?)\s*$", re.MULTILINE)
+
+# The page's own `# ` title. Stripped before body scoring because it restates
+# the filename, which is already scored — and scored higher.
+_H1_RE = re.compile(r"^# .*$\n?", re.MULTILINE)
 
 
 def _vault() -> Path:
@@ -280,6 +301,44 @@ def _page_summaries(vault: Path) -> list:
     return rows
 
 
+def _page_texts(vault: Path) -> list:
+    """Every wiki page as {name, summary, body}, reading each page WHOLE.
+
+    _page_summaries' bounded head-read says what a page is called and what it is
+    about. That is not enough to find a decision written in the middle of one:
+    searching names and summaries alone returned 0 of the 3 pages that discuss
+    Stripe and 0 of the 1 that discusses Kubernetes. Search gets its own reader
+    rather than widening the head-read, because page_summaries() feeds
+    daily_synthesis and the dashboard, neither of which wants whole bodies.
+
+    A plain re-read per search, with no index to keep in sync: the whole vault
+    is 614 pages / 1.19MB and reads in 13ms.
+
+    `body` drops the frontmatter, the `# ` title, the `**Summary**:` line and
+    the `**Sources**:` line. The first three are already scored as name or
+    summary, and scoring them twice would let one page part outrank a real body
+    hit; the fourth is ObsidianWikiAgent's ingest filenames, which match queries
+    about topics the page itself never discusses.
+    """
+    rows = []
+    for name in _list_wiki_pages(vault)["pages"]:
+        try:
+            text = (vault / "wiki" / name).read_text(encoding="utf-8")
+        except OSError:
+            continue
+        match = _SUMMARY_RE.search(text[:_HEAD_CHARS])
+        body = _FRONTMATTER_RE.sub("", text)
+        body = _H1_RE.sub("", body, count=1)
+        body = _SUMMARY_RE.sub("", body)
+        body = _SOURCES_LINE_RE.sub("", body)
+        rows.append({
+            "name": name[:-3],
+            "summary": match.group(1) if match else "",
+            "body": body,
+        })
+    return rows
+
+
 def _split_sections(text: str) -> list[tuple[str, str]]:
     """(heading, section text including its heading) for each H2, in page order.
     Empty when the page has no H2s at all — which is why sections are a fallback
@@ -372,24 +431,58 @@ def _fit_page(text: str, budget: int = MAX_PAGE_CHARS) -> str:
     return kept + notice + tail
 
 
-def _search_pages(vault: Path, query: str) -> list:
-    """Pages whose name or summary matches `query`, as {name, summary} rows,
-    best match first.
+def _context(body: str, match: re.Match) -> str:
+    """MAX_CONTEXT_CHARS of body centred on a hit, whitespace collapsed.
 
-    Terms are matched as substrings, not as whole words: page names are slugs
-    ('fractional-product-leadership'), so a term has to be able to match inside
-    one. A name hit scores double a summary hit — the page named for a topic is
-    more often the topic's page than one that merely mentions it. Ties break on
-    the name so the ordering is stable run to run."""
+    A body hit is worth nothing the model can act on unless it can see what it
+    hit: a page matches on body precisely when its name and summary do NOT hold
+    the term, so the other two fields of the row can't explain the match.
+    Leading and trailing ellipses mark a window cut out of more text, so a
+    fragment doesn't read as a whole sentence."""
+    half = max(0, (MAX_CONTEXT_CHARS - len(match.group(0))) // 2)
+    start, end = max(0, match.start() - half), min(len(body), match.end() + half)
+    snippet = " ".join(body[start:end].split())
+    return ("… " if body[:start].strip() else "") + snippet + (" …" if body[end:].strip() else "")
+
+
+def _search_pages(vault: Path, query: str) -> list:
+    """Pages whose name, summary or body matches `query`, as {name, summary}
+    rows — plus a `context` snippet on the ones that matched in the body — best
+    match first.
+
+    Name and summary terms are matched as SUBSTRINGS, not whole words: page
+    names are slugs ('fractional-product-leadership'), so a term has to be able
+    to match inside one. Body terms are matched on WORD BOUNDARIES instead,
+    because a body is prose, where substring matching is actively wrong — it is
+    why 'why we chose' used to rank `power-law`, on the term 'we' inside
+    'power'. On the real vault that boundary is the whole noise filter and no
+    stopword list is needed: the wiki's encyclopedic register puts 'we' in 6 of
+    614 pages and 'why' in 14.
+
+    Weights are name > summary > body (see _NAME_WEIGHT), and a term scores
+    once per page whether it appears there once or fifty times, so a long page
+    can't outrank a short one on repetition alone. Ties break on the name so
+    the ordering is stable run to run."""
     terms = _TERM_RE.findall(query.lower())
     if not terms:
         return []
+    body_patterns = [re.compile(rf"\b{re.escape(t)}\b", re.IGNORECASE) for t in terms]
     scored = []
-    for row in _page_summaries(vault):
-        name, summary = row["name"].lower(), row["summary"].lower()
-        score = sum(2 for t in terms if t in name) + sum(1 for t in terms if t in summary)
-        if score:
-            scored.append((-score, row["name"], row))
+    for row in _page_texts(vault):
+        name, summary, body = row["name"].lower(), row["summary"].lower(), row["body"]
+        score = sum(_NAME_WEIGHT for t in terms if t in name)
+        score += sum(_SUMMARY_WEIGHT for t in terms if t in summary)
+        # The EARLIEST body hit, not the first query term's, so the snippet
+        # shows where the page starts talking about this rather than wherever
+        # the user happened to put a word in their question.
+        hits = [m for m in (p.search(body) for p in body_patterns) if m]
+        score += _BODY_WEIGHT * len(hits)
+        if not score:
+            continue
+        out = {"name": row["name"], "summary": row["summary"]}
+        if hits:
+            out["context"] = _context(body, min(hits, key=lambda m: m.start()))
+        scored.append((-score, row["name"], out))
     scored.sort()
     return [row for _, _, row in scored]
 
@@ -426,7 +519,7 @@ def search_wiki(query: str) -> dict:
     kept, total = [], 0
     for row in matches[:MAX_SEARCH_RESULTS]:
         kept.append(row)
-        total += len(row["name"]) + len(row["summary"])
+        total += len(row["name"]) + len(row["summary"]) + len(row.get("context", ""))
         if total > MAX_SEARCH_CHARS:
             break
     result = {"matches": kept}
@@ -530,8 +623,11 @@ SEARCH_WIKI_SCHEMA = {
     "function": {
         "name": "search_wiki",
         "description": (
-            f"Search {_NAME}'s personal learnings wiki by topic and get back each "
-            "matching page name with its one-line summary. This is the ONLY way to "
+            f"Search the FULL TEXT of {_NAME}'s personal learnings wiki — every page's "
+            "whole body, not just its title — and get back each matching page name with "
+            "its one-line summary, plus a short quote from the page when the match was "
+            "in its body. Use it for a specific decision, reason or outcome he recorded, "
+            "not only for broad topics. This is the ONLY way to "
             "find out what is in the wiki: it holds hundreds of pages written from "
             f"{_NAME}'s own notes and reviews, and you do not know what any of them "
             "are. Only the pages this tool returns exist. Never name, describe, or "
@@ -546,8 +642,10 @@ SEARCH_WIKI_SCHEMA = {
                 "query": {
                     "type": "string",
                     "description": (
-                        "Topic words, matched against page names and summaries, e.g. "
-                        "'fractional product leadership'. Prefer two or three words."
+                        "Words to look for, matched against page names, summaries and "
+                        "page bodies, e.g. 'fractional product leadership'. Prefer two "
+                        "or three content words; drop filler like 'what did I decide "
+                        "about', which matches nothing useful."
                     ),
                 },
             },
