@@ -95,11 +95,12 @@ TOOL_RESULT_CHAR_CAPS = {
     # Row cap plus its own MAIL_SEARCH_CHAR_BUDGET (6000), same pairing as
     # search_web — a result count never bounds a payload.
     "search_mail": 7000,
-    # One of Wren's own documents, same shape as read_wiki_page: a curated file
-    # of known size that the user asked for, not an unbounded feed. Twelve of the
-    # 40 are over 14000 chars and README.md is 96KB, so the flat cap would hand
-    # back a fraction of one and the model would report that the documentation
-    # does not cover something sitting in the part it never saw. docs.py trims
+    # One document from Wren's corpus — hers, the wiki engine's or ScribeJay's —
+    # same shape as read_wiki_page: a curated file of known size that the user
+    # asked for, not an unbounded feed. Sixteen of the 64 are over 14000 chars
+    # and README.md is 96KB, so the flat cap would hand back a fraction of one
+    # and the model would report that the documentation does not cover something
+    # sitting in the part it never saw. docs.py trims
     # to MAX_DOC_CHARS (12000) first and names the sections it dropped; this is
     # the backstop above that, with room for the JSON wrapper. Keep the gap.
     "read_doc": 14000,

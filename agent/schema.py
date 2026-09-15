@@ -533,6 +533,28 @@ SETTINGS: tuple[Setting, ...] = (
         type="path", default="~/Projects/ObsidianWikiAgent", applies="live",
     ),
     Setting(
+        key="WREN_WIKI_REPO_PATH", group="Wiki and learnings",
+        label="Wiki engine checkout (docs)",
+        help="The ObsidianWikiAgent checkout whose README, SECURITY.md and "
+             "docs/ Wren can search and quote, so she can answer how notes get "
+             "into the wiki and how it is maintained. Files only — never an "
+             "import, never a shell-out. Usually the same path as the lint "
+             "checkout above, but kept separate: one names a repo whose CODE is "
+             "run, this one a repo whose DOCS are read. Missing means Wren "
+             "searches her own documentation and nothing else breaks.",
+        type="path", default="~/Projects/ObsidianWikiAgent", applies="live",
+    ),
+    Setting(
+        key="WREN_SCRIBEJAY_REPO_PATH", group="Wiki and learnings",
+        label="ScribeJay checkout (docs)",
+        help="The ScribeJay checkout whose README and docs/ Wren can search and "
+             "quote, so she can answer how the record she reads gets written. "
+             "Files only — the seam still holds: nothing here imports that "
+             "checkout, shells into it, or writes to its config. Missing means "
+             "Wren searches her own documentation and nothing else breaks.",
+        type="path", default="~/Projects/ScribeJay", applies="live",
+    ),
+    Setting(
         key="WREN_SKILLS_DIR", group="Wiki and learnings", label="Skills dir",
         help="Where reusable procedures are stored, one Markdown file per "
              "skill. Empty uses this repo's own skills directory.",

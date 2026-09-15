@@ -8,7 +8,11 @@ On 2026-08-30 it moved out of this repo entirely, into a sibling checkout at
 
 This page is what a Wren change needs to know. **How ScribeJay works is
 ScribeJay's own `docs/architecture.md`** — do not describe its internals here, or
-the two copies drift and the wrong one gets read.
+the two copies drift and the wrong one gets read. Since 2026-09-15 Wren can read
+that file herself: `search_docs` / `read_doc` cover ScribeJay's committed
+Markdown as `scribejay/architecture` and friends. That reader is what makes the
+no-second-copy rule above affordable — the answer stays in one place and Wren
+still reaches it.
 
 ## The seam
 
@@ -43,13 +47,23 @@ That asymmetry is deliberate and it is the rule a change here can break:
   agent's colour and icon assets under `chat/static/` and `chat/views/map.html`.
   Not one is an import or a shell-out. The config read is a plain file read,
   like the plists and logs — that is the whole extent of the coupling.
+- Since 2026-09-15 there is one more file read: `WREN_SCRIBEJAY_REPO_PATH`
+  (default `~/Projects/ScribeJay`) names the checkout whose `README.md` and
+  top-level `docs/` `agent/tools/docs.py` searches. Those documents enter Wren's
+  corpus under a `scribejay/` prefix, because eight of them share a filename stem
+  with one of Wren's. `scribejay/persona.md` is **out** — it is another agent's
+  system-prompt material, and Wren picking up ScribeJay's voice from a search hit
+  would fail with no error message. So is that repo's `AGENTS.md`: a maintenance
+  contract aimed at a coding agent working there, not at Wren. Both exclusions
+  hold by construction — the root files are named one by one, never globbed.
+  A checkout that is missing or moved yields no documents and no error.
 - ScribeJay names Wren nowhere. It has its own `.env`, its own venv, its own
   Google token, its own `SCRIBEJAY_*` backend chain, and its own copy of the
   launchd healer. Nothing it does depends on this repo existing.
 
 So a Wren change may read ScribeJay's *output* (vault pages, calendar events,
-log files). It must never import from the checkout, shell into it, or write to
-its config. If Wren needs something ScribeJay has, the answer is a second copy
+log files, and now its committed documentation). It must never import from the
+checkout, shell into it, or write to its config. If Wren needs something ScribeJay has, the answer is a second copy
 here, not a reach across.
 
 ## What left Wren's registry when the split happened

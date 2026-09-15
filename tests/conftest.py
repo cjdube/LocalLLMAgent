@@ -581,6 +581,30 @@ def _isolate_projects_dir(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_sibling_doc_repos(tmp_path, monkeypatch):
+    """Pin the two sibling documentation corpora at paths that do not exist.
+
+    The projects-dir treatment, for the projects-dir reason: agent/tools/docs.py
+    now *reads the machine* too. Its corpus spans two checkouts under ~/Projects
+    that are not part of THIS repo and may not be cloned at all, so left alone
+    list_docs() returns 40 names on a clean box and 64 on the developer's, and
+    every corpus-boundary assertion quietly becomes a statement about which
+    sibling repos they happen to have.
+
+    Pointing both at nonexistent paths also makes the DEFAULT suite exercise the
+    degrade — Wren's own documents only, never an error — which is the behaviour
+    that has to hold when a sibling is moved, unmounted or mid-upgrade. The tests
+    that want a sibling build a fixture tree and point the env var at it;
+    _sibling_roots() reads the env on every call, so setting it is enough.
+
+    Nothing here writes, so this is about determinism, not protecting production
+    state.
+    """
+    monkeypatch.setenv("WREN_WIKI_REPO_PATH", str(tmp_path / "no-wiki-repo"))
+    monkeypatch.setenv("WREN_SCRIBEJAY_REPO_PATH", str(tmp_path / "no-scribejay-repo"))
+
+
+@pytest.fixture(autouse=True)
 def _block_mail_subscriber(monkeypatch):
     """Stop any test from opening a real Pub/Sub streaming pull.
 

@@ -1,37 +1,101 @@
-"""Read-only access to Wren's OWN documentation, so she can answer "how do you
-handle a scheduled task that fails" out of the files that describe her.
+"""Read-only access to the documentation of the THREE systems that make up how
+Wren works, so she can answer "how do you handle a scheduled task that fails"
+and "how do my notes end up in the wiki" out of the files that decided it.
 
 Everything about how Wren works is written down — README.md, ANALYSIS.md and the
-38 files under docs/ — and until now none of it reached the model at runtime.
-agent/tools/projects.py comes closest and still does not get there: it reads this
-repo's README on the nightly scan, then _merge() strips the body before anything
-model-facing sees it, leaving a one-line distilled summary.
+files under docs/ — and until this tool existed none of it reached the model at
+runtime. agent/tools/projects.py comes closest and still does not get there: it
+reads this repo's README on the nightly scan, then _merge() strips the body
+before anything model-facing sees it, leaving a one-line distilled summary.
+
+The same was true one repo further out, and it mattered more. The learnings wiki
+is the knowledge base Wren queries constantly (agent/tools/wiki.py), but HOW a
+note becomes a page, and how the wiki is kept tidy, is documented in
+ObsidianWikiAgent. How the record she reads gets WRITTEN is documented in
+ScribeJay. Both were unreachable, and docs/scribejay.md forbids the obvious
+workaround: "How ScribeJay works is ScribeJay's own docs/architecture.md — do
+not describe its internals here, or the two copies drift and the wrong one gets
+read." This reader is what lets that rule hold.
+
+THE SEAM IS NOT WEAKENED
+------------------------
+A sibling's Markdown is read as DATA — the same category as its logs and its
+plists. Nothing here imports a sibling, shells into one, or writes to one. The
+coupling is one-way and is exactly "open a .md file".
+
+THREE CORPORA, ONE NAMESPACE
+----------------------------
+Wren's own documents keep BARE names — 'readme', 'limits', 'module-map' — so
+nothing that resolved before this change stopped resolving. A sibling's carry
+its repo as a prefix: 'scribejay/timezones', 'wiki/agent-context'.
+
+The prefix is not decoration. EIGHT ScribeJay documents share a filename stem
+with one of Wren's (llm-backend, logs, model-constraints, ntfy-setup,
+opaque-identifiers, readme, timezones, usage-ledger) and ObsidianWikiAgent
+shares one (readme). A flat merge would setdefault() the sibling away, and Wren
+would report in good faith that ScribeJay has no timezone document while reading
+Wren's own.
+
+A prefix was chosen over a second `repo` argument on read_doc. An argument
+creates a cross-argument consistency requirement the small model has to satisfy
+twice; a prefix makes the wrong combination unrepresentable — there is one
+string, and the model copies it back the way it already copies 'module-map'.
 
 WHAT IS IN THE CORPUS, AND WHAT IS DELIBERATELY NOT
 ----------------------------------------------------
-In: README.md (what she can do), ANALYSIS.md (how the subsystems fit), and the
-top level of docs/ (why each limit and design is what it is).
+In, from THIS repo: README.md (what she can do), ANALYSIS.md (how the subsystems
+fit), and the top level of docs/ (why each limit and design is what it is).
 
-Out, and these are not oversights:
+In, from ObsidianWikiAgent: README.md, SECURITY.md (the trust boundary the vault
+sits behind) and docs/ — of which docs/agent-context.md is the point of
+including the repo at all, being the descriptive, tool-neutral rationale behind
+its ingest and write paths.
+
+In, from ScribeJay: README.md and docs/ — of which docs/architecture.md is the
+file docs/scribejay.md defers to.
+
+Out, and none of these are oversights:
 
   AGENTS.md      Imperative instructions addressed to CODING agents working on
-                 this repo — "run pytest before calling a change done", "commit
+                 a repo — "run pytest before calling a change done", "commit
                  straight to main". Wren is not that agent. Handing her a file of
                  orders aimed at someone else is noise at best, and at worst she
-                 reads a maintenance instruction as something she should do.
-                 ANALYSIS.md is in precisely because it is the descriptive
-                 counterpart: it explains the same system without telling anyone
-                 to change it.
-  docs/reviews/  Gitignored. Audit plans and findings, not documentation.
+                 reads a maintenance instruction as something she should do. This
+                 is WORSE for a sibling's AGENTS.md, which is another repo's
+                 maintenance contract entirely. ANALYSIS.md and the wiki
+                 engine's docs/agent-context.md are in precisely because they are
+                 the descriptive counterparts: they explain the same systems
+                 without telling anyone to change anything.
+  CLAUDE.md      An import-only pointer in all three repos. Excluded by
+                 construction — root files are NAMED, never globbed.
+  persona.md     ScribeJay's scribejay/persona.md is another AGENT'S
+                 system-prompt material. Wren adopting ScribeJay's voice because
+                 a search hit landed it in her context is a failure with no error
+                 message. Outside both docs/ and the root list, so excluded by
+                 construction.
+  lint_defects/  ObsidianWikiAgent's tools/lint_defects/ holds deliberately
+                 FABRICATED defective wiki pages — fixtures for its linter.
+                 Feeding them to Wren would put invented wiki claims in the
+                 corpus she is told to trust. Excluded by construction.
+  docs/reviews/  Gitignored in all three repos. Audit plans and findings, not
+                 documentation.
   docs/handoff/  Gitignored. Work belonging to sibling repos.
 
 The corpus is read fresh from disk on every call. There is no index to keep in
-sync and nothing to invalidate: ~600KB reads in single-digit milliseconds, and
-the wiki's search does the same over twice as much (agent/tools/wiki.py).
+sync and nothing to invalidate: ~740KB reads in single-digit milliseconds, and
+the wiki's search does the same over more than that (agent/tools/wiki.py).
 
-The corpus lives beside the code, so the root is derived from __file__ rather
-than configured. There is no deployment in which the docs are somewhere else,
-and a setting nobody can meaningfully change is a setting that can be set wrong.
+WHERE THE ROOTS COME FROM
+-------------------------
+Wren's own root is derived from __file__: the docs travel with the code, there
+is no deployment in which they are somewhere else, and a setting nobody can
+meaningfully change is a setting that can be set wrong.
+
+The two siblings are the opposite case. They are separate checkouts that can be
+moved, unmounted, or simply never cloned, so each gets a Setting row read at
+CALL time (so a /settings save lands without a restart). A root that is not a
+directory contributes no documents at all — Wren-only, never an error, because
+"ScribeJay is mid-upgrade" must not break a question about Wren.
 
 This mirrors the SHAPE of agent/tools/wiki.py — search returns rows, read returns
 one trimmed document — without importing it. The two corpora agree on nothing
@@ -41,8 +105,10 @@ would mean a change to that project's page format could silently break this.
 
 Usage:
     python -m agent.tools.docs search "scheduled task failure"
+    python -m agent.tools.docs search "how do notes get into the wiki"
     python -m agent.tools.docs read limits
     python -m agent.tools.docs read limits --section "context window"
+    python -m agent.tools.docs read scribejay/architecture
     python -m agent.tools.docs list
 """
 
@@ -51,7 +117,7 @@ import re
 import sys
 from pathlib import Path
 
-from agent import prefs
+from agent import config, prefs
 from agent.tools._http import print_result
 
 _NAME = prefs.user_name()
@@ -68,11 +134,23 @@ _ROOT_DOCS = ("README.md", "ANALYSIS.md")
 # switching to a recursive walk would quietly pull both back in.
 _DOCS_DIR = "docs"
 
+# (name prefix, root-level files to include). The top level of docs/ is always
+# included on top of these. Root files are NAMED, never globbed — that is what
+# keeps each repo's AGENTS.md and CLAUDE.md out by construction rather than by a
+# rule somebody has to remember to hold.
+_SIBLING_REPOS = (
+    ("wiki", ("README.md", "SECURITY.md")),
+    ("scribejay", ("README.md",)),
+)
+
 # search_docs' caps, sized the way search_wiki's are. Summaries run ~200 chars
-# and the corpus is 40 documents, so the row cap is the one that normally binds;
-# the char budget covers a broad query that matches nearly everything. Both sit
-# well under the flat 8000-char tool-result cap in agent/loop.py, which is why
-# this tool needs no TOOL_RESULT_CHAR_CAPS entry of its own.
+# and the corpus is 64 documents across three repos, so the CHAR budget is now
+# the one that normally binds — the broadest query keeps 13 of the 15 allowed
+# rows before the char cap cuts it. Both still sit well under the flat 8000-char
+# tool-result cap in agent/loop.py (the worst measured case is 5,190), which is
+# why this tool needs no TOOL_RESULT_CHAR_CAPS entry of its own. A repo prefix
+# adds ~10 chars to a row, so the caps bound the PAGE, not the corpus: the
+# corpus can grow again without either number moving.
 MAX_SEARCH_RESULTS = 15
 MAX_SEARCH_CHARS = 4000
 
@@ -130,26 +208,81 @@ _STOPWORDS = frozenset({
 _FENCE_RE = re.compile(r"^```.*?^```", re.MULTILINE | re.DOTALL)
 
 
-def _doc_paths() -> dict:
-    """{name: path} for every document in the corpus, name being the filename
-    stem lowercased — 'readme', 'analysis', 'limits', 'module-map'.
+def _sibling_roots() -> dict:
+    """{prefix: configured root path} for the two sibling checkouts.
 
-    Building the map up front is also what makes read_doc safe. The name comes
-    from the model, and nothing here joins it onto a path; a name that is not
-    already a key simply does not resolve, so there is no traversal to defend
-    against and no _safe_child equivalent to get subtly wrong.
+    Read at CALL time, not at import, so a /settings save reaches the next
+    question without a restart.
+
+    The two reads are written out LONGHAND — one string-literal key each —
+    rather than folded into _SIBLING_REPOS and read in a loop. That is not
+    style: tests/test_schema.py's drift guard resolves a config.getenv() key
+    only when it is a string literal or a module-level constant, and a key that
+    arrives as a LOOP VARIABLE is invisible to it. Folded into the table, the
+    guard that exists to catch a key with no Setting row caught neither of these
+    — measured, _tree_reads() returned both only after this shape.
     """
-    paths = {}
-    for filename in _ROOT_DOCS:
-        path = _REPO_ROOT / filename
-        if path.is_file():
-            paths[path.stem.lower()] = path
+    return {
+        "wiki": config.getenv("WREN_WIKI_REPO_PATH", "~/Projects/ObsidianWikiAgent"),
+        "scribejay": config.getenv("WREN_SCRIBEJAY_REPO_PATH", "~/Projects/ScribeJay"),
+    }
 
-    docs_dir = _REPO_ROOT / _DOCS_DIR
+
+def _md_files(root: Path, root_docs: tuple) -> list:
+    """(stem, path) for one repo's corpus: the NAMED root files, then the top
+    level of docs/.
+
+    iterdir() and never rglob(). All three repos gitignore docs/reviews/ and this
+    one also has docs/handoff/; neither is documentation, and a switch to a
+    recursive walk would quietly pull both back in for every repo at once.
+    """
+    out = []
+    for filename in root_docs:
+        path = root / filename
+        if path.is_file():
+            out.append((path.stem.lower(), path))
+
+    docs_dir = root / _DOCS_DIR
     if docs_dir.is_dir():
         for path in sorted(docs_dir.iterdir()):
             if path.is_file() and path.suffix == ".md" and not path.name.startswith("."):
-                paths.setdefault(path.stem.lower(), path)
+                out.append((path.stem.lower(), path))
+    return out
+
+
+def _doc_paths() -> dict:
+    """{name: path} for every document in the corpus.
+
+    Wren's own documents keep BARE names — 'readme', 'analysis', 'limits',
+    'module-map'. A sibling's carry its repo as a prefix — 'scribejay/timezones',
+    'wiki/agent-context' — because eight ScribeJay stems collide with one of
+    Wren's and a flat merge would setdefault() the sibling away. See the module
+    docstring for the full list and for why a prefix beat a `repo` argument.
+
+    Building the map up front is still what makes read_doc safe, and the prefix
+    does not weaken it: a key is CONSTRUCTED here from a prefix we chose and a
+    stem read off disk, never parsed out of model input, and nothing joins a
+    model-supplied name onto a path. A name that is not already a key simply does
+    not resolve, so there is no traversal to defend against.
+
+    A sibling root that is not a directory contributes nothing — Wren-only, never
+    an error. A checkout can be moved, unmounted, or never cloned, and that means
+    "no ScribeJay documents today", not a failed tool call.
+    """
+    paths = {}
+    # setdefault still earns its place within a repo: it is what makes a
+    # root-level README.md win over a docs/readme.md rather than the walk order
+    # deciding. Across repos it is the prefix, not this, that stops a collision.
+    for stem, path in _md_files(_REPO_ROOT, _ROOT_DOCS):
+        paths.setdefault(stem, path)
+
+    roots = _sibling_roots()
+    for prefix, root_docs in _SIBLING_REPOS:
+        root = Path(roots[prefix]).expanduser()
+        if not root.is_dir():
+            continue
+        for stem, path in _md_files(root, root_docs):
+            paths.setdefault(f"{prefix}/{stem}", path)
     return paths
 
 
@@ -165,7 +298,14 @@ def _summary(text: str) -> str:
     body = _H1_RE.sub("", _FENCE_RE.sub("", text), count=1)
     for block in body.split("\n\n"):
         para = " ".join(block.split())
-        if not para or para.startswith(("#", "|", ">", "-", "*")):
+        # '<' is in the list for a raw HTML tag: ScribeJay's README opens with
+        # an <img> badge line ABOVE its H1, and _H1_RE strips the H1 from
+        # anywhere, so without this the summary would be the tag. Skipping a tag
+        # block is the same shape as skipping a table row or a blockquote — no
+        # HTML stripping, which would break the docstring's contract that a
+        # document breaking the convention degrades to a less useful first
+        # paragraph, never to an error.
+        if not para or para.startswith(("#", "|", ">", "-", "*", "<")):
             continue
         if len(para) <= _SUMMARY_CHARS:
             return para
@@ -289,6 +429,25 @@ def _fit_doc(text: str, budget: int = MAX_DOC_CHARS) -> str:
     return kept + notice
 
 
+def _rank_key(score: int, name: str) -> tuple:
+    """The result ordering: score first, then Wren's own document, then name.
+
+    Wren's OWN document goes ahead of a sibling's on a tie because the question
+    was asked of Wren — and eight ScribeJay documents share a filename stem with
+    one of hers, so a tie is the common case here, not the edge. Left to the
+    name alone the ALPHABET decided it: the key was (-score, name), 's' sorts
+    before 't', and 'scribejay/timezones' beat 'timezones'. Measured on the real
+    corpus, the flip hit 'timezones' and 'usage ledger'.
+
+    The name stays last, so the order is still stable run to run.
+
+    This is a named function rather than an inline tuple so a test can put the
+    old two-part key back and prove the tie-break is what decides the order —
+    tests/test_docs.py:test_the_own_first_tie_break_bites.
+    """
+    return (-score, "/" in name, name)
+
+
 def _search_docs(query: str) -> list:
     """Documents matching `query` as {name, summary} rows — plus a `context`
     snippet on the ones that matched in the body — best match first.
@@ -321,9 +480,9 @@ def _search_docs(query: str) -> list:
         out = {"name": row["name"], "summary": row["summary"]}
         if hits:
             out["context"] = _context(body, min(hits, key=lambda m: m.start()))
-        scored.append((-score, row["name"], out))
-    scored.sort()
-    return [row for _, _, row in scored]
+        scored.append((_rank_key(score, row["name"]), out))
+    scored.sort(key=lambda pair: pair[0])
+    return [row for _, row in scored]
 
 
 # --- model-facing tools ---
@@ -360,6 +519,20 @@ def read_doc(name: str, section: str | None = None) -> dict:
         key = key[:-3]
     paths = _doc_paths()
     path = paths.get(key)
+    if path is None:
+        # The model re-types what it read, and the repo prefix is the likeliest
+        # thing it drops — 'architecture' for 'scribejay/architecture'. Resolve a
+        # bare stem only when exactly ONE document ends in it. This is still a
+        # lookup against keys already in the map, never a path join, so it adds
+        # no traversal surface. A bare name that IS one of Wren's own matched
+        # exactly above and never reaches here: bare means Wren's.
+        hits = [k for k in paths if k.endswith("/" + key)]
+        if len(hits) == 1:
+            key, path = hits[0], paths[hits[0]]
+        elif hits:
+            return {"error": f"more than one document is called '{name}' — "
+                             "ask for one by its full name",
+                    "documents": sorted(hits)}
     if path is None:
         # Name what exists rather than only saying no, so the retry is informed.
         return {"error": f"no document called '{name}'", "documents": sorted(paths)}
@@ -402,20 +575,25 @@ SEARCH_DOCS_SCHEMA = {
     "function": {
         "name": "search_docs",
         "description": (
-            "Search the FULL TEXT of Wren's own documentation — the files that "
-            "describe how she is built, what she can do, how each scheduled "
-            "task behaves, where her limits are and why each one was chosen. "
-            "Get back each matching document name with a one-line summary, plus "
-            "a short quote when the match was in the body. Use this for any "
-            f"question {_NAME} asks about how Wren works, why she does "
-            "something a particular way, or what happens in some situation. "
-            "**This is the ONLY way to find out what her documentation says: "
-            "you do not know its contents.** Only the documents this tool "
-            "returns exist. Never name, describe, or quote a document that did "
-            "not come back from a search. Call this first, then call read_doc "
-            "on the one you want. If it returns no matches, say the "
-            "documentation does not cover that — do not answer from your own "
-            "knowledge as if it came from her docs."
+            "Search the FULL TEXT of the documentation for the three systems "
+            "that make up how Wren works: her OWN files (how she is built, what "
+            "she can do, how each scheduled task behaves, where her limits are "
+            "and why each one was chosen); the WIKI ENGINE that files raw notes "
+            "into the learnings wiki she reads and keeps it tidy; and "
+            "SCRIBEJAY, the journaling agent that writes the record of the day "
+            "she reads back. Get back each matching document name with a "
+            "one-line summary, plus a short quote when the match was in the "
+            f"body. Use this for any question {_NAME} asks about how Wren "
+            "works, how his notes get into the wiki or how it is maintained, "
+            "how the record of his day gets written, why something is done a "
+            "particular way, or what happens in some situation. **This is the "
+            "ONLY way to find out what any of that documentation says: you do "
+            "not know its contents.** Only the documents this tool returns "
+            "exist. Never name, describe, or quote a document that did not come "
+            "back from a search. Call this first, then call read_doc on the one "
+            "you want. If it returns no matches, say the documentation does not "
+            "cover that — do not answer from your own knowledge as if it came "
+            "from those docs."
         ),
         "parameters": {
             "type": "object",
@@ -440,19 +618,28 @@ READ_DOC_SCHEMA = {
     "function": {
         "name": "read_doc",
         "description": (
-            "Read one document from Wren's own documentation, by a name "
-            "search_docs returned. Cite the document name in your answer. "
-            "Several are too long to return whole; those come back with a note "
-            "naming the sections that were cut. When the answer you need is in "
-            "one of those, call this again with that heading as `section` to "
-            "read that part in full."
+            "Read one document, by a name search_docs returned. Cite the "
+            "document name in your answer. **A name with a slash in it says "
+            "which system the document belongs to**: 'scribejay/architecture' "
+            "is ScribeJay's, 'wiki/agent-context' is the wiki engine's, and a "
+            "plain name with no slash is Wren's own. Pass the name back exactly "
+            "as the search returned it — several documents share a plain name "
+            "across the three systems, and dropping the part before the slash "
+            "gets you Wren's copy instead. Several are too long to return "
+            "whole; those come back with a note naming the sections that were "
+            "cut. When the answer you need is in one of those, call this again "
+            "with that heading as `section` to read that part in full."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "name": {
                     "type": "string",
-                    "description": "Document name, e.g. 'limits' or 'readme' (with or without .md).",
+                    "description": (
+                        "Document name exactly as search_docs returned it — "
+                        "'limits', 'readme', 'scribejay/timezones', "
+                        "'wiki/agent-context' (with or without .md)."
+                    ),
                 },
                 "section": {
                     "type": "string",

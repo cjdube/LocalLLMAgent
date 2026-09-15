@@ -409,6 +409,71 @@ CASES = [
         "final_must_not_contain": ["i've added", "i have added", "i've scheduled",
                                    "it's on your calendar"],
     },
+    # ---- documentation across three repos ---------------------------------- #
+    #
+    # search_docs covers Wren's own repo plus two sibling checkouts (the wiki
+    # engine and ScribeJay). pytest monkeypatches every model call, so it cannot
+    # see the two things that change here: whether a broader description costs
+    # search_wiki its calls, and whether the repo prefix survives a round trip
+    # through the model. These three cases are the only check on either.
+    {
+        "id": "docs_wiki_ingest",
+        # The catalogue rule. "How does my wiki work" is exactly the topic a
+        # model will happily write confident prose about without calling
+        # anything — and the real answer is in a sibling repo's docs.
+        "prompt": "How do my notes actually end up in the wiki?",
+        "expect_tool": "search_docs",
+        "tool_results": {
+            "search_docs": {"documents": [
+                {"name": "wiki/agent-context", "summary":
+                 "How ObsidianWikiAgent ingests raw notes and writes wiki pages.",
+                 "quote": "Anything dropped in raw/ is picked up on the next "
+                          "ingest run and becomes an asserted page."},
+            ]},
+        },
+        "final_must_contain": ["raw"],
+        # Plausible-sounding ingest mechanisms that are not how this works.
+        "final_must_not_contain": ["webhook", "database", "api key"],
+    },
+    {
+        "id": "docs_sibling_vs_vault",
+        # The DISCRIMINATION case. search_docs now describes itself in terms of
+        # the wiki, which puts two similar-sounding search tools in front of a
+        # small model. This ask is about the vault's CONTENTS, so search_wiki is
+        # the right call; if this drops, the description or the keyword cues
+        # took something from it.
+        "prompt": "What does my wiki say about pricing?",
+        "expect_tool": "search_wiki",
+        "tool_results": {
+            "search_wiki": {"pages": [
+                {"title": "Pricing a fractional engagement", "path": "pricing.md",
+                 "quote": "Day rate over hourly, quoted per outcome."},
+            ]},
+        },
+        "final_must_contain": ["day rate"],
+    },
+    {
+        "id": "docs_collision_readback",
+        # Did the prefix survive the round trip? The whole namespacing decision
+        # rests on the model copying 'scribejay/timezones' back verbatim. Drop
+        # the prefix and it reads WREN'S timezone doc and answers confidently
+        # about the wrong system — a failure with no error message.
+        "prompt": "What does ScribeJay's timezone doc say?",
+        "expect_tool": "read_doc",
+        "arg_checks": {"name": _has("scribejay/")},
+        "tool_results": {
+            "search_docs": {"documents": [
+                {"name": "scribejay/timezones", "summary":
+                 "How ScribeJay converts a source's UTC stamps to local days."},
+                {"name": "timezones", "summary":
+                 "How Wren converts a source's UTC stamps to local days."},
+            ]},
+            "read_doc": {"name": "scribejay/timezones", "content":
+                         "# Timezones\n\nScribeJay stamps every capture in UTC "
+                         "and converts to the local day at write time."},
+        },
+        "final_must_contain": ["utc"],
+    },
     # ---- no tool should be called ------------------------------------------ #
     {
         "id": "no_tool_greeting",

@@ -1,8 +1,10 @@
 # Self-knowledge
 
-Wren can read her own configuration and her own documentation. Two tools for
-the settings and the docs, one deferred tool group, and nothing added to the
-system prompt.
+Wren can read her own configuration and the documentation of all three systems
+she is made of — her own repo, the wiki engine that fills her knowledge base,
+and the journaling agent that writes the record she reads. Two tools for the
+settings and the docs, one deferred tool group, and nothing added to the system
+prompt.
 
 ## What prompted it
 
@@ -119,23 +121,92 @@ ObsidianWikiAgent format change break this silently.
 
 ### The corpus
 
+**64 documents, ~740KB, across three checkouts.** The wiki is the knowledge base
+Wren queries constantly; how a note gets into it, and how it is maintained, is
+part of how she works. Before 2026-09-15 she had no reachable answer to either.
+
+**Wren's own repo — 40 documents**
+
 | Included | Excluded | Why |
 |---|---|---|
 | `README.md`, `ANALYSIS.md` | `AGENTS.md` | Imperative instructions aimed at **coding agents**. "Run pytest before calling a change done" is an order meant for somebody else, and Wren reading it as one aimed at her is worse than noise. |
 | `docs/*.md` (top level) | `docs/reviews/` | Gitignored. Audit plans, not documentation. |
 | | `docs/handoff/` | Gitignored. Work belonging to sibling repos. |
 
-40 documents. `ANALYSIS.md` is in because it is the **descriptive** counterpart
-to AGENTS.md: it explains how the subsystems fit without telling anyone to
-change anything.
+`ANALYSIS.md` is in because it is the **descriptive** counterpart to AGENTS.md:
+it explains how the subsystems fit without telling anyone to change anything.
 
-The repo root comes from `__file__`, not a setting. The docs travel with the
-code; there is nothing to configure. Read live from disk on every call, no
-index — the wiki reads 1.19MB in 13ms and this corpus is smaller.
+**ObsidianWikiAgent — 4 documents.** `README.md`, `SECURITY.md` (the trust
+boundary the vault sits behind), `docs/agent-context.md` and
+`docs/removing-content.md`. `agent-context.md` is the point of including this
+repo at all: its "Ingest and write-path decisions" section is the literal answer
+to *how does data get into the wiki*, and it stands in the same descriptive
+relation to that repo's `AGENTS.md` as `ANALYSIS.md` does to Wren's. Excluded:
+that repo's `AGENTS.md` and `CLAUDE.md`, and `tools/lint_defects/**` — those are
+deliberately **defective** wiki pages used as linter fixtures, and feeding them
+in would put invented wiki claims in the corpus Wren is told to trust.
 
-A document's name is its filename stem (`limits`, `module-map`, `readme`). Its
-summary is the first real paragraph after the H1, with any opening code fence
-skipped, cut on a word boundary.
+**ScribeJay — 20 documents.** `README.md` and the top level of `docs/`, which is
+where `docs/architecture.md` lives — the file `docs/scribejay.md` explicitly
+defers to. Excluded: `AGENTS.md`, `CLAUDE.md`, and `scribejay/persona.md`, which
+is **another agent's system-prompt material**. Wren adopting ScribeJay's voice
+because a search hit landed it in her context is a failure with no error message.
+
+Every exclusion above holds **by construction**, not by a rule someone has to
+remember: each sibling's root files are named one at a time, never globbed, and
+only the top level of `docs/` is walked. `iterdir()`, never `rglob()` — all
+three repos gitignore `docs/reviews/`, and a recursive walk would quietly pull
+it back in.
+
+### Three corpora, one namespace
+
+Wren's own documents keep **bare** names (`limits`, `module-map`). A sibling's
+carry its repo as a prefix: `scribejay/architecture`, `wiki/agent-context`.
+
+The prefix is not decoration. `_doc_paths()` keys on the lowercased filename
+stem with `setdefault`, and eight ScribeJay documents share a stem with one of
+Wren's — `llm-backend`, `logs`, `model-constraints`, `ntfy-setup`,
+`opaque-identifiers`, `readme`, `timezones`, `usage-ledger` — plus
+ObsidianWikiAgent's `readme`. A flat merge drops all nine silently, and Wren
+tells the user in good faith that ScribeJay has no timezone document while
+reading her own.
+
+A prefix was chosen over a second `repo` argument because it makes the wrong
+combination unrepresentable: there is one string and the model copies it back,
+the same way it already round-trips `module-map`. Bare names still resolve
+exactly as before, so nothing that worked stopped working.
+
+`read_doc` also accepts a **dropped** prefix — asking for `architecture` finds
+`scribejay/architecture` when that is the only match, and returns the candidate
+list when it is not. A bare name that *is* one of Wren's hits the exact match
+first and never reaches that fallback: bare means Wren's.
+
+### Where the roots come from
+
+Wren's own root comes from `__file__`, not a setting — her docs travel with her
+code, so there is nothing to configure. The siblings do not, so each has its own
+settings key: `WREN_WIKI_REPO_PATH` and `WREN_SCRIBEJAY_REPO_PATH`, both
+`applies="live"` because `_doc_paths()` reads them at call time.
+
+**Neither reuses `WREN_WIKI_LINT_ROOT`.** Wren now has three relationships to a
+sibling checkout — logs read, code run, docs read — and each keeps its own key.
+Folding docs-read into the lint root means pointing the linter at a worktree
+silently moves Wren's documentation corpus with it, and rewriting that row's
+help text would make `/settings` lie about what the field does.
+
+A checkout that is missing, moved or mid-upgrade yields no keys at all. Search
+degrades to Wren's own documents and **never errors** — a sibling being absent
+means "no ScribeJay docs today", not a broken tool.
+
+Read live from disk on every call, no index — the wiki reads 1.19MB in 13ms and
+this corpus is smaller.
+
+A document's name is its filename stem (`limits`, `module-map`, `readme`), with
+the repo prefix for a sibling's. Its summary is the first real paragraph after
+the H1, with any opening code fence skipped, cut on a word boundary. Lines
+opening with `<` are skipped too: ScribeJay's README starts with a raw `<img>`
+tag above its H1, and without that one character its summary would be the tag.
+Verified: **zero** of Wren's 40 summaries change.
 
 ### Scoring
 
@@ -146,14 +217,30 @@ wrong — it is what ranks a document for the `we` inside `power`.
 
 Weights are name 3 > summary 2 > body 1. A term scores once per document
 however often it appears, so a 30KB document cannot outrank a short precise one
-on repetition alone — and this corpus has a 96KB README in it. Ties break on
-the name, so the order is stable run to run. A body-only hit carries a
-~200-char quote, which is the only evidence of why a document matched a term
-its title and summary do not hold.
+on repetition alone — and this corpus has a 96KB README in it. A body-only hit
+carries a ~200-char quote, which is the only evidence of why a document matched
+a term its title and summary do not hold.
+
+Ranking is `_rank_key(score, name)` → `(-score, is_a_sibling, name)`. Score
+first, then **Wren's own document ahead of a sibling's on a tie**, then the name
+so the order stays stable run to run.
+
+The middle term is a fix for a measured regression, not a precaution. The
+question was asked of Wren, and nine documents share a stem with one of hers, so
+a tie is the common case here rather than the edge. Sorting on the name alone,
+the alphabet decided it — `s` before `t` — and `scribejay/timezones` beat
+`timezones`. Confirmed for `timezones` and `usage ledger` before the fix. With
+it, 7 of the 8 ScribeJay collision pairs put Wren's document first; the eighth
+(`ntfy setup`) is not a tie at all — ScribeJay's summary carries both query
+terms and Wren's carries one, so it wins on summary weight legitimately.
+
+`_rank_key` is a named module-level function purely so `tests/test_docs.py` can
+monkeypatch it back to the broken `(-score, name)` shape and assert the sibling
+wins — the same failing-then-passing guard pattern the stopword test uses.
 
 ### Reading, and the trim
 
-Section reading is **required, not optional**. Thirteen of the 40 documents exceed
+Section reading is **required, not optional**. Eighteen of the 64 documents exceed
 the 12000-char budget and `README.md`'s architecture section alone is larger
 than the whole budget. README stays one document read by section rather than
 eleven synthetic documents, which reuses the `section` argument instead of
@@ -190,6 +277,11 @@ checked alongside the length filter.
 that is not a key simply does not resolve. Nothing joins model input onto a
 path, so there is no traversal to defend against.
 
+**The prefix does not weaken that.** Each key is built here in Python out of a
+prefix this module chose and a stem read off disk — never parsed out of model
+input. The dropped-prefix fallback matches against keys already in the map, so
+`scribejay/../../etc/passwd` is simply a name that is not there.
+
 ## The tool descriptions carry the design
 
 Nothing about any of this is in the system prompt — that was the point — so the
@@ -207,6 +299,31 @@ reaches these tools through a `load_tools` hop and will not make that hop for a
 question it does not recognise. "What colour do we use for..." is the wording
 that failed, so it is the wording in the description.
 
+## Measured against the live model
+
+`pytest` monkeypatches every model call, so it cannot see the two things this
+change actually risks. Three cases in `evals/cases_chat.py`, replayed 12 times
+each against `gemma4:26b-mlx` on 2026-09-15 — 12 reps because this repo's
+precedent for catalogue-rule wording is a 12-replay count (`list_games` went
+from 2-of-12 fabricating to 12 of 12 calling the tool):
+
+| Case | Ask | Expected | Result |
+|---|---|---|---|
+| `docs_wiki_ingest` | "How do my notes actually end up in the wiki?" | `search_docs` | **12/12**, nothing fabricated |
+| `docs_sibling_vs_vault` | "What does my wiki say about pricing?" | `search_wiki` | **12/12** |
+| `docs_collision_readback` | "What does ScribeJay's timezone doc say?" | `read_doc(name="scribejay/…")` | **12/12**, arguments 12/12 |
+
+The middle one is the discrimination case: `search_docs` now describes itself in
+terms of the wiki, which puts two similar-sounding search tools in front of the
+model, and this is the check that the broader description cost `search_wiki`
+nothing. The third is the one the whole namespacing decision rests on — the
+prefix survived the round trip every time.
+
+`docs_wiki_ingest` also caught a real gap before a user did. The cue list held
+`how do notes` and the natural spoken form is *"how do **my** notes"*; cue
+matching is a literal substring, so the most likely phrasing of the question
+this feature exists to answer pre-loaded nothing. Both cues are there now.
+
 ## Registration
 
 - **Group `self`** in `agent/toolset.py`, holding all three tools.
@@ -217,6 +334,18 @@ that failed, so it is the wording in the description.
   call with the insurance adjuster" — ordinary calendar asks. `settings`
   (plural) and `setup` (one word) replaced them. Do not shorten a cue without
   re-running `tests/test_toolset.py`.
+- **There is deliberately no bare `wiki` cue here.** `GROUP_KEYWORDS["wiki"]`
+  already owns that word for `search_wiki`. The two tools answer different
+  questions off similar names: `search_wiki` reads the vault's **contents**
+  ("what did I decide about pricing"), `search_docs` reads the engine's
+  **documentation** ("how does a note become a page"). Pre-loading both on a
+  bare "wiki" puts two similar-sounding search tools in front of a small model
+  on the one ask where picking wrong is invisible. **Cue on the process, never
+  on the store** — hence `wiki agent`, `wiki lint`, `how does the wiki`, `how do
+  notes`, `ingest`, `obsidianwikiagent`. `journaling` is in for the same reason
+  and a bare `journal` is out: "what did I write in my journal" is a vault ask.
+  `tests/test_toolset.py` has a test in each direction so nobody adds the bare
+  cue in six months without something complaining.
 - **Policy sets**: all three are read-only, so none appears in `WRITE_TOOLS`,
   `CONSEQUENTIAL_TOOLS` or `UNATTENDED_EXCLUDED_TOOLS`. All three **are** in
   `MAIL_JOB_SAFE_TOOLS`, which is a safe list, not a deny list — an
@@ -231,4 +360,5 @@ that failed, so it is the wording in the description.
 | `agent/tools/setup_info.py` | `describe_setup` |
 | `agent/tools/docs.py` | `search_docs`, `read_doc`, plus an unregistered `list_docs` for humans |
 | `tests/test_setup_info.py` | The feature, and the credential boundary |
-| `tests/test_docs.py` | The corpus boundary, scoring, section matching, the trim |
+| `tests/test_docs.py` | The corpus boundary, scoring, section matching, the trim, and the sibling namespace |
+| `tests/conftest.py` | `_isolate_sibling_doc_repos` pins both sibling roots at paths that do not exist, so the suite reads the same on a clean box as on this machine |

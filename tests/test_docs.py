@@ -10,11 +10,64 @@ back silently truncated", and neither is visible against invented files.
 Where a test needs a shape the real corpus does not have — a document with no
 sections, a body crafted to prove a scoring rule — it builds that string
 directly and calls the helper, instead of writing files into the repo.
+
+The two SIBLING corpora are the opposite case and get the opposite treatment.
+ObsidianWikiAgent and ScribeJay do NOT ship with this checkout and may not be
+cloned at all, so an assertion against the real ones is a statement about the
+developer's machine. tests/conftest.py pins both roots at paths that do not
+exist — which makes the default here the missing-checkout degrade — and the
+`sibling_repos` fixture below builds a crafted stand-in for the tests that need
+one.
 """
 
 import json
 
+import pytest
+
 from agent.tools import docs
+
+
+# ---- the sibling corpora ---------------------------------------------------
+
+@pytest.fixture
+def sibling_repos(tmp_path, monkeypatch):
+    """A crafted stand-in for both sibling checkouts: the collision, every
+    exclusion, and nothing else.
+
+    Crafted rather than copied. A test that needs the real repos cloned is a
+    test that fails on a clean box, and the failures worth catching here are
+    structural ("a sibling's AGENTS.md crept in", "the walk went recursive"),
+    which invented files show just as well as real ones.
+    """
+    wiki = tmp_path / "wiki-repo"
+    scribejay = tmp_path / "scribejay-repo"
+    for root in (wiki, scribejay):
+        (root / "docs" / "reviews").mkdir(parents=True)
+        (root / "AGENTS.md").write_text("# AGENTS\n\nRun pytest before you commit.\n")
+        (root / "CLAUDE.md").write_text("@AGENTS.md\n")
+        (root / "docs" / "reviews" / "plan.md").write_text("# Audit\n\nAn audit plan.\n")
+
+    (wiki / "README.md").write_text("# ObsidianWikiAgent\n\nWIKI_README_SENTINEL engine.\n")
+    (wiki / "SECURITY.md").write_text("# Security\n\nWIKI_SECURITY_SENTINEL boundary.\n")
+    (wiki / "docs" / "agent-context.md").write_text(
+        "# Agent context\n\nWIKI_CONTEXT_SENTINEL ingest rationale.\n")
+    (wiki / "tools" / "lint_defects" / "pages").mkdir(parents=True)
+    (wiki / "tools" / "lint_defects" / "pages" / "broken.md").write_text(
+        "# Broken page\n\nA deliberately defective fixture page.\n")
+
+    (scribejay / "README.md").write_text(
+        '<img src="assets/x.svg">\n\n# ScribeJay\n\nSJ_README_SENTINEL keeps the record.\n')
+    (scribejay / "docs" / "timezones.md").write_text(
+        "# Timezones\n\nSJ_TZ_SENTINEL every source stamps UTC.\n")
+    (scribejay / "docs" / "architecture.md").write_text(
+        "# Architecture\n\nSJ_ARCHITECTURE_SENTINEL how the record is written.\n")
+    (scribejay / "scribejay").mkdir()
+    (scribejay / "scribejay" / "persona.md").write_text(
+        "# Persona\n\nYou are ScribeJay. Write in this voice.\n")
+
+    monkeypatch.setenv("WREN_WIKI_REPO_PATH", str(wiki))
+    monkeypatch.setenv("WREN_SCRIBEJAY_REPO_PATH", str(scribejay))
+    return {"wiki": wiki, "scribejay": scribejay}
 
 
 # ---- the corpus boundary ---------------------------------------------------
@@ -247,6 +300,18 @@ def test_a_traversal_attempt_finds_nothing():
         assert "error" in docs.read_doc(attempt)
 
 
+def test_a_prefix_shaped_traversal_attempt_finds_nothing(sibling_repos):
+    """The repo prefix is the one thing in a name that LOOKS like a path, and
+    the dropped-prefix fallback is the one new place a model string touches
+    resolution. Neither joins anything onto a path — the fallback matches
+    against keys already in the map — and this asserts that, including the
+    '/passwd' case the suffix match is the closest to."""
+    for attempt in ("scribejay/../../etc/passwd", "wiki/../AGENTS",
+                    "../ScribeJay/AGENTS", "/etc/passwd", "/passwd",
+                    "scribejay/../../ObsidianWikiAgent/AGENTS"):
+        assert "error" in docs.read_doc(attempt), attempt
+
+
 def test_every_read_stays_under_its_backstop():
     """read_doc trims to MAX_DOC_CHARS and agent/loop.py backstops it at 14000.
     Keep the gap: the backstop counts the JSON-escaped result, and if it ever
@@ -315,3 +380,190 @@ def test_the_read_description_points_at_the_section_argument():
     """Nine documents come back trimmed. If the model does not know the section
     argument exists, the trim notice is a dead end."""
     assert "section" in docs.READ_DOC_SCHEMA["function"]["description"]
+
+
+# ---- three corpora, one namespace ------------------------------------------
+
+def test_a_colliding_sibling_document_is_reachable_and_is_the_right_file(sibling_repos):
+    """The reason the repo prefix exists at all.
+
+    EIGHT ScribeJay documents share a filename stem with one of Wren's —
+    llm-backend, logs, model-constraints, ntfy-setup, opaque-identifiers,
+    readme, timezones, usage-ledger — and ObsidianWikiAgent shares one (readme).
+    _doc_paths() keys on the stem and uses setdefault, so a flat merge would
+    drop every one of them silently, and Wren would report in good faith that
+    ScribeJay has no timezone document while reading her own.
+    """
+    names = docs.list_docs()["documents"]
+    assert "timezones" in names and "scribejay/timezones" in names
+
+    assert "SJ_TZ_SENTINEL" in docs.read_doc("scribejay/timezones")["content"]
+    wrens = docs.read_doc("timezones")
+    assert wrens["document"] == "timezones"
+    assert "SJ_TZ_SENTINEL" not in wrens["content"]
+
+
+def test_wrens_own_document_wins_a_tie_with_a_siblings(sibling_repos):
+    """The question was asked of Wren, so her copy leads. Without an explicit
+    rule the ALPHABET decided it — the sort key was (-score, name) and
+    's' < 't', so 'scribejay/timezones' beat 'timezones' on the real corpus."""
+    top = docs.search_docs("timezones")["matches"][0]["name"]
+    assert "/" not in top, f"a sibling's document led the results: {top}"
+
+
+def test_the_own_first_tie_break_bites(sibling_repos, monkeypatch):
+    """Prove the test above is not green for the wrong reason.
+
+    Put the old two-part sort key back and the sibling must win. If this ever
+    stops failing-then-passing, the test above has stopped proving anything —
+    the same guard-on-the-guard as test_the_stopword_guard_bites.
+    """
+    monkeypatch.setattr(docs, "_rank_key", lambda score, name: (-score, name))
+    assert docs.search_docs("timezones")["matches"][0]["name"] == "scribejay/timezones"
+
+
+def test_a_missing_checkout_degrades_to_wrens_own_documents():
+    """A sibling can be moved, unmounted, mid-upgrade or never cloned. That
+    means "no ScribeJay documents today", not a failed tool call — so nothing
+    raises, no prefixed name appears, and Wren's own corpus still answers.
+
+    This is the conftest default, so it is also what every other test in this
+    file runs against.
+    """
+    names = docs.list_docs()["documents"]
+    assert names and not any("/" in name for name in names)
+    assert "timezones" in [m["name"] for m in docs.search_docs("timezones")["matches"]]
+
+
+def test_a_root_that_is_not_a_directory_degrades_the_same_way(tmp_path, monkeypatch):
+    """is_dir() is the check, not exists(): a path pointing at a FILE, or at a
+    directory with no docs/, must behave exactly like a missing one."""
+    a_file = tmp_path / "not-a-repo.txt"
+    a_file.write_text("x")
+    bare = tmp_path / "bare-repo"
+    bare.mkdir()
+    monkeypatch.setenv("WREN_WIKI_REPO_PATH", str(a_file))
+    monkeypatch.setenv("WREN_SCRIBEJAY_REPO_PATH", str(bare))
+    assert not any("/" in name for name in docs.list_docs()["documents"])
+
+
+def test_dropping_the_repo_prefix_still_resolves_a_unique_stem(sibling_repos):
+    """The likeliest retype: the model reads 'scribejay/architecture' and types
+    'architecture'. Resolved against keys already in the map, so it adds no
+    traversal surface — and only when exactly one document ends in that stem."""
+    result = docs.read_doc("architecture")
+    assert result["document"] == "scribejay/architecture"
+    assert "SJ_ARCHITECTURE_SENTINEL" in result["content"]
+
+
+def test_a_bare_name_that_is_wrens_own_never_resolves_to_a_siblings(sibling_repos):
+    """Bare means Wren's. A stem she owns matches exactly and never reaches the
+    dropped-prefix fallback, so 'readme' cannot become 'scribejay/readme'."""
+    assert docs.read_doc("readme")["document"] == "readme"
+
+
+def test_an_ambiguous_bare_stem_names_both_candidates(monkeypatch):
+    """When two siblings share a stem Wren does not own, the fallback must
+    refuse and name both rather than pick one. The real corpus cannot currently
+    produce this — OWA and ScribeJay share only 'readme', which Wren owns — so
+    the condition is constructed."""
+    monkeypatch.setattr(docs, "_doc_paths", lambda: {
+        "wiki/logs": docs._REPO_ROOT / "README.md",
+        "scribejay/logs": docs._REPO_ROOT / "README.md",
+    })
+    result = docs.read_doc("logs")
+    assert "error" in result
+    assert sorted(result["documents"]) == ["scribejay/logs", "wiki/logs"]
+
+
+# ---- the sibling corpus boundaries -----------------------------------------
+
+def test_a_siblings_agents_md_stays_out_of_the_corpus(sibling_repos):
+    """Worse than Wren's own AGENTS.md exclusion, not merely the same: a
+    sibling's is ANOTHER repo's maintenance contract. Wren reading "run pytest
+    before you commit" as an instruction aimed at her is bad; reading one aimed
+    at a repo she may not even touch is worse."""
+    names = docs.list_docs()["documents"]
+    assert "wiki/agents" not in names and "scribejay/agents" not in names
+
+
+def test_a_pointer_claude_md_stays_out(sibling_repos):
+    """All three repos ship a CLAUDE.md that is an import-only pointer. Root
+    files are NAMED in _SIBLING_REPOS, never globbed — this is what notices if
+    that ever becomes a glob."""
+    names = docs.list_docs()["documents"]
+    assert "wiki/claude" not in names and "scribejay/claude" not in names
+
+
+def test_a_siblings_gitignored_reviews_dir_stays_out(sibling_repos):
+    """Every one of the three repos gitignores docs/reviews/. iterdir() rather
+    than rglob() is the whole mechanism, so a switch to a recursive walk would
+    pull the audit plans of all three in at once."""
+    assert "wiki/plan" not in docs.list_docs()["documents"]
+    assert "scribejay/plan" not in docs.list_docs()["documents"]
+
+
+def test_the_wiki_engines_lint_fixtures_stay_out(sibling_repos):
+    """tools/lint_defects/pages/ holds deliberately FABRICATED defective wiki
+    pages — fixtures for that repo's linter. Feeding them to Wren would put
+    invented wiki claims in the same corpus she is told to trust, and she has
+    no way to tell them from documentation."""
+    assert "wiki/broken" not in docs.list_docs()["documents"]
+
+
+def test_another_agents_persona_stays_out(sibling_repos):
+    """scribejay/persona.md is ScribeJay's system-prompt material. Wren adopting
+    another agent's voice because a search hit landed it in her context is a
+    failure with no error message. It sits outside both docs/ and the root
+    list, so the exclusion is by construction."""
+    assert "scribejay/persona" not in docs.list_docs()["documents"]
+
+
+def test_every_sibling_document_is_readable_and_summarised(sibling_repos):
+    """The three sweeps the Wren-only tests already do, run over the siblings:
+    everything listed opens, has a summary, and fits the backstop."""
+    from agent.loop import TOOL_RESULT_CHAR_CAPS
+    backstop = TOOL_RESULT_CHAR_CAPS["read_doc"]
+    siblings = [n for n in docs.list_docs()["documents"] if "/" in n]
+    assert siblings, "the fixture contributed no documents"
+    for name in siblings:
+        result = docs.read_doc(name)
+        assert "content" in result, name
+        assert len(json.dumps(result)) < backstop, name
+    for row in docs._doc_texts():
+        if "/" in row["name"]:
+            assert row["summary"], row["name"]
+
+
+def test_a_readme_opening_with_an_html_tag_summarises_as_prose():
+    """ScribeJay's README opens with an <img> badge line ABOVE its H1, and
+    _H1_RE strips the H1 from anywhere — so without '<' in the skip list the
+    summary is the tag. Same shape as skipping a table row, not HTML
+    stripping."""
+    text = '<img src="x.svg" width="72">\n\n# Thing\n\nWhat the thing actually is.\n'
+    assert docs._summary(text) == "What the thing actually is."
+
+
+# ---- the descriptions carry the three-corpus design ------------------------
+
+def test_the_search_description_names_all_three_systems(sibling_repos):
+    """The model reaches this tool through a load_tools hop and will not make
+    that hop for a question it does not recognise. "How do my notes get into the
+    wiki" has to be findable in the words of the description itself."""
+    description = docs.SEARCH_DOCS_SCHEMA["function"]["description"].lower()
+    assert "wiki engine" in description
+    assert "scribejay" in description
+    assert "how his notes get into the wiki" in description
+    # The catalogue clauses must survive the rewrite.
+    assert "you do not know its contents" in description
+    assert "only the documents this tool returns exist" in description
+
+
+def test_the_read_description_explains_the_slash():
+    """The prefix only works if the model passes it back. The description is the
+    only place that can say what a slash means and that dropping it silently
+    returns Wren's copy instead of the one that was asked for."""
+    description = docs.READ_DOC_SCHEMA["function"]["description"]
+    assert "slash" in description.lower()
+    assert "scribejay/architecture" in description
+    assert "exactly as the search returned it" in description.lower()

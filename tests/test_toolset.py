@@ -354,7 +354,24 @@ def test_the_self_cues_load_wrens_own_settings_and_docs():
                 "how do you handle a scheduled task that fails",
                 "how are you built",
                 "what are your limits",
-                "what can you do"):
+                "what can you do",
+                # The sibling half. These are the asks the settings and
+                # documentation cues above all miss, because they name another
+                # system in the third person rather than naming Wren.
+                "how do notes get into the wiki",
+                # The possessive. Cue matching is a literal substring, so this
+                # natural spoken form misses "how do notes" entirely — an eval
+                # case found it, and it is the exact question the sibling
+                # corpora were added to answer.
+                "how do my notes actually end up in the wiki?",
+                "how does the wiki get maintained",
+                "how does the wiki lint work",
+                "what does the wiki agent do",
+                "how does ingest work",
+                "what happens when a note is ingested",
+                "what is scribejay",
+                "how does scribejay write the record",
+                "what does the journaling agent do"):
         assert "self" in toolset.groups_for_message(ask), ask
 
 
@@ -376,8 +393,42 @@ def test_the_self_cues_stay_off_the_asks_they_would_ruin():
                 "how'd Boston do last night?",
                 "read me my notes on pricing",
                 "what have I learned about RAG?",
-                "any new job openings?"):
+                "any new job openings?",
+                # A bare "journal" cue was tried and REMOVED on these two: both
+                # are asks about what is IN the vault, which belong to the wiki
+                # group. "journaling" carries the ask about the agent instead.
+                "journal entry for today",
+                "what did I write in my journal"):
         assert "self" not in toolset.groups_for_message(ask), ask
+
+
+def test_a_bare_wiki_ask_still_loads_only_the_wiki_group():
+    """The boundary the sibling cues were written around, pinned so it cannot
+    be undone quietly.
+
+    search_wiki reads the vault's CONTENTS — what Craig decided about pricing.
+    search_docs reads the wiki ENGINE's documentation — how a note becomes a
+    page. Adding a bare "wiki" cue to the self group would pre-load two
+    similar-sounding search tools on every vault ask, and a small model picking
+    the wrong corpus answers confidently out of it with nothing to signal the
+    mistake. Without this test someone adds that cue in six months and nothing
+    complains."""
+    for ask in ("what does my wiki say about pricing",
+                "search my wiki for the SVPG page",
+                "what's in the wiki about hiring"):
+        groups = toolset.groups_for_message(ask)
+        assert "wiki" in groups, ask
+        assert "self" not in groups, ask
+
+
+def test_asking_how_the_wiki_is_built_loads_the_self_group():
+    """The complement of the test above, and the reason the cues name the
+    PROCESS rather than the store. Loading the wiki group here too is fine —
+    it is loading only the wiki group on a "how does it work" ask that would
+    leave the answer unreachable."""
+    for ask in ("how do notes get into the wiki",
+                "how does the wiki get maintained"):
+        assert "self" in toolset.groups_for_message(ask), ask
 
 
 def test_the_self_blurb_denies_pretraining():
@@ -391,6 +442,11 @@ def test_the_self_blurb_denies_pretraining():
     assert "NOT something you know" in blurb
     assert "load" in blurb.lower()
     assert "colour" in blurb.lower() or "color" in blurb.lower()
+    # And it has to name the two sibling systems, for the same reason: an ask
+    # about the wiki engine reaches these tools only if the blurb says the
+    # group holds that documentation.
+    assert "wiki engine" in blurb.lower()
+    assert "scribejay" in blurb.lower()
 
 
 def test_render_toolgroups_index_lists_every_group():

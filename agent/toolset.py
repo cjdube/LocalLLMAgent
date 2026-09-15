@@ -358,8 +358,12 @@ MAIL_JOB_SAFE_TOOLS = frozenset({
     "list_reminders", "list_scheduled_tasks",
     # Wren's own notes and state.
     "recall", "list_skills", "read_skill", "search_wiki", "read_wiki_page",
-    # Her own settings and her own docs: both read files that ship with this
-    # repo, neither takes a destination, so an injected email cannot aim them.
+    # Her own settings and her own docs. The docs corpus now spans two SIBLING
+    # checkouts as well as this one, so "files that ship with this repo" is no
+    # longer the reason these are safe. The reason is the half that still holds
+    # and is the one that matters: neither takes a destination, and every path
+    # either can reach is fixed by a settings key, so an injected email cannot
+    # aim them anywhere.
     "describe_setup", "search_docs", "read_doc",
     "list_notifications", "list_nudges", "list_opportunities",
     "list_projects", "read_project", "list_games",
@@ -474,7 +478,9 @@ TOOL_GROUP_NAMES = {
     "clickup": ["list_clickup_spaces", "list_clickup_tasks", "read_clickup_task",
                 "add_clickup_task", "move_clickup_task", "comment_on_clickup_task"],
     # Wren answering questions about herself: her live configuration, and the
-    # documentation that describes how she works.
+    # documentation that describes how she works — hers plus the wiki engine's
+    # and ScribeJay's, which is where "how do my notes get into the wiki" and
+    # "how does the record get written" are actually written down.
     "self": ["describe_setup", "search_docs", "read_doc"],
 }
 
@@ -524,9 +530,13 @@ _GROUP_BLURBS = {
     # meal prep" about a table she colours the calendar with every day.
     "self": f"Wren's own settings and docs: {_NAME}'s calendar categories and "
             "the colour each uses, what everything else is set to, and how "
-            "Wren works. Load this for any ask about a colour, a setting, or "
-            "how she does something. NOT something you know — no colour or "
-            "setting is real until a tool returns it.",
+            "Wren works — plus the documentation of the two systems around "
+            "her: the wiki engine that files his notes into the learnings "
+            "wiki, and ScribeJay, which writes the record of his day. Load "
+            "this for any ask about a colour, a setting, how she does "
+            "something, how notes get into the wiki, or how the day gets "
+            "written down. NOT something you know — no colour, setting or "
+            "document is real until a tool returns it.",
 }
 
 # Case-insensitive word-boundary cues that pre-load a group before the model
@@ -649,7 +659,33 @@ GROUP_KEYWORDS = {
              "settings", "setup", "set to", "configur",
              "document", "readme", "your docs",
              "how do you", "how does she", "how are you built",
-             "your limit", "what can you do"],
+             "your limit", "what can you do",
+             # Then the sibling-documentation cues. The corpus now covers three
+             # systems and the two new ones are reachable by words none of the
+             # settings or documentation cues above carry.
+             #
+             # **NOT a bare "wiki".** GROUP_KEYWORDS["wiki"] already owns that
+             # word for search_wiki, and the two tools answer different
+             # questions off similar names: search_wiki reads the vault's
+             # CONTENTS ("what did I decide about pricing"), search_docs reads
+             # the ENGINE's documentation ("how does a note become a page").
+             # Pre-loading both on a bare "wiki" puts two similar-sounding
+             # search tools in front of a small model on the one ask where
+             # picking wrong is invisible — it answers confidently from the
+             # wrong corpus. So these cue the PROCESS, never the store.
+             #
+             # "journal" was tried and REMOVED for the same reason: it fires on
+             # "what did I write in my journal", which is a vault ask.
+             # "journaling" carries the ask about the AGENT without touching it.
+             #
+             # "how do my notes" is the possessive twin of "how do notes", not a
+             # duplicate: cue matching is a literal substring, and the natural
+             # spoken form of the question this feature exists to answer — "how
+             # do MY notes end up in the wiki" — misses the bare one entirely.
+             # An eval case caught that before a user did.
+             "scribejay", "journaling", "ingest", "wiki agent",
+             "obsidianwikiagent", "how do notes", "how do my notes",
+             "how does the wiki", "wiki lint"],
 }
 
 # The meta-tool. Not in TOOLS/DISPATCH — its callable is bound per session in
