@@ -750,6 +750,10 @@ TOOL_SERVICES = {
                            "read_clickup_task", "add_clickup_task",
                            "move_clickup_task", "comment_on_clickup_task"]),
     "background": ("Background Tasks", ["run_in_background", "list_background_jobs", "get_job_result"]),
+    # Wren reading Wren: config/settings.json for describe_setup, and the repo's
+    # own README/ANALYSIS/docs for the other two. Files that ship with this
+    # checkout, not a hosted service — same as games and projects.
+    "self": ("Wren's Own Files", ["describe_setup", "search_docs", "read_doc"]),
     "opportunities": ("Opportunity Scout", ["list_opportunities", "update_opportunity",
                                             "watch_company", "unwatch_company",
                                             "send_opportunity_digest",

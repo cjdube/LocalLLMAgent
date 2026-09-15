@@ -50,11 +50,13 @@ from agent.tools.clickup import (
     move_clickup_task,
     read_clickup_task,
 )
+from agent.tools.docs import DOCS_TOOL_SCHEMAS, read_doc, search_docs
 from agent.tools.evaluate_app import TOOL_SCHEMA as EVALUATE_APP_SCHEMA, evaluate_app
 from agent.tools.evaluate_against import TOOL_SCHEMA as EVALUATE_AGAINST_SCHEMA, evaluate_against
 from agent.tools.games import TOOL_SCHEMA as GAMES_SCHEMA, list_games
 from agent.tools.gmail_read import MAIL_TOOL_SCHEMAS, read_email, search_mail
 from agent.tools.github_starred import TOOL_SCHEMA as GITHUB_STARRED_SCHEMA, fetch_starred_repos
+from agent.tools.setup_info import SETUP_INFO_TOOL_SCHEMAS, describe_setup
 from agent.tools.projects import PROJECT_TOOL_SCHEMAS, list_projects, read_project
 from agent.tools.google_tasks import (
     COMPLETE_TASK_TOOL_SCHEMA,
@@ -168,6 +170,8 @@ TOOLS = [
     NUDGES_SCHEMA,
     *MAIL_TOOL_SCHEMAS,
     *CLICKUP_TOOL_SCHEMAS,
+    *SETUP_INFO_TOOL_SCHEMAS,
+    *DOCS_TOOL_SCHEMAS,
 ]
 
 DISPATCH = {
@@ -253,6 +257,11 @@ DISPATCH = {
     # stranger wrote, so nothing downstream may treat it as instruction.
     "search_mail": search_mail,
     "read_email": read_email,
+    # Wren reading Wren. Both are first-party reads of files that ship with this
+    # repo, so they carry none of the untrusted-content caveat above.
+    "describe_setup": describe_setup,
+    "search_docs": search_docs,
+    "read_doc": read_doc,
 }
 
 WRITE_TOOLS = frozenset({
@@ -349,6 +358,9 @@ MAIL_JOB_SAFE_TOOLS = frozenset({
     "list_reminders", "list_scheduled_tasks",
     # Wren's own notes and state.
     "recall", "list_skills", "read_skill", "search_wiki", "read_wiki_page",
+    # Her own settings and her own docs: both read files that ship with this
+    # repo, neither takes a destination, so an injected email cannot aim them.
+    "describe_setup", "search_docs", "read_doc",
     "list_notifications", "list_nudges", "list_opportunities",
     "list_projects", "read_project", "list_games",
     # Fixed first-party feeds: the account is the user's and the destination is
@@ -461,6 +473,9 @@ TOOL_GROUP_NAMES = {
     "mail": ["search_mail", "read_email", "reply_to_thread"],
     "clickup": ["list_clickup_spaces", "list_clickup_tasks", "read_clickup_task",
                 "add_clickup_task", "move_clickup_task", "comment_on_clickup_task"],
+    # Wren answering questions about herself: her live configuration, and the
+    # documentation that describes how she works.
+    "self": ["describe_setup", "search_docs", "read_doc"],
 }
 
 # One-line "when to load it" blurb per group, rendered into the chat prompt so
@@ -502,6 +517,16 @@ _GROUP_BLURBS = {
                "about ClickUp, his backlog, his ideas, what is next, or what he has "
                "shipped; the Spaces, Lists and Tasks that exist are only the ones the "
                "tools return, never ones you recall or would expect.",
+    # The only always-on cost of the whole self-knowledge change, so it carries
+    # the load: it has to name colours (the ask that exposed the gap), settings
+    # and documentation in one line, and deny pretraining in the same words the
+    # two tool descriptions do. Wren answered "I have no record of a colour for
+    # meal prep" about a table she colours the calendar with every day.
+    "self": f"Wren's own settings and docs: {_NAME}'s calendar categories and "
+            "the colour each uses, what everything else is set to, and how "
+            "Wren works. Load this for any ask about a colour, a setting, or "
+            "how she does something. NOT something you know — no colour or "
+            "setting is real until a tool returns it.",
 }
 
 # Case-insensitive word-boundary cues that pre-load a group before the model
@@ -596,6 +621,35 @@ GROUP_KEYWORDS = {
     # as prefixes, so "idea" covers ideas and "feature" covers features.
     "clickup": ["clickup", "backlog", "space", "idea", "parked", "shipped",
                 "roadmap", "feature", "ticket"],
+    # Two asks in one group, so two families of cue.
+    #
+    # Colour first, because it is the ask that exposed the gap and it names
+    # nothing else — "what colour do we use for meal prep" has no settings word
+    # in it at all. Both spellings; "color" is a prefix cue so it covers
+    # colors/colored/colour-coded.
+    #
+    # Then the settings words. "configur" is a prefix covering configure/
+    # configured/configuration, and "categor" covers category/categories — it
+    # does NOT fire on `recategorize`, because \b sits before the "re".
+    #
+    # "set up" and a bare "setting" were both tried and REMOVED: they fire on
+    # "set up a meeting with John" and "setting up a call", which is ordinary
+    # calendar wording and nothing to do with settings. "settings" (plural) and
+    # "setup" (one word) carry the real ask without touching either.
+    #
+    # Then the documentation words. "document" is a prefix covering
+    # documentation/documented. "how do you" and "how does" are the shape the
+    # question actually arrives in and carry no noun at all.
+    #
+    # **Prefix trap**: the matcher is `\b` + the cue, so a bare "set" would fire
+    # on "settle", and "doc" on "doctor" and "dock" — both are checked by the
+    # false-positive corpus in tests/test_toolset.py. Never shorten one of these
+    # without re-running it.
+    "self": ["color", "colour", "categor",
+             "settings", "setup", "set to", "configur",
+             "document", "readme", "your docs",
+             "how do you", "how does she", "how are you built",
+             "your limit", "what can you do"],
 }
 
 # The meta-tool. Not in TOOLS/DISPATCH — its callable is bound per session in

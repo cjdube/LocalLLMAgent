@@ -333,6 +333,66 @@ def test_the_sports_blurb_denies_pretraining():
     assert "load" in blurb.lower()
 
 
+def test_the_self_cues_load_wrens_own_settings_and_docs():
+    """The first ask is the one that started this. Asked what colour the
+    calendar uses for meal prep, Wren said she had no record of one — out of a
+    table she colours the calendar with every day. "colour" is the cue that
+    would have caught it, so the everyday phrasings are pinned here, not just
+    the technical ones."""
+    for ask in ("what color do we use for meal prep items in our calendar",
+                "what colour are my workout events",
+                "what color should a dentist appointment be",
+                "what are my calendar categories",
+                "what categories do we have",
+                "what is my morning brief set to",
+                "what are my settings",
+                "how is the morning brief configured",
+                "what's in your setup",
+                "what does your documentation say about scheduled tasks",
+                "check your docs for how mail watch works",
+                "what does the readme say",
+                "how do you handle a scheduled task that fails",
+                "how are you built",
+                "what are your limits",
+                "what can you do"):
+        assert "self" in toolset.groups_for_message(ask), ask
+
+
+def test_the_self_cues_stay_off_the_asks_they_would_ruin():
+    r"""The matcher is `\b` + the cue, so every cue matches as a PREFIX. Two
+    cues were removed after this corpus caught them: "set up" fired on "set up
+    a meeting with John", and a bare "setting" fired on "setting up a call with
+    the insurance adjuster" — both ordinary calendar asks that would have
+    loaded three schemas for nothing. "settings" (plural) and "setup" (one
+    word) are what replaced them. Do not shorten either without re-running
+    this."""
+    for ask in ("set up a meeting with John tomorrow",
+                "setting up a call with the insurance adjuster",
+                "set a reminder for 3pm",
+                "what's on my calendar tomorrow?",
+                "add a task to call the plumber",
+                "did anyone reply to me?",
+                "what's the temperature outside",
+                "how'd Boston do last night?",
+                "read me my notes on pricing",
+                "what have I learned about RAG?",
+                "any new job openings?"):
+        assert "self" not in toolset.groups_for_message(ask), ask
+
+
+def test_the_self_blurb_denies_pretraining():
+    """The asks the cues cannot catch reach these tools only if the model
+    chooses load_tools, and it will not choose it if it believes it already
+    knows what colour meal prep uses. Nothing about these values is in the
+    system prompt — that was the point, the prompt is already crowded — so the
+    blurb and the tool descriptions are the only things standing between the
+    question and an invented colour, which reads exactly like a real one."""
+    blurb = toolset._GROUP_BLURBS["self"]
+    assert "NOT something you know" in blurb
+    assert "load" in blurb.lower()
+    assert "colour" in blurb.lower() or "color" in blurb.lower()
+
+
 def test_render_toolgroups_index_lists_every_group():
     index = toolset.render_toolgroups_index()
     for group in toolset.TOOL_GROUPS:
