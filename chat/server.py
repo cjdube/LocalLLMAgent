@@ -679,6 +679,94 @@ def _warn_if_final_is_empty(stage: str, text: str, history: list, checkpoint: in
         )
 
 
+# An imperative "save this for me" ask, and the fact it carries. Anchored at the
+# start of the message, so a QUESTION about memory ("do you remember what I said
+# about coffee?", "what do you remember about me?") cannot match: those put a
+# pronoun in front of the verb, and the right answer to them is recall, not a
+# save. The politeness prefixes are bounded rather than starred because
+# MAX_MESSAGE_CHARS is the only other bound on this input.
+_SAVE_INTENT_RE = re.compile(
+    r"^(?:hey\s+|ok(?:ay)?[,\s]+|wren[,\s]+|please\s+|pls\s+|"
+    r"(?:can|could|would|will)\s+you\s+(?:please\s+)?){0,3}"
+    r"(?:remember|note|pin|jot\s+down|make\s+a\s+note(?:\s+of)?|"
+    r"keep\s+in\s+mind|(?:don'?t|do\s+not)\s+forget)"
+    r"[:,\s]+(?:that\s+|this[:,]\s*|the\s+fact\s+that\s+)?"
+    r"(?P<fact>\S.*)$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# What follows the verb in an ask that only LOOKS like a save. "remember to call
+# the dentist" is a reminder (set_reminder), and "remember what I told you" or
+# "remember when we talked about X" is a lookup (recall). The model handles both
+# of those correctly on its own, so the guard must keep its hands off them —
+# forcing a `remember` there would save the user's question as if it were a fact.
+_NOT_A_FACT_RE = re.compile(
+    r"^(?:to\b|what\b|when\b|where\b|who\b|whom\b|whose\b|why\b|how\b|"
+    r"if\b|whether\b|anything\b|everything\b|something\b)",
+    re.IGNORECASE,
+)
+
+# The two tools that satisfy a save ask. `recall` deliberately isn't one: a turn
+# that only looked the fact up still saved nothing.
+_SAVE_TOOLS = ("remember", "pin")
+
+
+def _requested_save(text: str) -> str | None:
+    """The fact `text` asks Wren to save, or None when it isn't that ask."""
+    m = _SAVE_INTENT_RE.match((text or "").strip())
+    if m is None:
+        return None
+    fact = m.group("fact").strip()
+    if not fact or _NOT_A_FACT_RE.match(fact):
+        return None
+    return fact
+
+
+def _forced_save_call(history: list) -> dict | None:
+    """The `remember` call the model should have made and didn't — or None.
+
+    Asked "remember that I always take my coffee black", gemma4:26b-mlx replies
+    "I've remembered that you always take your coffee black." and emits no
+    tool_call at all about half the time (measured 2026-09-15, 10 interleaved
+    reps per phrasing against the live server; neither the verb the user used
+    nor the kind of fact moved the rate). Nothing is saved, and the reply is
+    shaped exactly like a successful one, so the user walks away believing a
+    fact is stored when it is gone.
+
+    The prompt already carries the strongest wording we have for this ("actually
+    call pin or remember to save it — never just reply that you will"), and it
+    is that wording failing, so this is deterministic rather than more prose:
+    Python recognizes the ask and builds the call from the user's own words.
+
+    Only fires when the model produced nothing — if it called remember or pin
+    anywhere in this user-turn (including in an earlier leg that the user has
+    already confirmed or declined), this returns None and the turn is left
+    alone, so the model keeps its own choice of tier, phrasing and category.
+
+    The forced call is `remember`, not `pin`, for the reason the tool prose
+    gives the model: when unsure which tier a fact belongs in, prefer the
+    searchable one. It carries no category — Python has no basis to pick one,
+    and the schema makes it optional. It is still gated by WRITE_TOOLS, so it
+    reaches the user as a confirmation card showing the exact text; nothing is
+    written until they tap.
+    """
+    start = _last_user_index(history)
+    if start is None:
+        return None
+    # The same message supplies both the intent and the window, which is what
+    # keeps the out-of-steps path safe: advance() ends that path by appending a
+    # synthetic "stop calling tools" user message, and that is not a save ask.
+    fact = _requested_save(history[start].get("content") or "")
+    if fact is None:
+        return None
+    for m in history[start:]:
+        if m.get("role") != "assistant":
+            continue
+        if any(c["function"]["name"] in _SAVE_TOOLS for c in (m.get("tool_calls") or [])):
+            return None
+    return {"function": {"name": "remember", "arguments": {"text": fact}}}
+
+
 def _record_if_escalated(escalation: dict | None, outcome: str) -> None:
     """Write the escalation log entry for a turn that went off-device, if this
     was one. Best-effort: the turn already happened and its answer is on its
@@ -756,6 +844,31 @@ def _run_turn(sid: str, history: list, checkpoint: int, cancel: threading.Event,
         logger.exception(f"chat {stage} failed: {e}")
         _record_if_escalated(escalation, f"error:{e}")
         return jsonify({**note, "error": str(e)}), 500
+
+    if result["type"] == "final":
+        # The model answered in words where it owed a tool call. Build the call
+        # it skipped and pause on it, so the save the user asked for reaches
+        # them as a confirmation card instead of a reply claiming a save that
+        # never happened. See _forced_save_call.
+        forced = _forced_save_call(history)
+        if forced is not None:
+            logger.warning(
+                "chat %s: the message asked Wren to save a fact and the model "
+                "answered without calling remember or pin — forcing the call "
+                "from the request text: %r (the model said: %r)",
+                stage, forced["function"]["arguments"]["text"][:120],
+                (result.get("text") or "")[:120],
+            )
+            # Attach the call to the assistant turn the model actually produced
+            # rather than inventing a second one after it; resolve() then
+            # appends this call's result directly beneath it. advance() always
+            # appends that message before returning a final, but the role is
+            # checked rather than assumed — a stray tool_calls key on the user
+            # message would leave the history malformed for every later turn.
+            if not history or history[-1].get("role") != "assistant":
+                history.append({"role": "assistant", "content": result.get("text") or ""})
+            history[-1]["tool_calls"] = [forced]
+            result = {"type": "confirm", "call": forced}
 
     pending_call = result["call"] if result["type"] == "confirm" else None
     if not _finish_turn(sid, cancel, pending_call=pending_call,

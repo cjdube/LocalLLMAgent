@@ -765,6 +765,156 @@ def test_non_promise_phrasings_are_ignored(text):
     assert not srv._PROMISE_RE.search(text)
 
 
+# --------------------------------------------------------------------------- #
+# Forcing the memory save the model narrated instead of performing
+# --------------------------------------------------------------------------- #
+
+# Measured 2026-09-15 against the live server, 10 interleaved reps per phrasing:
+# "remember that ..." saved 8/20 and "keep in mind that ..." 9/20; a preference
+# saved 6/20 and a piece of trivia 11/20. 17 of 40 overall. Neither the verb nor
+# the kind of fact moves the rate, so the guard is deterministic rather than yet
+# more prompt wording — the strongest wording we have is what is failing.
+
+@pytest.mark.parametrize("text,fact", [
+    ("remember that I always take my coffee black", "I always take my coffee black"),
+    ("Remember I always take my coffee black", "I always take my coffee black"),
+    ("keep in mind that I prefer metric units", "I prefer metric units"),
+    ("note that my sister's name is Ada", "my sister's name is Ada"),
+    ("please remember that the boiler service is annual", "the boiler service is annual"),
+    ("can you remember that I park in bay 14", "I park in bay 14"),
+    ("pin that I prefer metric units", "I prefer metric units"),
+    ("don't forget that the gate code is 4821", "the gate code is 4821"),
+    ("remember: I take my coffee black", "I take my coffee black"),
+    ("make a note of the fact that crows hold grudges", "crows hold grudges"),
+])
+def test_save_asks_are_recognised_and_yield_the_fact(text, fact):
+    assert srv._requested_save(text) == fact
+
+
+@pytest.mark.parametrize("text", [
+    # A reminder, not a fact — set_reminder owns this and gets it right.
+    "remember to call the dentist at 3",
+    "don't forget to take the bins out",
+    # Questions ABOUT memory. The answer is recall; forcing a save here would
+    # store the user's own question as though it were a fact.
+    "do you remember what I said about coffee?",
+    "what do you remember about me?",
+    "remember when we talked about the vault layout?",
+    "remember anything about my car?",
+    # Not a save ask at all.
+    "remind me to call the dentist at 3",
+    "what's the weather tomorrow?",
+    "",
+])
+def test_non_save_asks_are_left_to_the_model(text):
+    assert srv._requested_save(text) is None
+
+
+def _final_reply_with_assistant_turn(text):
+    """An advance() double that answers with text and calls no tool, appending
+    the assistant message the real advance() appends before it returns."""
+    def fake_advance(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
+                     should_cancel=None, **_):
+        messages.append({"role": "assistant", "content": text})
+        return {"type": "final", "text": text}
+    return fake_advance
+
+
+def test_a_narrated_save_becomes_a_confirmation_card(auth_client, monkeypatch, caplog):
+    """The measured miss: the model says it remembered and calls nothing, so the
+    reply is shaped exactly like a success and the fact is simply gone. Python
+    recognises the ask and builds the call the model skipped."""
+    monkeypatch.setattr(
+        srv, "advance",
+        _final_reply_with_assistant_turn(
+            "I've remembered that you always take your coffee black."),
+    )
+
+    with caplog.at_level(logging.WARNING, logger=srv.logger.name):
+        resp = auth_client.post(
+            "/chat", json={"message": "remember that I always take my coffee black"})
+
+    body = resp.get_json()
+    assert body["type"] == "confirm"
+    assert body["tool"] == "remember"
+    assert body["args"] == {"text": "I always take my coffee black"}
+    assert "answered without calling remember or pin" in caplog.text
+    # Gated like any other write: the call is parked, not run.
+    assert srv.pending_confirmations[SID]["function"]["name"] == "remember"
+
+
+def test_the_forced_call_writes_nothing_until_it_is_confirmed(auth_client, monkeypatch):
+    """The other half of the guarantee: forcing the call must not BE the save.
+    A card the user never taps has to leave memory exactly as it was."""
+    monkeypatch.setattr(
+        srv, "advance",
+        _final_reply_with_assistant_turn("I've remembered that."),
+    )
+
+    before = memory.recall()
+    auth_client.post("/chat", json={"message": "remember that I park in bay 14"})
+    assert memory.recall() == before
+
+
+def test_the_forced_call_lands_on_the_assistant_turn_not_the_user_message(
+        auth_client, monkeypatch):
+    """The paused tool_call has to hang off the assistant turn. Attached to the
+    user message instead it would orphan the call, and every later turn would
+    carry a malformed history."""
+    monkeypatch.setattr(
+        srv, "advance",
+        _final_reply_with_assistant_turn("I've remembered that."),
+    )
+
+    auth_client.post("/chat", json={"message": "remember that I park in bay 14"})
+    history = srv.conversations[SID]
+    assert history[-1]["role"] == "assistant"
+    assert history[-1]["tool_calls"][0]["function"]["name"] == "remember"
+    assert "tool_calls" not in history[-2]
+
+
+def test_a_model_that_saves_for_itself_is_left_alone(auth_client, monkeypatch):
+    """When the model does call the tool, it keeps its own tier, phrasing and
+    category — the guard is a floor, not a replacement."""
+    pinned = {"function": {"name": "pin",
+                           "arguments": {"text": "the user prefers metric units",
+                                         "category": "preference"}}}
+
+    def fake_advance(messages, tools, dispatch, confirm_before=frozenset(), logger=None,
+                     should_cancel=None, **_):
+        messages.append({"role": "assistant", "content": "", "tool_calls": [pinned]})
+        messages.append({"role": "tool", "tool_name": "pin", "content": '{"id": "a1"}'})
+        messages.append({"role": "assistant", "content": "Pinned."})
+        return {"type": "final", "text": "Pinned."}
+
+    monkeypatch.setattr(srv, "advance", fake_advance)
+
+    resp = auth_client.post("/chat", json={"message": "keep in mind that I prefer metric units"})
+    assert resp.get_json()["type"] == "final"
+
+
+def test_the_guard_does_not_fire_twice_on_the_same_ask(auth_client, monkeypatch):
+    """After the user answers the card, /chat/confirm continues the same turn.
+    The forced call is already in that turn's history, so the continuation must
+    return the model's words — not a second identical card."""
+    forced = {"function": {"name": "remember",
+                           "arguments": {"text": "I always take my coffee black"}}}
+    srv.conversations[SID] = [
+        {"role": "system", "content": "s"},
+        {"role": "user", "content": "remember that I always take my coffee black"},
+        {"role": "assistant", "content": "I've remembered that.", "tool_calls": [forced]},
+    ]
+    srv.pending_confirmations[SID] = forced
+    monkeypatch.setattr(srv, "resolve", lambda *a, **k: None)
+    monkeypatch.setattr(
+        srv, "advance",
+        _final_reply_with_assistant_turn("Saved — I'll keep that in mind."),
+    )
+
+    resp = auth_client.post("/chat/confirm", json={"approved": True})
+    assert resp.get_json()["type"] == "final"
+
+
 def test_chat_confirm_keeps_resolved_result_on_failed_continuation(auth_client, monkeypatch):
     srv.conversations[SID] = [
         {"role": "system", "content": "s"},
