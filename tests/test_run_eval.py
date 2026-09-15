@@ -350,16 +350,31 @@ def test_chat_cases_name_real_tools():
 def test_chat_case_tools_are_reachable_for_that_prompt():
     """Keyword pre-loading has to actually offer the tool the case expects,
     otherwise the case measures GROUP_KEYWORDS rather than the model. (The model
-    could still get there via load_tools — this just keeps the common path honest.)"""
-    from agent.toolset import groups_for_message, tools_for
+    could still get there via load_tools — this just keeps the common path honest.)
+
+    A case may opt out with `expect_load_tools_group`, which says the hop IS what
+    it measures. That is not a free pass: the opt-out is checked both ways, so it
+    fails if a later cue makes the prompt pre-load after all (the case would
+    silently stop measuring the hop) and if the named group cannot reach the
+    tool."""
+    from agent.toolset import TOOL_GROUP_NAMES, groups_for_message, tools_for
 
     for case in CHAT_CASES:
         expected = case.get("expect_any_of") or ([case["expect_tool"]]
                                                  if case.get("expect_tool") else [])
         if not expected:
             continue
-        offered = {t["function"]["name"]
-                   for t in tools_for(groups_for_message(case["prompt"]))}
+        preloaded = groups_for_message(case["prompt"])
+        group = case.get("expect_load_tools_group")
+        if group:
+            assert group in TOOL_GROUP_NAMES, f"{case['id']}: no group {group!r}"
+            assert set(TOOL_GROUP_NAMES[group]) & set(expected), (
+                f"{case['id']}: group {group!r} does not hold any of {expected}")
+            assert group not in preloaded, (
+                f"{case['id']}: {case['prompt']!r} now pre-loads {group!r}, so the "
+                "case no longer measures the load_tools hop — drop the opt-out")
+            continue
+        offered = {t["function"]["name"] for t in tools_for(preloaded)}
         assert offered & set(expected), (
             f"{case['id']}: none of {expected} is offered for {case['prompt']!r}")
 

@@ -419,10 +419,6 @@ _BY_NAME = {t["function"]["name"]: t for t in TOOLS}
 # the model to read_skill; skill authoring (write/delete) is deferred below.
 CORE_TOOL_NAMES = [
     "fetch_weather",
-    # Core for the same reason as list_notifications below: "how'd Boston do?"
-    # arrives in wording no keyword pre-loader catches, and the cost of the miss
-    # is a score invented from pretraining, which reads exactly like a real one.
-    "fetch_scores",
     "get_upcoming_events", "get_events_by_date", "log_calendar_event",
     # The Google Tasks and reminder READS stay core; their writes are deferred
     # (see the taskedits and reminders groups). The line is the failure mode, not
@@ -457,6 +453,7 @@ TOOL_GROUP_NAMES = {
     "authoring": ["write_skill", "delete_skill"],
     "brief": ["send_morning_brief", "send_email"],
     "games": ["list_games"],
+    "sports": ["fetch_scores"],
     "projects": ["list_projects", "read_project"],
     "nudges": ["list_nudges"],
     "taskedits": ["create_task", "update_task_due_date", "complete_task"],
@@ -478,6 +475,11 @@ _GROUP_BLURBS = {
     "games": f"The games {_NAME} can play with you, and the link to open one. "
              "Load this for any ask about playing something — the games that exist "
              "are only the ones the tool lists, never ones you know of.",
+    "sports": f"Final scores for the teams {_NAME} follows on a given day. Load "
+              "this for any ask about a game, a score, a win or a loss, or how a "
+              "team did — including vague wording like \"how'd they do?\". Scores "
+              "are NOT something you know: no result is real until this tool "
+              "returns it, so load the group rather than answer from memory.",
     "projects": f"{_NAME}'s software projects — what he has built, what each one is, "
                 "and how recently he touched it. Load this for any ask about his "
                 "projects, repos, or what he is working on; the projects that exist "
@@ -527,6 +529,29 @@ GROUP_KEYWORDS = {
     # "play" without "game" catches "let's play something" and "play weigh anchor";
     # the game's own name is a cue too, since naming it is the likeliest way in.
     "games": ["game", "play", "weigh anchor"],
+    # Deferred on 2026-09-15: sports is a nice-to-have, not what Wren is for,
+    # and the schema cost 1,195 chars on every turn to stay core. Measured 14 of
+    # 16 real asks on this list. Both misses are the "how'd <team> do?" shape,
+    # which carries no sports word at all — the only cue that catches it is the
+    # team or city itself, and a cue list is data this public repo will not
+    # carry. Those fall through to load_tools, which is why the blurb above
+    # denies pretraining in the same words the tool description does.
+    # Prefix trap: a bare "won" fires on "wonder" and "win" on "winter", so the
+    # win/loss cues are all two words. Checked by the false-positive corpus in
+    # tests/test_toolset.py.
+    "sports": ["score", "sport", "game", "team",
+               "who won", "we won", "they won",
+               "did they win", "did we win", "did they lose", "did we lose",
+               "blown out", "shut out", "playoff", "standings", "inning",
+               "runs did", "final score",
+               "who's playing", "whos playing", "who is playing",
+               # "did the <team> win yesterday" is the commonest ask of all and
+               # names no sports noun, so the day word has to carry it. A bare
+               # "win"/"lost" cue cannot: it fires on "winter" and "lost my
+               # keys".
+               "win yesterday", "win last night", "win today", "win tonight",
+               "lose yesterday", "lose last night",
+               "lost yesterday", "lost last night"],
     # "repo" and "built" are the other ways in; "project" covers the direct ask.
     "projects": ["project", "repo", "repos", "codebase", "built", "building",
                  "working on", "stale"],

@@ -286,17 +286,51 @@ def test_the_write_cues_stay_off_the_asks_they_would_ruin():
         assert not (toolset.groups_for_message(ask) & writes), ask
 
 
-def test_fetch_scores_is_still_core():
-    """Measured 2026-09-15 and deliberately NOT demoted with the other writes.
-    The best cue list anyone could build fired on 10 of 16 real sports asks and
-    missed "how'd Boston do?" — the phrasing fetch_scores' own description calls
-    out. The only cue that catches those is the team or city itself, and a cue
-    list is data this public repo will not carry. A missed pre-load here is not
-    a shrug: with no schema in the prompt the model answers from pretraining,
-    and an invented score reads exactly like a real one."""
-    assert "fetch_scores" in toolset.CORE_TOOL_NAMES
-    grouped = [n for names in toolset.TOOL_GROUP_NAMES.values() for n in names]
-    assert "fetch_scores" not in grouped
+def test_the_sports_cues_load_the_scores_tool():
+    """fetch_scores left core on 2026-09-15 — sports is a nice-to-have, and the
+    schema cost 1,195 chars on every turn. These are the cues that have to carry
+    it now."""
+    for ask in ("what was the score last night?",
+                "did they win?",
+                "any games last night?",
+                "how'd my teams do?",
+                "who won?",
+                "anything happen in sports last night?",
+                "did we get blown out?",
+                "what's the final score",
+                "are they in the playoffs?",
+                "did they lose again?",
+                "who's playing tonight?",
+                "how many runs did they put up?"):
+        assert "sports" in toolset.groups_for_message(ask), ask
+
+
+def test_the_sports_cues_stay_off_the_asks_they_would_ruin():
+    """Prefix trap again: a bare "won" fires on "wonder" and "win" on "winter",
+    which is why every win/loss cue here is two words. "my team at work" is a
+    known and accepted false positive — one extra schema, nothing worse — so it
+    is deliberately not in this corpus."""
+    for ask in ("I wonder if the flight is on time",
+                "it's winter, is it cold?",
+                "what's in the window?",
+                "what's the temperature outside",
+                "what's my address again?",
+                "how'd the interview go?",
+                "what's on my calendar tomorrow?",
+                "remind me at 3",
+                "read me my notes on pricing"):
+        assert "sports" not in toolset.groups_for_message(ask), ask
+
+
+def test_the_sports_blurb_denies_pretraining():
+    """The two asks the cues cannot catch ("how'd Boston do?") reach the tool
+    only if the model chooses load_tools. It will not choose it if it believes
+    it already knows the score, so the blurb has to say it does not — the same
+    rule the tool descriptions follow. Without this the failure mode is an
+    invented score, which reads exactly like a real one."""
+    blurb = toolset._GROUP_BLURBS["sports"]
+    assert "NOT something you know" in blurb
+    assert "load" in blurb.lower()
 
 
 def test_render_toolgroups_index_lists_every_group():

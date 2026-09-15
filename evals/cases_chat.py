@@ -176,6 +176,12 @@ CASES = [
         # the wording a keyword pre-loader would miss and a model would fill in.
         "prompt": "How'd Boston do last night?",
         "expect_tool": "fetch_scores",
+        # fetch_scores left the core set on 2026-09-15, and this prompt is the
+        # one shape no cue can catch without putting a team name in a public
+        # repo. That is the point of the case now: it measures whether the model
+        # makes the load_tools hop off the group blurb instead of answering from
+        # pretraining. The harness runs load_tools for real.
+        "expect_load_tools_group": "sports",
         "tool_results": {
             "fetch_scores": {"date": _day(-1).isoformat(), "games": [
                 {"league": "mlb", "team": "Red Sox", "opponent": "Diamondbacks",
