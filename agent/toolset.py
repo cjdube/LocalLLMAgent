@@ -424,10 +424,15 @@ CORE_TOOL_NAMES = [
     # is a score invented from pretraining, which reads exactly like a real one.
     "fetch_scores",
     "get_upcoming_events", "get_events_by_date", "log_calendar_event",
-    "get_tasks", "get_tasks_due_soon", "create_task", "update_task_due_date", "complete_task",
+    # The Google Tasks and reminder READS stay core; their writes are deferred
+    # (see the taskedits and reminders groups). The line is the failure mode, not
+    # the family: a missed read is a shrug on the commonest ask of the two, while
+    # a missed write is a visible "I can't do that" or a load_tools hop, and the
+    # write schemas are 3.5x the size of the reads.
+    "get_tasks", "get_tasks_due_soon",
     "search_web",
     "remember", "pin", "recall", "recategorize", "archive", "forget",
-    "set_reminder", "list_reminders", "cancel_reminder",
+    "list_reminders",
     # Core rather than a deferred group, unlike list_nudges: "did you ping me
     # about X?" arrives in wording no keyword list reliably catches, a missed
     # pre-load is silent, and the failure mode of the miss is a fabricated
@@ -454,6 +459,8 @@ TOOL_GROUP_NAMES = {
     "games": ["list_games"],
     "projects": ["list_projects", "read_project"],
     "nudges": ["list_nudges"],
+    "taskedits": ["create_task", "update_task_due_date", "complete_task"],
+    "reminders": ["set_reminder", "cancel_reminder"],
     "mail": ["search_mail", "read_email", "reply_to_thread"],
     "clickup": ["list_clickup_spaces", "list_clickup_tasks", "read_clickup_task",
                 "add_clickup_task", "move_clickup_task", "comment_on_clickup_task"],
@@ -475,6 +482,11 @@ _GROUP_BLURBS = {
                 "and how recently he touched it. Load this for any ask about his "
                 "projects, repos, or what he is working on; the projects that exist "
                 "are only the ones the tool lists, never ones you know of.",
+    "taskedits": f"Change {_NAME}'s Google Tasks — add a task, move a due date, or "
+                 "mark one done. Reading his tasks needs no load; this group is "
+                 "only for changing them.",
+    "reminders": f"Set a reminder on {_NAME}'s phone for a future time, or cancel "
+                 "one he has pending. Listing what is pending needs no load.",
     "nudges": "The suggestions the daily synthesis has pushed to him — 'you looked "
               "at X, it fits your Y note'. Load this for any ask about what you have "
               "suggested, recommended or noticed; the ones that were sent are only "
@@ -518,6 +530,29 @@ GROUP_KEYWORDS = {
     # "repo" and "built" are the other ways in; "project" covers the direct ask.
     "projects": ["project", "repo", "repos", "codebase", "built", "building",
                  "working on", "stale"],
+    # Google Tasks WRITES. "task" and "todo" also fire on the read asks, which
+    # are core and need no load — that is deliberate: the read cue is the
+    # reliable way into the write, since "mark the dentist one done" usually
+    # follows a list. Paying 2,382 chars on task turns to never miss a write is
+    # the right side of the trade.
+    #
+    # **Every cue here is checked against a false-positive corpus in
+    # tests/test_toolset.py.** The matcher is `\b` + the cue, so a cue matches as
+    # a PREFIX: "add" would fire on "address", "mark" on "market", "due" on
+    # "duel". Trailing spaces are load-bearing — "add a"/"add the" fire on the
+    # imperative and not on "what's the address". Never shorten one of these
+    # without re-running that test.
+    "taskedits": ["task", "todo", "to-do", "to do",
+                  "add a", "add the", "add an", "put a", "create a",
+                  "mark ", "cross off", "check off", "tick off",
+                  "reschedule", "push back", "move the due", "due date",
+                  "finished", "did it", "knocked out"],
+    # Reminder WRITES. "remind" is a prefix cue covering remind/reminder/
+    # reminders, which is also how the read ask arrives — same trade as above.
+    # "forget" is NOT a cue: it is a memory tool that is core, and "don't forget"
+    # would drag this group onto every memory turn.
+    "reminders": ["remind", "ping me", "nudge me", "wake me", "alert me",
+                  "let me know at", "let me know in", "tell me at", "tell me in"],
     # Prefix cues, so "suggest" covers suggested/suggestion and "notice" covers
     # noticed. "suggest"/"recommend" will occasionally load this group for an
     # unrelated ask ("suggest a restaurant") — one extra schema, and the tool's

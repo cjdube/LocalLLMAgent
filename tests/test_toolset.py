@@ -228,6 +228,77 @@ def test_asking_about_your_own_notes_loads_the_wiki():
     assert "wiki" in toolset.groups_for_message("what have I been learning about?")
 
 
+def test_the_task_and_reminder_writes_load_on_the_words_he_actually_uses():
+    """create_task/update_task_due_date/complete_task and set_reminder/
+    cancel_reminder left core on 2026-09-15 (3,548 chars off every turn). The
+    reads stayed, so these cues are the only pre-load path to the writes — a
+    miss costs a load_tools hop at best. Pin the phrasings that must reach them."""
+    for ask in ("add a task to call the plumber",
+                "create a task for the insurance claim",
+                "put a task on my list to renew the registration",
+                "add an item to my todo list",
+                "mark the dentist task done",
+                "cross off the trash task",
+                "check off grocery shopping",
+                "I finished the tax paperwork, mark it complete",
+                "push back the due date on the registration",
+                "reschedule the dentist task to friday",
+                "move the due date to next week",
+                "I did it, close out the plumber task",
+                "knocked out the yard work, mark it"):
+        assert "taskedits" in toolset.groups_for_message(ask), ask
+    for ask in ("remind me to call the dentist at 3",
+                "set a reminder for the meeting",
+                "cancel that reminder",
+                "ping me in an hour",
+                "nudge me at 4pm about the call",
+                "wake me at 6",
+                "alert me when it's time to leave",
+                "let me know at 3pm",
+                "let me know in 20 minutes",
+                "tell me at noon to check the oven"):
+        assert "reminders" in toolset.groups_for_message(ask), ask
+
+
+def test_the_write_cues_stay_off_the_asks_they_would_ruin():
+    """The matcher is `\\b` + the cue, so every cue matches as a PREFIX: a bare
+    "add" fires on "address", "mark" on "market", "due" on "duel", "win" on
+    "winter". That is why several cues here carry a trailing space. This corpus
+    is the guard the comment in agent/toolset.py points at — shortening a cue
+    without re-running it is how the prefix trap gets back in."""
+    writes = {"taskedits", "reminders"}
+    for ask in ("what's the temperature outside",
+                "what's my address again?",
+                "how's the market doing?",
+                "what's the marketing plan?",
+                "I'm in a duel with the insurance company",
+                "what's due diligence?",
+                "don't forget I prefer metric",
+                "remember that I take my coffee black",
+                "what do you remember about me?",
+                "what's on my calendar tomorrow?",
+                "how'd Boston do last night?",
+                "what's in the window?",
+                "it's winter, is it cold?",
+                "I wonder if the flight is on time",
+                "what's on my plate today?",
+                "read me my notes on pricing"):
+        assert not (toolset.groups_for_message(ask) & writes), ask
+
+
+def test_fetch_scores_is_still_core():
+    """Measured 2026-09-15 and deliberately NOT demoted with the other writes.
+    The best cue list anyone could build fired on 10 of 16 real sports asks and
+    missed "how'd Boston do?" — the phrasing fetch_scores' own description calls
+    out. The only cue that catches those is the team or city itself, and a cue
+    list is data this public repo will not carry. A missed pre-load here is not
+    a shrug: with no schema in the prompt the model answers from pretraining,
+    and an invented score reads exactly like a real one."""
+    assert "fetch_scores" in toolset.CORE_TOOL_NAMES
+    grouped = [n for names in toolset.TOOL_GROUP_NAMES.values() for n in names]
+    assert "fetch_scores" not in grouped
+
+
 def test_render_toolgroups_index_lists_every_group():
     index = toolset.render_toolgroups_index()
     for group in toolset.TOOL_GROUPS:
