@@ -4,7 +4,7 @@ WIKI_VAULT_PATH is read fresh in _vault() on every call, so pointing it at a
 tmp_path via monkeypatch fully isolates these from the real vault.
 """
 
-from agent.tools import wiki
+from agent.tools import docs, wiki
 
 
 def _build_vault(root):
@@ -407,6 +407,38 @@ def test_one_shared_stopword_is_not_a_match(tmp_path, monkeypatch):
         _long_page(["Configuration and Preference Management"]))
 
     assert "error" in wiki.read_wiki_page("agentos", "Revenue and Pricing")
+
+
+def test_a_stopword_alone_does_not_match_a_section():
+    """The leak docs.py was fixed for, checked here too. The overlap branch used
+    to drop words under 4 chars as a stand-in for "not a stopword", and 'that'
+    and 'here' are both 4 letters — so a heading sharing only 'that' came back
+    as a match. A wrong section is worse than no section: the model reads it and
+    answers from it, and nothing tells either of them it got the wrong part."""
+    assert wiki._match_section(
+        [("Limits that are not about the model", "body")],
+        "something that is not a heading here",
+    ) is None
+
+
+def test_the_stopword_guard_bites(monkeypatch):
+    """Proof the test above is not green for the wrong reason. Empty the shared
+    stopword set and the same call must match on 'that' again."""
+    monkeypatch.setattr(docs, "_STOPWORDS", frozenset())
+    assert wiki._match_section(
+        [("Limits that are not about the model", "body")],
+        "something that is not a heading here",
+    ) is not None, "the unguarded version did not mismatch — this proves nothing"
+
+
+def test_a_single_real_word_still_matches_a_section():
+    """The guard must not turn into "two words or nothing". One CONTENT word is
+    a real match — asking about 'deployment' means the deployment section."""
+    hit = wiki._match_section(
+        [("Overview", "a"), ("Deployment and Rollout", "b")],
+        "how does the deployment work",
+    )
+    assert hit is not None and hit[0] == "Deployment and Rollout"
 
 
 def test_an_unmatched_section_names_what_the_page_does_have(tmp_path, monkeypatch):

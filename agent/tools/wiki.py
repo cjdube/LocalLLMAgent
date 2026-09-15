@@ -55,6 +55,9 @@ from pathlib import Path
 from agent import config
 from agent import prefs
 from agent.tools._http import load_env, print_result
+# One stopword list, not two. docs.py:_match_section had the same shared-stopword
+# bug and the same fix, and its tests guard the list; a copy here would drift.
+from agent.tools.docs import _heading_terms
 
 # Whose wiki this is, for the model-facing strings below. From
 # config/preferences.json; falls back to "the user".
@@ -371,12 +374,15 @@ def _match_section(sections: list, wanted: str) -> tuple[str, str] | None:
     if hits:
         return max(hits, key=lambda hb: len(hb[0]))
 
-    # Last resort. Words shorter than 4 chars are excluded because headings here
-    # are English phrases: one shared "and" would otherwise be a match.
-    terms = {t for t in _TERM_RE.findall(want) if len(t) >= 4}
+    # Last resort. Short words AND stopwords are both excluded, because headings
+    # here are English phrases: one shared "and" or "that" would otherwise count
+    # as a whole match. Length alone leaked — 'that' and 'here' are 4 letters,
+    # and a wrong section is worse than no section, because the model reads it
+    # and answers from it. A miss returns the real heading list to retry against.
+    terms = _heading_terms(want)
     best, best_score = None, 0
     for heading, body in sections:
-        score = len(terms & {t for t in _TERM_RE.findall(heading.lower()) if len(t) >= 4})
+        score = len(terms & _heading_terms(heading))
         if score > best_score:
             best, best_score = (heading, body), score
     return best
