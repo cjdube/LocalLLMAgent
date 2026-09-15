@@ -283,4 +283,5 @@ does, and were confirmed to fail with the redaction disabled.
   tradeoff.
 - [settings.md](settings.md) — the settings page in full: the schema table, the
   four-layer resolve, and why the environment still outranks the file.
-- Periodic audits of this posture land in [reviews/](reviews/).
+- Periodic audits of this posture land in `docs/reviews/`, which is
+  gitignored — deliberately, so a link here would break a fresh checkout.
