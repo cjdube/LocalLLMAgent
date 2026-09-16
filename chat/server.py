@@ -700,9 +700,18 @@ _SAVE_INTENT_RE = re.compile(
 # "remember when we talked about X" is a lookup (recall). The model handles both
 # of those correctly on its own, so the guard must keep its hands off them —
 # forcing a `remember` there would save the user's question as if it were a fact.
+#
+# The second half is reminiscence, which drops the question word entirely:
+# "remember our conversation about the roof" reads as a statement and is still a
+# lookup. Match the phrase, never the bare pronoun — a plain `we\b` would block
+# the legitimate "remember we're out of milk". A fact ending in "?" is caught in
+# `_requested_save` instead, because "remember that time you crashed?" loses its
+# only other cue to the `that ` strip in `_SAVE_INTENT_RE`.
 _NOT_A_FACT_RE = re.compile(
     r"^(?:to\b|what\b|when\b|where\b|who\b|whom\b|whose\b|why\b|how\b|"
-    r"if\b|whether\b|anything\b|everything\b|something\b)",
+    r"if\b|whether\b|anything\b|everything\b|something\b|"
+    r"(?:the\s+|that\s+)?time\b|our\s+(?:conversation|chat|talk)\b|"
+    r"(?:we|you|i)\s+(?:talked|discussed|said|mentioned|agreed|were|had)\b)",
     re.IGNORECASE,
 )
 
@@ -717,7 +726,7 @@ def _requested_save(text: str) -> str | None:
     if m is None:
         return None
     fact = m.group("fact").strip()
-    if not fact or _NOT_A_FACT_RE.match(fact):
+    if not fact or fact.endswith("?") or _NOT_A_FACT_RE.match(fact):
         return None
     return fact
 

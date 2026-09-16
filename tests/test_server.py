@@ -801,6 +801,17 @@ def test_save_asks_are_recognised_and_yield_the_fact(text, fact):
     "what do you remember about me?",
     "remember when we talked about the vault layout?",
     "remember anything about my car?",
+    # Reminiscence: a backward-looking reference to a shared past, which in
+    # English drops the question word and so reads as a statement. The answer
+    # is still recall, and forcing a save here puts a card in front of the user
+    # offering to store their own question.
+    "remember, we talked about the budget last week",
+    "remember the time we went to Maine?",
+    "remember our conversation about the roof",
+    "remember that time you crashed?",
+    "remember you mentioned a plumber",
+    # A save ask that ends in a question is an ask about the fact, not a fact.
+    "remember my flight is at 7 — can you check it?",
     # Not a save ask at all.
     "remind me to call the dentist at 3",
     "what's the weather tomorrow?",
@@ -808,6 +819,18 @@ def test_save_asks_are_recognised_and_yield_the_fact(text, fact):
 ])
 def test_non_save_asks_are_left_to_the_model(text):
     assert srv._requested_save(text) is None
+
+
+@pytest.mark.parametrize("text,fact", [
+    # The reminiscence guard matches phrases, never a bare pronoun: a plain
+    # `we\b` would swallow every one of these, which are real facts.
+    ("remember we're out of milk", "we're out of milk"),
+    ("remember that the dog eats at 6", "the dog eats at 6"),
+    ("remember I park in B12", "I park in B12"),
+    ("remember our anniversary is in June", "our anniversary is in June"),
+])
+def test_the_reminiscence_guard_does_not_swallow_real_facts(text, fact):
+    assert srv._requested_save(text) == fact
 
 
 def _final_reply_with_assistant_turn(text):

@@ -311,8 +311,11 @@ warns even when it succeeds, so the failure rate stays visible.
 ### Layer E — a limit that isn't a number
 
 **Lazy tool loading** (`docs/tool-loading.md`) is a context limit expressed as
-structure rather than a constant. Wren has 57 tools, about 40,000 chars of
-schema in total; chat sends ~16,000 of that as a 24-tool always-loaded core. Sending
+structure rather than a constant. Wren has 60 tools, about 43,700 chars of
+schema in total; chat sends ~12,000 of that as a 19-tool always-loaded core (18
+in `CORE_TOOL_NAMES` plus `load_tools` — `toolset.tools_for(frozenset())` is
+what computes it, and `test_the_documented_tool_count_matches_the_registry`
+holds the first number to the registry). Sending
 every schema on every turn wastes context the small model can't spare.
 Chat sends a small always-loaded core plus groups pulled in on demand. Applies to
 chat only — the background worker uses the whole registry.

@@ -121,7 +121,7 @@ ObsidianWikiAgent format change break this silently.
 
 ### The corpus
 
-**64 documents, ~740KB, across three checkouts.** The wiki is the knowledge base
+**About sixty documents, ~740KB, across three checkouts.** The wiki is the knowledge base
 Wren queries constantly; how a note gets into it, and how it is maintained, is
 part of how she works. Before 2026-09-15 she had no reachable answer to either.
 
@@ -240,8 +240,10 @@ wins — the same failing-then-passing guard pattern the stopword test uses.
 
 ### Reading, and the trim
 
-Section reading is **required, not optional**. Eighteen of the 64 documents exceed
-the 12000-char budget and `README.md`'s architecture section alone is larger
+Section reading is **required, not optional**. Roughly a third of the corpus
+exceeds the 12000-char budget — no exact count is stated here, because most of
+the long ones are the siblings' and that number changes with no commit in this
+repo — and `README.md`'s architecture section alone is larger
 than the whole budget. README stays one document read by section rather than
 eleven synthetic documents, which reuses the `section` argument instead of
 inventing a naming scheme.

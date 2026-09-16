@@ -225,3 +225,45 @@ def test_every_blocking_subprocess_call_carries_an_explicit_timeout():
 
     unbounded = [site for path in paths for site in _unbounded_subprocess_calls(path)]
     assert not unbounded, f"blocking subprocess calls with no timeout: {unbounded}"
+
+
+def test_every_tool_group_is_named_in_the_tool_loading_doc():
+    """`docs/tool-loading.md` is where `AGENTS.md` sends a contributor to decide
+    whether a new tool is core or grouped, and misclassification is security
+    behaviour — `mail` widens the confirm set. The doc had 8 of 15 groups on
+    2026-09-16, missing `self`, `mail` and five others, because three commits
+    that changed the registry touched 0 lines of it. The registry is guarded by
+    a partition test; this guards the prose about it.
+    """
+    from agent import toolset
+
+    text = (ROOT / "docs" / "tool-loading.md").read_text(encoding="utf-8")
+    assert len(toolset.TOOL_GROUP_NAMES) >= 15, "the scan lost the registry"
+
+    missing = [g for g in toolset.TOOL_GROUP_NAMES if f"`{g}`" not in text]
+    assert not missing, f"tool groups absent from docs/tool-loading.md: {missing}"
+
+    # The other half: a group named in the doc that left the registry. The core
+    # bullet named `recolor` for weeks after `recolor_event` was deleted.
+    documented = set(re.findall(r"^  - `([a-z_]+)`", text, re.MULTILINE))
+    stale = sorted(documented - set(toolset.TOOL_GROUP_NAMES))
+    assert not stale, f"docs/tool-loading.md names groups that do not exist: {stale}"
+
+
+def test_the_documented_tool_count_matches_the_registry():
+    """`docs/limits.md` is what the prompt-budget analysis reasons from, so a
+    stale tool count there produces a wrong answer to "can we afford to promote
+    this group to core?". It said 57 tools and a 24-tool core on 2026-09-16,
+    against a real 60 and 19.
+    """
+    from agent import toolset
+
+    text = (ROOT / "docs" / "limits.md").read_text(encoding="utf-8")
+
+    total = re.search(r"Wren has (\d+) tools", text)
+    assert total, "docs/limits.md no longer states a tool count in the scanned form"
+    assert int(total.group(1)) == len(toolset.TOOLS)
+
+    core = re.search(r"(\d+)-tool always-loaded core", text)
+    assert core, "docs/limits.md no longer states a core size in the scanned form"
+    assert int(core.group(1)) == len(toolset.tools_for(frozenset()))

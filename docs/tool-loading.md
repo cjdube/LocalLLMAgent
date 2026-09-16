@@ -15,12 +15,21 @@ lives in `chat/server.py`.
 
 ## Core vs. groups
 
-- **Core** (`CORE_TOOLS`) — always sent: weather, calendar (read + log +
-  recolor), Google Tasks, web search, memory (remember/pin/recall/recategorize/
-  archive/forget), reminders, the scheduled-task list (`list_scheduled_tasks`),
-  and skills **read** (the skills index is rendered into the prompt every turn
-  and tells the model to `read_skill`). Plus the `load_tools` meta-tool itself.
-- **Groups** (`TOOL_GROUPS`) — loaded on demand:
+**The core is reads, plus `log_calendar_event`.** Every write that isn't that
+one is deferred into a group on purpose — `4dbdd6d` moved the task and reminder
+writes out while keeping their reads core, because the reads answer "what's on
+my list?" on a cold turn and the writes never do. Put a new *write* in a group
+unless you can say why it belongs on every turn.
+
+- **Core** (`CORE_TOOL_NAMES`) — always sent: `fetch_weather`; the calendar
+  reads (`get_upcoming_events`, `get_events_by_date`) plus `log_calendar_event`;
+  the Google Tasks reads (`get_tasks`, `get_tasks_due_soon`); `search_web`;
+  memory (`remember`, `pin`, `recall`, `recategorize`, `archive`, `forget`);
+  `list_reminders`; `list_notifications`; `list_scheduled_tasks`; and skills
+  **read** (`list_skills`, `read_skill` — the skills index is rendered into the
+  prompt every turn and tells the model to `read_skill`). Plus the `load_tools`
+  meta-tool itself.
+- **Groups** (`TOOL_GROUP_NAMES`) — loaded on demand:
   - `opportunities` — fractional-work scout, watchlist, company research
   - `wiki` — the learnings wiki
   - `background` — hand a long task off to run detached
@@ -29,8 +38,18 @@ lives in `chat/server.py`.
   - `authoring` — write/delete a skill
   - `brief` — send the morning brief, or send an email
   - `games` — the games he can play, and the link to open one
+  - `sports` — scores for the teams he follows
   - `projects` — his local checkouts: what each is, and how recently he
     touched it
+  - `nudges` — the proactive nudges `daily_synthesis` wrote
+  - `taskedits` — the Google Tasks **writes**: create, complete, re-due
+  - `reminders` — the reminder **writes**: set and cancel
+  - `mail` — read, search and reply to Gmail. Its results are untrusted
+    content, so loading it widens the confirm set (`confirm_set_for("mail")`)
+  - `clickup` — the ClickUp board: read the Spaces and Tasks, add, comment,
+    move
+  - `self` — Wren's own settings and documentation (`describe_setup`,
+    `search_docs`, `read_doc`), all read-only
 
 Every tool in `TOOLS` is in exactly one of core or a group — enforced by
 `tests/test_toolset.py::test_core_and_groups_partition_the_registry`, so adding

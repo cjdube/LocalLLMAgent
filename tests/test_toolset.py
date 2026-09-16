@@ -406,7 +406,7 @@ def test_a_bare_wiki_ask_still_loads_only_the_wiki_group():
     """The boundary the sibling cues were written around, pinned so it cannot
     be undone quietly.
 
-    search_wiki reads the vault's CONTENTS — what Craig decided about pricing.
+    search_wiki reads the vault's CONTENTS — what the user decided about pricing.
     search_docs reads the wiki ENGINE's documentation — how a note becomes a
     page. Adding a bare "wiki" cue to the self group would pre-load two
     similar-sounding search tools on every vault ask, and a small model picking
