@@ -381,9 +381,9 @@ def render_brief_html(
         _section("☀️", "Today at a Glance", html.escape(glance_text) or "No summary available.")
         + _section("\U0001F4C5", "Calendar", _events_html(events))
         + _section("✅", "Tasks Due Soon", _tasks_html(tasks, tasks_error))
-        + _section("\U0001F5C2️", "Backlog", _backlog_html(backlog or {}, backlog_error))
         + (_section("\U0001F3C6", "Scores", scores_body) if scores_body else "")
         + _section("\U0001F324️", "Weather", _weather_html(weather))
+        + _section("\U0001F5C2️", "Backlog", _backlog_html(backlog or {}, backlog_error))
         + _section("⭐", "Starred Repos", _starred_repos_html(starred_repos, starred_intro, starred_error))
     )
     return f"""<!DOCTYPE html>
