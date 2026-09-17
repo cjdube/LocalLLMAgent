@@ -2,10 +2,14 @@
 each game that Wren hosts.
 
 A hosted game is two things behind Wren's login: its built browser bundle,
-served straight off disk, and a proxy for the AI calls its own service answers.
+served straight off disk, and a proxy for the calls its own service answers.
 Mounting it under Wren's origin rather than giving it a port of its own is
-deliberate — the game has no authentication, and a second listener on the
-tailnet would be a way into it that skips Wren's token.
+deliberate — the game has no authentication of its own worth exposing, and a
+second listener on the tailnet would be a way into it that skips Wren's token.
+
+How much of a service the proxy opens is decided per game: every game may reach
+its AI endpoints, and only a game whose registry entry sets proxy_api may reach
+the rest of its API. See game_api below and docs/games.md.
 
 The registry itself is agent/tools/games.py, shared with the chat tool, so the
 page and the model always list the same games.
@@ -42,6 +46,12 @@ games_bp = Blueprint("games", __name__)
 AI_TIMEOUT_S = 160
 WARMUP_TIMEOUT_S = 620
 
+# A game's own state calls (its board, a move, the current view) are local and
+# fast — nothing in them waits on a model. Kept short on purpose: a game service
+# that has wedged should read as broken quickly, not park a request for minutes
+# the way an AI call legitimately does.
+GAME_API_TIMEOUT_S = 15
+
 # The app-wide MAX_CONTENT_LENGTH is 256KB, sized for a chat turn. A game's
 # batched log flush is bigger than that sounds: one state snapshot runs to ~14KB
 # and a burst at round resolution flushes several at once, so the cap is
@@ -62,12 +72,27 @@ def _is_proxyable(endpoint: str) -> bool:
     a script) never normalizes them away first the way a browser would.
 
     Deliberately a shape check and NOT an allowlist of endpoint names. The proxy
-    is dumb on purpose (see game_ai) — the game's service owns its own routes,
+    is dumb on purpose (see game_api) — the game's service owns its own routes,
     and naming them here would be a second place for them to drift, so a game
     adding an endpoint would 404 until someone edited Wren. This bounds the URL
     without knowing anything about what the game answers.
     """
     return bool(endpoint) and "/" not in endpoint and endpoint not in (".", "..")
+
+
+def _is_forwardable(rest: str) -> bool:
+    """The same bound as _is_proxyable, but for a path of several segments.
+
+    The wider proxy exists so a game whose whole match runs over its own HTTP API
+    can be played through Wren, which means nested paths like
+    games/<id>/actions have to pass. What must NOT pass is a path that climbs out
+    of /api/: requests() normalizes dot segments when it prepares the URL, so a
+    rest of "../internal/x" would reach the service as /internal/x. Rejecting
+    "." and ".." segments outright is what keeps every forwarded URL under the
+    service's own /api/ prefix.
+    """
+    segments = rest.split("/")
+    return bool(rest) and all(seg not in ("", ".", "..") for seg in segments)
 
 
 @games_bp.before_request
@@ -110,33 +135,69 @@ def game_asset(game_id: str, asset: str = "index.html"):
     return send_from_directory(dist, asset)
 
 
-@games_bp.route("/games/<game_id>/api/ai/<path:endpoint>", methods=["POST"])
-def game_ai(game_id: str, endpoint: str):
-    """Proxy one AI call through to the game's own service on loopback.
+@games_bp.route("/games/<game_id>/api/<path:rest>", methods=["GET", "POST"])
+def game_api(game_id: str, rest: str):
+    """Proxy one call through to the game's own service on loopback.
 
     Deliberately dumb: it forwards the body and hands back the response. The
-    game's service owns prompt construction, schema validation and its own
-    fallbacks — duplicating any of that here would be a second place for it to
-    drift."""
+    game's service owns prompt construction, schema validation, its own auth and
+    its own fallbacks — duplicating any of that here would be a second place for
+    it to drift.
+
+    Two kinds of call come through here, and they are gated differently.
+
+    The AI calls (/api/ai/<endpoint>) are open to every game: one flat segment,
+    POST only, and the long model timeouts above. That is all Weigh Anchor's
+    browser ever asks for.
+
+    Everything else under /api/ is the game's own match API — several segments,
+    GET as well as POST, and a bearer token the service issues to the seat. A
+    game only gets that when its registry entry sets proxy_api, because opening
+    a service's whole API to the browser is a decision per game, not a default:
+    Weigh Anchor's service has routes its screen has no business calling.
+    """
     if not _authenticated():
         return jsonify({"error": "not authenticated"}), 401
     game = _game(game_id)
     if game is None:
         return jsonify({"error": f"no game with id {game_id!r}"}), 404
-    if not _is_proxyable(endpoint):
-        # 404 rather than 400: from the caller's side, an endpoint this proxy
-        # won't forward is one that doesn't exist.
-        logger.warning(f"games: {game_id} rejected AI endpoint {endpoint!r}")
-        return jsonify({"error": f"invalid AI endpoint {endpoint!r}"}), 404
 
-    timeout = WARMUP_TIMEOUT_S if endpoint == "warmup" else AI_TIMEOUT_S
-    url = f"http://127.0.0.1:{game['api_port']}/api/ai/{endpoint}"
+    is_ai = rest == "ai" or rest.startswith("ai/")
+    if is_ai:
+        endpoint = rest[len("ai/"):]
+        if request.method != "POST" or not _is_proxyable(endpoint):
+            # 404 rather than 400: from the caller's side, an endpoint this proxy
+            # won't forward is one that doesn't exist.
+            logger.warning(f"games: {game_id} rejected AI endpoint {endpoint!r}")
+            return jsonify({"error": f"invalid AI endpoint {endpoint!r}"}), 404
+        timeout = WARMUP_TIMEOUT_S if endpoint == "warmup" else AI_TIMEOUT_S
+    else:
+        if not game.get("proxy_api") or not _is_forwardable(rest):
+            logger.warning(f"games: {game_id} rejected API path {rest!r}")
+            return jsonify({"error": f"invalid API path {rest!r}"}), 404
+        timeout = GAME_API_TIMEOUT_S
+
+    url = f"http://127.0.0.1:{game['api_port']}/api/{rest}"
+    # Only the bearer token is carried over. The service decides what a seat may
+    # do from that token alone, and forwarding anything else — Host, Origin,
+    # Cookie — would either leak Wren's session downstream or trip the game's own
+    # loopback-name check, since requests() sets Host from the URL above.
+    headers = {}
+    token = request.headers.get("Authorization")
+    if token:
+        headers["Authorization"] = token
+
     try:
-        resp = requests.post(url, json=request.get_json(silent=True) or {}, timeout=timeout)
+        if request.method == "GET":
+            resp = requests.get(url, headers=headers, timeout=timeout)
+        else:
+            resp = requests.post(
+                url, json=request.get_json(silent=True) or {}, headers=headers, timeout=timeout
+            )
     except requests.RequestException as e:
         # Degrade with a readable message: the game's client surfaces the status
         # and body, and "connection refused" tells the user the service is down
         # far better than a bare 500 would.
-        logger.warning(f"games: {game_id} {endpoint} proxy failed: {e}")
+        logger.warning(f"games: {game_id} {rest} proxy failed: {e}")
         return jsonify({"error": f"{game['name']} service unreachable: {e}"}), 502
     return resp.content, resp.status_code, {"Content-Type": resp.headers.get("Content-Type", "application/json")}

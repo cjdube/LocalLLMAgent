@@ -1,10 +1,13 @@
 """Tests for the games blueprint: auth gating, serving a game's built bundle,
-and the AI proxy.
+and the proxy to a game's own service.
 
 The proxy is the security-relevant part — it is the one route that forwards a
-request body to another local service — so the auth gate, the timeout split, and
-the failure path get explicit coverage. requests.post is monkeypatched
-throughout; no test may reach a real game service.
+request to another local service — so the auth gate, the timeout split, and the
+failure path get explicit coverage. It carries two gates that are easy to
+confuse: every game may reach /api/ai/<one-segment> by POST, and only a game
+whose registry entry sets proxy_api may reach the rest of /api/. Both halves are
+asserted below, in each direction. requests.post and requests.get are
+monkeypatched throughout; no test may reach a real game service.
 """
 
 import os
@@ -55,11 +58,22 @@ def posted(monkeypatch):
         content = b'{"ok": true}'
         headers = {"Content-Type": "application/json"}
 
-    def fake_post(url, json=None, timeout=None):
-        calls.append({"url": url, "json": json, "timeout": timeout})
+    def fake_post(url, json=None, timeout=None, headers=None):
+        calls.append({
+            "method": "POST", "url": url, "json": json,
+            "timeout": timeout, "headers": headers or {},
+        })
+        return Resp()
+
+    def fake_get(url, timeout=None, headers=None):
+        calls.append({
+            "method": "GET", "url": url, "json": None,
+            "timeout": timeout, "headers": headers or {},
+        })
         return Resp()
 
     monkeypatch.setattr(routes_games.requests, "post", fake_post)
+    monkeypatch.setattr(routes_games.requests, "get", fake_get)
     return calls
 
 
@@ -225,3 +239,89 @@ def test_chat_keeps_the_tighter_body_cap(auth_client):
     # The larger limit is scoped to the games blueprint; chat must not inherit it.
     resp = auth_client.post("/chat", json={"message": "x" * 400_000})
     assert resp.status_code == 413
+
+
+# --------------------------------------------------------------------------- #
+# The wider match-API proxy (proxy_api games)
+# --------------------------------------------------------------------------- #
+# Train Game runs its whole match over its own HTTP API from the browser, so the
+# screen needs GET as well as POST, nested paths, and the bearer token the
+# service issues to the seat. That is a bigger opening than the AI proxy, so it
+# is per-game: the registry entry has to ask for it.
+
+def test_match_api_forwards_a_nested_get_with_the_seat_token(auth_client, posted, monkeypatch):
+    monkeypatch.setenv("TRAIN_GAME_PORT", "4173")
+    resp = auth_client.get(
+        "/games/train-game/api/games/g1/view",
+        headers={"Authorization": "Bearer seat-token"},
+    )
+    assert resp.status_code == 200
+    assert posted[0]["method"] == "GET"
+    assert posted[0]["url"] == "http://127.0.0.1:4173/api/games/g1/view"
+    # Without the token the service answers 401 to every match call, so a proxy
+    # that dropped it would look like a broken game rather than a broken proxy.
+    assert posted[0]["headers"]["Authorization"] == "Bearer seat-token"
+
+
+def test_match_api_forwards_a_post_body(auth_client, posted):
+    resp = auth_client.post(
+        "/games/train-game/api/games/g1/actions",
+        json={"expectedRevision": 4, "action": {"kind": "claim"}},
+    )
+    assert resp.status_code == 200
+    assert posted[0]["url"] == "http://127.0.0.1:4173/api/games/g1/actions"
+    assert posted[0]["json"] == {"expectedRevision": 4, "action": {"kind": "claim"}}
+
+
+def test_match_api_uses_the_short_timeout(auth_client, posted):
+    # Nothing in a match call waits on a model, so a wedged service should read
+    # as broken quickly rather than parking a request for minutes.
+    auth_client.get("/games/train-game/api/board")
+    assert posted[0]["timeout"] == routes_games.GAME_API_TIMEOUT_S
+    assert routes_games.GAME_API_TIMEOUT_S < routes_games.AI_TIMEOUT_S
+
+
+def test_match_api_is_refused_for_a_game_that_did_not_ask_for_it(auth_client, posted):
+    """The other half of the guarantee: opening a service's whole API is a
+    decision per game. Weigh Anchor's entry sets proxy_api False, and its service
+    has routes its screen has no business calling."""
+    for method, path in [
+        ("get", "/games/weigh-anchor/api/board"),
+        ("post", "/games/weigh-anchor/api/games/g1/actions"),
+        ("get", "/games/weigh-anchor/api/session"),
+    ]:
+        resp = getattr(auth_client, method)(path)
+        assert resp.status_code == 404, path
+    assert posted == [], "nothing may reach a game that did not opt in"
+
+
+def test_match_api_requires_auth(client, posted):
+    resp = client.get("/games/train-game/api/session")
+    assert resp.status_code == 401
+    assert posted == []
+
+
+def test_match_api_refuses_to_climb_out_of_the_api_prefix(auth_client, posted):
+    # requests() normalizes dot segments when it prepares the URL, so without the
+    # guard "../internal/x" would reach the service as /internal/x — any path on
+    # it, not just its API. A browser normalizes first; curl or a script does not.
+    for rest in ("../internal/admin", "games/../../admin", "..", "a/./b", "a//b"):
+        resp = auth_client.get(f"/games/train-game/api/{rest}")
+        assert resp.status_code in (404, 301, 308), rest
+    assert posted == []
+
+
+def test_ai_path_still_refuses_get_for_every_game(auth_client, posted):
+    # The AI proxy was POST-only before this route also learned GET, and the
+    # game services treat those endpoints as commands. Widening the route must
+    # not have widened that.
+    assert auth_client.get("/games/weigh-anchor/api/ai/read").status_code == 404
+    assert auth_client.get("/games/train-game/api/ai/read").status_code == 404
+    assert posted == []
+
+
+def test_train_game_is_registered_and_listed(auth_client):
+    from agent.tools.games import list_games
+    ids = [g["id"] for g in list_games()["games"]]
+    assert "train-game" in ids
+    assert "weigh-anchor" in ids

@@ -641,6 +641,19 @@ SETTINGS: tuple[Setting, ...] = (
         help="Must match the port in that game's own launchd plist.",
         type="int", default="3002", minimum=1, maximum=65535, applies="live",
     ),
+    Setting(
+        key="TRAIN_GAME_DIR", group="Games", label="Train Game checkout",
+        help="Where the game's own repo lives. Wren serves its built screen "
+             "from packages/ui/dist under her own origin, so the login gate "
+             "covers it.",
+        type="path", default="~/Projects/TrainGame", applies="live",
+    ),
+    Setting(
+        key="TRAIN_GAME_PORT", group="Games", label="Train Game port",
+        help="The port that game's own server listens on. Must match the port "
+             "it is started with.",
+        type="int", default="4173", minimum=1, maximum=65535, applies="live",
+    ),
 
     # ------------------------------------------------------- Logs and usage
     Setting(

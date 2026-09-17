@@ -134,7 +134,7 @@ _REDIRECT_ENDPOINTS = {"games.game_asset"}
 _URL_ARGS = {
     "task_key": "morning_brief", "run_id": "someid", "item_id": "abc",
     "watch_id": "abc", "game_id": "weigh-anchor", "asset": "index.html",
-    "endpoint": "decide", "filename": "favicon.svg", "name": "some-page",
+    "rest": "ai/decide", "filename": "favicon.svg", "name": "some-page",
 }
 
 

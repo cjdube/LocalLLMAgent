@@ -565,6 +565,7 @@ def _isolate_games(tmp_path, monkeypatch):
     # than protecting production state.
     monkeypatch.setattr(_games, "_service_up", lambda port: False)
     monkeypatch.setenv("WEIGH_ANCHOR_DIR", str(tmp_path / "weigh-anchor"))
+    monkeypatch.setenv("TRAIN_GAME_DIR", str(tmp_path / "train-game"))
 
 
 @pytest.fixture(autouse=True)

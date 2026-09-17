@@ -47,6 +47,14 @@ def _weigh_anchor_dir() -> Path:
     ).expanduser()
 
 
+def _train_game_dir() -> Path:
+    """Same as above. The bundle is a workspace package, so the built screen is
+    under packages/ui, not at the checkout root."""
+    return Path(
+        config.getenv("TRAIN_GAME_DIR") or (Path.home() / "Projects" / "TrainGame")
+    ).expanduser()
+
+
 def games() -> list[dict]:
     """The registry. A function rather than a module constant so the env-derived
     paths and ports are resolved per call."""
@@ -70,6 +78,30 @@ def games() -> list[dict]:
             # The AI seats run on the same local model chat uses, and Ollama serves one
             # generation at a time, so game turns and chat turns queue behind each other.
             "note": "The AI seats think with the same local model as chat, so a game turn and a chat message wait for each other.",
+            # Its browser code calls nothing but the AI endpoints, so the wider
+            # proxy stays shut for it. See chat/routes_games.py:game_api.
+            "proxy_api": False,
+        },
+        {
+            "id": "train-game",
+            "name": "Train Game",
+            "blurb": (
+                "A railway route-building game on an original 39-city map. Take contracts, "
+                "claim the lanes between cities to link them up, and score the routes you "
+                "complete before your opponent takes the track you need."
+            ),
+            "players": "You plus 1 AI seat. The match is saved after every move, so you can close the tab and pick the same game up later.",
+            "path": "/games/train-game/",
+            "dist": _train_game_dir() / "packages" / "ui" / "dist",
+            "api_port": int(config.getenv("TRAIN_GAME_PORT", "4173")),
+            # Its opponent runs as a separate agent process against the game's own
+            # server, so no model call passes through chat's Ollama slot on the
+            # request path — unlike Weigh Anchor, a turn here does not queue behind
+            # a chat message.
+            "note": "The opponent plays from its own process, so a game turn does not wait on a chat message.",
+            # Unlike Weigh Anchor, the whole match runs over the game's HTTP API
+            # from the browser, so the screen needs all of /api/ forwarded.
+            "proxy_api": True,
         },
     ]
 

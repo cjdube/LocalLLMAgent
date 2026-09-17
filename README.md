@@ -374,7 +374,7 @@ chat/
   routes_dashboard.py      # read-only dashboard/scheduler JSON API (blueprint)
   routes_opportunities.py  # opportunity triage API (blueprint)
   routes_starred.py        # starred-repo API, live list + cached fallback (blueprint)
-  routes_games.py          # games API, hosted bundles, AI proxy (blueprint)
+  routes_games.py          # games API, hosted bundles, game-service proxy (blueprint)
   routes_logs.py           # log-viewer JSON API (blueprint)
   routes_wiki.py           # wiki graph and lint API (blueprint)
   routes_usage.py          # model-usage ledger API (blueprint)
@@ -801,12 +801,18 @@ See [docs/starred.md](docs/starred.md).
 hosts, each with a Play link and whether it's playable right now; the `list_games`
 chat tool answers the same from a message ("what can we play?"). Wren implements
 no game — each lives in its own repo, and Wren serves its built bundle under her
-own origin and proxies its AI calls to a loopback service, so the game inherits
-the chat token instead of needing a tailnet port of its own. One game is
-registered today: **Weigh Anchor**, a word-deduction card game whose AI seats
+own origin and proxies its calls to a loopback service, so the game inherits
+the chat token instead of needing a tailnet port of its own. Two games are
+registered today. **Weigh Anchor** is a word-deduction card game whose AI seats
 think with the same local model chat uses (so game turns and chat turns queue
-behind each other) and which is *cooperative* at two seats by design. Adding a
-game is a registry entry plus a plist. See [docs/games.md](docs/games.md).
+behind each other) and which is *cooperative* at two seats by design. **Train
+Game** is a railway route-building game; its opponent plays from its own process,
+so its turns don't queue behind chat — but it has no launchd plist, so it shows
+as unavailable until you start its server by hand. A game's bundle must be built
+with the mount point it is served at (`VITE_BASE=/games/<id>/`); built plain, the
+page loads and every asset 404s, which looks like a Play button that does
+nothing. Adding a game is a registry entry plus a plist. See
+[docs/games.md](docs/games.md).
 
 ### Wiki graph
 
