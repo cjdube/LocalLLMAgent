@@ -54,14 +54,14 @@
          running them directly is one less artifact to keep in sync. tsx is
          hoisted to the workspace root, not to packages/server.
 
-         NOT tsx/dist/cli.mjs, which is what `npm run` and the weighanchor plist
-         use. That CLI spawns node as a CHILD and then waits, so launchd watches
-         the wrapper rather than the server: kill the server and launchd still
-         reports the job "running" while nothing listens on the port, and
-         KeepAlive never fires. Measured here on 2026-09-17 — the wrapper sat
-         alive for 30s after its child died. Loading tsx's hooks into node
-         directly is the same thing that CLI does, in one process, so the pid
-         launchd watches IS the server. -->
+         NOT tsx/dist/cli.mjs, which is what `npm run` uses. That CLI spawns
+         node as a CHILD and then waits, so launchd watches the wrapper rather
+         than the server: kill the server and launchd still reports the job
+         "running" while nothing listens on the port, and KeepAlive never fires.
+         Measured here on 2026-09-17. The weighanchor plist had the same bug and
+         was fixed the same way the same day; tests/test_games.py asserts it for
+         both, because the next game's plist gets copied from one of these and
+         the copy is how it spread. -->
     <key>ProgramArguments</key>
     <array>
         <string>/opt/homebrew/bin/node</string>

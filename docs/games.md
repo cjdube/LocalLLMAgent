@@ -150,12 +150,18 @@ port 4173, which is also what `npm run game` wants:
 launchctl bootout gui/$(id -u)/local.wren.traingame
 ```
 
-**Don't run that plist through `tsx/dist/cli.mjs`** the way `npm run` and the
-weighanchor plist do. That CLI spawns node as a child and waits, so launchd ends
-up watching the wrapper: kill the server and the job still reports `running`
-with nothing on the port, and `KeepAlive` never fires. The plist loads tsx's
-hooks into node directly instead, so the pid launchd watches is the server.
-Measured 2026-09-17, both ways.
+**Don't run a game's plist through `tsx/dist/cli.mjs`** the way `npm run` does.
+That CLI spawns node as a child and waits, so launchd ends up watching the
+wrapper: kill the server and the job still reports `running` with nothing on the
+port, and `KeepAlive` never fires. Both plists load tsx's hooks into node
+directly instead, so the pid launchd watches is the server.
+
+Both games shipped that bug. Weigh Anchor ran that way for 19 days — launchd
+tracked the wrapper while the server answering on 3002 was a different pid — and
+it only survived because the server never crashed. Fixed in both on 2026-09-17,
+after which each recovered from a `kill -9` in seconds.
+`tests/test_games.py:test_service_plist_runs_the_server_not_a_wrapper` asserts it
+per plist, because the next game's plist will be copied from one of these.
 
 ## Configuration
 

@@ -184,15 +184,23 @@ def test_service_plist_port_matches_the_registry(game_id, filename, monkeypatch)
     )
 
 
-def test_train_game_plist_runs_the_server_not_a_wrapper():
+@pytest.mark.parametrize("game_id,filename", _GAME_PLISTS)
+def test_service_plist_runs_the_server_not_a_wrapper(game_id, filename):
     """launchd watches the process it spawns. tsx/dist/cli.mjs spawns node as a
     CHILD and waits, so the job stays "running" after the server dies and
-    KeepAlive never fires — measured 2026-09-17, the wrapper outlived its child
-    by over a minute with nothing on the port. Loading tsx's hooks into node
-    directly keeps the watched pid and the listening pid the same."""
-    plist = plistlib.loads((_PLIST_DIR / "local.wren.traingame.plist").read_bytes())
+    KeepAlive never fires.
+
+    Both games shipped this bug. Weigh Anchor ran that way for 19 days —
+    launchd tracked pid 1438 while the server answering on 3002 was pid 1841 —
+    and it survived only because the server never crashed. Loading tsx's hooks
+    into node directly keeps the watched pid and the listening pid the same;
+    measured 2026-09-17, both games then recovered from a kill -9 in seconds.
+
+    Parameterized rather than written per game on purpose: the next game's plist
+    will be copied from one of these, and the copy is how the bug spread."""
+    plist = plistlib.loads((_PLIST_DIR / filename).read_bytes())
     argv = plist["ProgramArguments"]
     assert not any("cli.mjs" in arg for arg in argv), (
-        "running the tsx CLI here makes launchd watch a wrapper, not the server"
+        f"{filename}: running the tsx CLI makes launchd watch a wrapper, not the server"
     )
-    assert plist["KeepAlive"] is True
+    assert plist["KeepAlive"] is True, filename

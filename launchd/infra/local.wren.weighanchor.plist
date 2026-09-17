@@ -34,11 +34,23 @@
 
     <!-- tsx rather than a build step: the server is four TypeScript files and
          the repo has no server build target, so running the sources directly is
-         one less artifact to keep in sync with the checkout. -->
+         one less artifact to keep in sync with the checkout.
+
+         NOT tsx/dist/cli.mjs, which is what `npm run` uses and what this plist
+         used until 2026-09-17. That CLI spawns node as a CHILD and then waits,
+         so launchd watches the wrapper rather than the server: this job ran for
+         19 days with launchd tracking pid 1438 while the server answering on
+         3002 was pid 1841. Kill the server and the job still reports "running"
+         with nothing on the port, and KeepAlive below never fires. Loading
+         tsx's hooks into node directly is the same thing that CLI does, in one
+         process, so the pid launchd watches IS the server. -->
     <key>ProgramArguments</key>
     <array>
         <string>/opt/homebrew/bin/node</string>
-        <string>__HOME__/Projects/WeighAnchor/node_modules/tsx/dist/cli.mjs</string>
+        <string>--require</string>
+        <string>__HOME__/Projects/WeighAnchor/node_modules/tsx/dist/preflight.cjs</string>
+        <string>--import</string>
+        <string>file://__HOME__/Projects/WeighAnchor/node_modules/tsx/dist/loader.mjs</string>
         <string>server/index.ts</string>
     </array>
 
@@ -61,7 +73,8 @@
 
     <!-- Always up: the /games page probes this port to decide whether the game
          is playable, so a dead service shows as "unavailable" rather than a
-         broken board. -->
+         broken board. This only works because ProgramArguments above runs the
+         server itself rather than a wrapper — see the note there. -->
     <key>KeepAlive</key>
     <true/>
 
