@@ -7,6 +7,9 @@ an empty tmp dir suite-wide, and these tests patch them back to exercise each
 branch deliberately.
 """
 
+import plistlib
+from pathlib import Path
+
 import pytest
 
 from agent.tools import games as games_mod
@@ -146,3 +149,50 @@ def test_tool_description_forbids_naming_a_game_from_pretraining():
     description = games_mod.TOOL_SCHEMA["function"]["description"]
     assert "NOT something you know" in description
     assert "Never name a game or a link from your own knowledge" in description
+
+
+# --------------------------------------------------------------------------- #
+# The committed service plists
+# --------------------------------------------------------------------------- #
+# A game's service plist and its registry entry carry the same port in two
+# places, and the plist's ProgramArguments decide whether launchd's KeepAlive
+# can see the service die at all. Both are silent when wrong: the game just
+# greys out on /games, which reads as "I forgot to start it".
+
+_PLIST_DIR = Path(__file__).resolve().parent.parent / "launchd" / "infra"
+# (registry id, plist filename). A game with no plist is not listed here.
+_GAME_PLISTS = [
+    ("weigh-anchor", "local.wren.weighanchor.plist"),
+    ("train-game", "local.wren.traingame.plist"),
+]
+
+
+@pytest.mark.parametrize("game_id,filename", _GAME_PLISTS)
+def test_service_plist_port_matches_the_registry(game_id, filename, monkeypatch):
+    path = _PLIST_DIR / filename
+    assert path.is_file(), f"{filename} is missing; update _GAME_PLISTS too"
+    plist = plistlib.loads(path.read_bytes())
+
+    # The registry resolves its port from the environment, and conftest may have
+    # set one. Read the schema default, which is what the plist has to match.
+    monkeypatch.delenv("WEIGH_ANCHOR_PORT", raising=False)
+    monkeypatch.delenv("TRAIN_GAME_PORT", raising=False)
+    game = next(g for g in games_mod.games() if g["id"] == game_id)
+
+    assert plist["EnvironmentVariables"]["PORT"] == str(game["api_port"]), (
+        f"{filename} starts the service on a different port than the proxy dials"
+    )
+
+
+def test_train_game_plist_runs_the_server_not_a_wrapper():
+    """launchd watches the process it spawns. tsx/dist/cli.mjs spawns node as a
+    CHILD and waits, so the job stays "running" after the server dies and
+    KeepAlive never fires — measured 2026-09-17, the wrapper outlived its child
+    by over a minute with nothing on the port. Loading tsx's hooks into node
+    directly keeps the watched pid and the listening pid the same."""
+    plist = plistlib.loads((_PLIST_DIR / "local.wren.traingame.plist").read_bytes())
+    argv = plist["ProgramArguments"]
+    assert not any("cli.mjs" in arg for arg in argv), (
+        "running the tsx CLI here makes launchd watch a wrapper, not the server"
+    )
+    assert plist["KeepAlive"] is True

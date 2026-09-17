@@ -133,16 +133,29 @@ which overwrites a bundle built for Wren. Build for one mount point at a time:
 plain to play standalone at `http://127.0.0.1:4173`, with `VITE_BASE` to play
 through Wren.
 
-Then start the server:
+Then install the server, once. Make the log directory first — it is gitignored
+in that repo, so a fresh checkout does not have it, and launchd will not create
+it:
 
 ```bash
-cd ~/Projects/TrainGame
-npm run -w @traingame/server game
+mkdir -p ~/Projects/TrainGame/logs
+cd ~/Projects/LocalLLMAgent
+./launchd/install.sh launchd/infra/local.wren.traingame.plist
 ```
 
-**There is no launchd plist for it yet**, so it does not come back after a reboot
-and `/games` greys it out until you start it by hand. Add one in `launchd/infra/`
-the way Weigh Anchor has, when it is worth it.
+To hack on the game locally afterwards, boot the service out first — it holds
+port 4173, which is also what `npm run game` wants:
+
+```bash
+launchctl bootout gui/$(id -u)/local.wren.traingame
+```
+
+**Don't run that plist through `tsx/dist/cli.mjs`** the way `npm run` and the
+weighanchor plist do. That CLI spawns node as a child and waits, so launchd ends
+up watching the wrapper: kill the server and the job still reports `running`
+with nothing on the port, and `KeepAlive` never fires. The plist loads tsx's
+hooks into node directly instead, so the pid launchd watches is the server.
+Measured 2026-09-17, both ways.
 
 ## Configuration
 

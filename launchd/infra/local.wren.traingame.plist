@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The Train Game server — the Fastify server that holds the match and answers
+  the screen's API calls. Wren serves the game's built screen herself and
+  proxies /games/train-game/api/* here (chat/routes_games.py), so the browser
+  never talks to this port directly.
+
+  It binds 127.0.0.1 (packages/server/src/game.ts passes host explicitly) and
+  refuses any request arriving under a name that isn't a loopback name, so it is
+  NOT reachable over the tailnet: going through Wren is what puts it behind the
+  chat token.
+
+  Unlike Weigh Anchor, no model call reaches this process on the request path —
+  the opponent is Local Bot, running in this same process against the match API.
+  So a game turn here never queues behind a chat turn for Ollama's single slot.
+
+  This lives OUTSIDE launchd/ proper (in launchd/infra/) for the same reason
+  colima and weighanchor do: chat/insights.py:discover_tasks globs
+  launchd/*.plist non-recursively, so a directory down keeps another repo's
+  service off Wren's dashboard. install.sh skips this directory unless you name
+  the file.
+
+  Install (the paths are __HOME__ placeholders — install.sh fills them in, so
+  don't cp this into place by hand). Two things must exist first, or the job
+  fails to spawn and /games stays grey:
+
+      # 1. the log directory. It is gitignored in that repo, so a fresh
+      #    checkout does not have it and launchd will not create it.
+      mkdir -p ~/Projects/TrainGame/logs
+
+      # 2. the screen, built for the path Wren serves it at. Built plain, the
+      #    page loads and every asset 404s — which reads as a Play button that
+      #    does nothing, not as a build problem.
+      cd ~/Projects/TrainGame
+      VITE_BASE=/games/train-game/ npm run -w @traingame/ui build
+
+      cd ~/Projects/LocalLLMAgent
+      ./launchd/install.sh launchd/infra/local.wren.traingame.plist
+
+  Note the port: `npm run game` in that repo starts the same server on 4173, so
+  it collides with this service. Boot this out while hacking on the game
+  locally — and remember that `npm run game` rebuilds the screen PLAIN, so
+  rebuild it with VITE_BASE before booting the service back in:
+      launchctl bootout gui/$(id -u)/local.wren.traingame
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.wren.traingame</string>
+
+    <!-- tsx rather than a build step, same as weighanchor: the server is
+         TypeScript sources in a workspace with no server build target, so
+         running them directly is one less artifact to keep in sync. tsx is
+         hoisted to the workspace root, not to packages/server.
+
+         NOT tsx/dist/cli.mjs, which is what `npm run` and the weighanchor plist
+         use. That CLI spawns node as a CHILD and then waits, so launchd watches
+         the wrapper rather than the server: kill the server and launchd still
+         reports the job "running" while nothing listens on the port, and
+         KeepAlive never fires. Measured here on 2026-09-17 — the wrapper sat
+         alive for 30s after its child died. Loading tsx's hooks into node
+         directly is the same thing that CLI does, in one process, so the pid
+         launchd watches IS the server. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/node</string>
+        <string>--require</string>
+        <string>__HOME__/Projects/TrainGame/node_modules/tsx/dist/preflight.cjs</string>
+        <string>--import</string>
+        <string>file://__HOME__/Projects/TrainGame/node_modules/tsx/dist/loader.mjs</string>
+        <string>src/game.ts</string>
+    </array>
+
+    <!-- packages/server, because that is where src/game.ts sits. The paths
+         game.ts resolves (the save file, the built screen) all come off
+         import.meta.url rather than the working directory, so this only has to
+         make the argument above resolve. -->
+    <key>WorkingDirectory</key>
+    <string>__HOME__/Projects/TrainGame/packages/server</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- launchd's default PATH is minimal and tsx re-spawns node. -->
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <!-- Must match TRAIN_GAME_PORT in Wren's settings, which is what the
+             proxy in chat/routes_games.py dials. -->
+        <key>PORT</key>
+        <string>4173</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Always up: the /games page probes this port to decide whether the game
+         is playable, so a dead service shows as "unavailable" rather than a
+         broken board. The match is written to disk after every move and resumes
+         by itself, so a restart here does not lose the game in progress. This
+         only works because ProgramArguments above runs the server itself rather
+         than a wrapper — see the note there. -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Don't hot-loop if the checkout is broken (missing node_modules, a
+         syntax error): a game service is never urgent enough to retry faster. -->
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+
+    <!-- The game's own repo, not Wren's logs/ — Wren's run-chart parser reads
+         everything in there and this isn't one of its tasks. -->
+    <key>StandardOutPath</key>
+    <string>__HOME__/Projects/TrainGame/logs/service.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Projects/TrainGame/logs/service.log</string>
+</dict>
+</plist>

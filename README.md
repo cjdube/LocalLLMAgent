@@ -807,8 +807,7 @@ registered today. **Weigh Anchor** is a word-deduction card game whose AI seats
 think with the same local model chat uses (so game turns and chat turns queue
 behind each other) and which is *cooperative* at two seats by design. **Train
 Game** is a railway route-building game; its opponent plays from its own process,
-so its turns don't queue behind chat — but it has no launchd plist, so it shows
-as unavailable until you start its server by hand. A game's bundle must be built
+so its turns don't queue behind chat. A game's bundle must be built
 with the mount point it is served at (`VITE_BASE=/games/<id>/`); built plain, the
 page loads and every asset 404s, which looks like a Play button that does
 nothing. Adding a game is a registry entry plus a plist. See
