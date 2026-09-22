@@ -67,8 +67,11 @@ def _thinking(text="quietly reasoning"):
     return {"type": "thinking", "thinking": text, "signature": "CAIS8gwK"}
 
 
-def _tool_use(name="Bash"):
-    return {"type": "tool_use", "id": "toolu_1", "name": name, "input": {"command": "ls"}}
+def _tool_use(name="Bash", file_path=None):
+    """A tool_use block. With `file_path` it is a file tool — Write, Edit and
+    Read all carry that same field, which is why the reader checks the NAME."""
+    payload = {"file_path": file_path} if file_path else {"command": "ls"}
+    return {"type": "tool_use", "id": "toolu_1", "name": name, "input": payload}
 
 
 def _text(text):
@@ -466,6 +469,128 @@ def test_a_plan_with_no_heading_is_refused(roots, stub):
     out = session_ticket.create_ticket(session_id=SESSION_ID)
     assert "no '# ' heading" in out["error"]
     assert stub["events"] == []
+
+
+# --------------------------------------------------------------------------- #
+# No plan, but the session wrote a document
+# --------------------------------------------------------------------------- #
+
+DOC = "# Fall back to the document\n\nWhy this exists.\n\n## Step 1\n\nDo it.\n"
+
+
+@pytest.fixture
+def no_plan(roots, tmp_path):
+    """The `roots` session with its plan removed, plus a working directory for
+    it — a session that never entered plan mode."""
+    (roots["plans"] / f"{SLUG}.md").unlink()
+    work = tmp_path / "work"
+    work.mkdir()
+    return {"work": work, "projects": roots["projects"]}
+
+
+def _session_that_wrote(no_plan, *blocks):
+    """Rewrite the session transcript with `cwd` set and the given tool_use
+    blocks, in order, after the reply."""
+    cwd = str(no_plan["work"])
+    lines = [_user(PROMPT, cwd=cwd), _assistant(_text(REPLY), cwd=cwd)]
+    lines += [_assistant(b, request_id="req_2", cwd=cwd) for b in blocks]
+    _write_transcript(no_plan["projects"], lines)
+
+
+def test_a_session_with_no_plan_files_the_md_it_wrote(no_plan, stub):
+    report = no_plan["work"] / "report.md"
+    report.write_text(DOC, encoding="utf-8")
+    _session_that_wrote(no_plan, _tool_use("Write", str(report)))
+
+    out = session_ticket.create_ticket(session_id=SESSION_ID)
+    assert out["created"] is True
+    assert out["title"] == "Fall back to the document"
+    assert "report.md" in out["fallback"]
+    assert out["attached"] == "report.md"
+
+
+def test_the_last_written_md_wins(no_plan, stub):
+    """A session that writes several is working up to the one it ends with."""
+    first = no_plan["work"] / "draft.md"
+    second = no_plan["work"] / "final.md"
+    first.write_text("# The draft\n\nEarly.\n", encoding="utf-8")
+    second.write_text(DOC, encoding="utf-8")
+    _session_that_wrote(no_plan, _tool_use("Write", str(first)),
+                        _tool_use("Write", str(second)))
+
+    out = session_ticket.create_ticket(session_id=SESSION_ID)
+    assert out["title"] == "Fall back to the document"
+    assert out["attached"] == "final.md"
+
+
+def test_an_md_outside_the_working_directory_is_not_filed(no_plan, tmp_path, stub):
+    """Stands in for a memory note under ~/.claude: written by the session, but
+    not the thing it was working on."""
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    note = elsewhere / "note.md"
+    note.write_text(DOC, encoding="utf-8")
+    _session_that_wrote(no_plan, _tool_use("Write", str(note)))
+
+    out = session_ticket.create_ticket(session_id=SESSION_ID)
+    assert "no plan file" in out["error"]
+    assert "wrote no .md" in out["error"]
+    assert stub["events"] == []
+
+
+def test_an_md_that_no_longer_exists_is_skipped(no_plan, stub):
+    """A tool_use records the CALL, so a write that was refused or later
+    deleted is in the transcript with nothing behind it."""
+    kept = no_plan["work"] / "kept.md"
+    kept.write_text(DOC, encoding="utf-8")
+    _session_that_wrote(no_plan, _tool_use("Write", str(kept)),
+                        _tool_use("Write", str(no_plan["work"] / "gone.md")))
+
+    out = session_ticket.create_ticket(session_id=SESSION_ID)
+    assert out["attached"] == "kept.md"
+
+
+def test_an_edited_md_is_not_a_session_document(no_plan, stub):
+    """An Edit means the file was already there, so it is not this session's
+    own output."""
+    existing = no_plan["work"] / "existing.md"
+    existing.write_text(DOC, encoding="utf-8")
+    _session_that_wrote(no_plan, _tool_use("Edit", str(existing)))
+
+    out = session_ticket.create_ticket(session_id=SESSION_ID)
+    assert "wrote no .md" in out["error"]
+    assert stub["events"] == []
+
+
+def test_a_read_md_is_not_a_session_document(no_plan, stub):
+    """The one the real transcript would have tripped on: a Read carries
+    `file_path` too, so the field alone is not enough."""
+    other = no_plan["work"] / "someone-elses.md"
+    other.write_text(DOC, encoding="utf-8")
+    _session_that_wrote(no_plan, _tool_use("Read", str(other)))
+
+    out = session_ticket.create_ticket(session_id=SESSION_ID)
+    assert "wrote no .md" in out["error"]
+    assert stub["events"] == []
+
+
+def test_a_session_with_a_plan_ignores_the_fallback(roots, tmp_path, stub):
+    """The plan is the source whenever there is one, and a plain plan run says
+    nothing about a fallback."""
+    work = tmp_path / "work"
+    work.mkdir()
+    report = work / "report.md"
+    report.write_text(DOC, encoding="utf-8")
+    _write_transcript(roots["projects"], [
+        _user(PROMPT, cwd=str(work)),
+        _assistant(_text(REPLY), cwd=str(work)),
+        _assistant(_tool_use("Write", str(report)), request_id="req_2", cwd=str(work)),
+    ])
+
+    out = session_ticket.create_ticket(session_id=SESSION_ID)
+    assert out["title"] == "File a session as a ticket"
+    assert out["attached"] == f"{SLUG}.md"
+    assert "fallback" not in out
 
 
 # --------------------------------------------------------------------------- #

@@ -22,6 +22,11 @@ are the description, and the file is attached. Use it for a handoff brief, which
 nobody typed as a prompt and which no transcript holds. The same rule still
 applies — the words come off the document, not out of a model.
 
+**A session with no plan falls back to the .md it wrote itself.** Not every
+session enters plan mode, and one that ran a review and wrote the report is
+still worth filing. The file must sit inside the session's own working
+directory, and the result carries a `fallback` line saying which file was used.
+
 **Create, attach, then move.** The move to `designed` is last so the status
 never claims a Task is designed while its plan is still missing. Each step
 after the create can fail on its own, and the result says which did — a Task
@@ -146,8 +151,37 @@ def _assistant_text(rec: dict) -> str:
     ).strip()
 
 
+def _written_markdown(rec: dict) -> list:
+    """Absolute paths of the .md files this turn wrote with the Write tool.
+
+    Write only. An Edit means the file was already there, so it is not this
+    session's own output, and a Read carries `file_path` too — which is why the
+    tool name is checked and not just the field.
+
+    A tool_use block records the CALL, not its result, so a refused or failed
+    write appears here as well. Every path is checked against the filesystem
+    before it is used.
+    """
+    msg = rec.get("message")
+    if not isinstance(msg, dict):
+        return []
+    content = msg.get("content")
+    if not isinstance(content, list):
+        return []
+    found = []
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") != "tool_use":
+            continue
+        if block.get("name") != "Write":
+            continue
+        path = (block.get("input") or {}).get("file_path")
+        if isinstance(path, str) and path.endswith(".md"):
+            found.append(path)
+    return found
+
+
 def _read_transcript(path: Path) -> dict:
-    """Stream one .jsonl session and pull out the four facts we need.
+    """Stream one .jsonl session and pull out the facts we need.
 
     Line by line, with a cheap string test before json.loads: these files run to
     megabytes and most lines are assistant output we do not want.
@@ -157,8 +191,8 @@ def _read_transcript(path: Path) -> dict:
     They also carry only `type` and `sessionId` — no uuid, no timestamp — so
     nothing here may assume a line is shaped like a message.
     """
-    slug = ai_title = custom_title = first_prompt = started_at = None
-    reply_request, reply_parts = None, []
+    slug = ai_title = custom_title = first_prompt = started_at = cwd = None
+    reply_request, reply_parts, written = None, [], []
     with path.open("r", encoding="utf-8", errors="replace") as fh:
         for line in fh:
             if '"type"' not in line:
@@ -177,6 +211,13 @@ def _read_transcript(path: Path) -> dict:
                 ai_title = rec.get("aiTitle") or ai_title
             if slug is None and rec.get("slug"):
                 slug = rec["slug"]
+            if cwd is None and rec.get("cwd"):
+                cwd = rec["cwd"]
+            # On its own, NOT folded into the reply chain below: that chain
+            # stops gathering once the first reply's requestId is past, and the
+            # document is usually written much later in the session.
+            if kind == "assistant":
+                written.extend(_written_markdown(rec))
             if first_prompt is None and kind == "user":
                 text = _human_text(rec)
                 if text:
@@ -203,6 +244,8 @@ def _read_transcript(path: Path) -> dict:
         "first_prompt": first_prompt,
         "first_reply": "\n\n".join(reply_parts),
         "started_at": started_at,
+        "cwd": cwd,
+        "written_md": written,
     }
 
 
@@ -278,6 +321,31 @@ def _plan_for_slug(slug: str) -> Path | None:
     if root not in candidate.parents:
         return None
     return candidate if candidate.is_file() else None
+
+
+def _document_for_session(facts: dict) -> Path | None:
+    """The .md this session wrote, to file when it has no plan.
+
+    An ALLOW rule, not a reject one: only a file inside the session's own
+    working directory counts. A session writes .md files that are not
+    deliverables — a memory note under ~/.claude, a scratch file in the
+    scratchpad under /private/tmp — and the next kind nobody has thought of yet
+    would not be on a reject list either.
+
+    The LAST one still on disk wins. A session that writes several is working up
+    to the one it finishes with, and an earlier draft is not what somebody picks
+    the Task up to read.
+    """
+    root = Path(facts.get("cwd") or "/nonexistent").expanduser().resolve()
+    if not root.is_dir():
+        return None
+    for raw in reversed(facts.get("written_md") or []):
+        candidate = Path(raw).expanduser().resolve()
+        if root not in candidate.parents:
+            continue
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def _plan_heading(plan_text: str) -> str:
@@ -530,8 +598,23 @@ def create_ticket(session_id: str = None, plan_path: str = None,
     if "error" in facts:
         return facts
     if not facts["plan_path"]:
-        return {"error": f"no plan file at {_plans_root()}/{facts['slug']}.md — "
-                         "write the plan first, or pass --plan <path>"}
+        found = _document_for_session(facts)
+        if found is None:
+            return {"error": f"no plan file at {_plans_root()}/{facts['slug']}.md, "
+                             "and this session wrote no .md inside its working "
+                             "directory — write the plan first, or pass "
+                             "--plan <path> or --document <path>"}
+        # `fallback`, not `warnings`: the skill reads a warning as "the Task was
+        # created but a later step failed" and repeats it as a partial failure.
+        # This Task is complete and correct — it just came from a different
+        # source than the caller asked for.
+        result = create_document_ticket(
+            str(found), priority=priority, space=space, status=status,
+            dry_run=dry_run, force=force,
+        )
+        result["fallback"] = (f"no plan for session {facts['slug']}; filed "
+                              f"{found.name}, the .md this session wrote")
+        return result
     title = facts["plan_h1"]
     if not title:
         return {"error": f"{Path(facts['plan_path']).name} has no '# ' heading, "

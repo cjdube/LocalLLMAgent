@@ -770,9 +770,10 @@ plan's heading becomes the Task title, your first prompt of that session and the
 reply it drew become quotes in the description under **Asked** and **Answered**,
 the plan `.md` is attached, and the Task lands in
 `designed` — which is exactly the state `wren-build` needs, so the two fit
-together. Priority is an argument and defaults to `normal`. **It needs a plan
-file**; a session with none is refused rather than filed half-built. Running it
-twice refuses instead of filing a duplicate. The skill lives in
+together. Priority is an argument and defaults to `normal`. **A session with no
+plan falls back to the `.md` it wrote itself** — a review or a brief left in the
+working directory — and is refused only when there is neither. Running it twice
+refuses instead of filing a duplicate. The skill lives in
 `~/.claude/skills/clickup-ticket/` so it works from any repo, but the logic is
 `agent/session_ticket.py` here. See [docs/session-ticket.md](docs/session-ticket.md).
 

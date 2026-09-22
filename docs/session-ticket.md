@@ -147,12 +147,46 @@ Both take an id, so neither has a `TOOL_SCHEMA`, and neither appears in
 `agent/toolset.py` or `chat/insights.py`. Same class as `tagged_clickup_tasks`
 and `remove_clickup_tag`.
 
+## A session with no plan
+
+Not every session enters plan mode. One that ran a review and wrote the report
+has no plan file, but it does have a finished document sitting in the working
+directory — and until 2026-09-22 that session was simply refused, and the user
+was told to pass `--document <path>` by hand.
+
+It is found instead. Every transcript line carries a `cwd`, and a `Write` shows
+up as a `tool_use` block naming the file it wrote, so the session's own output
+is readable from the transcript with no guessing. The rules:
+
+- **`Write` only.** An `Edit` means the file was already there, so it is not
+  this session's output. A `Read` carries `file_path` too, which is why the tool
+  name is checked and not just the field.
+- **Inside the session's `cwd`, and nothing else.** An allow rule, not a reject
+  one — a session also writes a memory note under `~/.claude` and scratch files
+  in its scratchpad, and the next kind nobody has thought of yet would not be on
+  a reject list either.
+- **The last one still on disk wins.** A session that writes several is working
+  up to the one it finishes with. A `tool_use` records the call, not its result,
+  so a write that failed or was later deleted is skipped.
+
+The Task is then built exactly as `--document` builds one, and the result
+carries a `fallback` line naming the file. That is a **success field, not a
+warning**: the skill reads `warnings` as "the Task was created but a later step
+failed", and this Task is complete — it just came from a different source than
+the caller asked for.
+
+A document written with a Bash heredoc rather than the `Write` tool is still
+invisible. That is deliberate: the `repository-review` skill requires `Write`
+because the command guard refuses the heredoc, so the deliverables this is built
+for always come through it.
+
 ## Limits, on purpose
 
 - **The Wren Space only**, by default. It is the Space whose workflow defines
   `designed`. `--space` overrides it, but `--status` then needs to name a status
   that Space actually defines.
-- **One plan, and it must exist.** No plan file means refused, not filed.
+- **One source, and it must exist.** No plan and no `.md` written inside
+  the working directory means refused, not filed.
 - **No re-filing.** A second run refuses rather than updating the existing Task;
   `--force` files another one.
 - **The quote is cut out loud.** ClickUp truncates an over-long description
