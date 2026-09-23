@@ -51,9 +51,17 @@ of calls, not the size of any prompt. If a README is missing or the model
 returns nothing usable, the blurb falls back to the repo's GitHub description, so
 every repo still gets a usable line.
 
-Blurbs are generated **once per repo** and reused thereafter (a repo's purpose is
-stable, and READMEs churn on every commit). De-starred repos are pruned from the
-store on each run. Pass `--refresh` to regenerate every blurb:
+Blurbs the model wrote are generated **once per repo** and reused thereafter (a
+repo's purpose is stable, and READMEs churn on every commit). A blurb that fell
+back is the exception: each entry records a `source` of `model`, `description` or
+`empty`, and anything but `model` is asked for again on the next run. Falling
+back is usually transient — a busy Ollama slot returning empty content, or a
+README not pushed yet — and without the retry the repo would keep its GitHub
+description until somebody ran `--refresh` by hand. Entries written before
+`source` existed have no key; a missing key reads as `model`.
+
+De-starred repos are pruned from the store on each run. Pass `--refresh` to
+regenerate every blurb, including the ones the model did write:
 
 ```
 python -m tasks.starred_blurbs           # only newly-starred repos

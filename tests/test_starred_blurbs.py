@@ -111,3 +111,58 @@ def test_fetch_error_notifies_and_returns_nonzero(stub, monkeypatch):
 
     assert sb.main([]) == 1
     assert failures == ["GitHub down"]
+
+
+def test_a_fallback_blurb_is_retried_on_the_next_run(stub, monkeypatch):
+    """A blurb the model did not write must not be cached as if it had.
+
+    The cache key is the repo name, so a repo that fell back once was never in
+    `todo` again and kept its GitHub description until somebody ran --refresh by
+    hand. The model returning empty content is a documented failure here (a busy
+    Ollama slot, or thinking eating the budget), so this is a transient failure
+    made permanent.
+    """
+    monkeypatch.setattr(sb, "fetch_starred_repos", lambda: _repos(("a/one", "desc one")))
+
+    # Run 1: no README, so the description is used.
+    assert sb.main([]) == 0
+    store = load_json(sb.BLURBS_PATH, {})
+    assert store["a/one"]["blurb"] == "desc one"
+    assert store["a/one"]["source"] == "description"
+
+    # Run 2: the README is there now. The repo must be asked again.
+    stub["readmes"] = {"a/one": "# One\nDoes one thing."}
+    assert sb.main([]) == 0
+    store = load_json(sb.BLURBS_PATH, {})
+    assert store["a/one"]["blurb"] == "A tool that does the thing."
+    assert store["a/one"]["source"] == "model"
+    assert len(stub["complete"]) == 1, "run 1 must not have called the model"
+
+
+def test_an_empty_blurb_is_retried_too(stub, monkeypatch):
+    """The worst case: no README and no description caches the empty string and
+    renders as a blank cell on /starred forever."""
+    monkeypatch.setattr(sb, "fetch_starred_repos", lambda: _repos(("a/one", "")))
+
+    assert sb.main([]) == 0
+    store = load_json(sb.BLURBS_PATH, {})
+    assert store["a/one"]["blurb"] == ""
+    assert store["a/one"]["source"] == "empty"
+
+    stub["readmes"] = {"a/one": "# One"}
+    assert sb.main([]) == 0
+    assert load_json(sb.BLURBS_PATH, {})["a/one"]["source"] == "model"
+
+
+def test_an_entry_written_before_source_existed_is_not_regenerated(stub, monkeypatch):
+    """The migration half. Entries already in the store carry no `source` key, and
+    they are the model's own work — re-asking for all of them would spend a model
+    call per starred repo on the first run after this change."""
+    from agent.store import atomic_write_json
+    atomic_write_json(sb.BLURBS_PATH, {"a/one": {"blurb": "old", "generated_at": "x"}})
+    stub["readmes"] = {"a/one": "# One"}
+    monkeypatch.setattr(sb, "fetch_starred_repos", lambda: _repos(("a/one", "d1")))
+
+    assert sb.main([]) == 0
+    assert load_json(sb.BLURBS_PATH, {})["a/one"]["blurb"] == "old"
+    assert stub["complete"] == []

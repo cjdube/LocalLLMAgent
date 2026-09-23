@@ -56,10 +56,15 @@ def _first_line(text: str) -> str:
     return ""
 
 
-def _generate_blurb(repo: dict, backend, logger) -> str:
+def _generate_blurb(repo: dict, backend, logger) -> tuple[str, str]:
     """One isolated completion for one repo: summarize its README, falling back
     to the repo's GitHub description when the README is missing or the model
-    returns nothing usable — so every repo still gets a usable blurb."""
+    returns nothing usable — so every repo still gets a usable blurb.
+
+    Returns the blurb and where it came from: "model", "description", or
+    "empty". The caller stores that, because a fallback cached as if the model
+    had written it is never asked for again.
+    """
     readme = fetch_readme(repo["full_name"])[:README_CHARS]
     if readme.strip():
         raw = complete_text(
@@ -72,11 +77,12 @@ def _generate_blurb(repo: dict, backend, logger) -> str:
         logger.info(f"blurb {repo['full_name']} -> {raw!r}")
         blurb = _first_line(raw)
         if blurb:
-            return blurb
+            return blurb, "model"
         logger.warning(f"{repo['full_name']}: model returned nothing usable; using description")
     else:
         logger.info(f"{repo['full_name']}: no README; using description")
-    return (repo.get("description") or "").strip()
+    fallback = (repo.get("description") or "").strip()
+    return fallback, "description" if fallback else "empty"
 
 
 def main(argv=None) -> int:
@@ -98,16 +104,28 @@ def main(argv=None) -> int:
         logger.info(f"{len(repos)} starred repos")
 
         cached = load_json(BLURBS_PATH, {})
-        todo = repos if args.refresh else [r for r in repos if r["full_name"] not in cached]
+        # A blurb the model didn't write is asked for again next run. Falling back
+        # is transient — an empty completion from a busy slot, or a README that
+        # hadn't been pushed yet — but the cache key is the repo name, so without
+        # this the repo never re-enters `todo` and keeps its description until
+        # somebody runs --refresh by hand. Entries written before `source` existed
+        # have no key and are the model's own work, so a missing key reads as
+        # "model" and today's store costs nothing on the next run.
+        todo = repos if args.refresh else [
+            r for r in repos
+            if r["full_name"] not in cached
+            or cached[r["full_name"]].get("source", "model") != "model"
+        ]
         logger.info(f"{len(todo)} repos need a blurb")
 
         if todo:
             backend = resolve_backend("starred_blurbs")
             warm_model(logger=logger, backend=backend)
             for repo in todo:
-                blurb = _generate_blurb(repo, backend, logger)
+                blurb, source = _generate_blurb(repo, backend, logger)
                 cached[repo["full_name"]] = {
                     "blurb": blurb,
+                    "source": source,
                     "generated_at": datetime.now(timezone.utc).isoformat(),
                 }
 
