@@ -30,17 +30,24 @@ games_bp = Blueprint("games", __name__)
 
 # How long to wait on the game's own service before giving up.
 #
-# These must stay ABOVE the browser's own budgets (150s per decision, 600s for
-# warmup — see WeighAnchor src/agent/client.ts), because the game depends on the
-# server being the side that gives up first: a browser-side abort does not stop
-# an Ollama generation, so if this proxy timed out first the model would still be
-# busy and the retry would queue behind it.
+# WARMUP_TIMEOUT_S must stay ABOVE the browser's own warmup budget
+# (WARMUP_TIMEOUT_MS = 600_000 in WeighAnchor src/agent/client.ts), because the
+# game depends on the server being the side that gives up first: a browser-side
+# abort does not stop an Ollama generation, so if this proxy timed out first the
+# model would still be busy and the retry would queue behind it.
 #
-# Flask runs threaded, so a warmup parked here for ten minutes doesn't block the
-# *server* — but it does block chat, one layer down: Ollama runs with
+# AI_TIMEOUT_S does NOT bound a model decision. WeighAnchor moved its AI seats
+# into its own server process (server/aiSeats.ts), so the only browser calls that
+# still reach this route are the warmup (src/agent/client.ts) and the batched log
+# flush to /api/ai/log (src/ui/gameLog.ts). Don't tune this number to fix
+# starvation — no generation crosses this proxy on it.
+#
+# Warmup is the call here that really can hold Ollama's slot. Flask runs
+# threaded, so a warmup parked here for ten minutes doesn't block the *server* —
+# but it does block chat, one layer down: Ollama runs with
 # OLLAMA_NUM_PARALLEL=1, so the generation holds the single slot and a chat turn
 # started during a warmup queues behind it silently, looking like a hang rather
-# than a wait. That is the real cost of raising these numbers. See
+# than a wait. That is the real cost of raising WARMUP_TIMEOUT_S. See
 # docs/games.md ("Game turns and chat turns queue behind each other") and
 # docs/ollama-serving.md (starvation).
 AI_TIMEOUT_S = 160

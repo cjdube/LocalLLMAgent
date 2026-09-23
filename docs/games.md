@@ -56,6 +56,10 @@ row and its service's other routes stay unreachable from a browser. Train Game
 runs its whole match over its own HTTP API — board, session, view, actions,
 handover — so it needs the second, and sets `proxy_api: True` to ask for it.
 
+Only `warmup` is a model call. Weigh Anchor's AI seats moved into its own server
+process, so the sole other browser call on the first row is its batched log
+flush — the 160s budget bounds no generation.
+
 Both rows reject `.` and `..` segments. `requests()` normalizes dot segments when
 it builds the URL, so without that check a path of `../internal/x` would reach the
 service as `/internal/x` — any route on it. A browser normalizes before sending;
