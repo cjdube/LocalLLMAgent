@@ -189,8 +189,11 @@ with a reason rather than served as a dead board. Two reasons:
 - **"not built yet"** — no `dist` directory. Run the build above.
 - **"its model service isn't running"** — nothing is listening on the port. For
   Weigh Anchor, check `launchctl print gui/$(id -u)/local.wren.weighanchor` and
-  the service log at `~/Projects/WeighAnchor/logs/service.log`. Train Game has no
-  plist, so this just means you have not started it.
+  the service log at `~/Projects/WeighAnchor/logs/service.log`. For Train Game,
+  check `launchctl print gui/$(id -u)/local.wren.traingame` and the service log
+  at `~/Projects/TrainGame/logs/service.log`. If either job will not spawn at
+  all, check that its `logs` directory exists — it is gitignored in both repos
+  and launchd will not create it.
 
 The build is reported first when both are wrong, because it's the actionable one.
 

@@ -267,3 +267,37 @@ def test_the_documented_tool_count_matches_the_registry():
     core = re.search(r"(\d+)-tool always-loaded core", text)
     assert core, "docs/limits.md no longer states a core size in the scanned form"
     assert int(core.group(1)) == len(toolset.tools_for(frozenset()))
+
+
+def test_every_hosted_game_has_its_launchd_job_in_the_troubleshooting_section():
+    """`docs/games.md`'s "when a game shows as unavailable" bullet is read at the
+    one moment the page is greyed out, so a game missing from it sends the reader
+    to start a service by hand — which then collides with the `KeepAlive` job the
+    moment launchd brings it back.
+
+    Train Game gained `launchd/infra/local.wren.traingame.plist` on 2026-09-17
+    and that bullet still said it had no plist, forty lines below the section
+    telling the reader to install one.
+
+    The label is checked inside a `launchctl print` line on purpose: the plist's
+    filename already appears in the deploy section, so a plain substring search
+    over the file passes while the troubleshooting bullet is still wrong.
+    """
+    from agent.tools.games import games
+
+    text = (ROOT / "docs" / "games.md").read_text(encoding="utf-8")
+    registry = games()
+    assert registry, "the scan lost the games registry"
+
+    for game in registry:
+        label = "local.wren." + game["id"].replace("-", "")
+        plist = ROOT / "launchd" / "infra" / f"{label}.plist"
+        assert plist.is_file(), (
+            f"{game['name']} has no service plist at {plist.relative_to(ROOT)} — "
+            "name a game's plist after its registry id, or this guard cannot "
+            "find it"
+        )
+        assert f"launchctl print gui/$(id -u)/{label}" in text, (
+            f"docs/games.md never tells the reader to inspect {label}, so "
+            f"{game['name']} showing as unavailable has no documented next step"
+        )
