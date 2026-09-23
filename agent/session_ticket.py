@@ -381,10 +381,10 @@ def session_facts(session_id: str = None, plan_path: str = None) -> dict:
     if not facts["first_prompt"]:
         return {"error": f"no typed prompt found in {transcript.name} — "
                          "this session has nothing to quote"}
-    if not facts["slug"]:
-        return {"error": f"{transcript.name} carries no slug, so its plan cannot be found"}
-
-    plan = given_plan or _plan_for_slug(facts["slug"])
+    # A slug is only ever used to FIND a plan at <plans>/<slug>.md. A session
+    # with no slug — an unattended run, which is never given a title — simply
+    # has nothing to look up, so it falls through to the document fallback.
+    plan = given_plan or (_plan_for_slug(facts["slug"]) if facts["slug"] else None)
     facts.update({
         "session_id": transcript.stem,
         "transcript": str(transcript),
@@ -600,10 +600,13 @@ def create_ticket(session_id: str = None, plan_path: str = None,
     if not facts["plan_path"]:
         found = _document_for_session(facts)
         if found is None:
-            return {"error": f"no plan file at {_plans_root()}/{facts['slug']}.md, "
-                             "and this session wrote no .md inside its working "
-                             "directory — write the plan first, or pass "
-                             "--plan <path> or --document <path>"}
+            missing = (f"no plan file at {_plans_root()}/{facts['slug']}.md"
+                       if facts["slug"] else
+                       f"session {facts['session_id']} carries no slug, so it "
+                       "has no plan file")
+            return {"error": f"{missing}, and this session wrote no .md inside "
+                             "its working directory — write the plan first, or "
+                             "pass --plan <path> or --document <path>"}
         # `fallback`, not `warnings`: the skill reads a warning as "the Task was
         # created but a later step failed" and repeats it as a partial failure.
         # This Task is complete and correct — it just came from a different
@@ -612,7 +615,8 @@ def create_ticket(session_id: str = None, plan_path: str = None,
             str(found), priority=priority, space=space, status=status,
             dry_run=dry_run, force=force,
         )
-        result["fallback"] = (f"no plan for session {facts['slug']}; filed "
+        result["fallback"] = (f"no plan for session "
+                              f"{facts['slug'] or facts['session_id']}; filed "
                               f"{found.name}, the .md this session wrote")
         return result
     title = facts["plan_h1"]

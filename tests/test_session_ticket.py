@@ -509,6 +509,59 @@ def test_a_session_with_no_plan_files_the_md_it_wrote(no_plan, stub):
     assert out["attached"] == "report.md"
 
 
+def _without_slug(rec):
+    """One transcript line with the `slug` key absent, not empty.
+
+    A scheduled run is never given a title, so no line of its transcript
+    carries the field at all — which is a different shape from a line whose
+    slug is "".
+    """
+    return {k: v for k, v in rec.items() if k != "slug"}
+
+
+def test_a_session_with_no_slug_still_files_the_md_it_wrote(no_plan, stub):
+    """The slug's only job is to FIND a plan — <plans>/<slug>.md. A session
+    with no slug and no plan has nothing to look up, so the missing field must
+    not stop the fallback.
+
+    This is the weekly repository review: launchd runs it unattended, nothing
+    ever asserts a title, and the report it writes is the only copy of that
+    work off this machine.
+    """
+    cwd = str(no_plan["work"])
+    report = no_plan["work"] / "report.md"
+    report.write_text(DOC, encoding="utf-8")
+    _write_transcript(no_plan["projects"], [
+        _without_slug(_user(PROMPT, cwd=cwd)),
+        _without_slug(_assistant(_text(REPLY), cwd=cwd)),
+        _without_slug(_assistant(_tool_use("Write", str(report)),
+                                 request_id="req_2", cwd=cwd)),
+    ])
+
+    out = session_ticket.create_ticket(session_id=SESSION_ID)
+    assert out["created"] is True
+    assert out["title"] == "Fall back to the document"
+    assert out["attached"] == "report.md"
+    assert "report.md" in out["fallback"]
+
+
+def test_a_session_with_no_slug_and_no_md_names_the_session(no_plan, stub):
+    """The other half: with nothing to fall back to it must still refuse
+    readably. The old message interpolated the slug, so a session without one
+    would have offered a path ending '/None.md'."""
+    cwd = str(no_plan["work"])
+    _write_transcript(no_plan["projects"], [
+        _without_slug(_user(PROMPT, cwd=cwd)),
+        _without_slug(_assistant(_text(REPLY), cwd=cwd)),
+    ])
+
+    out = session_ticket.create_ticket(session_id=SESSION_ID)
+    assert "wrote no .md" in out["error"]
+    assert "None" not in out["error"]
+    assert SESSION_ID in out["error"]
+    assert stub["events"] == []
+
+
 def test_the_last_written_md_wins(no_plan, stub):
     """A session that writes several is working up to the one it ends with."""
     first = no_plan["work"] / "draft.md"
