@@ -170,13 +170,15 @@ def test_decisions_get_the_shorter_timeout(auth_client, posted):
     assert posted[0]["timeout"] == routes_games.AI_TIMEOUT_S
 
 
-def test_proxy_timeouts_exceed_the_browsers_own_budgets():
+def test_warmup_budget_exceeds_the_browsers_own():
     # The game depends on the SERVER being the side that gives up first: a
     # browser-side abort doesn't stop an Ollama generation, so a proxy that
     # timed out first would leave the model busy and the retry queued behind it.
-    # The browser's budgets are 150s per decision and 600s for warmup.
-    assert routes_games.AI_TIMEOUT_S > 150
+    # WARMUP_TIMEOUT_MS = 600_000 in WeighAnchor src/agent/client.ts is the
+    # budget this must stay above. There is no decision budget to beat any more:
+    # its AI seats moved server-side, so no generation crosses this proxy.
     assert routes_games.WARMUP_TIMEOUT_S > 600
+    assert routes_games.WARMUP_TIMEOUT_S > routes_games.AI_TIMEOUT_S
 
 
 def test_unreachable_service_degrades_to_502(auth_client, monkeypatch):
@@ -325,3 +327,45 @@ def test_train_game_is_registered_and_listed(auth_client):
     ids = [g["id"] for g in list_games()["games"]]
     assert "train-game" in ids
     assert "weigh-anchor" in ids
+
+
+def test_match_api_forwards_the_query_string(auth_client, posted, monkeypatch):
+    """A dropped query string is invisible on both sides: the browser sends a
+    parameter, the service answers with its own default, and nothing logs it.
+
+    Train Game's /api/agent/turn is a long poll that takes waitMs from the query
+    and defaults to 25s. Dropped, that poll would outlive GAME_API_TIMEOUT_S and
+    come back as a 502 about a service that was working.
+    """
+    monkeypatch.setenv("TRAIN_GAME_PORT", "4173")
+    resp = auth_client.get("/games/train-game/api/agent/turn?waitMs=5000&seat=2")
+    assert resp.status_code == 200
+    assert posted[0]["url"] == (
+        "http://127.0.0.1:4173/api/agent/turn?waitMs=5000&seat=2"
+    )
+
+
+def test_ai_proxy_forwards_the_query_string(auth_client, posted):
+    """The other gate. Both build the same URL, so both must carry it."""
+    resp = auth_client.post("/games/weigh-anchor/api/ai/log?round=3", json={})
+    assert resp.status_code == 200
+    assert posted[0]["url"].endswith("/api/ai/log?round=3")
+
+
+def test_no_query_string_leaves_no_trailing_marker(auth_client, posted):
+    """A bare '?' is a different URL to the service and shows up in its logs."""
+    auth_client.get("/games/train-game/api/board")
+    assert "?" not in posted[0]["url"]
+
+
+def test_the_query_string_cannot_widen_the_path(auth_client, posted):
+    """The path bound is what keeps a call inside /api/, and a query string is
+    not part of the path. The shape checks still decide, and a game that did not
+    opt in stays shut no matter what the query says."""
+    assert auth_client.get(
+        "/games/weigh-anchor/api/board?x=1"
+    ).status_code == 404
+    assert auth_client.get(
+        "/games/train-game/api/../internal/x?x=1"
+    ).status_code == 404
+    assert posted == []

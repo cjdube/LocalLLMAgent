@@ -185,6 +185,15 @@ def game_api(game_id: str, rest: str):
         timeout = GAME_API_TIMEOUT_S
 
     url = f"http://127.0.0.1:{game['api_port']}/api/{rest}"
+    # The query string crosses too, verbatim. It is outside the path bound the
+    # checks above enforce — requests() normalizes dot segments in the path only,
+    # so a query cannot climb out of /api/ — and dropping it was silent on both
+    # sides: the browser sends a parameter and the service answers with its own
+    # default. Train Game's /api/agent/turn already reads waitMs this way.
+    # Decoded latin-1 rather than utf-8 because any byte sequence must survive;
+    # the caller already encoded it.
+    if request.query_string:
+        url = f"{url}?{request.query_string.decode('latin-1')}"
     # Only the bearer token is carried over. The service decides what a seat may
     # do from that token alone, and forwarding anything else — Host, Origin,
     # Cookie — would either leak Wren's session downstream or trip the game's own

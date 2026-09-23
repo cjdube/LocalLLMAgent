@@ -69,6 +69,11 @@ Only the `Authorization` header crosses the proxy. Wren's own session cookie mus
 not reach a game service, and forwarding `Host` or `Origin` would trip Train
 Game's loopback-name check, since `requests()` sets `Host` from the loopback URL.
 
+The query string crosses verbatim on both rows. It sits outside the path bound
+above — dot segments are normalized in the path only — so it widens nothing, and
+dropping it was silent in both directions: the browser sent a parameter and the
+service answered with its own default.
+
 ## The two constraints worth knowing before you play
 
 **Weigh Anchor's turns and chat turns queue behind each other.** Its AI seats
