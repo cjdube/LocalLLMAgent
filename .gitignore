@@ -16,6 +16,9 @@ config/google_token.json
 config/github_starred_state.json
 config/wren_memory.json
 config/reminders.json
+# Uploaded CSVs (agent/tools/imports.py) — user financial data.
+config/imports.json
+config/imports/
 config/push_log.json
 config/bg_jobs.json
 config/opportunities.json

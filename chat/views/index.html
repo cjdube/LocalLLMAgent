@@ -167,6 +167,23 @@
   }
   #send:disabled { opacity: 0.5; }
   #send.stop { background: #b42318; }
+  /* Round icon button matching #send's height so the row stays bottom-aligned;
+     flex-shrink: 0 keeps it from being squeezed at phone width. */
+  #attach {
+    flex-shrink: 0;
+    height: var(--composer-row);
+    width: var(--composer-row);
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid #d0d5dd;
+    background: #ffffff;
+    color: #6b7280;
+    font-size: 17px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  #attach:hover { background: #f3f4f6; }
+  #attach:disabled { opacity: 0.5; cursor: default; }
 </style>
 </head>
 <body>
@@ -180,6 +197,8 @@
   </header>
   <div id="messages"></div>
   <form id="composer">
+    <button id="attach" type="button" aria-label="Upload a CSV file">📎</button>
+    <input type="file" id="attachFile" accept=".csv,text/csv" hidden>
     <textarea id="input" rows="1" autocomplete="off" placeholder="Ask Wren anything..." autofocus></textarea>
     <button id="send" type="submit">Send</button>
   </form>

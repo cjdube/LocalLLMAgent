@@ -31,7 +31,10 @@
   const input = document.getElementById("input");
   const sendBtn = document.getElementById("send");
   const newChatBtn = document.getElementById("newChat");
+  const attachBtn = document.getElementById("attach");
+  const attachFile = document.getElementById("attachFile");
   const GREETING = "Hi — what can I do for you today?";
+  const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
   function scrollToEnd() {
     messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -479,6 +482,71 @@
     resetInput();
     messagesEl.replaceChildren();
     addMessage("wren", GREETING);
+  });
+
+  // CSV upload: the paperclip opens the hidden file input, and its change
+  // event does the rest. Client-side checks (extension, size) happen before
+  // any request so a bad pick never costs a round trip. The result — success
+  // or failure — is just another system note in the thread, same as any other
+  // error; a successful upload also prefills the composer so the next typed
+  // message can refer to what was just added, without auto-sending it.
+  attachBtn.addEventListener("click", () => attachFile.click());
+
+  function prefillUpload(name) {
+    const note = "I uploaded " + name + ". ";
+    input.value = input.value ? input.value + " " + note : note;
+    autoGrow();
+    input.focus();
+  }
+
+  // A 413 from Flask's own request-too-large handling is not guaranteed to be
+  // JSON (it can be a plain error page), so a failed .json() there still needs
+  // a readable message rather than surfacing as a raw parse error.
+  async function uploadErrorMessage(resp) {
+    try {
+      const payload = await resp.json();
+      if (payload && payload.error) return payload.error;
+    } catch (_) {
+      // fall through to the generic messages below
+    }
+    return resp.status === 413
+      ? "File is too large (max 5 MB)."
+      : `Upload failed (HTTP ${resp.status}).`;
+  }
+
+  async function uploadFile(file) {
+    if (!/\.csv$/i.test(file.name)) {
+      addMessage("system", "Only .csv files can be uploaded.");
+      return;
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      addMessage("system", "File is too large (max 5 MB).");
+      return;
+    }
+
+    attachBtn.disabled = true;
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const resp = await fetch("/api/imports", { method: "POST", body: formData });
+      if (!resp.ok) {
+        addMessage("system", await uploadErrorMessage(resp));
+        return;
+      }
+      const payload = await resp.json();
+      addMessage("system", `Uploaded ${payload.name} — ${payload.rows.toLocaleString()} rows.`);
+      prefillUpload(payload.name);
+    } catch (err) {
+      addMessage("system", `Upload failed (${err.message}).`);
+    } finally {
+      attachBtn.disabled = false;
+    }
+  }
+
+  attachFile.addEventListener("change", () => {
+    const file = attachFile.files && attachFile.files[0];
+    attachFile.value = "";  // let the same file be picked again
+    if (file) uploadFile(file);
   });
 
   addMessage("wren", GREETING);

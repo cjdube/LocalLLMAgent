@@ -166,6 +166,7 @@ from agent.backends import gemini as _gemini_backend
 from agent.tools import background as _background
 from agent.tools import email as _email
 from agent.tools import games as _games
+from agent.tools import imports as _imports
 from agent.tools import mail_state as _mail_state
 from agent.tools import memory as _memory
 from agent.tools import notify as _notify
@@ -375,6 +376,11 @@ def _isolate_remaining_config_stores(tmp_path, monkeypatch):
     monkeypatch.setattr(_memory, "_STORE_PATH", tmp_path / "wren_memory.json")
     monkeypatch.setattr(_background, "_STORE_PATH", tmp_path / "bg_jobs.json")
     monkeypatch.setattr(_reminders, "_STORE_PATH", tmp_path / "reminders.json")
+    # Uploaded CSVs (agent/tools/imports.py) hold personal financial data —
+    # both the file store and its index need the same backstop as everything
+    # else here, so a test never writes a fixture upload over a real one.
+    monkeypatch.setattr(_imports, "IMPORTS_DIR", tmp_path / "imports")
+    monkeypatch.setattr(_imports, "_INDEX_PATH", tmp_path / "imports.json")
     # The delivered-push log. This redirect is load-bearing, not a backstop:
     # _block_ntfy_egress below stubs requests.post with a response whose
     # raise_for_status() passes, so notify() reaches its SUCCESS branch in every

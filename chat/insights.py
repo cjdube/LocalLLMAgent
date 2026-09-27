@@ -737,6 +737,8 @@ TOOL_SERVICES = {
     "wiki": ("Obsidian Wiki", ["search_wiki", "read_wiki_page"]),
     "skills": ("Skills", ["list_skills", "read_skill", "write_skill", "delete_skill"]),
     "reminders": ("Reminders", ["set_reminder", "list_reminders", "cancel_reminder"]),
+    # Files under config/imports/ the user uploaded in chat — local, like games.
+    "imports": ("Uploaded Files", ["list_imports", "read_import"]),
     "scheduler": ("launchd Scheduler", ["list_scheduled_tasks"]),
     "games": ("Games", ["list_games"]),
     # Local checkouts under PROJECTS_DIR, not a hosted service — same as games.

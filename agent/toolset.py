@@ -95,6 +95,12 @@ from agent.tools.opportunities import (
 from agent.tools.push_log import TOOL_SCHEMA as PUSH_LOG_SCHEMA, list_notifications
 from agent.tools.research import RESEARCH_TOOL_SCHEMAS, research_company, research_opportunity
 from agent.tools.schedule import LIST_SCHEDULED_TASKS_TOOL_SCHEMA, list_scheduled_tasks
+from agent.tools.imports import (
+    LIST_IMPORTS_TOOL_SCHEMA,
+    READ_IMPORT_TOOL_SCHEMA,
+    list_imports,
+    read_import,
+)
 from agent.tools.reminders import (
     CANCEL_REMINDER_TOOL_SCHEMA,
     LIST_REMINDERS_TOOL_SCHEMA,
@@ -153,6 +159,8 @@ TOOLS = [
     SET_REMINDER_TOOL_SCHEMA,
     LIST_REMINDERS_TOOL_SCHEMA,
     CANCEL_REMINDER_TOOL_SCHEMA,
+    LIST_IMPORTS_TOOL_SCHEMA,
+    READ_IMPORT_TOOL_SCHEMA,
     PUSH_LOG_SCHEMA,
     LIST_SCHEDULED_TASKS_TOOL_SCHEMA,
     RUN_IN_BACKGROUND_TOOL_SCHEMA,
@@ -212,6 +220,9 @@ DISPATCH = {
     "set_reminder": set_reminder,
     "list_reminders": list_reminders,
     "cancel_reminder": cancel_reminder,
+    # Read-only: CSV files the user uploaded through the chat page's paperclip.
+    "list_imports": list_imports,
+    "read_import": read_import,
     # Read-only: reads the log notify() writes on every delivered push. The
     # counterpart to list_reminders, which only ever sees PENDING reminders —
     # this is the only way to see one that already fired.
@@ -482,6 +493,8 @@ TOOL_GROUP_NAMES = {
     # and ScribeJay's, which is where "how do my notes get into the wiki" and
     # "how does the record get written" are actually written down.
     "self": ["describe_setup", "search_docs", "read_doc"],
+    # Files the user uploaded in chat. Read-only, so no gating set.
+    "files": ["list_imports", "read_import"],
 }
 
 # One-line "when to load it" blurb per group, rendered into the chat prompt so
@@ -537,6 +550,10 @@ _GROUP_BLURBS = {
             "something, how notes get into the wiki, or how the day gets "
             "written down. NOT something you know — no colour, setting or "
             "document is real until a tool returns it.",
+    "files": f"CSV files {_NAME} uploaded in chat with the paperclip button. Load "
+             "this for any ask about a file, an upload, a CSV or a spreadsheet he "
+             "gave you. The files are NOT something you know — none exists and "
+             "no row is real until a tool returns it.",
 }
 
 # Case-insensitive word-boundary cues that pre-load a group before the model
@@ -622,6 +639,12 @@ GROUP_KEYWORDS = {
     # so both load — two extra schemas, and each tool's description keeps the
     # read and the send apart. "inbox"/"wrote"/"reply" are the ways in that
     # brief's cues miss.
+    # Uploaded files. **NOT a bare "import"** — it fires on "important" — and
+    # NOT a bare "file", which fires on "filed" and "filing" ("file a ticket").
+    # "upload" covers upload/uploaded on the prefix match.
+    "files": ["upload", "csv", "spreadsheet", "attach",
+              "the file", "my file", "that file", "this file", "a file",
+              "files", "imported"],
     "mail": ["email", "mail", "inbox", "wrote to me", "reply", "replied",
              "message from", "hear back", "heard from"],
     # Deliberately NOT "task": Google Tasks owns that word and its tools are

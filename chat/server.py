@@ -58,6 +58,7 @@ from chat.auth import _authenticated
 from chat.login_throttle import LoginThrottle
 from chat.routes_dashboard import dashboard_bp
 from chat.routes_games import games_bp
+from chat.routes_imports import imports_bp
 from chat.routes_logs import logs_bp
 from chat.routes_usage import usage_bp
 from chat.routes_opportunities import opportunities_bp
@@ -227,14 +228,15 @@ app.config["SESSION_COOKIE_SECURE"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
 # The read-only dashboard/scheduler API, the opportunities triage API, the games
-# surface, the log viewer, the starred-repo API and the wiki lint/graph API live
-# in their own blueprint modules (see chat/routes_dashboard.py,
-# chat/routes_opportunities.py, chat/routes_games.py, chat/routes_logs.py,
-# chat/routes_starred.py, chat/routes_wiki.py, chat/routes_settings.py); the
-# conversation engine and auth stay here.
+# surface, the CSV import API, the log viewer, the starred-repo API and the wiki
+# lint/graph API live in their own blueprint modules (see chat/routes_dashboard.py,
+# chat/routes_opportunities.py, chat/routes_games.py, chat/routes_imports.py,
+# chat/routes_logs.py, chat/routes_starred.py, chat/routes_wiki.py,
+# chat/routes_settings.py); the conversation engine and auth stay here.
 app.register_blueprint(dashboard_bp)
 app.register_blueprint(opportunities_bp)
 app.register_blueprint(games_bp)
+app.register_blueprint(imports_bp)
 app.register_blueprint(logs_bp)
 app.register_blueprint(usage_bp)
 app.register_blueprint(settings_bp)

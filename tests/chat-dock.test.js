@@ -24,6 +24,8 @@ const DOCK_SRC = fs.readFileSync(
 const MARKUP = `
   <div id="messages"></div>
   <form id="composer">
+    <button id="attach" type="button">Attach</button>
+    <input type="file" id="attachFile" accept=".csv,text/csv" hidden>
     <textarea id="input" rows="1"></textarea>
     <button id="send" type="submit">Send</button>
   </form>
@@ -877,5 +879,139 @@ describe("message history", () => {
     document.getElementById("newChat").click();
     press("ArrowUp");
     expect(input().value).toBe("what's on today?");
+  });
+});
+
+// The paperclip button: pick a .csv, POST it to /api/imports, and either drop
+// a note in the thread and prefill the composer, or show why it failed.
+describe("uploading a CSV via the paperclip", () => {
+  const attachBtn = () => document.getElementById("attach");
+  const attachInput = () => document.getElementById("attachFile");
+
+  function pickFile(name, content, type = "text/csv") {
+    const file = new File([content], name, { type });
+    Object.defineProperty(attachInput(), "files", {
+      configurable: true,
+      value: [file],
+    });
+    attachInput().dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  test("clicking the paperclip opens the file picker", () => {
+    const click = jest.fn();
+    attachInput().click = click;
+    attachBtn().click();
+    expect(click).toHaveBeenCalledTimes(1);
+  });
+
+  test("uploads a valid CSV, notes the row count, and prefills the composer", async () => {
+    global.fetch = jest.fn(() => Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ n: 1, name: "transactions.csv", rows: 1234, columns: ["a"] }),
+    }));
+    pickFile("transactions.csv", "a,b\n1,2");
+    await settle();
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);  // no /chat turn was started
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe("/api/imports");
+    expect(opts.method).toBe("POST");
+    expect(opts.body).toBeInstanceOf(FormData);
+    expect(lastMessage()).toBe("Uploaded transactions.csv — 1,234 rows.");
+    expect(input().value).toBe("I uploaded transactions.csv. ");
+  });
+
+  test("appends the prefill to whatever was already being typed", async () => {
+    global.fetch = jest.fn(() => Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ n: 1, name: "a.csv", rows: 2, columns: [] }),
+    }));
+    input().value = "here's the file";
+    pickFile("a.csv", "a\n1");
+    await settle();
+    expect(input().value).toBe("here's the file I uploaded a.csv. ");
+  });
+
+  test("a 400 JSON error is shown as a message", async () => {
+    global.fetch = jest.fn(() => Promise.resolve({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: "That file isn't a CSV Wren can read." }),
+    }));
+    pickFile("transactions.csv", "not really csv");
+    await settle();
+    expect(lastMessage()).toBe("That file isn't a CSV Wren can read.");
+  });
+
+  test("a 413 with a non-JSON body shows the generic too-large message", async () => {
+    global.fetch = jest.fn(() => Promise.resolve({
+      ok: false,
+      status: 413,
+      json: () => Promise.reject(new SyntaxError("Unexpected token '<'")),
+    }));
+    pickFile("big.csv", "x".repeat(10));
+    await settle();
+    expect(lastMessage()).toBe("File is too large (max 5 MB).");
+  });
+
+  test("a non-JSON error body on another status shows a generic message", async () => {
+    global.fetch = jest.fn(() => Promise.resolve({
+      ok: false,
+      status: 500,
+      json: () => Promise.reject(new SyntaxError("Unexpected token '<'")),
+    }));
+    pickFile("a.csv", "a\n1");
+    await settle();
+    expect(lastMessage()).toBe("Upload failed (HTTP 500).");
+  });
+
+  test("a non-.csv file is rejected client-side without a request", async () => {
+    global.fetch = jest.fn();
+    pickFile("notes.txt", "hello");
+    await settle();
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(lastMessage()).toContain("Only .csv files");
+  });
+
+  test("an oversized file is rejected client-side without a request", async () => {
+    global.fetch = jest.fn();
+    pickFile("big.csv", "x".repeat(6 * 1024 * 1024));
+    await settle();
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(lastMessage()).toContain("too large");
+  });
+
+  test("a filename with markup renders as text, not HTML", async () => {
+    const evilName = "<img src=x onerror=alert(1)>.csv";
+    global.fetch = jest.fn(() => Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ n: 1, name: evilName, rows: 3, columns: [] }),
+    }));
+    pickFile(evilName, "a,b\n1,2");
+    await settle();
+    expect(messages().querySelector("img")).toBeNull();
+    expect(lastMessage()).toContain(evilName);
+  });
+
+  test("the file input value is reset after upload so the same file can be re-picked", async () => {
+    global.fetch = jest.fn(() => Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ n: 1, name: "a.csv", rows: 1, columns: [] }),
+    }));
+    pickFile("a.csv", "a\n1");
+    expect(attachInput().value).toBe("");  // reset synchronously, before the request resolves
+    await settle();
+  });
+
+  test("the file input value is reset even when the upload fails", async () => {
+    global.fetch = jest.fn(() => Promise.reject(new TypeError("Failed to fetch")));
+    pickFile("a.csv", "a\n1");
+    expect(attachInput().value).toBe("");
+    await settle();
+    expect(lastMessage()).toContain("Upload failed");
   });
 });

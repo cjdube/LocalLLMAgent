@@ -333,6 +333,34 @@ def test_the_sports_blurb_denies_pretraining():
     assert "load" in blurb.lower()
 
 
+def test_the_files_cues_load_the_import_tools():
+    """The paperclip prefills "I uploaded <name>. ", so the first ask always
+    carries "upload" — the rest are the ways back to a file later on."""
+    for ask in ("I uploaded transactions.csv. what's in it?",
+                "what files have I given you?",
+                "read the file I gave you",
+                "show me rows 50-60 of my file",
+                "what columns does the csv have?",
+                "look at that spreadsheet again",
+                "go through the transactions I imported"):
+        assert "files" in toolset.groups_for_message(ask), ask
+
+
+def test_the_files_cues_stay_off_the_asks_they_would_ruin():
+    """Prefix trap: a bare "import" fires on "important", a bare "file" on
+    "filed" and "filing"."""
+    for ask in ("what's important today?",
+                "file a ticket for the login bug",
+                "I filed my taxes",
+                "what's on my calendar tomorrow?",
+                "attend the meeting at 3"):
+        assert "files" not in toolset.groups_for_message(ask), ask
+
+
+def test_the_files_blurb_denies_pretraining():
+    assert "NOT something you know" in toolset._GROUP_BLURBS["files"]
+
+
 def test_the_self_cues_load_wrens_own_settings_and_docs():
     """The first ask is the one that started this. Asked what colour the
     calendar uses for meal prep, Wren said she had no record of one — out of a
