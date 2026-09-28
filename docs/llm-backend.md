@@ -33,7 +33,7 @@ Two environment variables in `config/.env`, resolved as
 
 `<TASK_KEY>` is the uppercased task/module name. Wired task keys:
 `DAILY_SYNTHESIS`, `OPPORTUNITY_DIGEST`, `MORNING_BRIEF`, `STARRED_BLURBS`,
-`PROJECT_SCAN`, `RESEARCH`, `EVALUATE_APP`, `EVALUATE_AGAINST`. (The journaling
+`PROJECT_SCAN`, `RESEARCH`, `EVALUATE_APP`, `EVALUATE_AGAINST`, `SHOPPING`. (The journaling
 keys left with ScribeJay — see its own `docs/llm-backend.md`.)
 
 (The list is the set of `resolve_backend("<key>")` call sites — `grep -rn

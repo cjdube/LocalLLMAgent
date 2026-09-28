@@ -284,6 +284,29 @@ def _run_job(job: dict, tools, dispatch, logger) -> None:
         notify(message=result["text"] or "(no summary)", title="Task done")
 
 
+def _run_shopping(job: dict, logger) -> None:
+    """A "shopping" job is a fixed pipeline, not a tool loop: the model only
+    writes search queries and fit scores, and Python does the rest (see
+    agent/tools/shopping.py). So there are no tools to offer, nothing to gate
+    and nothing to approve — it runs, stores its summary, and pushes. Imported
+    here, not at top, for the same idle-poll reason as _load_agent_stack.
+
+    A model-call failure is NOT caught by shop(); it propagates to main()'s
+    transient branch, so an Ollama restart retries the job instead of failing it."""
+    from agent.tools.shopping import shop
+
+    logger.info(f"starting shopping job {job['id']}: {job['task_text'][:100]!r}")
+    result = shop(**(job.get("params") or {}))
+    if "error" in result:
+        background.mark_failed(job["id"], result["error"])
+        logger.warning(f"shopping job {job['id']} found nothing: {result['error']}")
+        notify(message=f"Shopping: {result['error']}", title="Shopping done")
+        return
+    background.mark_done(job["id"], result["summary"])
+    logger.info(f"shopping job {job['id']} done ({len(result['picks'])} picks)")
+    notify(message=result["headline"], title="Shopping done")
+
+
 def _repush_stale_approvals(logger) -> None:
     """Re-send the approval push for jobs stuck awaiting_approval longer than a
     token lifetime — their buttons have expired (or never rendered, if
@@ -319,6 +342,9 @@ def main() -> int:
         job = background.next_actionable()
         if job is None:
             _repush_stale_approvals(logger)
+            return 0
+        if job.get("kind") == "shopping":
+            _run_shopping(job, logger)
             return 0
         tools, dispatch = _bg_tools_and_dispatch(
             job["task_text"], job.get("origin"), logger, job.get("comment_prefix"))

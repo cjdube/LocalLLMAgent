@@ -448,6 +448,25 @@ SETTINGS: tuple[Setting, ...] = (
         secret=True, applies="live",
     ),
     Setting(
+        key="EBAY_CLIENT_ID", group="Web and search", label="eBay client ID",
+        help="eBay developer app's client ID (production keyset). With the "
+             "secret below, lets the shopping job search eBay listings.",
+        secret=True, applies="next_run",
+    ),
+    Setting(
+        key="EBAY_CLIENT_SECRET", group="Web and search",
+        label="eBay client secret",
+        help="The same keyset's client secret. Either eBay key empty means "
+             "the shopping job skips eBay.",
+        secret=True, applies="next_run",
+    ),
+    Setting(
+        key="BESTBUY_API_KEY", group="Web and search", label="Best Buy key",
+        help="Free Best Buy Products API key. Empty means the shopping job "
+             "skips Best Buy.",
+        secret=True, applies="next_run",
+    ),
+    Setting(
         key="GITHUB_TOKEN", group="Web and search", label="GitHub token",
         help="A classic token with no scopes covers public starred repos; add "
              "read access to repo to include private stars.",

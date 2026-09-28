@@ -52,6 +52,8 @@ unless you can say why it belongs on every turn.
     `search_docs`, `read_doc`), all read-only
   - `files` — CSV files he uploaded in chat with the paperclip
     (`list_imports`, `read_import`), read-only. See [imports.md](imports.md)
+  - `shopping` — start a background search for the best-priced options
+    within a budget (`start_shopping`); never buys. See [shopping.md](shopping.md)
 
 Every tool in `TOOLS` is in exactly one of core or a group — enforced by
 `tests/test_toolset.py::test_core_and_groups_partition_the_registry`, so adding
