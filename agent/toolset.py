@@ -220,7 +220,7 @@ DISPATCH = {
     "set_reminder": set_reminder,
     "list_reminders": list_reminders,
     "cancel_reminder": cancel_reminder,
-    # Read-only: CSV files the user uploaded through the chat page's paperclip.
+    # Read-only: CSV/PDF files the user uploaded through the chat page's paperclip.
     "list_imports": list_imports,
     "read_import": read_import,
     # Read-only: reads the log notify() writes on every delivered push. The
@@ -550,8 +550,8 @@ _GROUP_BLURBS = {
             "something, how notes get into the wiki, or how the day gets "
             "written down. NOT something you know — no colour, setting or "
             "document is real until a tool returns it.",
-    "files": f"CSV files {_NAME} uploaded in chat with the paperclip button. Load "
-             "this for any ask about a file, an upload, a CSV or a spreadsheet he "
+    "files": f"CSV and PDF files {_NAME} uploaded in chat with the paperclip button. Load "
+             "this for any ask about a file, an upload, a CSV, a PDF or a spreadsheet he "
              "gave you. The files are NOT something you know — none exists and "
              "no row is real until a tool returns it.",
 }
@@ -642,7 +642,7 @@ GROUP_KEYWORDS = {
     # Uploaded files. **NOT a bare "import"** — it fires on "important" — and
     # NOT a bare "file", which fires on "filed" and "filing" ("file a ticket").
     # "upload" covers upload/uploaded on the prefix match.
-    "files": ["upload", "csv", "spreadsheet", "attach",
+    "files": ["upload", "csv", "pdf", "spreadsheet", "attach",
               "the file", "my file", "that file", "this file", "a file",
               "files", "imported"],
     "mail": ["email", "mail", "inbox", "wrote to me", "reply", "replied",

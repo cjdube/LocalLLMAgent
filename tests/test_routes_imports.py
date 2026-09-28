@@ -140,3 +140,31 @@ def test_chat_keeps_the_tighter_body_cap(auth_client):
     # The larger cap is scoped to this blueprint only; chat must not inherit it.
     resp = auth_client.post("/chat", json={"message": "x" * 400_000})
     assert resp.status_code == 413
+
+
+# --------------------------------------------------------------------------- #
+# PDF upload
+# --------------------------------------------------------------------------- #
+
+def test_pdf_upload_returns_kind_and_pages(auth_client):
+    from tests.test_imports import make_pdf
+
+    resp = auth_client.post(
+        "/api/imports",
+        data={"file": (io.BytesIO(make_pdf(["one", "two"])), "doc.pdf")},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["kind"] == "pdf"
+    assert body["pages"] == 2
+
+
+def test_garbage_pdf_upload_is_rejected(auth_client):
+    resp = auth_client.post(
+        "/api/imports",
+        data={"file": (io.BytesIO(b"not a real pdf"), "fake.pdf")},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 400
+    assert "error" in resp.get_json()

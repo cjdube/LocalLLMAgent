@@ -1,8 +1,8 @@
 # Uploaded files
 
-Wren can read a CSV file you give her in chat. Tap the paperclip beside the
-message box, pick a `.csv`, and the page uploads it and fills the box with
-`I uploaded <name>. ` — finish the sentence with your question and send.
+Wren can read a CSV or PDF file you give her in chat. Tap the paperclip beside
+the message box, pick a `.csv` or `.pdf`, and the page uploads it and fills the
+box with `I uploaded <name>. ` — finish the sentence with your question and send.
 
 This is the general "give Wren a file" capability. Subscription tracking (a
 later phase) builds on it; nothing here knows what the file contains.
@@ -11,11 +11,11 @@ later phase) builds on it; nothing here knows what the file contains.
 
 - `POST /api/imports` (`chat/routes_imports.py`, login required) hands the bytes
   to `agent/tools/imports.py:save_import()`.
-- It must be a `.csv` of at most 5 MB. The limit is raised for this one
+- It must be a `.csv` or `.pdf` of at most 5 MB. The limit is raised for this one
   blueprint only — every other route keeps the app-wide 256 KB cap.
-- The text is decoded as UTF-8 (falling back to Latin-1, which is what many bank
-  exports use), the delimiter is sniffed (`,` `;` tab `|`), and the file is
-  re-written as plain UTF-8 comma CSV under `config/imports/<random id>.csv`.
+- For CSV: the text is decoded as UTF-8 (falling back to Latin-1, which is what
+  many bank exports use), the delimiter is sniffed (`,` `;` tab `|`), and the
+  file is re-written as plain UTF-8 comma CSV under `config/imports/<random id>.csv`.
   The name you uploaded is kept as a label in `config/imports.json` only — it
   never becomes a path.
 - The newest 20 uploads are kept. The 21st upload deletes the oldest file and
@@ -28,22 +28,41 @@ later phase) builds on it; nothing here knows what the file contains.
 Two read-only tools in the deferred `files` group ([tool-loading.md](tool-loading.md)):
 
 - `list_imports` — the uploaded files, newest first, numbered (`1` = newest).
+  Shows the file kind (csv or pdf) and row/column counts for CSV, page count for PDF.
   The model gets numbers, never the stored ids
   ([opaque-identifiers.md](opaque-identifiers.md)).
-- `read_import(n, start_row)` — one page of rows, at most 100 rows or about 6,000
-  characters. Every page says "Showing rows X–Y of Z", and a page that is not
-  the last one says it is **not** the whole file and gives the next `start_row`.
-  Rows count from 1, as people count them: a 0-based offset made the model
-  show rows 51–56 when asked for "rows 50 to 55", 3 of 3 times.
+- `read_import(n, start_row, start_page)` — for CSV, at most 100 rows or about
+  6,000 characters; for PDF, whole pages up to about 6,000 characters. Every
+  result says "Showing rows X–Y of Z" (CSV) or "Showing pages X–Y of Z" (PDF),
+  and one that is not the last says it is **not** the whole file and gives the
+  next `start_row` or `start_page`. Rows and pages count from 1, as people count
+  them: a 0-based offset made the model show rows 51–56 when asked for "rows 50
+  to 55", 3 of 3 times.
 
-The group pre-loads when a message says "upload", "csv", "spreadsheet", "the
-file", "my file" and similar. A bare "import" or "file" is deliberately not a
-cue — they fire on "important" and "file a ticket".
+The group pre-loads when a message says "upload", "csv", "pdf", "spreadsheet",
+"the file", "my file" and similar. A bare "import" or "file" is deliberately not
+a cue — they fire on "important" and "file a ticket".
 
 The small model reads a page at a time. It is fine for "what's in this file?"
 or "show me the rows for March"; it is **not** fit to scan thousands of rows
 and total them. Whole-file analysis belongs in Python, the way subscription
 detection will do it.
+
+## PDFs
+
+A PDF is extracted on upload — text is pulled from each page and stored as
+`config/imports/<random id>.json`, a list of page texts. The PDF file itself is
+not kept. Layout padding is squeezed out on the way: a printed text file came
+back from the extractor as 5,021 characters for 21 words.
+
+Rejected with a clear error message: a scanned PDF with no text layer (OCR is
+not performed), a password-protected PDF, more than 500 pages, or a file that
+cannot be parsed.
+
+When reading a PDF, each result is one or more whole pages, about 6,000
+characters at a time. The result says "Showing pages X–Y of Z" (pages count
+from 1); if more remains, it says so and gives the next `start_page`. A single
+page longer than the budget is cut, and the result says so.
 
 ## Privacy
 
@@ -62,5 +81,6 @@ There is no delete button yet. From the Mac:
 .venv/bin/python -m agent.tools.imports --delete 1
 ```
 
-`--read N [--start-row K]` prints a page, and `--add PATH` imports a local file
-without the browser.
+`--read N [--start-row K] [--start-page K]` prints a page (use `--start-row`
+for CSV, `--start-page` for PDF), and `--add PATH` imports a local file without
+the browser.

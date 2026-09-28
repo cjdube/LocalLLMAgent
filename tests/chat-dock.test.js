@@ -25,7 +25,7 @@ const MARKUP = `
   <div id="messages"></div>
   <form id="composer">
     <button id="attach" type="button">Attach</button>
-    <input type="file" id="attachFile" accept=".csv,text/csv" hidden>
+    <input type="file" id="attachFile" accept=".csv,text/csv,.pdf,application/pdf" hidden>
     <textarea id="input" rows="1"></textarea>
     <button id="send" type="submit">Send</button>
   </form>
@@ -967,12 +967,30 @@ describe("uploading a CSV via the paperclip", () => {
     expect(lastMessage()).toBe("Upload failed (HTTP 500).");
   });
 
-  test("a non-.csv file is rejected client-side without a request", async () => {
+  test("uploads a valid PDF, notes the page count, and prefills the composer", async () => {
+    global.fetch = jest.fn(() => Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ n: 1, name: "report.pdf", kind: "pdf", pages: 3 }),
+    }));
+    pickFile("report.pdf", "%PDF-1.4", "application/pdf");
+    await settle();
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe("/api/imports");
+    expect(opts.method).toBe("POST");
+    expect(opts.body).toBeInstanceOf(FormData);
+    expect(lastMessage()).toBe("Uploaded report.pdf — 3 pages.");
+    expect(input().value).toBe("I uploaded report.pdf. ");
+  });
+
+  test("a non-.csv/.pdf file is rejected client-side without a request", async () => {
     global.fetch = jest.fn();
     pickFile("notes.txt", "hello");
     await settle();
     expect(global.fetch).not.toHaveBeenCalled();
-    expect(lastMessage()).toContain("Only .csv files");
+    expect(lastMessage()).toContain("Only .csv or .pdf");
   });
 
   test("an oversized file is rejected client-side without a request", async () => {

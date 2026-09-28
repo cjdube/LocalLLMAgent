@@ -33,3 +33,7 @@ google-cloud-pubsub==2.39.1
 # Optional cloud backend (WREN_LLM_BACKEND=gemini). Imported lazily, only when
 # that backend is selected, so a purely local (Ollama) install never loads it.
 google-genai==2.11.0
+
+# Text extraction for PDFs uploaded in chat (agent/tools/imports.py). Pure
+# Python, no system library, and it runs on the Mac — nothing leaves the device.
+pypdf==6.19.0

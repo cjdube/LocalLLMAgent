@@ -1,5 +1,5 @@
 """The /api/imports JSON API — the chat page's paperclip button uploads a CSV
-here; the model then lists and pages through it via agent/tools/imports.py's
+or PDF here; the model then lists and pages through it via agent/tools/imports.py's
 own read-only tools.
 
 Registered as a Flask blueprint by chat/server.py.
@@ -17,7 +17,7 @@ logger = logging.getLogger("wren")
 imports_bp = Blueprint("imports", __name__)
 
 # The app-wide MAX_CONTENT_LENGTH is 256KB, sized for a chat turn — too small
-# for a CSV upload. Scope the raise to this blueprint only: imports.py's own
+# for a file upload. Scope the raise to this blueprint only: imports.py's own
 # MAX_IMPORT_BYTES (5MiB) plus headroom for multipart encoding overhead
 # (boundary markers, headers, base64-ish padding on the field), so a file right
 # at the real limit isn't rejected by this outer cap before save_import() ever
@@ -46,10 +46,8 @@ def api_upload_import():
         logger.warning("api_imports: upload rejected (%s)", result["error"])
         return jsonify(result), 400
 
-    logger.info(
-        "api_imports: uploaded %r (%d rows, %d bytes)",
-        result["name"], result["rows"], len(data),
-    )
+    size = f"{result['pages']} pages" if result["kind"] == "pdf" else f"{result['rows']} rows"
+    logger.info("api_imports: uploaded %r (%s, %d bytes)", result["name"], size, len(data))
     return jsonify(result)
 
 

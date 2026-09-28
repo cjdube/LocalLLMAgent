@@ -484,7 +484,7 @@
     addMessage("wren", GREETING);
   });
 
-  // CSV upload: the paperclip opens the hidden file input, and its change
+  // CSV/PDF upload: the paperclip opens the hidden file input, and its change
   // event does the rest. Client-side checks (extension, size) happen before
   // any request so a bad pick never costs a round trip. The result — success
   // or failure — is just another system note in the thread, same as any other
@@ -515,8 +515,8 @@
   }
 
   async function uploadFile(file) {
-    if (!/\.csv$/i.test(file.name)) {
-      addMessage("system", "Only .csv files can be uploaded.");
+    if (!/\.(csv|pdf)$/i.test(file.name)) {
+      addMessage("system", "Only .csv or .pdf files can be uploaded.");
       return;
     }
     if (file.size > MAX_UPLOAD_BYTES) {
@@ -534,7 +534,10 @@
         return;
       }
       const payload = await resp.json();
-      addMessage("system", `Uploaded ${payload.name} — ${payload.rows.toLocaleString()} rows.`);
+      const message = typeof payload.pages === "number"
+        ? `Uploaded ${payload.name} — ${payload.pages.toLocaleString()} pages.`
+        : `Uploaded ${payload.name} — ${payload.rows.toLocaleString()} rows.`;
+      addMessage("system", message);
       prefillUpload(payload.name);
     } catch (err) {
       addMessage("system", `Upload failed (${err.message}).`);
