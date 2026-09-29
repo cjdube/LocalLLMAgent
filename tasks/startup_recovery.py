@@ -53,6 +53,7 @@ POLICIES = {
     "local.wren.starredblurbs": ("starred_blurbs", 1, "wren"),
     "local.wren.starredinstalled": ("starred_installed", 1, "none"),
     "local.wren.starredreleases": ("starred_releases", 1, "none"),
+    "local.wren.blogcomments": ("blog_comments", 1, "none"),
 }
 
 

@@ -95,6 +95,7 @@ GROUPS = (
     "Google account",
     "Mail",
     "Notifications",
+    "Blog",
     "Web and search",
     "Opportunity scout",
     "Wiki and learnings",
@@ -427,6 +428,24 @@ SETTINGS: tuple[Setting, ...] = (
         key="NTFY_TOKEN", group="Notifications", label="Push token",
         help="Publish token for that topic.",
         secret=True, applies="live",
+    ),
+
+    # ------------------------------------------------------------------ Blog
+    Setting(
+        key="CF_ACCOUNT_ID", group="Blog", label="Cloudflare account ID",
+        help="The account that holds the blog's comments database. Empty turns "
+             "the daily pending-comments push into a failure alert.",
+        applies="next_run",
+    ),
+    Setting(
+        key="CF_D1_DATABASE_ID", group="Blog", label="Comments database ID",
+        help="The D1 database ID of blog-comments.",
+        applies="next_run",
+    ),
+    Setting(
+        key="CF_D1_TOKEN", group="Blog", label="D1 read token",
+        help="A Cloudflare API token with Account → D1 → Read and nothing else.",
+        secret=True, applies="next_run",
     ),
 
     # -------------------------------------------------------- Web and search

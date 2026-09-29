@@ -729,6 +729,8 @@ TOOL_SERVICES = {
     # eBay and Best Buy are both behind this one tool; one node, not two.
     "shopping": ("eBay + Best Buy", ["start_shopping"]),
     "github": ("GitHub", ["fetch_starred_repos"]),
+    # The blog's comments database, read by the blog_comments routine only.
+    "blog": ("Blog Comments (Cloudflare D1)", []),
     "youtube": ("YouTube", []),  # routine-only, see the note above
     # The routine failure-alert channel. list_notifications reads the log
     # notify() writes on every delivered push, so the map draws chat's one edge
@@ -800,6 +802,7 @@ ROUTINE_USES = {
     "opportunity_digest": ["opportunities", "gmail", "ntfy"],
     "starred_blurbs": ["github", "ntfy"],
     "starred_releases": ["github", "ntfy"],
+    "blog_comments": ["blog", "gmail", "ntfy"],  # gmail = notify's email fallback
     "starred_installed": ["ntfy"],  # runs local version commands + reads local config; no external source
     "project_scan": ["projects", "ntfy"],  # reads local checkouts under PROJECTS_DIR; no external source
     "log_inspector": ["gmail", "ntfy"],  # rollup push via ntfy, email fallback on ntfy outage
