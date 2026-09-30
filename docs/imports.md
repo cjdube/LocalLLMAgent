@@ -11,8 +11,9 @@ later phase) builds on it; nothing here knows what the file contains.
 
 - `POST /api/imports` (`chat/routes_imports.py`, login required) hands the bytes
   to `agent/tools/imports.py:save_import()`.
-- It must be a `.csv` or `.pdf` of at most 5 MB. The limit is raised for this one
-  blueprint only — every other route keeps the app-wide 256 KB cap.
+- It must be a `.csv` or `.pdf` of at most 5 MB. The limit is raised for this
+  blueprint only. Every other route keeps the app-wide 256 KB cap, except the
+  games proxy, which raises it to 2 MB ([games.md](games.md)).
 - For CSV: the text is decoded as UTF-8 (falling back to Latin-1, which is what
   many bank exports use), the delimiter is sniffed (`,` `;` tab `|`), and the
   file is re-written as plain UTF-8 comma CSV under `config/imports/<random id>.csv`.

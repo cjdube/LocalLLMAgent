@@ -228,7 +228,7 @@ app.config["SESSION_COOKIE_SECURE"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
 # The read-only dashboard/scheduler API, the opportunities triage API, the games
-# surface, the CSV import API, the log viewer, the starred-repo API and the wiki
+# surface, the CSV/PDF upload API, the log viewer, the starred-repo API and the wiki
 # lint/graph API live in their own blueprint modules (see chat/routes_dashboard.py,
 # chat/routes_opportunities.py, chat/routes_games.py, chat/routes_imports.py,
 # chat/routes_logs.py, chat/routes_starred.py, chat/routes_wiki.py,
