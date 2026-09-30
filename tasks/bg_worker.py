@@ -298,9 +298,14 @@ def _run_shopping(job: dict, logger) -> None:
     logger.info(f"starting shopping job {job['id']}: {job['task_text'][:100]!r}")
     result = shop(**(job.get("params") or {}))
     if "error" in result:
-        background.mark_failed(job["id"], result["error"])
-        logger.warning(f"shopping job {job['id']} found nothing: {result['error']}")
-        notify(message=f"Shopping: {result['error']}", title="Shopping done")
+        # "No offers" alone reads as an empty market; the source errors say
+        # whether a store was ever asked.
+        error = result["error"]
+        if result.get("source_errors"):
+            error += f" ({'; '.join(result['source_errors'])})"
+        background.mark_failed(job["id"], error)
+        logger.warning(f"shopping job {job['id']} found nothing: {error}")
+        notify(message=f"Shopping: {error}", title="Shopping done")
         return
     background.mark_done(job["id"], result["summary"])
     logger.info(f"shopping job {job['id']} done ({len(result['picks'])} picks)")

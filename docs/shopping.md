@@ -14,7 +14,7 @@ send yourself. Wren only reads.
 1. Chat: the model calls `start_shopping(description, max_price, must_haves)`.
    It is in `WRITE_TOOLS`, so you tap to start it — the card shows the budget
    the model parsed, which is the point of the tap.
-2. `agent/tools/shopping.py:start_shopping` validates the budget and queues a
+2. `agent/tools/shopping.py:start_shopping` validates the budget, checks that at least one store has its keys, and queues a
    job in `config/bg_jobs.json` with `kind: "shopping"` and the arguments in
    `params`.
 3. `tasks/bg_worker.py` sees the kind and calls `shopping.shop()` directly —
@@ -64,9 +64,13 @@ page scraping.
 | Best Buy Products API | `BESTBUY_API_KEY` | Free key from developer.bestbuy.com — sign up with a domain email; a free address (Gmail) is refused. Free for personal use; commercial use needs a partner agreement. The key rides in the query string, so every error goes through `http_error`, which redacts it. |
 | Tavily | `TAVILY_API_KEY` | Review context only — never an offer. |
 
+If **no** store has its keys, `start_shopping` refuses in chat and names the
+keys to set. No job is queued, so no model call or Tavily search is spent.
+
 A source with no key, or one that fails, is listed under "Source problems" in
 the report and the job runs on what is left. No offers from any source → the
-job is marked failed and the push says why.
+job is marked failed, and the stored error and the push both carry the source
+problems, so "no offers found" never hides a store that was not asked.
 
 Checked 2026-09-28: both shop APIs live, free with a key, personal use allowed.
 

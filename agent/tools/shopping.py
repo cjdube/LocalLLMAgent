@@ -407,6 +407,10 @@ def start_shopping(description: str = "", max_price=None, must_haves: str = "", 
     if price is None:
         return {"error": "max_price must be a positive number of US dollars — "
                          "ask for the budget"}
+    if not _shop_sources.configured_sources():
+        return {"error": "shopping is not set up — no store has an API key. Set "
+                         "EBAY_CLIENT_ID and EBAY_CLIENT_SECRET, or BESTBUY_API_KEY, "
+                         "in config/.env. Nothing was searched."}
     must_haves = (must_haves or "").strip()
     task = f"Shop for: {description} — under ${price:.0f}"
     if must_haves:

@@ -589,6 +589,17 @@ def test_shopping_job_with_no_offers_fails_and_says_why(monkeypatch):
     assert "no offers found" in calls[-1]["message"]
 
 
+def test_a_failed_shopping_job_names_the_source_errors(monkeypatch):
+    calls = _capture_notify(monkeypatch)
+    _fake_shopping(monkeypatch, lambda **kw: {
+        "error": "no offers found", "source_errors": ["ebay: EBAY_CLIENT_ID not set"]})
+    jid = _start_shopping_job(description="x", max_price=5)
+
+    assert bg_worker.main() == 0
+    assert "ebay: EBAY_CLIENT_ID not set" in background.get_job_result(jid)["result"]
+    assert "ebay: EBAY_CLIENT_ID not set" in calls[-1]["message"]
+
+
 def test_shopping_job_retries_when_the_model_is_away(monkeypatch):
     _capture_notify(monkeypatch)
     monkeypatch.setattr(bg_worker, "notify_failure", lambda *a, **k: None)

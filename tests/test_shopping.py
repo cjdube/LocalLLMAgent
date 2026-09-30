@@ -273,6 +273,7 @@ def test_dedupe_on_url(monkeypatch):
 def test_start_shopping_queues_a_shopping_job(monkeypatch, tmp_path):
     from agent.tools import background
     monkeypatch.setattr(background, "_STORE_PATH", tmp_path / "bg_jobs.json")
+    monkeypatch.setattr(_shop_sources, "configured_sources", lambda: ["ebay"])
 
     result = sh.start_shopping(description="standing desk", max_price="$300",
                                must_haves="memory presets")
@@ -293,6 +294,28 @@ def test_start_shopping_rejects_a_bad_budget_before_queueing(monkeypatch, tmp_pa
 
     assert "error" in sh.start_shopping(description="desk", max_price=bad)
     assert background.next_actionable() is None
+
+
+def test_start_shopping_refuses_when_no_store_has_a_key(monkeypatch, tmp_path):
+    from agent.tools import background
+    monkeypatch.setattr(background, "_STORE_PATH", tmp_path / "bg_jobs.json")
+    monkeypatch.setattr("agent.tools._shop_sources.resolve_key", lambda name, arg=None: None)
+
+    result = sh.start_shopping(description="desk", max_price=300)
+
+    assert "BESTBUY_API_KEY" in result["error"]
+    assert background.next_actionable() is None
+
+
+@pytest.mark.parametrize("keys, expected", [
+    ({"EBAY_CLIENT_ID": "i", "EBAY_CLIENT_SECRET": "s"}, ["ebay"]),
+    ({"EBAY_CLIENT_ID": "i"}, []),  # half an eBay keyset cannot get a token
+    ({"BESTBUY_API_KEY": "k"}, ["bestbuy"]),
+])
+def test_configured_sources_needs_every_key_of_a_source(monkeypatch, keys, expected):
+    monkeypatch.setattr("agent.tools._shop_sources.resolve_key",
+                        lambda name, arg=None: keys.get(name))
+    assert _shop_sources.configured_sources() == expected
 
 
 def test_start_shopping_is_gated_and_never_offered_to_a_background_job():

@@ -56,6 +56,17 @@ _ebay_token_cache: dict = {}
 _TOKEN_EXPIRY_MARGIN = 60
 
 
+def configured_sources() -> list:
+    """The sources whose keys are all set. start_shopping refuses when this is
+    empty, so a job no store could answer is never queued."""
+    sources = []
+    if resolve_key("EBAY_CLIENT_ID") and resolve_key("EBAY_CLIENT_SECRET"):
+        sources.append("ebay")
+    if resolve_key("BESTBUY_API_KEY"):
+        sources.append("bestbuy")
+    return sources
+
+
 def _title_case_trim(title: str) -> str:
     """Trim a title to 200 chars, defensively (a missing/odd title becomes "")."""
     return str(title or "")[:200]
