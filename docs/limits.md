@@ -311,7 +311,7 @@ warns even when it succeeds, so the failure rate stays visible.
 ### Layer E — a limit that isn't a number
 
 **Lazy tool loading** (`docs/tool-loading.md`) is a context limit expressed as
-structure rather than a constant. Wren has 63 tools, about 46,200 chars of
+structure rather than a constant. Wren has 62 tools, about 44,800 chars of
 schema in total; chat sends ~12,000 of that as a 19-tool always-loaded core (18
 in `CORE_TOOL_NAMES` plus `load_tools` — `toolset.tools_for(frozenset())` is
 what computes it, and `test_the_documented_tool_count_matches_the_registry`

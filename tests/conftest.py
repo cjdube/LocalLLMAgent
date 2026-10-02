@@ -177,7 +177,6 @@ from agent.tools import reminders as _reminders
 from agent import usage_ledger as _usage_ledger
 from chat import insights as _insights
 from agent.tools import clickup as _clickup
-from agent.tools import _shop_sources
 from chat import wikilint as _wikilint
 from evals import run_eval as _run_eval
 from tasks import _common
@@ -516,23 +515,6 @@ def _block_clickup_egress(monkeypatch):
     # upload_attachment is the third door: multipart, so it cannot go through
     # _write either. It POSTs to api.clickup.com with the real token.
     monkeypatch.setattr(_clickup, "upload_attachment", _blocked)
-
-
-@pytest.fixture(autouse=True)
-def _block_shop_egress(monkeypatch):
-    """The shopping sources reach api.ebay.com and api.bestbuy.com with the
-    user's real keys, loaded from config/.env. Same shape and same reasons as
-    the ClickUp guard above: it raises _ClickUpEgress (a BaseException, so the
-    module's own `except Exception` cannot swallow it), and it patches the
-    module's own _http_get/_http_post seam, not the shared `requests` object
-    the ntfy stub overwrites. tests/test_shop_sources.py re-patches both."""
-    def _blocked(*a, **k):
-        raise _ClickUpEgress(
-            "a test reached a live shopping API. Stub _shop_sources.search_ebay/"
-            "search_bestbuy, or _shop_sources._http_get/_http_post."
-        )
-    monkeypatch.setattr(_shop_sources, "_http_get", _blocked)
-    monkeypatch.setattr(_shop_sources, "_http_post", _blocked)
 
 
 @pytest.fixture(autouse=True)

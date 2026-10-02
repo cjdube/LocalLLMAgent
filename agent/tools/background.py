@@ -163,8 +163,7 @@ def run_in_background(task: str) -> dict:
     return start_job(task)
 
 
-def start_job(task: str, origin: str = "chat", comment_prefix: str = None,
-              kind: str = None, params: dict = None) -> dict:
+def start_job(task: str, origin: str = "chat", comment_prefix: str = None) -> dict:
     """Queue a background job. `origin` is a provenance flag, not a policy: the
     worker hands it to toolset.confirm_set_for() and toolset.excluded_for(),
     which alone decide what a "mail" or "clickup" job may do without a tap and
@@ -176,13 +175,7 @@ def start_job(task: str, origin: str = "chat", comment_prefix: str = None,
     so without it he cannot tell his own note from Wren's answer, and the tag
     that would have told him is removed by then. The caller supplies the text
     and the worker applies it, because a prefix the model was merely asked for
-    is a prefix the model can drop.
-
-    `kind` names a fixed Python pipeline the worker runs INSTEAD of the tool
-    loop, with `params` as its arguments ("shopping" → agent/tools/shopping.py).
-    No tools are offered to such a job at all, so its origin gates nothing.
-    None is the ordinary tool-loop job, and every job queued before `kind`
-    existed reads as one."""
+    is a prefix the model can drop."""
     task = (task or "").strip()
     if not task:
         return {"error": "task description was empty"}
@@ -191,8 +184,6 @@ def start_job(task: str, origin: str = "chat", comment_prefix: str = None,
         "task_text": task,
         "origin": origin,
         "comment_prefix": comment_prefix,
-        "kind": kind,
-        "params": params,
         "status": "pending",
         "messages": None,
         "pending_call": None,

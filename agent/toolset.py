@@ -94,7 +94,6 @@ from agent.tools.opportunities import (
 )
 from agent.tools.push_log import TOOL_SCHEMA as PUSH_LOG_SCHEMA, list_notifications
 from agent.tools.research import RESEARCH_TOOL_SCHEMAS, research_company, research_opportunity
-from agent.tools.shopping import START_SHOPPING_TOOL_SCHEMA, start_shopping
 from agent.tools.schedule import LIST_SCHEDULED_TASKS_TOOL_SCHEMA, list_scheduled_tasks
 from agent.tools.imports import (
     LIST_IMPORTS_TOOL_SCHEMA,
@@ -172,7 +171,6 @@ TOOLS = [
     *OPPORTUNITY_TOOL_SCHEMAS,
     SEND_DIGEST_TOOL_SCHEMA,
     *RESEARCH_TOOL_SCHEMAS,
-    START_SHOPPING_TOOL_SCHEMA,
     EVALUATE_APP_SCHEMA,
     EVALUATE_AGAINST_SCHEMA,
     GAMES_SCHEMA,
@@ -242,10 +240,6 @@ DISPATCH = {
     # brief), so ungated like search_web.
     "research_opportunity": research_opportunity,
     "research_company": research_company,
-    # Queues a fixed-pipeline job that only reads (eBay, Best Buy, Tavily) and
-    # never buys. Gated below anyway, like run_in_background: the tap is the
-    # user checking the budget the model parsed before a model-heavy job starts.
-    "start_shopping": start_shopping,
     # Read-only like the research tools: fetches + analyzes a page, writes nothing.
     "evaluate_app": evaluate_app,
     # Read-only: loads a wiki lens page + the target, analyzes, writes nothing.
@@ -303,7 +297,7 @@ WRITE_TOOLS = frozenset({
     # now agree.
     "remember", "pin", "recategorize", "archive",
     "write_skill", "delete_skill", "set_reminder", "cancel_reminder",
-    "run_in_background", "start_shopping", "update_opportunity", "watch_company",
+    "run_in_background", "update_opportunity", "watch_company",
     "unwatch_company", "send_opportunity_digest",
     "add_clickup_task", "move_clickup_task", "comment_on_clickup_task",
 })
@@ -337,8 +331,6 @@ CONSEQUENTIAL_TOOLS = frozenset({
 # useful, and run_in_background would let a job replicate.
 UNATTENDED_EXCLUDED_TOOLS = frozenset({
     "run_in_background", "list_background_jobs", "get_job_result",
-    # A job starting a shopping job is a job spawning a job, for the same reason.
-    "start_shopping",
     "remember", "pin", "recategorize", "archive", "forget",
     "write_skill", "delete_skill",
     # Same criterion as the memory tools, one hop further out: read_clickup_task
@@ -503,7 +495,6 @@ TOOL_GROUP_NAMES = {
     "self": ["describe_setup", "search_docs", "read_doc"],
     # Files the user uploaded in chat. Read-only, so no gating set.
     "files": ["list_imports", "read_import"],
-    "shopping": ["start_shopping"],
 }
 
 # One-line "when to load it" blurb per group, rendered into the chat prompt so
@@ -512,9 +503,6 @@ _GROUP_BLURBS = {
     "opportunities": f"{_NAME}'s fractional-work opportunities, watchlist, and company research.",
     "wiki": f"{_NAME}'s learnings wiki — weekly reviews and concept pages.",
     "background": "Hand a long-running task off to run detached and report back.",
-    "shopping": f"Find the best-priced options for something {_NAME} wants to buy, "
-                "within a budget, and draft a lower offer. Never buys. Prices are "
-                "NOT something you know — load this rather than guess.",
     "web": "Fetch a specific web page, evaluate a web app, or list starred GitHub repos.",
     "authoring": "Save or delete a skill (a reusable multi-step procedure).",
     "brief": "Send the morning brief, or send an email.",
@@ -586,11 +574,7 @@ GROUP_KEYWORDS = {
     "wiki": ["wiki", "learn", "weekly review", "working on",
              "notes", "wrote", "written", "write down", "read about",
              "decid", "chose", "choose", "why", "rationale"],
-    # "shop" is here too so "what did the shopping turn up?" pre-loads
-    # get_job_result, which lives in this group.
-    "background": ["background", "kick off", "hand off", "handoff", "shop"],
-    "shopping": ["shop", "buy", "budget", "purchase", "cheapest", "best price",
-                 "good deal", "under $"],
+    "background": ["background", "kick off", "hand off", "handoff"],
     "web": ["webpage", "web page", "fetch", "url", "evaluate", "starred", "github"],
     "authoring": ["skill"],
     "brief": ["brief", "email"],
@@ -893,11 +877,6 @@ def describe_call(call: dict) -> str:
         return f'Set reminder "{args.get("message", "")}" for {args.get("when", "?")}'
     if name == "cancel_reminder":
         return f'Cancel reminder {args.get("reminder_id", "?")}'
-    if name == "start_shopping":
-        desc = (args.get("description") or "").strip()[:120]
-        budget = args.get("max_price")
-        extra = f' (must have: {args["must_haves"]})' if args.get("must_haves") else ""
-        return f'Shop in the background for "{desc}" under ${budget}{extra}'
     if name == "run_in_background":
         task = (args.get("task") or "").strip()
         if len(task) > 120:

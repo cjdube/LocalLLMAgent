@@ -726,8 +726,6 @@ TOOL_SERVICES = {
     "espn": ("ESPN Scoreboard", ["fetch_scores"]),
     "web_search": ("Tavily Search", ["search_web", "research_company"]),
     "firecrawl": ("Firecrawl", ["fetch_webpage", "evaluate_app", "evaluate_against"]),
-    # eBay and Best Buy are both behind this one tool; one node, not two.
-    "shopping": ("eBay + Best Buy", ["start_shopping"]),
     "github": ("GitHub", ["fetch_starred_repos"]),
     # The blog's comments database, read by the blog_comments routine only.
     "blog": ("Blog Comments (Cloudflare D1)", []),
