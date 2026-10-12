@@ -412,7 +412,8 @@ layers guard it:
 ### A failure that outlives a restart
 
 KeepAlive restarts a failed watcher about every 10 seconds. On 2026-10-12 a
-revoked Google token (a `scribejay consent` revokes the grant both repos share)
+revoked Google token (a `scribejay consent` revoked the grant both repos then
+shared; ScribeJay has had its own OAuth client since)
 made that one phone push per restart. The watcher now stores the last failure it
 pushed as `last_failure` in `config/mail_state.json` and pushes only a failure
 that differs from it. Every occurrence is still logged. A notification handled
