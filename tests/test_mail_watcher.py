@@ -504,6 +504,59 @@ def test_main_refuses_to_start_when_the_label_is_missing(monkeypatch):
     assert mail_watcher.main() == 1
 
 
+@pytest.fixture
+def failure_pushes(monkeypatch):
+    sent = []
+    monkeypatch.setattr(mail_watcher, "notify_failure",
+                        lambda name, detail, logger=None: sent.append(str(detail)))
+    return sent
+
+
+def test_a_crash_loop_pushes_once_per_failure(monkeypatch, failure_pushes):
+    """KeepAlive restarts a failed watcher every ~10s. On 2026-10-12 a revoked
+    token turned that into one phone push per restart."""
+    monkeypatch.setenv("MAIL_PUBSUB_PROJECT", "wren-123")
+    monkeypatch.setattr(mail_watcher.gmail_read, "label_id",
+                        lambda *a, **k: {"error": "invalid_grant"})
+
+    for _ in range(3):
+        assert mail_watcher.main() == 1
+
+    assert failure_pushes == ["label lookup failed: invalid_grant"]
+
+
+def test_a_different_failure_still_pushes(monkeypatch, failure_pushes):
+    monkeypatch.setenv("MAIL_PUBSUB_PROJECT", "wren-123")
+    errors = iter(["invalid_grant", "invalid_grant", "quota exceeded"])
+    monkeypatch.setattr(mail_watcher.gmail_read, "label_id",
+                        lambda *a, **k: {"error": next(errors)})
+
+    for _ in range(3):
+        mail_watcher.main()
+
+    assert failure_pushes == ["label lookup failed: invalid_grant",
+                              "label lookup failed: quota exceeded"]
+
+
+def test_a_handled_notification_rearms_the_failure_push(
+        gmail, pushes, model, logger, failure_pushes):
+    """Once the watcher works again, the same failure coming back is news."""
+    mail_watcher._notify_failure_once("label lookup failed: invalid_grant", logger)
+    mail_state.commit(new_history_id="100")
+    gmail["history"] = {"message_ids": [], "history_id": "500", "resynced": False}
+
+    class _PubSubMessage:
+        data = _payload()
+
+        def ack(self):
+            pass
+
+    mail_watcher._make_callback(logger)(_PubSubMessage())
+    mail_watcher._notify_failure_once("label lookup failed: invalid_grant", logger)
+
+    assert failure_pushes == ["label lookup failed: invalid_grant"] * 2
+
+
 # --------------------------------------------------------------------------- #
 # Wren/Do — the email becomes a background job
 #

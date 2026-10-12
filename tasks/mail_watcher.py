@@ -402,6 +402,19 @@ def handle_notification(data: bytes, logger, label_id: str = None,
                       new_history_id=history["history_id"])
 
 
+def _notify_failure_once(detail, logger) -> None:
+    """Push a failure only if it differs from the last one pushed.
+
+    KeepAlive restarts a failed watcher every ~10 seconds, so a failure that
+    outlives one start — a revoked token, on 2026-10-12 — was one phone push
+    per restart. The log still records every occurrence; only the push is
+    deduplicated. A handled notification clears it (see _make_callback)."""
+    if mail_state.record_failure(str(detail)):
+        notify_failure("mail_watcher", detail, logger)
+    else:
+        logger.info("same failure as the last push; not pushing again")
+
+
 def _make_callback(logger, label_id: str = None, act_label_id: str = None):
     """Wrap handle_notification so one bad message can't kill the stream.
 
@@ -417,9 +430,10 @@ def _make_callback(logger, label_id: str = None, act_label_id: str = None):
     def callback(pubsub_message):
         try:
             handle_notification(pubsub_message.data, logger, label_id, act_label_id)
+            mail_state.clear_failure()
         except Exception as e:
             logger.exception(f"notification handling failed, acking anyway: {e}")
-            notify_failure("mail_watcher", e, logger)
+            _notify_failure_once(e, logger)
         pubsub_message.ack()
 
     return callback
@@ -480,7 +494,7 @@ def main() -> int:
         return 0
     except Exception as e:
         logger.exception(f"mail watcher failed: {e}")
-        notify_failure("mail_watcher", e, logger)
+        _notify_failure_once(e, logger)
         # Non-zero, so launchd's KeepAlive restarts us. A throttled restart loop
         # is visible in logs/mail_watcher.launchd.log; a silent exit is not.
         return 1

@@ -18,6 +18,9 @@ together (see commit() below):
    is what tasks/mail_watch_renew.py checks so a silent stop becomes an alert
    rather than a quiet inbox.
 
+It also keeps `last_failure`, the one failure already pushed to the phone, so a
+KeepAlive restart loop pushes once rather than every ~10 seconds.
+
 Everything here goes through agent/store.py, so a concurrent renewal run and
 the always-on watcher can't interleave a read-modify-write and drop one of
 these fields.
@@ -40,7 +43,8 @@ def _defaults() -> dict:
     literal would have `seen` appended to in place, so the module global would
     accumulate every message id the process ever handled — and, in the test
     suite, leak them between tests."""
-    return {"history_id": None, "watch_expiration": None, "seen": []}
+    return {"history_id": None, "watch_expiration": None, "seen": [],
+            "last_failure": None}
 
 # How many recently-handled Gmail message ids to remember. Gmail's history is
 # only about a week deep, so an id older than the window can never come back
@@ -150,6 +154,32 @@ def record_watch(expiration, new_history_id=None) -> dict:
             data["history_id"] = _newer(data["history_id"], new_history_id)
         _save(data)
         return data
+
+
+def record_failure(detail: str) -> bool:
+    """Remember `detail` as the failure last pushed. True if it is new — i.e.
+    the caller should push it.
+
+    It has to live on disk: a crashed watcher is a new process each time
+    launchd restarts it, so nothing in memory survives to compare against."""
+    with locked(_STORE_PATH):
+        data = _load()
+        if data["last_failure"] == detail:
+            return False
+        data["last_failure"] = detail
+        _save(data)
+        return True
+
+
+def clear_failure() -> None:
+    """The watcher is working again, so the next failure is news. Writes only
+    when something is stored — this runs on every handled notification."""
+    if _load()["last_failure"] is None:
+        return
+    with locked(_STORE_PATH):
+        data = _load()
+        data["last_failure"] = None
+        _save(data)
 
 
 def watch_expires_in_hours(now=None) -> float | None:
