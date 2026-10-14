@@ -91,6 +91,14 @@ is_running() {
     launchctl print "$DOMAIN/$1" 2>/dev/null | grep -qE '^[[:space:]]*state = running'
 }
 
+# A KeepAlive daemon (the mail watcher) is always running, so "mid-run" never
+# ends for it. Skipping it as mid-run kept the upgrade unrecorded forever: every
+# hourly pass reloaded every agent and pushed again (2026-10-14). launchd brings
+# a daemon straight back, so it is reloaded like the chat server, never skipped.
+is_daemon() {
+    [ "$(/usr/bin/plutil -extract KeepAlive raw -o - "$AGENTS/$1.plist" 2>/dev/null)" = "true" ]
+}
+
 # Identity of the interpreter every other plist execs. Resolved to its real
 # Cellar path and stamped with inode and mtime, so a brew upgrade that lands a
 # new binary on the SAME path is still detected — the symlink chain out of
@@ -264,7 +272,7 @@ if [ ${#stale[@]} -gt 0 ]; then
         # A scheduled job caught mid-run is doing real work — the wiki ingest can
         # hold the single Ollama slot for the better part of an hour. Its next run
         # is already broken; one more missed run costs less than a killed one.
-        if is_running "$label"; then
+        if is_running "$label" && ! is_daemon "$label"; then
             log "  skipped $label — mid-run, rerun this once it finishes"
             skipped=1
             continue
