@@ -38,6 +38,8 @@ from pathlib import Path
 
 from agent import config
 from agent.tools._http import load_env, print_result
+# The model names the skill file, so the path check is the wiki's, not a copy.
+from agent.tools.wiki import _safe_child
 
 load_env()
 
@@ -65,16 +67,6 @@ def _slugify(name: str) -> str:
     s = re.sub(r"[^\w\s-]", "", s)      # drop punctuation the model might add
     s = re.sub(r"[\s_]+", "-", s)       # spaces/underscores -> hyphen
     return s.strip("-")
-
-
-def _safe_child(base: Path, name: str) -> Path:
-    """Resolve `name` to a path inside `base`, rejecting any '../' escape. The
-    name comes from the model, so it's untrusted (mirrors wiki._safe_child)."""
-    candidate = (base / name).resolve()
-    base = base.resolve()
-    if base not in candidate.parents and candidate != base:
-        raise ValueError(f"'{name}' resolves outside {base}")
-    return candidate
 
 
 def _parse_skill(text: str) -> dict:
