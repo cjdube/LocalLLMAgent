@@ -196,7 +196,8 @@ def test_cli_approve_and_deny_resolve_a_stuck_job(capsys):
 
 def test_token_roundtrip_and_rejects_garbage():
     tok = background.make_approval_token("j1", "approve")
-    assert background.read_approval_token(tok) == {"job": "j1", "decision": "approve"}
+    assert background.read_approval_token(tok) == {"job": "j1", "decision": "approve",
+                                                   "pause": None}
     assert background.read_approval_token("garbage") is None
 
 

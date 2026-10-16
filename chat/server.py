@@ -1268,7 +1268,8 @@ def bg_resolve():
     endpoint reachable without the login cookie (the phone's ntfy app calls it
     directly). The token is HMAC-signed with a ~1h expiry; single-use falls out
     of the job state machine (resolve_job only acts on an awaiting_approval job,
-    so a replay finds nothing to do). It does exactly one thing and logs every
+    so a replay finds nothing to do), and the token names one pause, so a button
+    from an earlier pause of the same job cannot approve a later action. It does exactly one thing and logs every
     hit. POST only — the ntfy action buttons send POST (see
     background.approval_actions), and a GET mutating endpoint invites
     prefetchers and leaves the token in more access logs than it needs to."""
@@ -1278,7 +1279,8 @@ def bg_resolve():
         logger.warning("bg_resolve: rejected invalid or expired token")
         return jsonify({"error": "invalid or expired token"}), 403
     approved = payload["decision"] == "approve"
-    applied = background.resolve_job(payload["job"], approved)
+    applied = background.resolve_job(payload["job"], approved,
+                                    pause=payload.get("pause", ""))
     logger.info("bg_resolve job=%s decision=%s applied=%s",
                 payload["job"], payload["decision"], applied)
     # Acknowledge the tap so the phone shows what the choice registered as — the

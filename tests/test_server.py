@@ -1251,6 +1251,21 @@ def test_bg_resolve_token_is_single_use_and_acks_once(client, monkeypatch, tmp_p
     assert acks == ["Approved"]  # only the first tap acks, not the replay
 
 
+def test_bg_resolve_old_pause_token_cannot_approve_a_later_pause(client, monkeypatch, tmp_path):
+    # One job pauses twice. The Approve button from the first push must not
+    # approve the second action, which the user has not seen.
+    _capture_ack(monkeypatch)
+    background, jid = _seed_awaiting_job(monkeypatch, tmp_path)
+    first = background.make_approval_token(jid, "approve")
+    assert background.resolve_job(jid, True) is True  # first pause answered (CLI)
+    background.save_awaiting(jid, [], {"function": {"name": "send_email", "arguments": {}}})
+
+    assert client.post(f"/api/bg/resolve?token={first}").get_json()["ok"] is False
+    assert background.get_job_result(jid)["status"] == "awaiting_approval"
+    second = background.make_approval_token(jid, "approve")
+    assert client.post(f"/api/bg/resolve?token={second}").get_json()["ok"] is True
+
+
 def test_bg_resolve_deny_acks_denied(client, monkeypatch, tmp_path):
     acks = _capture_ack(monkeypatch)
     background, jid = _seed_awaiting_job(monkeypatch, tmp_path)

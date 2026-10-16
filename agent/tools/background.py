@@ -264,9 +264,12 @@ def save_awaiting(job_id: str, messages: list, pending_call: dict,
         if job is None:
             return
         now = _now()
+        # A fresh id per pause: one job can pause many times, and a token must
+        # approve only the pause whose push it rode in on.
         job.update(status="awaiting_approval", messages=messages,
                    pending_call=pending_call, approval_message=approval_message,
-                   approval_started=now, approval_repushes=0, updated=now)
+                   approval_id=uuid4().hex, approval_started=now,
+                   approval_repushes=0, updated=now)
         _save(data)
 
 
@@ -373,13 +376,20 @@ def expire_stale_approvals(max_age_s: int = _EXPIRE_AWAITING_AFTER_S,
     return expired
 
 
-def resolve_job(job_id: str, approved: bool) -> bool:
+_ANY_PAUSE = object()
+
+
+def resolve_job(job_id: str, approved: bool, pause=_ANY_PAUSE) -> bool:
     """Approve/deny a job awaiting approval. Returns True if applied, False if the
-    job isn't awaiting (unknown, or already resolved — makes the token single-use)."""
+    job isn't awaiting (unknown, or already resolved — makes the token single-use)
+    or `pause` names an earlier pause than the one the job is waiting on now. The
+    CLI passes no `pause`: whoever runs it is looking at the current job."""
     with locked(_STORE_PATH):
         data = _load()
         job = _find(data["jobs"], job_id)
         if job is None or job["status"] != "awaiting_approval":
+            return False
+        if pause is not _ANY_PAUSE and job.get("approval_id") != pause:
             return False
         job["status"] = "approved" if approved else "denied"
         job["updated"] = _now()
@@ -397,7 +407,12 @@ def _serializer() -> URLSafeTimedSerializer:
 
 
 def make_approval_token(job_id: str, decision: str) -> str:
-    return _serializer().dumps({"job": job_id, "decision": decision})
+    """Signed for the job's CURRENT pause, so a button left on the phone from an
+    earlier pause of the same job cannot approve a later action."""
+    with locked(_STORE_PATH):
+        job = _find(_load()["jobs"], job_id)
+    pause = job.get("approval_id") if job else None
+    return _serializer().dumps({"job": job_id, "decision": decision, "pause": pause})
 
 
 def read_approval_token(token: str) -> dict | None:
