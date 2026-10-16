@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -50,6 +51,21 @@ def test_corrupt_file_is_quarantined_and_default_returned(tmp_path, caplog):
 # --------------------------------------------------------------------------- #
 # atomic_write_json
 # --------------------------------------------------------------------------- #
+
+def test_read_error_on_a_healthy_file_raises_and_leaves_it_in_place(tmp_path, monkeypatch):
+    # "Too many open files" says nothing about the file. Quarantining it would
+    # let the next save write a store holding only the new item.
+    path = tmp_path / "store.json"
+    path.write_text('{"facts": ["keep me"]}')
+    def boom(self, *a, **k):
+        raise OSError(24, "Too many open files")
+    monkeypatch.setattr(Path, "read_text", boom)
+    with pytest.raises(OSError):
+        load_json(path, {})
+    monkeypatch.undo()
+    assert json.loads(path.read_text()) == {"facts": ["keep me"]}
+    assert not list(tmp_path.glob("store.json.corrupt-*"))
+
 
 def test_failed_write_keeps_original_and_leaves_no_temp(tmp_path):
     path = tmp_path / "store.json"

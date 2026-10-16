@@ -61,9 +61,11 @@ def locked(store_path):
 
 def load_json(store_path, default):
     """Parse the JSON file at `store_path`, or return `default` when the file
-    doesn't exist yet. A file that exists but can't be read or parsed is moved
-    aside to <name>.corrupt-<timestamp> and logged, and `default` is returned —
-    a damaged store degrades to empty instead of crashing every caller.
+    doesn't exist yet. A file that exists but won't parse is moved aside to
+    <name>.corrupt-<timestamp> and logged, and `default` is returned — a damaged
+    store degrades to empty instead of crashing every caller. Any other read
+    error (too many open files, permissions) raises: the file may be healthy,
+    and treating it as empty would let the next save overwrite it.
     Callers should pass a fresh `default` (e.g. a dict literal) since it may be
     returned and then mutated."""
     store_path = Path(store_path)
@@ -71,7 +73,7 @@ def load_json(store_path, default):
         return json.loads(store_path.read_text())
     except FileNotFoundError:
         return default
-    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
         quarantine = store_path.with_name(
             f"{store_path.name}.corrupt-{datetime.now():%Y%m%dT%H%M%S}"
         )
