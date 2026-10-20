@@ -92,15 +92,20 @@ Everything in `new` becomes the digest:
    many batches that takes. Lines the model skips or garbles simply stay
    unscored; those items still appear, sorted last in their section, with no
    score badge.
-2. Python assembles the three-section HTML email (🆕 Just Funded / ⏳ Stalled
+2. Leads scoring below `MIN_REPORT_SCORE` (7, a constant in
+   `agent/tools/opportunities.py`) are marked `digested` and left out of the
+   email. The `/opportunities` page hides them from triage too. Unscored leads still go out. They are not dismissed, so a low-scoring
+   opening can still come back as a stalled search. If nothing is left, no
+   email sends.
+3. Python assembles the three-section HTML email (🆕 Just Funded / ⏳ Stalled
    Searches / 👋 Hiring Signals) — the model never formats the digest.
-3. The email sends; anything scoring ≥ `OPP_SCORE_THRESHOLD` (default 8) also
+4. The email sends; anything scoring ≥ `OPP_SCORE_THRESHOLD` (default 8) also
    triggers an ntfy phone push.
-4. Only after a successful send are the reported items marked `digested` and
+5. Only after a successful send are the reported items marked `digested` and
    the EDGAR watermark advanced — a failed send loses nothing; the next run
    retries the same items.
 
-Nothing new that day → no email.
+Nothing new that day, or nothing scoring 7 or more → no email.
 
 ## What does marking Interested or Dismissed do?
 

@@ -1300,6 +1300,19 @@ def test_api_opportunities_lists_items_and_watchlist(auth_client, opp_store):
     assert [w["slug"] for w in data["watchlist"]] == ["acme"]
 
 
+def test_api_opportunities_hides_low_scorers_from_triage(auth_client, opp_store):
+    opp, _ = opp_store
+    opp.insert_new_items([
+        {"id": f"hn:{n}", "source": "hn", "signal": "hiring", "company": f"Co{n}",
+         "title": "Head of Product", "url": "https://example.com", "posted_at": None}
+        for n in (2, 3, 4)])
+    opp.record_scores({"hn:2": (6, "low"), "hn:3": (7, "ok"), "hn:4": (3, "low")})
+    opp.update_opportunity("hn:4", "interested")  # the user chose it: keep it
+    data = auth_client.get("/api/opportunities").get_json()
+    # hn:1 is unscored, so it still shows; only hn:2 is hidden.
+    assert sorted(i["id"] for i in data["items"]) == ["hn:1", "hn:3", "hn:4"]
+
+
 def test_api_opportunity_status_triages_via_the_shared_store(auth_client, opp_store):
     opp, item_id = opp_store
     resp = auth_client.post(f"/api/opportunities/{item_id}/status",

@@ -289,7 +289,7 @@ def test_posting_closing_before_its_first_digest_is_never_reported(stubbed_run, 
     monkeypatch.setattr(od, "poll_ats",
                         lambda watchlist: {"items": [_ats_job(2, "Head of Product")],
                                            "errors": [], "boards_polled": ["greenhouse:acme"]})
-    monkeypatch.setattr(od, "complete_text", lambda **k: "1|5|Say hi.")
+    monkeypatch.setattr(od, "complete_text", lambda **k: "1|7|Say hi.")
     assert od.build_and_send_digest()["new_items"] == 1
     body = stubbed_run["emails"][-1][1]
     assert "Head of Product" in body and "VP of Engineering" not in body
@@ -418,7 +418,10 @@ def test_stalled_flip_rescores_under_the_new_signal(stubbed_run, monkeypatch):
     monkeypatch.setattr(od, "complete_text",
                         lambda **k: "1|4|Just posted, wait.")
     assert od.main() == 0
-    assert "4/10" in stubbed_run["emails"][0][1]
+    # Below MIN_REPORT_SCORE: no email, but digested (not dismissed) so the
+    # stall can still bring it back.
+    assert stubbed_run["emails"] == []
+    assert opp.list_opportunities(status="digested")["count"] == 1
 
     # 50 days later the board still lists the same posting.
     monkeypatch.setattr(od, "poll_ats",
@@ -426,8 +429,21 @@ def test_stalled_flip_rescores_under_the_new_signal(stubbed_run, monkeypatch):
     monkeypatch.setattr(od, "complete_text",
                         lambda **k: "1|9|Seat's been open 60 days — offer to bridge.")
     assert od.main() == 0
-    body = stubbed_run["emails"][1][1]
+    body = stubbed_run["emails"][0][1]
     assert "Stalled Searches" in body and "9/10" in body and "bridge" in body
+
+
+def test_low_scores_are_left_out_of_the_email(stubbed_run, monkeypatch):
+    monkeypatch.setattr(od, "poll_edgar",
+                        lambda *a: {"items": [_edgar_item(1), _edgar_item(2), _edgar_item(3)]})
+    monkeypatch.setattr(od, "complete_text",
+                        lambda **k: "1|7|Keep.\n2|6|Drop.\n3|9|Keep too.")
+    result = od.build_and_send_digest()
+    assert result["new_items"] == 2
+    body = stubbed_run["emails"][0][1]
+    assert "Startup 1" in body and "Startup 3" in body and "Startup 2" not in body
+    # The dropped lead is done, not pending: the next run does not re-report it.
+    assert opp.pending_new_items() == []
 
 
 def test_digest_html_escapes_and_guards_urls(stubbed_run, monkeypatch):

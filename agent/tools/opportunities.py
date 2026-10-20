@@ -53,6 +53,10 @@ _SETTABLE_STATUSES = ("interested", "dismissed")
 # closed, which stays as a badged reminder of an outreach already in flight.
 _PRUNE_AFTER_S = 30 * 24 * 3600
 _LIST_LIMIT = 20
+# Leads the model scores below this stay out of the digest email and off the
+# /opportunities triage list. Unscored leads still show: no score is not a low
+# score.
+MIN_REPORT_SCORE = 7
 _LIST_CHARS = 5500
 
 

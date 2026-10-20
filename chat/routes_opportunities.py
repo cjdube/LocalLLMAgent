@@ -69,7 +69,12 @@ def _research_one(item: dict) -> None:
 def api_opportunities():
     if not _authenticated():
         return jsonify({"error": "not authenticated"}), 401
-    return jsonify({"items": opportunities.all_items(),
+    # Low scorers leave triage only; one already marked interested stays.
+    items = [i for i in opportunities.all_items()
+             if not (i["status"] in ("new", "digested")
+                     and i.get("score") is not None
+                     and i["score"] < opportunities.MIN_REPORT_SCORE)]
+    return jsonify({"items": items,
                     "watchlist": opportunities.get_watchlist()})
 
 

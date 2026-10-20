@@ -13,9 +13,10 @@ policy — no LinkedIn scraping, no paid data SaaS):
 The pollers and the dedupe store do everything deterministic; the local LLM
 only scores each NEW item 1-10 for fractional-operator fit and drafts a
 one-line outreach angle. HTML is assembled in Python (morning-brief pattern).
-Only items not seen before (or newly stalled) are reported, so an empty day
-sends no email. Each run also retires watched openings that have dropped off
-their board (close_missing), so a filled role stops sitting in the pipeline.
+Only items not seen before (or newly stalled) and scoring at least
+opportunities.MIN_REPORT_SCORE are reported, so an empty day sends no
+email. Each run also retires watched openings that have dropped off their
+board (close_missing), so a filled role stops sitting in the pipeline.
 
 The whole pipeline lives in build_and_send_digest(), shared by this scheduled
 task (main, below) and the chat server's send_opportunity_digest tool.
@@ -787,6 +788,23 @@ def build_and_send_digest(logger: Optional[logging.Logger] = None) -> dict:
         for item in to_report:
             if item["id"] in scores:
                 item["score"], item["angle"] = scores[item["id"]]
+
+        # Digested, not dismissed: a dismissed opening can never come back as
+        # a stalled search, and the stall may earn it a higher score.
+        low = [i for i in to_report
+               if i.get("score") is not None
+               and i["score"] < opportunities.MIN_REPORT_SCORE]
+        if low:
+            opportunities.mark_digested([i["id"] for i in low])
+            log.info(f"{len(low)} leads scored below "
+                     f"{opportunities.MIN_REPORT_SCORE} — left out")
+            to_report = [i for i in to_report if i not in low]
+        if not to_report:
+            log.info("Nothing scored high enough — no digest sent")
+            if not edgar_result.get("error"):
+                _write_edgar_watermark(edgar_watermark)
+            log.info("Opportunity digest run complete — nothing high enough")
+            return {"sent": False, "new_items": 0, "below_threshold": len(low)}
 
         body_html = render_digest_html(to_report)
         result = send_email(
