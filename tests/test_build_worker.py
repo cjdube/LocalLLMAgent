@@ -113,6 +113,12 @@ def test_the_prompt_forbids_every_git_write():
     assert "unstaged" in prompt
 
 
+def test_the_prompt_forbids_touching_the_shared_venv_and_env():
+    prompt = build_worker.build_prompt(_job(), Path("/tmp/wt"), "b")
+    assert "Do NOT install, upgrade or remove packages" in prompt
+    assert "do NOT edit config/.env" in prompt
+
+
 def test_the_prompt_names_the_worktree_and_branch():
     prompt = build_worker.build_prompt(_job(), Path("/tmp/wt/thing"), "wren-build/thing-ab12")
     assert "/tmp/wt/thing" in prompt
@@ -207,6 +213,35 @@ def test_the_model_flag_appears_only_when_it_is_configured(monkeypatch):
 def test_an_untouched_head_passes(fake_run):
     fake_run({"rev-parse": _Proc(stdout="abc123\n")})
     assert build_worker.verify_untouched_git(Path("/tmp/wt"), "abc123", "b") == {"ok": True}
+
+
+def test_shared_state_reads_main_head_packages_and_env(fake_run, monkeypatch, tmp_path):
+    (tmp_path / ".venv/lib/python3.12/site-packages/b-2.dist-info").mkdir(parents=True)
+    (tmp_path / ".venv/lib/python3.12/site-packages/a-1.dist-info").mkdir()
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config/.env").write_text("X=1\n")
+    monkeypatch.setattr(build_worker, "_repo_root", lambda: tmp_path)
+    fake = fake_run({"rev-parse": _Proc(stdout="mainsha\n")})
+    state = build_worker.shared_state()
+    assert state["main"] == "mainsha"
+    assert fake.calls[0][1]["cwd"] == str(tmp_path)
+    assert state["packages"] == ["a-1.dist-info", "b-2.dist-info"]
+    assert state["env"] == (tmp_path / "config/.env").stat().st_mtime_ns
+
+
+def test_unchanged_shared_state_has_no_notes():
+    s = {"main": "m", "packages": ["a-1.dist-info"], "env": 5}
+    assert build_worker.shared_changes(s, dict(s)) == []
+
+
+def test_each_shared_change_gets_its_own_note():
+    before = {"main": "m1", "packages": ["a-1.dist-info"], "env": 5}
+    notes = build_worker.shared_changes(before, {**before, "main": "m2"})
+    assert len(notes) == 1 and "HEAD moved" in notes[0]
+    notes = build_worker.shared_changes(before, {**before, "packages": ["a-2.dist-info"]})
+    assert len(notes) == 1 and "a-2.dist-info" in notes[0]
+    notes = build_worker.shared_changes(before, {**before, "env": 6})
+    assert len(notes) == 1 and "config/.env" in notes[0]
 
 
 def test_a_commit_is_undone_and_reported(fake_run):
@@ -449,6 +484,8 @@ def queued(monkeypatch, tmp_path):
                         lambda *a, **k: {"ok": True})
     monkeypatch.setattr(build_worker, "diffstat", lambda *a: "4 files changed")
     monkeypatch.setattr(build_worker, "run_pytest", lambda *a: "1183 passed")
+    monkeypatch.setattr(build_worker, "shared_state",
+                        lambda: {"main": "m1", "packages": ["a-1.dist-info"], "env": 1})
     return build_queue.enqueue("86bb", "Add up-arrow recall", "## Plan\ndo it\n", "a.md")
 
 
@@ -508,6 +545,23 @@ def test_a_git_violation_survives_into_the_report(queued, monkeypatch, reported,
                                          "turns": 5, "duration_ms": 60000})
     build_worker.run_job(build_queue.next_pending(), logger)
     assert "Claude committed anyway" in reported.comments[0][1]
+
+
+def test_a_change_outside_the_worktree_survives_into_the_report(
+        queued, monkeypatch, reported, logger):
+    """The deny list cannot see `python -c` or `git -C`, so a commit on main or a
+    pip install into the shared .venv has to be caught after the run."""
+    states = iter([{"main": "m1", "packages": ["a-1.dist-info"], "env": 1},
+                   {"main": "m2", "packages": ["a-1.dist-info", "b-2.dist-info"], "env": 1}])
+    monkeypatch.setattr(build_worker, "shared_state", lambda: next(states))
+    monkeypatch.setattr(build_worker, "run_claude",
+                        lambda *a, **k: {"summary": "Done.", "cost": 1.0,
+                                         "turns": 5, "duration_ms": 60000})
+    build_worker.run_job(build_queue.next_pending(), logger)
+    comment = reported.comments[0][1]
+    assert "WARNING" in comment
+    assert "main checkout's HEAD moved" in comment
+    assert "b-2.dist-info" in comment
 
 
 def test_a_failed_push_does_not_silence_the_clickup_comment(

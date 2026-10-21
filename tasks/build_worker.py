@@ -216,6 +216,38 @@ def verify_untouched_git(worktree: Path, base_sha: str, branch: str) -> dict:
                     f"{now[:12]}) — {detail}"}
 
 
+def shared_state() -> dict:
+    """What a build can change outside its worktree: the main checkout's HEAD,
+    and the two things LINKED_PATHS shares with every live Wren process — the
+    installed packages and config/.env. The deny list is prefix-matched and
+    plain Bash is allowed, so `python -c` or `git -C` can reach all three; this
+    is the proof for them, as verify_untouched_git is for the worktree."""
+    repo = _repo_root()
+    head = _git(["rev-parse", "HEAD"], repo)
+    env = repo / "config" / ".env"
+    return {
+        "main": head.stdout.strip() if head.returncode == 0 else None,
+        "packages": sorted(p.name for p in repo.glob(".venv/lib/python*/site-packages/*.dist-info")),
+        "env": env.stat().st_mtime_ns if env.exists() else None,
+    }
+
+
+def shared_changes(before: dict, after: dict) -> list:
+    """One line per thing that moved during the build. Never undone here: a peer
+    session or the /settings page may have made the change, not Claude."""
+    notes = []
+    if before["main"] != after["main"]:
+        notes.append(f"the main checkout's HEAD moved during the build "
+                     f"({str(before['main'])[:12]} -> {str(after['main'])[:12]}) — check who committed")
+    if before["packages"] != after["packages"]:
+        added = sorted(set(after["packages"]) - set(before["packages"]))
+        notes.append("the shared .venv changed during the build (now: "
+                     f"{', '.join(added) or 'packages removed'}) — every Wren process runs from it")
+    if before["env"] != after["env"]:
+        notes.append("config/.env changed during the build — it is the live file, check it")
+    return notes
+
+
 def diffstat(worktree: Path, base_sha: str) -> str:
     """One line: what changed against the commit the worktree started on.
     Untracked files are counted too — nothing is staged, so `git diff` alone
@@ -259,6 +291,9 @@ Hard rules for this run:
 - Do NOT create, switch, rename or delete a branch. Do NOT push. Do NOT use gh.
 - Leave every change sitting in the working tree, unstaged. That is the deliverable.
 - Do not edit anything outside this worktree.
+- Do NOT install, upgrade or remove packages, and do NOT edit config/.env.
+  Both are shared with the live app. If the plan needs either, stop and say so
+  in your summary.
 - When the implementation is done, run: .venv/bin/python -m pytest
 - Finish with a short plain-text summary: what you changed, and whether the
   tests passed.
@@ -495,9 +530,11 @@ def run_job(job: dict, logger) -> None:
         logger.info(f"job {job['id']} was claimed by another run; standing down")
         return
 
+    before = shared_state()
     claude = run_claude(worktree, build_prompt(job, worktree, branch), logger)
     git_check = verify_untouched_git(worktree, base_sha, branch)
-    git_note = "" if git_check["ok"] else git_check["note"]
+    notes = ([] if git_check["ok"] else [git_check["note"]]) + shared_changes(before, shared_state())
+    git_note = "; ".join(notes)
     if git_note:
         logger.error(git_note)
 

@@ -184,6 +184,19 @@ it ingests untrusted web content *and* runs unattended — pointing it at a clou
 backend is the riskiest single switch. See [llm-backend.md](llm-backend.md) and
 [frontier-escalation.md](frontier-escalation.md).
 
+## The build worker is the widest capability
+
+`tasks/build_worker.py` runs Claude Code unattended with plain `Bash` and
+edits accepted. The approval is the plan you wrote plus the `wren-build` tag
+you added by hand, so the risk is model error, not an attacker. Its worktree
+links the live `.venv` and the real `config/.env`, so a run can read every
+secret Wren holds and can change the interpreter every Wren process uses. The
+deny list blocks git writes by prefix only. The after-run proof catches a
+commit in the worktree or the main checkout, a package change, and a
+`config/.env` change, and reports each one. If the ClickUp workspace ever gains
+a second person who can edit task descriptions, this boundary needs a fresh
+look. See [clickup-build.md](clickup-build.md).
+
 ## The page shells sit outside the directory Flask serves
 
 Flask registers `/static/<path:filename>` itself, over `chat/static/`. That route

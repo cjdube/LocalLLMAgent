@@ -96,6 +96,9 @@ A fresh worktree has no `.venv` and no `config/.env`, because both are
 gitignored. The worker symlinks both in from the main checkout, which is what
 makes `.venv/bin/python -m pytest` work inside the worktree exactly as
 `AGENTS.md` documents it. Being gitignored, both stay invisible to `git status`.
+They are **links, not copies**: a `pip install` in the worktree changes the
+interpreter every Wren process runs from, and an edit to its `config/.env` edits
+the live file. The prompt forbids both, and the proof below checks both.
 
 **Worktrees are not auto-deleted.** The branch is the deliverable. Remove it by
 hand with `git worktree remove` after merging or discarding.
@@ -126,6 +129,14 @@ the run and compares `git rev-parse HEAD` after it. If HEAD moved, it runs
 `git reset --mixed <base>` — `--mixed`, never `--hard`, so the work survives in
 the working tree — and the report says loudly that Claude committed despite the
 deny list. A reset that itself fails escalates the wording again.
+
+The deny list matches a command's **prefix**, and plain `Bash` is allowed, so
+`git -C <other repo> commit` or a `python -c` that calls git gets past it. So the
+proof also reads three things outside the worktree before and after the run:
+the main checkout's HEAD, the package list in the shared `.venv`, and the
+modification time of `config/.env`. A change to any of them adds a `WARNING:`
+line to the report. None is undone, because a peer session or the `/settings`
+page may have made it, not Claude.
 
 Also passed: `--strict-mcp-config` with no `--mcp-config`, so no MCP servers
 load. An unattended build has no business holding Gmail or Supabase tools.
