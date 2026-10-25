@@ -63,8 +63,8 @@ prompt already contains?"**
 it has a logger. A call without `logger=` fails silently by construction.
 
 **On Gemini:** only the Ollama path acts on `think`. The equivalent knob is
-`WREN_GEMINI_THINKING_BUDGET` (already 0 by default, and some models reject 0 —
-see `agent/backends/gemini.py`).
+`WREN_GEMINI_THINKING_LEVEL` (already `low` by default, and some models reject
+some levels — see `agent/backends/gemini.py`).
 
 ## Degrading on bad model output must be logged
 

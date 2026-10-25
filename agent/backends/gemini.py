@@ -19,7 +19,7 @@ from typing import Callable, Optional
 from agent import config
 
 # Default cloud model when the Gemini backend is selected but no model is pinned.
-GEMINI_DEFAULT_MODEL = "gemini-2.5-flash"
+GEMINI_DEFAULT_MODEL = "gemini-3.8-flash"
 
 
 def _coerce_response(content) -> dict:
@@ -165,30 +165,27 @@ def _gemini_chat(
     # weekly-learnings draft truncated to 162 visible tokens). max_out above is
     # what actually protects the visible answer — see below.
     #
-    # The budget below is a HINT on the 3.x models, not a cap. Measured
-    # 2026-08-16: gemini-3.7-flash spent 268-313 thinking tokens with the budget
-    # set to 0, and both 3.6 and 3.7 overran a budget of 128 (109-397). So do not
-    # read a low budget as "thinking off" — treat it as a nudge and size max_out
-    # for the answer you need. At max_output_tokens=200 thinking ate 194 of them
-    # and returned 3 characters with finish_reason=MAX_TOKENS; at the 8192
-    # default there is ample headroom.
-    thinking_budget = int(config.getenv("WREN_GEMINI_THINKING_BUDGET", "0"))
+    # The level below is a HINT, not a cap, so size max_out for the answer you
+    # need. At max_output_tokens=200 thinking ate 194 of them and returned 3
+    # characters with finish_reason=MAX_TOKENS; at the 8192 default there is
+    # ample headroom.
+    #
+    # thinking_level, not thinking_budget: Google's 2026-10 notice says upcoming
+    # models return 400 INVALID_ARGUMENT for any thinking_budget. Levels are not
+    # portable either. Measured 2026-10-24: gemini-3.8-flash accepts low, medium
+    # and high but rejects minimal; gemini-2.5-flash rejects any level. Verify
+    # with one real call after any WREN_GEMINI_MODEL change.
+    thinking_level = config.getenv("WREN_GEMINI_THINKING_LEVEL", "low")
     # `think` is deliberately NOT honoured here. The seam's think=False means
-    # "don't spend the answer's budget on scratchpad", which this backend already
-    # aims at via the budget above — and forcing 0 would override the per-model
-    # escape hatch the env var exists to provide. 0 is also not portable: it is
-    # the code default and works on gemini-2.5-flash and gemini-3.7-flash, but
-    # gemini-2.5-pro and gemini-3.6-flash both reject it with a bare 400
-    # INVALID_ARGUMENT (-1 for dynamic, or any positive budget, is accepted
-    # everywhere). config/.env pins 128, which is portable across all of them.
-    # Tune WREN_GEMINI_THINKING_BUDGET per model instead, and verify with one
-    # real call after any WREN_GEMINI_MODEL change.
+    # "don't spend the answer's budget on scratchpad", which the low level above
+    # already aims at — and forcing a level would override the per-model escape
+    # hatch the setting exists to provide.
     _ = think
     system, contents = _gemini_contents(messages)
 
     cfg_kwargs = dict(
         max_output_tokens=max_out,
-        thinking_config=types.ThinkingConfig(thinking_budget=thinking_budget),
+        thinking_config=types.ThinkingConfig(thinking_level=thinking_level),
         # We drive the tool loop ourselves; disable the SDK's auto tool-calling
         # so it returns functionCall parts instead of trying to invoke Python.
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
@@ -256,13 +253,13 @@ def _gemini_chat(
         # MAX_TOKENS means the reply was cut off before the model was done —
         # mirrors the Ollama num_predict warning above. With a thinking model,
         # the usual cause is thinking eating the output budget (see thinking
-        # config above); WREN_GEMINI_THINKING_BUDGET=0 avoids that.
+        # config above); a lower WREN_GEMINI_THINKING_LEVEL helps.
         if reason and "MAX_TOKENS" in reason:
             logger.warning(
                 "gemini generation hit finish_reason=MAX_TOKENS and was cut off "
                 "(output_tokens=%s, thinking_tokens=%s) — the draft is likely "
                 "incomplete; raise WREN_GEMINI_MAX_OUTPUT_TOKENS or lower "
-                "WREN_GEMINI_THINKING_BUDGET",
+                "WREN_GEMINI_THINKING_LEVEL",
                 output_tokens, thinking_tokens,
             )
     return message

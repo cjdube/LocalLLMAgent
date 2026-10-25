@@ -88,24 +88,23 @@ is what the code falls back to when the variable is unset.
 | Variable | Default | Live value | What it bounds |
 |---|---|---|---|
 | `WREN_GEMINI_MAX_OUTPUT_TOKENS` | 8192 | unset | Cloud model output per call. **This is the limit that actually bounds a Gemini call** — see the note below. |
-| `WREN_GEMINI_THINKING_BUDGET` | 0 | **128** | Thinking tokens. A hint, not a cap, and not portable across models. See below. |
+| `WREN_GEMINI_THINKING_LEVEL` | low | unset | How hard the model thinks. A hint, not a cap, and not portable across models. See below. |
 
-> **The Gemini thinking budget is the one limit in this document that does not
-> do what its name says.** Measured 2026-08-16 against the live API:
+> **The Gemini thinking setting does not bound anything.**
 >
-> - **It is not enforced.** `gemini-3.7-flash` spent 268-313 thinking tokens with
->   the budget set to **0**. Both 3.6 and 3.7 overran a budget of 128 (109-397).
->   So "0 = thinking off" is false on the 3.x models.
-> - **It is not portable.** 0 works on `gemini-2.5-flash` and `gemini-3.7-flash`,
->   but `gemini-2.5-pro` and `gemini-3.6-flash` reject it with a bare
->   `400 INVALID_ARGUMENT`. 128 and -1 are accepted everywhere.
+> - **It is not enforced.** Measured 2026-08-16 on the old thinking budget:
+>   `gemini-3.7-flash` spent 268-313 thinking tokens with the budget set to
+>   **0**. The level that replaced it (2026-10-24) is a hint in the same way.
+> - **It is not portable.** `gemini-3.8-flash` accepts `low`, `medium` and
+>   `high` but rejects `minimal`; 2.5 models reject any level (measured
+>   2026-10-24). Upcoming models reject the old `thinking_budget` outright.
 > - **`WREN_GEMINI_MAX_OUTPUT_TOKENS` is the real bound.** Thinking counts
 >   against it. At `max_output_tokens=200`, thinking consumed 194 and the call
 >   returned 3 characters with `finish_reason=MAX_TOKENS` — the documented
 >   empty-answer failure, reproduced. At the 8192 default there is ample room.
 >
 > Practical upshot: size `WREN_GEMINI_MAX_OUTPUT_TOKENS` for the answer you need
-> and leave the budget pinned at 128, which is portable and survives a rollback.
+> and leave the level at `low`.
 
 ### Task-specific prompt bounds
 

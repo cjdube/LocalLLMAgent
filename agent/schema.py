@@ -181,7 +181,7 @@ SETTINGS: tuple[Setting, ...] = (
     Setting(
         key="WREN_GEMINI_MODEL", group="Model", label="Cloud model",
         help="Model id used when a call routes to Gemini.",
-        default="gemini-2.5-flash", applies="live",
+        default="gemini-3.8-flash", applies="live",
     ),
     Setting(
         key="WREN_GEMINI_MAX_OUTPUT_TOKENS", group="Model",
@@ -191,13 +191,13 @@ SETTINGS: tuple[Setting, ...] = (
         type="int", default="8192", minimum=256, maximum=65536, applies="live",
     ),
     Setting(
-        key="WREN_GEMINI_THINKING_BUDGET", group="Model",
-        label="Cloud thinking budget",
-        help="A hint, not a cap — measured overruns on the 3.x models. Not "
-             "portable either: 0 is rejected outright by gemini-2.5-pro and "
-             "gemini-3.6-flash. 128, or -1 for dynamic, is accepted everywhere. "
-             "Verify with one real call after changing the cloud model.",
-        type="int", default="0", minimum=-1, maximum=32768, applies="live",
+        key="WREN_GEMINI_THINKING_LEVEL", group="Model",
+        label="Cloud thinking level",
+        help="A hint, not a cap. Not portable: gemini-3.8-flash rejects "
+             "minimal, and 2.5 models reject any level. Verify with one real "
+             "call after changing the cloud model.",
+        type="choice", choices=("minimal", "low", "medium", "high"),
+        default="low", applies="live",
     ),
     Setting(
         key="GEMINI_API_KEY", group="Model", label="Gemini API key",

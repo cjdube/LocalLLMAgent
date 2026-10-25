@@ -668,9 +668,9 @@ def _llm_chat(
 
     `think` says the caller's answer needs the whole token budget, so the
     scratchpad shouldn't compete for it. Only the Ollama path acts on it; the
-    Gemini backend already defaults its thinking budget to 0 and exposes
-    WREN_GEMINI_THINKING_BUDGET as the per-model override (some models reject
-    0 outright), so forcing it there would break more than it fixed.
+    Gemini backend already defaults its thinking level to low and exposes
+    WREN_GEMINI_THINKING_LEVEL as the per-model override (some models reject
+    some levels outright), so forcing it there would break more than it fixed.
 
     Being the one seam both backends pass through, this is also where every
     model call is written to the usage ledger — one write site, so a third

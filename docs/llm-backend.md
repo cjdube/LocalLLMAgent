@@ -81,14 +81,15 @@ consumer next starts — there's nothing to reload live:
 ## Gemini config
 
 - Key: `GEMINI_API_KEY` or `GOOGLE_API_KEY` (the SDK checks both).
-- `WREN_GEMINI_MODEL` — model id, defaults to `gemini-2.5-flash`.
+- `WREN_GEMINI_MODEL` — model id, defaults to `gemini-3.8-flash`.
 - `WREN_GEMINI_MAX_OUTPUT_TOKENS` — per-call generation cap, defaults to 8192.
-- `WREN_GEMINI_THINKING_BUDGET` — thinking tokens, defaults to `0` in code but
-  set to `128` in `.env.example`. Thinking counts against the output cap, so a
-  large budget returns *empty* content rather than a short answer. `0` is the
-  right value and works on 2.5-flash and 3.7-flash, but 2.5-pro and 3.6-flash
-  reject it with a bare 400 `INVALID_ARGUMENT`; `128` (or `-1` for dynamic) is
-  accepted everywhere. Verify with one real call after changing
+- `WREN_GEMINI_THINKING_LEVEL` — `minimal`, `low`, `medium` or `high`; defaults
+  to `low`. Thinking counts against the output cap, so heavy thinking returns
+  *empty* content rather than a short answer. It replaced
+  `WREN_GEMINI_THINKING_BUDGET` on 2026-10-24, because Google's notice says
+  upcoming models reject any `thinking_budget` with 400 `INVALID_ARGUMENT`.
+  Levels are not portable: `gemini-3.8-flash` rejects `minimal`, and 2.5 models
+  reject any level. Verify with one real call after changing
   `WREN_GEMINI_MODEL`.
 - Dependency: `google-genai` (pinned in `requirements.txt`), imported lazily so a
   purely local install never loads it.

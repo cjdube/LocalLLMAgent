@@ -594,30 +594,32 @@ def test_gemini_tolerates_a_tool_call_without_a_thought_signature(monkeypatch):
     assert model_part.thought_signature is None
 
 
-def test_gemini_disables_thinking_and_sets_output_cap_by_default(monkeypatch):
+def test_gemini_lowers_thinking_and_sets_output_cap_by_default(monkeypatch):
     # Thinking is a *thinking* model's default, and thinking tokens count against
     # the output cap — leaving it on starved the weekly-learnings draft. Default
-    # to budget 0 (off) with generous output headroom.
-    monkeypatch.delenv("WREN_GEMINI_THINKING_BUDGET", raising=False)
+    # to level low with generous output headroom, and never send thinking_budget
+    # (upcoming models reject it).
+    monkeypatch.delenv("WREN_GEMINI_THINKING_LEVEL", raising=False)
     monkeypatch.delenv("WREN_GEMINI_MAX_OUTPUT_TOKENS", raising=False)
     captured = _patch_gemini(monkeypatch, [[_FakeChunk(parts=[_FakePart(text="ok")])]])
 
     loop._gemini_chat([{"role": "user", "content": "hey"}], tools=[])
 
     config = captured["calls"][0]["config"]
-    assert config.thinking_config.thinking_budget == 0
+    assert config.thinking_config.thinking_level == "LOW"  # the SDK's enum
+    assert config.thinking_config.thinking_budget is None
     assert config.max_output_tokens == 8192
 
 
-def test_gemini_thinking_budget_and_cap_are_env_overridable(monkeypatch):
-    monkeypatch.setenv("WREN_GEMINI_THINKING_BUDGET", "1024")
+def test_gemini_thinking_level_and_cap_are_env_overridable(monkeypatch):
+    monkeypatch.setenv("WREN_GEMINI_THINKING_LEVEL", "high")
     monkeypatch.setenv("WREN_GEMINI_MAX_OUTPUT_TOKENS", "2048")
     captured = _patch_gemini(monkeypatch, [[_FakeChunk(parts=[_FakePart(text="ok")])]])
 
     loop._gemini_chat([{"role": "user", "content": "hey"}], tools=[])
 
     config = captured["calls"][0]["config"]
-    assert config.thinking_config.thinking_budget == 1024
+    assert config.thinking_config.thinking_level == "HIGH"
     assert config.max_output_tokens == 2048
 
 
