@@ -546,8 +546,10 @@ def _file_task(title: str, description: str, attach: Path, extra: dict,
         if clash:
             return clash
 
+    # CCC: "Claude Code created", so the board can tell these Tasks apart.
     created = clickup.add_clickup_task(title=title, space=space,
-                                       description=description, priority=priority)
+                                       description=description, priority=priority,
+                                       tags=["CCC"])
     if "error" in created:
         return created
 

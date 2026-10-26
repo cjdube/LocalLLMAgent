@@ -139,7 +139,7 @@ def stub(monkeypatch):
 
     def _add(title, space, list_name=None, description=None, tags=None,
              priority=None, api_key=None):
-        events.append(("add", title, space, priority, description))
+        events.append(("add", title, space, priority, description, tags))
         if state["add_error"]:
             return {"error": state["add_error"]}
         return {"tool_name": "add_clickup_task", "created": True, "title": title,
@@ -384,6 +384,11 @@ def test_create_then_attach_then_move(roots, stub):
     still missing."""
     session_ticket.create_ticket(session_id=SESSION_ID)
     assert _kinds(stub) == ["read", "add", "find", "upload", "move"]
+
+
+def test_the_task_is_tagged_ccc(roots, stub):
+    session_ticket.create_ticket(session_id=SESSION_ID)
+    assert stub["events"][1][5] == ["CCC"]
 
 
 def test_the_priority_defaults_to_normal_and_is_passed_through(roots, stub):
