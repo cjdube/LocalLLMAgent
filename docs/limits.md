@@ -19,7 +19,7 @@ Three distinct problems, often confused:
 | Problem | What goes wrong | Which limits address it |
 |---|---|---|
 | **Context overflow** | Prompt exceeds `num_ctx`. Ollama truncates the **front** — where the system prompt lives. The model then loses its identity and its rules, and often runs away in a repetition loop. | history trimming, tool-result caps, per-tool char budgets, prompt compaction |
-| **Output budget exhaustion** | Generation exceeds `num_predict`. On a thinking model this returns **empty content**, not a truncated answer. | `OLLAMA_NUM_PREDICT`, `think=False`, `WREN_GEMINI_THINKING_BUDGET` |
+| **Output budget exhaustion** | Generation exceeds `num_predict`. On a thinking model this returns **empty content**, not a truncated answer. | `OLLAMA_NUM_PREDICT`, `think=False`, `WREN_GEMINI_THINKING_LEVEL` |
 | **Resource / safety bounds** | A runaway loop, a slow API, an unbounded store, a brute-force login. | iteration caps, HTTP timeouts, store pruning, login throttle |
 
 Only the first two are "small model" limits. The third group would exist on any
