@@ -193,10 +193,10 @@ SETTINGS: tuple[Setting, ...] = (
     Setting(
         key="WREN_GEMINI_THINKING_LEVEL", group="Model",
         label="Cloud thinking level",
-        help="A hint, not a cap. Not portable: gemini-3.8-flash rejects "
-             "minimal, and 2.5 models reject any level. Verify with one real "
-             "call after changing the cloud model.",
-        type="choice", choices=("minimal", "low", "medium", "high"),
+        help="A hint, not a cap. Not portable: 2.5 models reject any level. "
+             "Verify with one real call after changing the cloud model.",
+        # No "minimal": gemini-3.8-flash, the default model, rejects it.
+        type="choice", choices=("low", "medium", "high"),
         default="low", applies="live",
     ),
     Setting(

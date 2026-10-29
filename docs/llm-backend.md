@@ -83,8 +83,8 @@ consumer next starts — there's nothing to reload live:
 - Key: `GEMINI_API_KEY` or `GOOGLE_API_KEY` (the SDK checks both).
 - `WREN_GEMINI_MODEL` — model id, defaults to `gemini-3.8-flash`.
 - `WREN_GEMINI_MAX_OUTPUT_TOKENS` — per-call generation cap, defaults to 8192.
-- `WREN_GEMINI_THINKING_LEVEL` — `minimal`, `low`, `medium` or `high`; defaults
-  to `low`. Thinking counts against the output cap, so heavy thinking returns
+- `WREN_GEMINI_THINKING_LEVEL` — `low`, `medium` or `high`; defaults to `low`.
+  `/settings` leaves out `minimal` because the default model rejects it. Thinking counts against the output cap, so heavy thinking returns
   *empty* content rather than a short answer. It replaced
   `WREN_GEMINI_THINKING_BUDGET` on 2026-10-24, because Google's notice says
   upcoming models reject any `thinking_budget` with 400 `INVALID_ARGUMENT`.
