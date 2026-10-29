@@ -36,6 +36,15 @@ def setup_logger(task_name: str) -> logging.Logger:
     stream_handler.setFormatter(fmt)
     logger.addHandler(stream_handler)
 
+    # agent.* modules (store, config, schema) log through their own loggers,
+    # which otherwise have no handler: a quarantined store reached only bare
+    # stderr, which neither the dashboard nor log_inspector reads.
+    agent_logger = logging.getLogger("agent")
+    agent_logger.setLevel(logging.WARNING)
+    agent_logger.handlers.clear()
+    agent_logger.addHandler(file_handler)
+    agent_logger.addHandler(stream_handler)
+
     return logger
 
 

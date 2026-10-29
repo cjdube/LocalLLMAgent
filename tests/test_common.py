@@ -35,6 +35,23 @@ def test_setup_logger_is_isolated_and_does_not_stack_handlers():
     assert len(again.handlers) == 2
 
 
+def test_a_quarantined_store_lands_in_the_task_log(tmp_path):
+    # agent.store logs through its own logger. Without setup_logger wiring it
+    # in, the line reached only stderr, where no dashboard or log check looks.
+    from agent.store import load_json
+    from chat.insights import _LINE_RE
+
+    _common.setup_logger("store_task")
+    bad = tmp_path / "broken.json"
+    bad.write_text("{not json")
+    load_json(bad, {})
+
+    lines = (_common.LOGS_DIR / "store_task.log").read_text().splitlines()
+    matched = [m for m in map(_LINE_RE.match, lines) if m]
+    assert [m.group(2) for m in matched] == ["ERROR"]
+    assert "broken.json is unreadable" in matched[0].group(3)
+
+
 def test_notify_failure_pushes_high_priority_with_email_fallback(monkeypatch):
     calls = {}
 
