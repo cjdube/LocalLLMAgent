@@ -29,6 +29,7 @@ Usage:
     python -m tasks.starred_installed
 """
 
+import json
 import os
 import re
 import shlex
@@ -135,10 +136,23 @@ def main() -> int:
     logger = setup_logger("starred_installed")
     logger.info("Starting starred installed-version run")
     try:
-        source = load_json(SOURCE_PATH, {})
-        if not isinstance(source, dict):
-            logger.error("starred_installed.json is not a JSON object; nothing to resolve")
+        # Read directly, not with load_json: this file is hand-edited, so a typo
+        # must leave it where the user edits it (load_json would move it aside)
+        # and must not reach the write below, which would blank the whole cache.
+        problem = None
+        try:
+            source = json.loads(SOURCE_PATH.read_text())
+        except FileNotFoundError:
             source = {}
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            problem = f"starred_installed.json does not parse ({e})"
+        else:
+            if not isinstance(source, dict):
+                problem = "starred_installed.json is not a JSON object"
+        if problem:
+            logger.error(f"{problem}; cache left as it was")
+            notify_failure("starred_installed", problem, logger)
+            return 1
 
         # A failed check must not erase a version we already measured: the whole
         # cache is rewritten each run, so a run where the command is simply not

@@ -268,6 +268,22 @@ def test_main_prunes_entries_dropped_from_source(monkeypatch):
     assert store["a/keep"]["version"] == "v2.0"
 
 
+@pytest.mark.parametrize("text", ['{"a/cli": {"version": "v1"},}', '[]'])
+def test_main_leaves_cache_and_source_alone_on_a_bad_source(text, monkeypatch):
+    # The source is hand-edited, so a typo is likely. It must not blank the
+    # cache, and the file must stay where the user edits it.
+    good = {"a/cli": {"version": "2.5.0", "source": "cmd", "error": None}}
+    atomic_write_json(si.INSTALLED_PATH, good)
+    si.SOURCE_PATH.write_text(text)
+    pushed = []
+    monkeypatch.setattr(si, "notify_failure", lambda *a: pushed.append(a))
+
+    assert si.main() == 1
+    assert load_json(si.INSTALLED_PATH, {}) == good
+    assert si.SOURCE_PATH.read_text() == text
+    assert len(pushed) == 1
+
+
 def test_main_empty_when_no_source(monkeypatch):
     # No source file -> empty cache, clean exit (nothing tracked).
     assert si.main() == 0
