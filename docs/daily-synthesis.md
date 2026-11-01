@@ -83,6 +83,35 @@ Each of the three quiet endings logs its own line — no overlap, all candidates
 were repeats, nothing genuine — because silence is this task's usual outcome and
 a single shared message would make a broken morning read like a quiet one.
 
+## Acting on a nudge
+
+Each nudge line comes back from the model tagged `[N]`, the number of the
+candidate it is about (`tag_nudges`). Python strips the tag, numbers the push
+(`1. …`), and maps the number back to the candidate — the model never copies
+an id. The candidate's anchor kind then fixes the action, in Python, with no
+model decision (`agent/nudge_actions.py:action_for`):
+
+| Anchor | Button | What a tap does |
+| --- | --- | --- |
+| wiki page, project you're building, an echo | `N → wiki` | writes a fact-only note to the wiki queue (`LEARNINGS_DIR`) |
+| idea you parked | `N → ticket` | adds the same facts as a comment on that ClickUp item, found by title |
+| company you track | none | — |
+
+`render_candidates` prints a `button:` line under each candidate, and the
+prompt tells the model to end its question with that offer, or ask nothing
+when there is none — so the question on the phone matches the button under it.
+
+The rows go to `config/nudge_actions.json` (kept 7 days). Each button is an ntfy
+`http` action that POSTs to `/api/nudges/act` with a signed token that names one
+row and lives 7 days ([security-model.md](security-model.md)). The tap runs in
+the chat server, in Python, with no model call. The row is stamped `done` under
+the store lock, so a second tap does nothing; a failed action leaves the row open
+for a retry. Either way a short push says what happened.
+
+No `WREN_PUBLIC_URL` means no buttons; the nudge still pushes. A line with no
+valid tag gets no button and logs a WARNING with the counts. Any error while
+building the buttons is logged and the push goes out without them.
+
 ## Reading them back
 
 The push is a one-shot alert and the archive was, for its first three weeks, write-
@@ -174,6 +203,12 @@ So the archive lives in a sibling directory the ingest agent doesn't walk. It is
 still inside the vault (Obsidian browses it fine); it just isn't a source. A
 `SYNTHESIS_DIR` pointed back at `raw/` reintroduces the bug — hence the guard
 test `test_archive_goes_to_synthesis_dir_not_learnings_dir`.
+
+The **wiki** button does write to `raw/` — on purpose, and only on a tap. What
+it writes is a source, not a question: the note (`nudge_actions._note`) holds
+what he did (the signal lines, and the fetched text of the first page he
+visited) plus a `Relates to: [[page]]` line. It never holds the nudge's
+question, which is the text that caused the fabrication above.
 
 ## How a pair is scored, and the three noise filters
 

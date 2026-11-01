@@ -1053,3 +1053,52 @@ def test_yesterday_s_reading_reaches_a_parked_idea(stub_anchors, stub_projects,
     assert len(pairs) == 1
     assert pairs[0]["anchor"]["label"] == "Archive search"
     assert "columnar" in pairs[0]["overlap"]
+
+
+# --------------------------------------------------------------------------- #
+# nudge buttons — the [N] tag maps a nudge back to its candidate
+# --------------------------------------------------------------------------- #
+
+def test_render_candidates_says_what_each_button_does():
+    wiki = {"kind": "anchor", "overlap": ["duckdb"],
+            "signal": {"kind": "watched", "text": "DuckDB"},
+            "anchor": {"kind": "wiki page", "label": "duckdb"}}
+    company = {**wiki, "anchor": {"kind": "company you track", "label": "Acme"}}
+    out = ds.render_candidates([wiki, company])
+    assert "button: save the facts as a note for his wiki" in out
+    assert "button: none" in out
+
+
+def test_tag_nudges_maps_numbers_and_strips_the_tag(caplog):
+    pairs = [{"id": 1}, {"id": 2}]
+    logger = logging.getLogger("test_tag")
+    out = ds.tag_nudges(["[2] second", "[9] out of range", "no tag"], pairs, logger)
+    assert out == [("second", pairs[1]), ("out of range", None), ("no tag", None)]
+    assert "2 of 3 nudge(s) had no valid [N]" in caplog.text
+
+
+def test_tagged_nudge_gets_a_button_and_a_clean_archive(stub_sources, tmp_path, monkeypatch):
+    monkeypatch.setenv("FLASK_SECRET_KEY", "test-secret")
+    monkeypatch.setenv("WREN_PUBLIC_URL", "https://host")
+    monkeypatch.setattr(ds, "complete_text",
+                        lambda **k: "- [1] DuckDB fits your 'duckdb-analytics' note; save it to the wiki?")
+    monkeypatch.setattr(ds, "fetch_liked_videos",
+                        lambda *a, **k: {"videos": [{"title": "DuckDB deep dive", "channel": "X"}]})
+    monkeypatch.setattr(ds, "page_summaries", lambda: {"pages": [{"name": "duckdb-analytics", "summary": ""}]})
+
+    assert ds.main() == 0
+    push = stub_sources["pushes"][0]
+    assert push["message"].startswith("1. DuckDB fits")
+    assert [a["label"] for a in push["actions"]] == ["1 → wiki"]
+    body = next(tmp_path.glob("Daily-Synthesis-*.md")).read_text()
+    assert "- DuckDB fits" in body and "[1]" not in body
+
+
+def test_button_failure_still_pushes_the_nudge(stub_sources, monkeypatch):
+    monkeypatch.setattr(ds, "record", lambda *a: (_ for _ in ()).throw(OSError("disk")))
+    monkeypatch.setattr(ds, "fetch_liked_videos",
+                        lambda *a, **k: {"videos": [{"title": "DuckDB deep dive", "channel": "X"}]})
+    monkeypatch.setattr(ds, "page_summaries", lambda: {"pages": [{"name": "duckdb-analytics", "summary": ""}]})
+
+    assert ds.main() == 0
+    assert stub_sources["pushes"][0]["actions"] is None

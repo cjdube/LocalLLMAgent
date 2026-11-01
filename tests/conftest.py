@@ -78,6 +78,7 @@ never in config/.
 
 Every other JSON store under config/ gets that same backstop, for the same
 reason (see _isolate_remaining_config_stores): wren_memory.json, bg_jobs.json,
+nudge_actions.json,
 reminders.json, github_starred_state.json, and the WIKI_VAULT_PATH vault. All
 were per-test-redirected only — the pre-incident position opportunities.json
 was in. Adding a new store means adding it there in the same commit; the
@@ -175,6 +176,7 @@ from agent.tools import projects as _projects_tool
 from agent.tools import push_log as _push_log
 from agent.tools import reminders as _reminders
 from agent import usage_ledger as _usage_ledger
+from agent import nudge_actions as _nudge_actions
 from chat import insights as _insights
 from agent.tools import clickup as _clickup
 from chat import wikilint as _wikilint
@@ -375,6 +377,7 @@ def _isolate_remaining_config_stores(tmp_path, monkeypatch):
     # whatever a previous test wrote.
     monkeypatch.setattr(_memory, "_STORE_PATH", tmp_path / "wren_memory.json")
     monkeypatch.setattr(_background, "_STORE_PATH", tmp_path / "bg_jobs.json")
+    monkeypatch.setattr(_nudge_actions, "_STORE_PATH", tmp_path / "nudge_actions.json")
     monkeypatch.setattr(_reminders, "_STORE_PATH", tmp_path / "reminders.json")
     # Uploaded CSVs (agent/tools/imports.py) hold personal financial data —
     # both the file store and its index need the same backstop as everything

@@ -27,7 +27,7 @@ for style/script because the pages carry their logic in inline blocks; the
 `self` + `frame-ancestors 'none'` policy is the meaningful win, and tightening to
 nonces would mean moving that JS into `/static`.
 
-### The one endpoint without a session cookie
+### The endpoints without a session cookie
 
 `POST /api/bg/resolve` is exempt, because a background-task approval button on
 the phone calls it directly from the ntfy app. It's authenticated instead by an
@@ -39,6 +39,13 @@ state machine rather than a token store: `resolve_job` only acts on an
 `awaiting_approval` job, so a replay finds nothing to do. Every hit is logged.
 It's POST-only: a mutating GET invites prefetchers and leaves the token in more
 access logs than it needs to.
+
+`POST /api/nudges/act` (`chat/routes_nudges.py`) is exempt for the same reason:
+it backs the numbered buttons on a daily-synthesis nudge. Its token names one
+stored nudge and lives 7 days; single-use comes from the row's `done` stamp,
+checked and set under the store lock. The action is fixed in Python when the
+nudge is made — save fact-only notes to the wiki queue, or comment on one
+ClickUp item — so a leaked token can do only that one thing, once.
 
 ## Prompt injection
 

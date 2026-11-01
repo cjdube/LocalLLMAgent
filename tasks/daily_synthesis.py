@@ -48,6 +48,7 @@ from agent.tools.chrome_history import fetch_chrome_history
 from agent.tools.clickup import backlog_anchors
 from agent.tools.learnings_file import read_entry
 from agent.tools.notify import notify
+from agent.nudge_actions import DESCRIPTIONS, action_for, buttons, record
 from agent.tools.nudges import _synthesis_dir, list_nudges
 from agent.tools.opportunities import get_watchlist, list_opportunities
 from agent.tools.projects import load_registry
@@ -185,11 +186,14 @@ repetition is the point: it says what he is actually chewing on. Say so plainly,
 "Stripe's PM archetypes came at you twice yesterday — reading and video; worth a note?".
 
 Keep ONLY the genuine, non-obvious, actionable ones. For each, write ONE short line \
-that names both sides and why they connect — phrased as a nudge he can act on, e.g. \
-"You dug into DuckDB yesterday — it fits your 'local-analytics' note; want a summary?".
+that names both sides and why they connect — phrased as a nudge he can act on. A \
+candidate's "button:" line says what his one tap will do; end the nudge with a \
+question that asks exactly that, e.g. "You dug into DuckDB yesterday — it fits your \
+'local-analytics' note; save it to the wiki?". With no button, ask nothing.
 
 Output rules:
-- One nudge per line, each starting with "- ".
+- One nudge per line, each starting with "- " and then the candidate's number in \
+brackets, e.g. "- [2] ...".
 - At most {MAX_NUDGES} lines. Fewer is better. Quality over quantity.
 - If NONE of the candidates is a genuine, useful connection, output exactly: NONE
 - Output only the lines (or NONE) — no preamble, no headings, no explanation."""
@@ -292,7 +296,11 @@ def gather_signals(start, end, day, logger) -> list:
         for site in compact_sites(chrome.get("sites", [])):
             paths = " ".join(site.get("pages") or [])
             text = f"{site.get('title') or ''} ({site.get('domain') or ''}) {paths}".strip()
+            # The addresses a "save to wiki" tap fetches (agent/nudge_actions.py).
+            urls = [f"https://{site['domain']}{p}" for p in site.get("pages") or []
+                    if site.get("domain")]
             signals.append({"channel": "chrome", "kind": "browsed", "text": text,
+                            "urls": urls,
                             "tokens": _tokenize(f"{text} {site.get('domain') or ''}")})
     except Exception as e:
         logger.warning(f"chrome signals unavailable: {e}")
@@ -673,7 +681,31 @@ def render_candidates(pairs: list) -> str:
                 + (f" — {summary}" if summary else "") + "\n"
                 f"   shared terms: {', '.join(p['overlap'])}"
             )
+        action = action_for(p)
+        lines.append(f"   button: {DESCRIPTIONS[action] if action else 'none'}")
     return "\n".join(lines)
+
+
+_TAG_RE = re.compile(r"^\[(\d+)\]\s*")
+
+
+def tag_nudges(nudges: list, candidates: list, logger) -> list:
+    """Map each "[N] text" nudge back to candidate N, as (text, pair) with the
+    tag stripped. The model copies a small number, never an id (AGENTS.md); a
+    missing or out-of-range number keeps the nudge with no button, logged at
+    WARNING because it silently costs a button."""
+    tagged = []
+    for nudge in nudges:
+        m = _TAG_RE.match(nudge)
+        n = int(m.group(1)) if m else 0
+        text = nudge[m.end():].strip() if m else nudge
+        pair = candidates[n - 1] if 1 <= n <= len(candidates) else None
+        tagged.append((text, pair))
+    untagged = sum(1 for _, pair in tagged if pair is None)
+    if untagged:
+        logger.warning(f"{untagged} of {len(nudges)} nudge(s) had no valid [N] "
+                       f"candidate tag; pushed without a button")
+    return tagged
 
 
 def parse_nudges(text: str) -> list:
@@ -776,12 +808,23 @@ def main() -> int:
             logger.info("Daily synthesis run complete")
             return 0
 
-        message = "\n".join(f"• {n}" for n in nudges)
+        tagged = tag_nudges(nudges, candidates, logger)
+        nudges = [text for text, _ in tagged]
+        # Numbered, because each button is labelled with its nudge's number.
+        message = "\n".join(f"{i}. {n}" for i, n in enumerate(nudges, 1))
+        try:
+            actions = buttons(record(day, tagged))
+        except Exception as e:
+            # A button is a convenience; it must never cost the nudge itself.
+            logger.warning(f"nudge buttons unavailable, pushing without them: {e}")
+            actions = None
         # One-shot alert (nothing retries it), so fall back to email if the push
         # fails — same "don't lose it" choice as notify_failure. The push is the
-        # live channel; the vault write below is the durable archive.
+        # live channel; the vault write below is the durable archive. The email
+        # carries no buttons; the stored rows still expire on their own.
         result = notify(message=message, title="Wren: connections worth a look",
-                        priority="default", email_fallback=True)
+                        priority="default", email_fallback=True,
+                        actions=actions)
         if result.get("error"):
             logger.warning(f"synthesis push did not send: {result['error']}")
         logger.info(f"Pushed {len(nudges)} nudge(s)")

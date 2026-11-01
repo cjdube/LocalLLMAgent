@@ -65,6 +65,7 @@ from chat.routes_opportunities import opportunities_bp
 from chat.routes_settings import settings_bp
 from chat.routes_starred import starred_bp
 from chat.routes_wiki import wiki_bp
+from chat.routes_nudges import nudges_bp
 from tasks._common import setup_logger
 from tasks.morning_brief import brief_dispatch
 from tasks.opportunity_digest import digest_dispatch
@@ -232,7 +233,8 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 # lint/graph API live in their own blueprint modules (see chat/routes_dashboard.py,
 # chat/routes_opportunities.py, chat/routes_games.py, chat/routes_imports.py,
 # chat/routes_logs.py, chat/routes_starred.py, chat/routes_wiki.py,
-# chat/routes_settings.py); the conversation engine and auth stay here.
+# chat/routes_settings.py, chat/routes_nudges.py); the conversation engine and
+# auth stay here.
 app.register_blueprint(dashboard_bp)
 app.register_blueprint(opportunities_bp)
 app.register_blueprint(games_bp)
@@ -242,6 +244,7 @@ app.register_blueprint(usage_bp)
 app.register_blueprint(settings_bp)
 app.register_blueprint(starred_bp)
 app.register_blueprint(wiki_bp)
+app.register_blueprint(nudges_bp)
 
 @app.after_request
 def _security_headers(resp):

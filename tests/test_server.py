@@ -113,6 +113,7 @@ _AUTH_EXEMPT = {
     "login",       # the auth endpoint itself
     "static",      # static assets, no user data
     "bg_resolve",  # token-authenticated instead; see docs/security-model.md
+    "nudges.nudge_act",  # same: a synthesis nudge's ntfy button
 }
 # Page routes render the login form (200) rather than a JSON 401 — a browser
 # navigation showing raw JSON is worse than showing the form.
