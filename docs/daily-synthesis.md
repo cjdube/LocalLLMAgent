@@ -206,9 +206,10 @@ test `test_archive_goes_to_synthesis_dir_not_learnings_dir`.
 
 The **wiki** button does write to `raw/` — on purpose, and only on a tap. What
 it writes is a source, not a question: the note (`nudge_actions._note`) holds
-what he did (the signal lines, and the fetched text of the first page he
-visited) plus a `Relates to: [[page]]` line. It never holds the nudge's
-question, which is the text that caused the fabrication above.
+what he did (the signal lines, and the text of the most visited page, fetched
+through Firecrawl, which receives that page's address) plus a
+`Relates to: [[page]]` line. It never holds the nudge's question, which is the
+text that caused the fabrication above.
 
 ## How a pair is scored, and the three noise filters
 

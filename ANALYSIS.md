@@ -6,7 +6,7 @@ LocalLLMAgent is a single-user, local-first personal AI system for a Mac mini. I
 
 ## 2. Overall architecture
 
-The codebase is organized around two agents sharing a small substrate:
+The codebase is one agent, Wren, on a small substrate. ScribeJay, which used to share that substrate, is now a separate repo (last item below):
 
 - **Wren, the interactive/read-and-act agent.** `chat/server.py` owns the Flask application, authentication, in-memory conversations, context compaction, cancellation, frontier escalation, and confirmation continuations. The page at `chat/views/index.html` supplies the chat DOM, while `chat/static/chat-dock.js` owns the browser interaction and rendering. Feature-specific HTTP APIs live in `chat/routes_*.py` blueprints; read-only dashboard aggregation lives in `chat/insights.py`.
 - **The model seam.** `agent/loop.py` defines the canonical message and tool-call protocol. `advance()` is the resumable tool-calling state machine used by chat and background work; `resolve()` appends an approved or declined result for a call on which `advance()` paused; `complete_text()` is the one-shot, tool-free path used when deterministic Python owns the surrounding document. `_llm_chat()` selects a backend, `_ollama_chat()` implements the local streaming transport, and `agent/backends/gemini.py` translates the same canonical shapes to and from Gemini.

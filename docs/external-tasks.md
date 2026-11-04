@@ -164,7 +164,7 @@ ObsidianWikiAgent already pushes its own ntfy alert when a run fails or blows it
 budget, so this isn't about crash notification. What it adds is **absence**:
 `log_inspector`'s Signal B goes through `discover_tasks()`, so a federated job
 that launchd never fired — or that started and never finished — now lands in the
-7 AM rollup like any Wren task. Signal A (the line scan) reads each external
+8 AM rollup like any Wren task. Signal A (the line scan) reads each external
 root's `logs/` too, skipping `*.launchd.log` there for the same
 double-count reason it skips Wren's.
 
@@ -184,8 +184,9 @@ Four signals:
 
 - **Pages** — concept pages in `wiki/`, excluding `index.md` and `log.md`.
 - **Files waiting** — raw sources whose basename isn't in `wiki/.ingested.json`,
-  oldest first, and the card warns at two days. One file waiting at 8am is the
-  normal state before the 9am ingest; age is what separates that from stuck.
+  oldest first, and the card warns at two days. A file written after the 5am
+  ingest normally waits for the next morning's run; age is what separates that
+  from stuck.
 - **Last backup** — the vault's last commit date and how many commits the remote
   doesn't have. Read against the local remote-tracking ref, never a fetch, which
   is also what makes it the right signal: the snapshot job's push is what

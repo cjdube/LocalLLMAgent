@@ -54,7 +54,7 @@ every layer below.
 ### Why the environment still outranks the page
 
 This looks backwards for a settings page until you count what depends on it:
-251 `monkeypatch.setenv` calls across `tests/`, and every `WREN_X=...
+hundreds of `monkeypatch.setenv` calls across `tests/`, and every `WREN_X=...
 .venv/bin/python -m ...` one-off on the command line. A file that outranked the
 environment would break both, silently.
 

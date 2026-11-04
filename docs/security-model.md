@@ -45,7 +45,9 @@ it backs the numbered buttons on a daily-synthesis nudge. Its token names one
 stored nudge and lives 7 days; single-use comes from the row's `done` stamp,
 checked and set under the store lock. The action is fixed in Python when the
 nudge is made — save fact-only notes to the wiki queue, or comment on one
-ClickUp item — so a leaked token can do only that one thing, once.
+ClickUp item — so a leaked token can do only that one thing, once. Both actions
+can send data off this machine; see
+[Cloud backends widen the boundary](#cloud-backends-widen-the-boundary).
 
 ## Prompt injection
 
@@ -190,6 +192,11 @@ conversation history to the provider**. `bg_worker` is the sharpest case, since
 it ingests untrusted web content *and* runs unattended — pointing it at a cloud
 backend is the riskiest single switch. See [llm-backend.md](llm-backend.md) and
 [frontier-escalation.md](frontier-escalation.md).
+
+Two nudge buttons also send data out, only on a tap. A **wiki** tap on a browsing
+nudge sends that page's address (host and path, no query string) from Chrome
+history to Firecrawl, which fetches the text for the note. A **ticket** tap posts
+the nudge's facts to ClickUp as a comment.
 
 ## The build worker is the widest capability
 
