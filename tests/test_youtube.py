@@ -1,19 +1,14 @@
-"""Tests for agent.tools.youtube and the weekly-learnings video compaction.
+"""Tests for agent.tools.youtube.
 
 The live YouTube API is faked with a small stand-in service (matching the
 project's precedent of not hitting live Google APIs in tests), which lets us
 exercise the real logic worth testing: the [start, end] date window, the
 stop-paginating-once-past-the-window shortcut, and graceful error degradation.
-The pure helpers (_video_from_item, compact_videos) are unit-tested directly.
+The pure helper _video_from_item is unit-tested directly.
 """
 
 import agent.tools.youtube as youtube
 from agent.tools.youtube import _video_from_item, fetch_liked_videos
-from agent.activity_log import (
-    MAX_YOUTUBE_DESC_CHARS,
-    MAX_YOUTUBE_VIDEOS,
-    compact_videos,
-)
 
 
 # --------------------------------------------------------------------------- #
@@ -164,22 +159,3 @@ def test_fetch_error_degrades_to_empty_list(monkeypatch):
 
     assert result["videos"] == []
     assert "quota exceeded" in result["error"]
-
-
-# --------------------------------------------------------------------------- #
-# compact_videos (agent.activity_log)
-# --------------------------------------------------------------------------- #
-
-def test_compact_videos_caps_count():
-    videos = [{"title": f"v{i}", "channel": "c", "description": "d", "url": "u"} for i in range(MAX_YOUTUBE_VIDEOS + 5)]
-    assert len(compact_videos(videos)) == MAX_YOUTUBE_VIDEOS
-
-
-def test_compact_videos_truncates_description():
-    videos = [{"title": "t", "channel": "c", "description": "x" * (MAX_YOUTUBE_DESC_CHARS + 100), "url": "u"}]
-    assert len(compact_videos(videos)[0]["description"]) == MAX_YOUTUBE_DESC_CHARS
-
-
-def test_compact_videos_keeps_only_expected_fields():
-    videos = [{"title": "t", "channel": "c", "description": "d", "url": "u", "video_id": "x", "liked_at": "z"}]
-    assert set(compact_videos(videos)[0]) == {"title", "channel", "description", "url"}

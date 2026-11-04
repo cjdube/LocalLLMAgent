@@ -50,8 +50,6 @@ def prior_day(now: datetime | None = None) -> tuple[datetime, datetime, "datetim
 # to ollama means lowering them again — the failure is silent (a section just
 # vanishes from the draft), so check the output if you switch.
 MAX_CHROME_SITES = 40
-MAX_YOUTUBE_VIDEOS = 25
-MAX_YOUTUBE_DESC_CHARS = 500
 
 # Page paths kept per site. The paths are what let the review say more than the
 # tab title did — "/gemini-api/docs/models" plus "/gemini-api/docs/pricing" is a
@@ -116,20 +114,6 @@ def compact_sites(sites: list) -> list:
             entry["pages"] = paths
         out.append(entry)
     return out
-
-
-def compact_videos(videos: list) -> list:
-    """Keep only the fields the model needs from each liked video and truncate
-    the description, bounding the prompt the same way compact_sites does."""
-    return [
-        {
-            "title": v.get("title"),
-            "channel": v.get("channel"),
-            "description": (v.get("description") or "")[:MAX_YOUTUBE_DESC_CHARS],
-            "url": v.get("url"),
-        }
-        for v in videos[:MAX_YOUTUBE_VIDEOS]
-    ]
 
 
 def persist_or_email(content: str, prefix: str, day, subject: str,

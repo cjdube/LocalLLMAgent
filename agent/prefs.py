@@ -66,14 +66,6 @@ def calendar_categories() -> list:
             if isinstance(c, dict) and c.get("name") and c.get("color_id")]
 
 
-def category_color_by_role(role: str, default: str) -> str:
-    """colorId of the first category tagged with `role`, decoupling operational
-    lookups (fitness logging, colorizer fallback) from the personal category
-    names, which a cloner is free to rename."""
-    return next((c["color_id"] for c in calendar_categories()
-                 if c.get("role") == role), default)
-
-
 def brief_calendar_hours(default: int = 48) -> int:
     """How far ahead the morning brief's calendar section looks. A missing or
     non-positive value falls back to `default` — a bad edit should shorten

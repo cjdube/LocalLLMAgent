@@ -21,7 +21,7 @@ import json
 import platform
 import sqlite3
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -46,11 +46,6 @@ NOISE_DOMAINS = {
     "amazon.com", "www.amazon.com",
     "localhost", "127.0.0.1",
 }
-
-def _chrome_ts_to_datetime(chrome_ts: int) -> datetime:
-    unix_us = chrome_ts - 11644473600 * 1_000_000
-    return datetime.fromtimestamp(unix_us / 1_000_000, tz=timezone.utc)
-
 
 # Cap on a single page path in the `pages` list; long paths are usually ids or
 # slugs whose tail carries no extra signal.

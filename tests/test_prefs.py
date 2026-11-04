@@ -224,11 +224,5 @@ def test_helpers_degrade_on_empty_prefs(monkeypatch):
     assert prefs.section("calendar") == {}
     assert prefs.user_name() == "the user"
     assert prefs.calendar_categories() == []
-    assert prefs.category_color_by_role("fallback", "11") == "11"
     assert prefs.job_search() == {}
     assert prefs.project_instruction_files() == ("AGENTS.md",)
-
-
-def test_category_color_by_role():
-    assert prefs.category_color_by_role("fitness", "0") == "4"
-    assert prefs.category_color_by_role("no-such-role", "0") == "0"
