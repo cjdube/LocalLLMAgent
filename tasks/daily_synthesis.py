@@ -293,6 +293,8 @@ def gather_signals(start, end, day, logger) -> list:
         chrome = fetch_chrome_history(start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"),
                                       pages_per_domain=MAX_PAGES_PER_SITE,
                                       max_sites=None)  # summarizes the whole day; no context window to protect
+        if chrome.get("error"):  # returned, not raised, so the except below never sees it
+            logger.warning(f"chrome signals unavailable: {chrome['error']}")
         for site in compact_sites(chrome.get("sites", [])):
             paths = " ".join(site.get("pages") or [])
             text = f"{site.get('title') or ''} ({site.get('domain') or ''}) {paths}".strip()
@@ -307,6 +309,8 @@ def gather_signals(start, end, day, logger) -> list:
 
     try:
         yt = fetch_liked_videos(start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
+        if yt.get("error"):
+            logger.warning(f"youtube signals unavailable: {yt['error']}")
         for video in yt.get("videos", []):
             title = video.get("title") or ""
             signals.append({"channel": "youtube", "kind": "watched",

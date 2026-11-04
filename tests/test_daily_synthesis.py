@@ -8,7 +8,7 @@ push. TIMEZONE is pinned so the prior-day window is deterministic, not the
 host's zone (AGENTS.md: UTC→local day windows)."""
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -503,6 +503,39 @@ def test_drop_repeats_matches_an_echo_on_its_shared_terms():
 def test_drop_repeats_with_no_history_keeps_everything():
     pair = _anchor_pair(["duckdb"], "duckdb-analytics")
     assert ds.drop_repeats([pair], []) == [pair]
+
+
+# --------------------------------------------------------------------------- #
+# gather_signals: a source that fails by returning an error
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("fetcher, name", [("fetch_chrome_history", "chrome"),
+                                           ("fetch_liked_videos", "youtube")])
+def test_a_source_returning_an_error_warns_and_the_rest_survive(
+        stub_sources, monkeypatch, caplog, fetcher, name):
+    """Both fetchers RETURN {"error": ...}, so the surrounding except never runs.
+    A brew upgrade that dropped Full Disk Access cost 18 days of Chrome signals
+    this way, with no line in the log."""
+    monkeypatch.setattr(ds, fetcher, lambda *a, **k: {"error": "unable to open database file"})
+    chat = _sig("ai-chat", "Learned about DuckDB", {"duckdb"})
+    monkeypatch.setattr(ds, "_ai_chat_signals", lambda day, logger: [chat])
+    day = datetime(2026, 11, 3)
+
+    with caplog.at_level(logging.WARNING):
+        signals = ds.gather_signals(day, day, day, logging.getLogger("test_gather"))
+
+    assert f"{name} signals unavailable: unable to open database file" in caplog.text
+    assert signals == [chat]
+
+
+def test_healthy_sources_do_not_warn(stub_sources, monkeypatch, caplog):
+    monkeypatch.setattr(ds, "_ai_chat_signals", lambda day, logger: [])
+    day = datetime(2026, 11, 3)
+
+    with caplog.at_level(logging.WARNING):
+        assert ds.gather_signals(day, day, day, logging.getLogger("test_gather")) == []
+
+    assert "signals unavailable" not in caplog.text
 
 
 # --------------------------------------------------------------------------- #
