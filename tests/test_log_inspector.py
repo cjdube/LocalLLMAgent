@@ -110,6 +110,9 @@ def test_warm_model_failure_is_critical_despite_warning_level():
 @pytest.mark.parametrize("msg", [
     "login throttled for 127.0.0.1, retry after 29s",
     "bg_resolve: rejected invalid or expired token",
+    "nudge_act: rejected invalid or expired token",
+    "2 project(s) have no README, configured project instructions (AGENTS.md, CLAUDE.md), "
+    "or docs/ and so get no anchor: PodiumBoardSite, reviews",
 ])
 def test_noise_is_never_reported(msg):
     _write_log("wren.log", _line(NOW - timedelta(hours=1), "WARNING", msg))

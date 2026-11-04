@@ -82,7 +82,8 @@ otherwise invisible — the project still appears in the registry and simply sto
 matching anything:
 
 - a project with no README, configured instruction file, or `docs/` is named in a WARNING
-  (on the real machine: `AgenticOS`, `AIChatScraper`, `my-agent-hq`,
+  in `logs/project_scan.log`, which `log_inspector` treats as noise because it
+  repeats daily (on the real machine: `AgenticOS`, `AIChatScraper`, `my-agent-hq`,
   `SortOfCardGame` — the fix is a README in that repo, not code here). The one
   exception where code *was* the fix: `AgenticDevelopment` had `AGENTS.md` and
   nothing else, so the read list grew that spelling rather than the repo growing

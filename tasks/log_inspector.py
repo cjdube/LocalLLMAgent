@@ -79,6 +79,10 @@ NOISE = (
     # trim means one outgrew its budget — rare, and exactly worth a push.
     "login throttled",                          # the rate limiter working as designed
     "bg_resolve: rejected invalid or expired",  # expected: a stale ntfy button was tapped
+    "nudge_act: rejected invalid or expired",   # the same, on a nudge's button
+    # Repeats every day until a README lands in that repo, and is not a failure.
+    # It pushed on 39 of 69 mornings. The line stays in logs/project_scan.log.
+    "have no README, configured project instructions",
     # "push failed, will retry" was here, on the theory that reminder_sweep's
     # retry makes it self-healing. The July 2026 outage killed that theory: over
     # four days it was neither transient nor self-healing, and suppressing it

@@ -119,9 +119,10 @@ filter; an unrecognised warning still reports, verbatim.
 
 | Pattern | Why it's noise |
 |---|---|
-| `result trimmed:` | The tool-result cap working as designed. |
 | `login throttled` | The rate limiter working as designed. |
 | `bg_resolve: rejected invalid or expired` | Expected — a stale ntfy button was tapped. |
+| `nudge_act: rejected invalid or expired` | The same, on a nudge's button. |
+| `have no README, configured project instructions` | Repeats daily until that repo gets a README, and is not a failure. It stays in `logs/project_scan.log`. |
 
 `push failed, will retry` **used to be on this list** ("`reminder_sweep` retries
 on its own — transient and self-healing"). The July 2026 outage disproved that:
