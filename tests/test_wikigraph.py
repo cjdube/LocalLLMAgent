@@ -76,6 +76,17 @@ def test_link_targets_ignores_a_code_span():
     assert wg.link_targets(text) == ["obsidian-wiki-agent"]
 
 
+def test_link_targets_treats_a_whole_link_in_a_code_span_as_text():
+    """Obsidian does not count these, and neither does the sibling repo's
+    linked_page_names — /wiki and /wiki/lint must agree about the same file."""
+    assert wg.link_targets("reads `[[foo]]` here") == []
+    assert wg.link_targets("reads `see [[foo]] there` and [[bar]]") == ["bar"]
+    assert wg.link_targets("reads ``a ` [[foo]]`` and [[bar]]") == ["bar"]
+    # A lone backtick opens no span, and a span ends with its line.
+    assert wg.link_targets("a lone ` then [[foo]]") == ["foo"]
+    assert wg.link_targets("a lone ` here\nand [[foo]] ` there") == ["foo"]
+
+
 def test_link_targets_does_not_run_past_a_newline():
     assert wg.link_targets("[[unclosed\nand [[real]] here") == ["real"]
 

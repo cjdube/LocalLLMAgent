@@ -45,8 +45,8 @@ from agent.tools.wiki import (
 # panel shows the whole page anyway (/api/wiki/page/<name>).
 MAX_SUMMARY_CHARS = 140
 
-# Backticks and newlines are excluded from a link body, matching _LINK_RE in
-# ObsidianWikiAgent's agent/wiki_tools.py. Not defensive tidiness — the naive
+# Backticks and newlines are excluded from a link body, matching LINK_RE in
+# ObsidianWikiAgent's agent/wikilinks.py. Not defensive tidiness — the naive
 # `\[\[([^\]]+)\]\]` finds a real false link in this very vault:
 # ai-chat-learnings-2026-08-02.md discusses wiki-link syntax, so a code span's
 # `[[` opens a match that runs through the prose and closes on the ]] of the
@@ -54,7 +54,13 @@ MAX_SUMMARY_CHARS = 140
 # as dangling AND the real link is lost, which also makes its target look less
 # connected than it is. Excluding backticks stops a code span from opening a
 # match; excluding newlines stops one unclosed [[ eating the rest of the file.
-_LINK_RE = re.compile(r"\[\[([^\]\n`]+)\]\]")
+#
+# The first branch matches a whole code span so a link inside it is never seen:
+# Obsidian treats `[[foo]]` as text. Group 1 is the backticks, group 2 a link's
+# body. Same pattern as _SPAN_OR_LINK_RE in the sibling repo, and the same limits:
+# shortcut: a span must close on its own line and fenced blocks are not skipped;
+# upgrade together with the sibling if Obsidian's link list disagrees again.
+_LINK_RE = re.compile(r"(?<!`)(`+)(?!`)[^\n]*?(?<!`)\1(?!`)|\[\[([^\]\n`]+)\]\]")
 _TITLE_RE = re.compile(r"^# (.+?)\s*$", re.MULTILINE)
 _UPDATED_RE = re.compile(r"^\*\*Last updated\*\*:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
 
@@ -83,7 +89,7 @@ def link_targets(content: str) -> list[str]:
     subprocess boundary, not a dependency (see chat/wikilint.py).
     """
     names = []
-    for raw in _LINK_RE.findall(content):
+    for _, raw in _LINK_RE.findall(content):
         target = raw.split("|", 1)[0].split("#", 1)[0].strip()
         if target.endswith(".md"):
             target = target[:-len(".md")]

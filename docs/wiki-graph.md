@@ -60,6 +60,10 @@ genuine link after it. The invented target is dropped as dangling **and** the
 real link is lost. The sibling repo hit this first and fixed it the same way; the
 two must agree, or `/wiki` and `/wiki/lint` disagree about the same file.
 
+A whole link inside a code span, like `` `[[foo]]` ``, is text and not a link. The
+regex matches the span first so that nothing inside it counts, which is how
+Obsidian treats it. Its own link list found the one page where both repos differed.
+
 ## The layout
 
 Canvas, not SVG: 388 nodes want pan and zoom on a phone, and 388 `<g>` elements
