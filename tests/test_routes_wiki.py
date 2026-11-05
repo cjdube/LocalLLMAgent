@@ -17,7 +17,8 @@ import pytest
 
 from chat import routes_wiki as rw
 from chat import server as srv
-from chat import wikilint
+from chat import wikilint, wikireview
+from agent.store import atomic_write_json
 
 
 FINDINGS = {"vault": "/v", "pages": 3, "findings": 1, "fixes": [],
@@ -102,6 +103,62 @@ def test_fix_is_logged(auth_client, monkeypatch, caplog):
 def test_fix_is_not_a_get(auth_client, monkeypatch):
     _stub_lint(monkeypatch, FINDINGS)
     assert auth_client.get("/api/wiki/lint/fix").status_code == 405
+
+
+# --------------------------------------------------------------------------- #
+# /wiki/review
+# --------------------------------------------------------------------------- #
+
+def _review_store(vault):
+    (vault / "alpha.md").write_text("# Alpha\n", encoding="utf-8")
+    atomic_write_json(wikireview._STORE_PATH, {
+        "groups": [{"id": "g", "family": "F", "title": "T", "line": "L", "pages": ["alpha"]}],
+        "marks": {}, "sorted_at": "2026-01-03",
+    })
+
+
+def test_the_lint_page_links_to_the_review_page(auth_client):
+    # The only way in: the review has no menu item, so losing this link strands it.
+    assert 'href="/wiki/review"' in auth_client.get("/wiki/lint").get_data(as_text=True)
+
+
+def test_review_returns_groups_pages_marks_and_date(auth_client, vault):
+    _review_store(vault)
+    body = auth_client.get("/api/wiki/review").get_json()
+    assert set(body) == {"groups", "pages", "marks", "sorted_at"}
+    assert body["groups"][0]["pages"] == ["alpha"]
+    assert "alpha" in body["pages"]
+
+
+def test_review_missing_vault_is_a_404_with_an_error(auth_client, tmp_path, monkeypatch):
+    monkeypatch.setenv("WIKI_VAULT_PATH", str(tmp_path / "nowhere"))
+    resp = auth_client.get("/api/wiki/review")
+    assert resp.status_code == 404
+    assert "error" in resp.get_json()
+
+
+def test_review_mark_survives_a_fresh_read(auth_client, vault):
+    _review_store(vault)
+    resp = auth_client.put("/api/wiki/review/marks/g",
+                           json={"verdict": "cut", "pages": {"alpha": "keep"}})
+    assert resp.status_code == 200
+    assert auth_client.get("/api/wiki/review").get_json()["marks"]["g"] == {
+        "verdict": "cut", "pages": {"alpha": "keep"}}
+
+
+@pytest.mark.parametrize("group, body, status", [
+    ("g", {"verdict": "maybe", "pages": {}}, 400),
+    ("g", {"verdict": "cut", "pages": {"alpha": "unsure"}}, 400),
+    ("g", ["not", "an", "object"], 400),
+    ("nope", {"verdict": "cut", "pages": {}}, 404),
+    ("g", {"verdict": "cut", "pages": {"no-such-page": "cut"}}, 404),
+])
+def test_review_refuses_bad_marks(auth_client, vault, group, body, status):
+    _review_store(vault)
+    resp = auth_client.put(f"/api/wiki/review/marks/{group}", json=body)
+    assert resp.status_code == status
+    assert "error" in resp.get_json()
+    assert auth_client.get("/api/wiki/review").get_json()["marks"] == {}
 
 
 # --------------------------------------------------------------------------- #

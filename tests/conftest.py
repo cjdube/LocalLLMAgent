@@ -180,6 +180,7 @@ from agent import nudge_actions as _nudge_actions
 from chat import insights as _insights
 from agent.tools import clickup as _clickup
 from chat import wikilint as _wikilint
+from chat import wikireview as _wikireview
 from evals import run_eval as _run_eval
 from tasks import _common
 from tasks import build_queue as _build_queue
@@ -379,6 +380,7 @@ def _isolate_remaining_config_stores(tmp_path, monkeypatch):
     monkeypatch.setattr(_background, "_STORE_PATH", tmp_path / "bg_jobs.json")
     monkeypatch.setattr(_nudge_actions, "_STORE_PATH", tmp_path / "nudge_actions.json")
     monkeypatch.setattr(_reminders, "_STORE_PATH", tmp_path / "reminders.json")
+    monkeypatch.setattr(_wikireview, "_STORE_PATH", tmp_path / "wiki_review.json")
     # Uploaded CSVs (agent/tools/imports.py) hold personal financial data —
     # both the file store and its index need the same backstop as everything
     # else here, so a test never writes a fixture upload over a real one.

@@ -22,6 +22,7 @@ config/imports/
 config/push_log.json
 config/bg_jobs.json
 config/nudge_actions.json
+config/wiki_review.json
 config/opportunities.json
 config/opportunities_state.json
 config/starred_blurbs.json

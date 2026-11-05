@@ -36,11 +36,11 @@
     flex: 1; min-width: 180px; padding: 8px 11px; font-size: 13px;
     border: 1px solid #e5e7eb; border-radius: 9px; background: #fff; color: #1f2328;
   }
-  .toolbar button {
-    padding: 8px 13px; font-size: 13px; font-weight: 600; cursor: pointer;
+  .toolbar button, .toolbar a {
+    padding: 8px 13px; font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none;
     border: 1px solid #e5e7eb; border-radius: 9px; background: #fff; color: #374151;
   }
-  .toolbar button:hover { background: #fafafa; }
+  .toolbar button:hover, .toolbar a:hover { background: #fafafa; }
   .toolbar button#lintFix { border-color: #fde68a; background: #fffbeb; color: #92400e; }
   .toolbar button:disabled { opacity: 0.5; cursor: default; }
 
@@ -116,6 +116,7 @@
       <input id="lintFilter" type="search" placeholder="Filter findings…" autocomplete="off">
       <button id="lintRecheck" type="button">Re-check</button>
       <button id="lintFix" type="button" hidden>Apply safe fixes</button>
+      <a href="/wiki/review">Review vault</a>
     </div>
     <div id="lintSummary">Checking…</div>
     <div id="lintFixLog"></div>

@@ -1,11 +1,12 @@
-"""The /wiki JSON API — lint findings and single-page reads.
+"""The /wiki JSON API — lint findings, single-page reads and the vault review.
 
 The Flask edge only. Running the sibling repo's lint lives in chat/wikilint.py,
-and reading the vault lives in agent/tools/wiki.py; this module does auth,
-shapes, and status codes.
+reading the vault lives in agent/tools/wiki.py, and the review's data lives in
+chat/wikireview.py; this module does auth, shapes, and status codes.
 
-The lint's `fix` endpoint is the one write path here, and it is a POST for that
-reason. It cannot take a target: it runs the sibling's apply_safe_fixes, whose
+The lint's `fix` endpoint is the one path here that writes to the vault, and it
+is a POST for that reason. (The review's PUT writes only its own store under
+config/.) It cannot take a target: it runs the sibling's apply_safe_fixes, whose
 whole contract is that it touches only the mechanical subset (self-links, dead
 index entries) and leaves every judgment call alone. Nothing the caller sends
 widens that.
@@ -19,14 +20,14 @@ pages are served from there with the other views, as chat/routes_games.py does.
 
 import logging
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 
 from agent.tools.wiki import _require_vault, _safe_child
 from chat.auth import _authenticated
 # The module, not the function: tests/conftest.py blocks the lint subprocess by
 # replacing wikilint.run_lint, and a `from ... import run_lint` here would bind
 # the real one at import time and walk straight past that guard.
-from chat import wikigraph, wikilint
+from chat import wikigraph, wikilint, wikireview
 
 logger = logging.getLogger("wren")
 
@@ -72,6 +73,32 @@ def api_wiki_graph():
     if not _authenticated():
         return jsonify({"error": "not authenticated"}), 401
     return jsonify(wikigraph.build_graph())
+
+
+@wiki_bp.route("/api/wiki/review", methods=["GET"])
+def api_wiki_review():
+    """Every page placed in one group, with the saved marks, for /wiki/review."""
+    if not _authenticated():
+        return jsonify({"error": "not authenticated"}), 401
+    result = wikireview.review()
+    return jsonify(result), 404 if "error" in result else 200
+
+
+@wiki_bp.route("/api/wiki/review/marks/<group_id>", methods=["PUT"])
+def api_wiki_review_marks(group_id):
+    """Save one group's marks. Writes config/wiki_review.json, never the vault."""
+    if not _authenticated():
+        return jsonify({"error": "not authenticated"}), 401
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"error": "expected a JSON object"}), 400
+    try:
+        wikireview.set_mark(group_id, body.get("verdict"), body.get("pages", {}))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except LookupError as e:
+        return jsonify({"error": str(e)}), 404
+    return jsonify({"ok": True})
 
 
 @wiki_bp.route("/api/wiki/page/<name>", methods=["GET"])

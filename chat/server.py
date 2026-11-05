@@ -1243,6 +1243,7 @@ VIEW_PAGES = {
     "/activity": "activity.html",
     "/wiki": "wiki.html",
     "/wiki/lint": "wiki-lint.html",
+    "/wiki/review": "wiki-review.html",
     "/games": "games.html",
     "/settings": "settings.html",
 }

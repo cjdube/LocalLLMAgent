@@ -378,13 +378,14 @@ chat/
   routes_starred.py        # starred-repo API, live list + cached fallback (blueprint)
   routes_games.py          # games API, hosted bundles, game-service proxy (blueprint)
   routes_logs.py           # log-viewer JSON API (blueprint)
-  routes_wiki.py           # wiki graph and lint API (blueprint)
+  routes_wiki.py           # wiki graph, lint and review API (blueprint)
   routes_usage.py          # model-usage ledger API (blueprint)
   insights.py              # no-Flask data layer: plists, logs, capabilities, /map
   logview.py               # no-Flask log reader behind routes_logs.py
   usage.py                 # no-Flask reader for logs/usage.jsonl behind routes_usage.py
   wikigraph.py             # no-Flask link graph over the wiki vault
   wikilint.py              # runs the sibling ObsidianWikiAgent checkout as a subprocess
+  wikireview.py            # no-Flask vault review: places pages in groups, saves marks
   views/index.html         # single-page chat UI (vanilla JS, no build step)
   static/chat-dock.js      # browser-side composer, rendering and link handling
 ```
@@ -853,6 +854,20 @@ Backed by `GET /api/wiki/lint`, `POST /api/wiki/lint/fix` and
 The multi-minute model pass is deliberately not offered here.
 See [docs/wiki-lint.md](docs/wiki-lint.md).
 
+### Vault review
+
+**Review vault** in the `/wiki/lint` toolbar opens `/wiki/review` (same auth as
+the dashboard), the only way in: it has no menu item. The page shows every vault
+page sorted into plain-language groups. Mark a group Keep, Not sure or Don't
+care, or tick single pages to cut. Marks save as you go, and **Copy cut list**
+copies the page names. **It never writes to the vault.** A new page shows in
+Unsorted, because nothing sorts new pages yet.
+
+Backed by `GET /api/wiki/review` and `PUT /api/wiki/review/marks/<group_id>` in
+`chat/routes_wiki.py`, over `chat/wikireview.py` and the gitignored
+`config/wiki_review.json`.
+See [docs/wiki-review.md](docs/wiki-review.md).
+
 ### System map
 
 `http://127.0.0.1:8420/map` is an explorable radial visualization of the whole
@@ -1161,8 +1176,8 @@ scripts. `chat/static/chat-dock.js` is the chat page's dock,
 `chat/static/run-chart.js` the dashboard's duration charts,
 `chat/static/log-view.js` the `/logs` viewer's renderer (see
 [docs/logs.md](docs/logs.md)), `chat/static/usage-chart.js` the `/activity`
-cost charts, and `chat/static/wiki-graph.js` and `chat/static/wiki-lint.js` the
-two wiki views.
+cost charts, and `chat/static/wiki-graph.js`, `chat/static/wiki-lint.js` and
+`chat/static/wiki-review.js` the three wiki views.
 `chat/static/nav.js` renders the top-nav menu on
 every view from one canonical list, with `chat/static/nav.css` owning its look
 and mobile-wrap behavior — so the menu stays consistent instead of drifting per
