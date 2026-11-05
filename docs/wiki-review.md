@@ -41,7 +41,7 @@ The stored list and the vault are matched on each read:
 - A page that no group claims shows in **Unsorted**. New pages land there.
 - A name that left the vault drops out. A group left with no pages is hidden.
 
-Nothing sorts new pages yet. Whether Gemma can do that is an open question.
+Nothing sorts new pages. A local model failed that test: see below.
 
 The inbound-link count uses `link_targets` from `chat/wikigraph.py`, so a link
 inside a code span does not count, and `/wiki` and this page agree. It folds
@@ -61,3 +61,31 @@ Both routes need a signed-in session, like the rest of `chat/routes_wiki.py`.
 
 Page summaries come from web sources, so they are untrusted. Every string from
 the API goes through `esc()` in `chat/static/wiki-review.js`.
+
+## Can a local model sort new pages?
+
+Not well enough. `evals/sort_eval.py` tests this against the hand sort. Each call
+sends the 29 numbered topic groups and 40 numbered pages, and the model replies
+with number pairs. The key is a path, because it holds private page names:
+
+```
+.venv/bin/python -m evals.sort_eval --key config/wiki_review.json --models gemma4:26b-mlx qwen3.8:27b-mlx
+```
+
+Run of 2026-11-05: 636 topic pages, 3 trials per model, production settings.
+
+| | Placed after retry | Match with hand sort | One trial |
+| --- | --- | --- | --- |
+| gemma4:26b-mlx | 636/636 | 64.2%, 67.3%, 66.5% | about 73 s |
+| qwen3.8:27b-mlx | 636/636 | 66.7%, 66.0%, 64.6% | about 222 s |
+
+The pass mark was all pages placed, at least 80% match, and at most 3 real
+mistakes in 30 disagreements read by hand. Placement passed, and the other two
+failed. Of the 30 read, one reader judged 11 real mistakes and 19 where both
+groups were fine (Gemma 7 of 14, qwen 4 of 16). So the match number understates
+the model, because many pages fit two groups. The mistakes still matter: a page
+in the wrong group can reach the cut list through a group's **Don't care** mark.
+
+The model sees only a name and a summary. Some of the real mistakes put one of
+the user's own projects in a general group, because a summary does not say whose
+project it is. A sort that used more than that would be a different test.
