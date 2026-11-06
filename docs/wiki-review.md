@@ -39,9 +39,15 @@ The stored list and the vault are matched on each read:
 - A page goes to the first group that claims it, so it is never in two groups.
 - A dated page goes to the group whose `prefix` matches the name before its date.
 - A page that no group claims shows in **Unsorted**. New pages land there.
+- **Move to** on an Unsorted page adds it to a group's `pages` list. Dated groups
+  are not offered, because a prefix decides their pages. A tick on the page moves
+  with it. A page already in a group has no menu, so its marks stay with its group.
 - A name that left the vault drops out. A group left with no pages is hidden.
 
-Nothing sorts new pages. A local model failed that test: see below.
+No model sorts new pages, because a local model failed that test: see below. To
+sort many at once, ask Claude Code to read the Unsorted pages and add each name to
+a group's `pages` list in the store. The next page load shows the result, with no
+restart. **Move to** and that edit change the same list, so use either one.
 
 The inbound-link count uses `link_targets` from `chat/wikigraph.py`, so a link
 inside a code span does not count, and `/wiki` and this page agree. It folds
@@ -50,14 +56,17 @@ not the graph's 140, because this page needs enough text to judge a page.
 
 ## API
 
-Both routes need a signed-in session, like the rest of `chat/routes_wiki.py`.
+All three routes need a signed-in session, like the rest of `chat/routes_wiki.py`.
 
-- `GET /api/wiki/review` returns `{groups, pages, marks, sorted_at}`. `pages`
-  maps a name to `[summary, words, sources, inbound, newest date]`. A missing
-  vault returns 404 with `{"error": ...}`.
+- `GET /api/wiki/review` returns `{groups, pages, marks, move_to, sorted_at}`.
+  `pages` maps a name to `[summary, words, sources, inbound, newest date]`.
+  `move_to` lists the groups a page can move to. A missing vault returns 404 with
+  `{"error": ...}`.
 - `PUT /api/wiki/review/marks/<group_id>` takes `{verdict, pages}`. A verdict is
   `keep`, `unsure`, `cut` or null, and a page mark is `keep` or `cut`. A bad value
   returns 400. An unknown group, or a page that is not in that group, returns 404.
+- `POST /api/wiki/review/move` takes `{page, group}`. A page that is not in
+  Unsorted, or a group that cannot take a page, returns 404.
 
 Page summaries come from web sources, so they are untrusted. Every string from
 the API goes through `esc()` in `chat/static/wiki-review.js`.

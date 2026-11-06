@@ -37,12 +37,18 @@
   const isThin = (n) => P[n][2] <= 1 && P[n][3] <= 1;
   const matches = (name) => !query || name.toLowerCase().includes(query) || P[name][0].toLowerCase().includes(query);
 
+  // Only Unsorted pages move: a placed page's marks belong to its group.
+  const moveMenu = (name) => `<select class="move" data-move="${esc(name)}" aria-label="Move ${esc(name)} to a group">
+      <option value="">Move to…</option>
+      ${DATA.move_to.map((t) => `<option value="${esc(t.id)}">${esc(t.title)}</option>`).join("")}
+    </select>`;
+
   function pageRow(g, name) {
     const [summary, , sources, links, date] = P[name];
     const cut = isCut(marks[g.id], name);
     return `<div class="p ${cut ? "is-cut" : ""}">
       <input type="checkbox" data-g="${esc(g.id)}" data-p="${esc(name)}" ${cut ? "checked" : ""} aria-label="Cut ${esc(name)}">
-      <div><div class="n">${esc(name)}</div><div class="s">${esc(summary)}</div></div>
+      <div><div class="n">${esc(name)}</div><div class="s">${esc(summary)}</div>${g.id === "unsorted" ? moveMenu(name) : ""}</div>
       <div class="m">${sources} src · ${links} links · ${esc(date)}</div>
     </div>`;
   }
@@ -148,6 +154,27 @@
     }
   }
 
+  async function movePage(select) {
+    const name = select.dataset.move, title = select.selectedOptions[0].textContent;
+    try {
+      await Promise.all(Object.values(queues));  // a tick still saving must land first
+      const resp = await fetch("/api/wiki/review/move", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ page: name, group: select.value }),
+      });
+      if (!resp.ok) throw new Error(`status ${resp.status}`);
+      await load();
+      rerender();
+      setStatus(`Moved ${name} to ${title}.`);
+      const next = document.querySelector("select[data-move]");  // focus went with the row
+      if (next) next.focus();
+    } catch (e) {
+      select.value = "";
+      setStatus(`The move did not finish (${e.message}). Reload this page, then look in Unsorted.`, true);
+    }
+  }
+
   document.addEventListener("click", (e) => {
     const b = e.target.closest("button");
     if (!b) return;
@@ -171,6 +198,10 @@
 
   document.addEventListener("change", (e) => {
     const box = e.target;
+    if (box.dataset && box.dataset.move) {
+      if (box.value) movePage(box);
+      return;
+    }
     if (!box.dataset || !box.dataset.p) return;
     const id = box.dataset.g, name = box.dataset.p, m = mark(id);
     const pages = { ...(m.pages || {}) };
@@ -188,22 +219,26 @@
     timer = setTimeout(() => { query = e.target.value.trim().toLowerCase(); renderList(); }, 150);
   });
 
+  async function load() {
+    const resp = await fetch("/api/wiki/review");
+    const body = await resp.json();
+    if (!resp.ok || body.error) throw new Error(body.error || `status ${resp.status}`);
+    DATA = body;
+    P = body.pages;
+    marks = body.marks;
+    biggest = Math.max(1, ...DATA.groups.map((g) => g.pages.length));
+    document.getElementById("t-groups").textContent = DATA.groups.length;
+    document.getElementById("lede").textContent =
+      `Your vault has ${num(Object.keys(P).length)} pages, sorted into ${DATA.groups.length} groups, so you can make one choice for many pages at a time.`;
+  }
+
   (async () => {
     try {
-      const resp = await fetch("/api/wiki/review");
-      const body = await resp.json();
-      if (!resp.ok || body.error) throw new Error(body.error || `status ${resp.status}`);
-      DATA = body;
-      P = body.pages;
-      marks = body.marks;
-      biggest = Math.max(1, ...DATA.groups.map((g) => g.pages.length));
+      await load();
     } catch (e) {
       setStatus(`The vault could not be loaded (${e.message}).`, true);
       return;
     }
-    document.getElementById("t-groups").textContent = DATA.groups.length;
-    document.getElementById("lede").textContent =
-      `Your vault has ${num(Object.keys(P).length)} pages, sorted into ${DATA.groups.length} groups, so you can make one choice for many pages at a time.`;
     if (DATA.sorted_at) {
       document.getElementById("fine").textContent += ` Groups last sorted ${DATA.sorted_at}. A newer page shows in Unsorted.`;
     }

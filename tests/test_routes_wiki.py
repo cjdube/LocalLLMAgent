@@ -125,7 +125,7 @@ def test_the_lint_page_links_to_the_review_page(auth_client):
 def test_review_returns_groups_pages_marks_and_date(auth_client, vault):
     _review_store(vault)
     body = auth_client.get("/api/wiki/review").get_json()
-    assert set(body) == {"groups", "pages", "marks", "sorted_at"}
+    assert set(body) == {"groups", "pages", "marks", "move_to", "sorted_at"}
     assert body["groups"][0]["pages"] == ["alpha"]
     assert "alpha" in body["pages"]
 
@@ -159,6 +159,29 @@ def test_review_refuses_bad_marks(auth_client, vault, group, body, status):
     assert resp.status_code == status
     assert "error" in resp.get_json()
     assert auth_client.get("/api/wiki/review").get_json()["marks"] == {}
+
+
+def test_review_move_places_an_unsorted_page(auth_client, vault):
+    _review_store(vault)
+    (vault / "new-page.md").write_text("# New\n", encoding="utf-8")
+    resp = auth_client.post("/api/wiki/review/move", json={"page": "new-page", "group": "g"})
+    assert resp.status_code == 200
+    groups = auth_client.get("/api/wiki/review").get_json()["groups"]
+    assert [(g["id"], g["pages"]) for g in groups] == [("g", ["alpha", "new-page"])]
+
+
+@pytest.mark.parametrize("body, status", [
+    ({"page": "alpha", "group": "g"}, 404),     # already placed
+    ({"page": "new-page", "group": "nope"}, 404),
+    ({"group": "g"}, 404),
+    (["not", "an", "object"], 400),
+])
+def test_review_move_refuses_bad_requests(auth_client, vault, body, status):
+    _review_store(vault)
+    (vault / "new-page.md").write_text("# New\n", encoding="utf-8")
+    resp = auth_client.post("/api/wiki/review/move", json=body)
+    assert resp.status_code == status
+    assert "error" in resp.get_json()
 
 
 # --------------------------------------------------------------------------- #

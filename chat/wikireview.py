@@ -94,7 +94,7 @@ def _place(stored_groups: list, names) -> list:
             "id": UNSORTED_ID,
             "family": "Not sorted yet",
             "title": "Unsorted",
-            "line": "Pages that no group holds yet.",
+            "line": "Pages that no group holds yet. Open this group, then use Move to on a page.",
             "pages": sorted(remaining),
         })
     return placed
@@ -120,7 +120,11 @@ def review() -> dict:
                 "verdict": mark["verdict"],
                 "pages": {n: v for n, v in mark["pages"].items() if n in members},
             }
-    return {"groups": groups, "pages": facts, "marks": marks, "sorted_at": store["sorted_at"]}
+    # Not read from `groups`: a stored group with no pages left can still take one,
+    # and a dated group never can, because its prefix decides its pages.
+    move_to = [{"id": g["id"], "title": g["title"]} for g in store["groups"] if "pages" in g]
+    return {"groups": groups, "pages": facts, "marks": marks, "move_to": move_to,
+            "sorted_at": store["sorted_at"]}
 
 
 def set_mark(group_id: str, verdict, pages) -> None:
@@ -149,4 +153,31 @@ def set_mark(group_id: str, verdict, pages) -> None:
             store["marks"].pop(group_id, None)
         else:
             store["marks"][group_id] = {"verdict": verdict, "pages": pages}
+        atomic_write_json(_STORE_PATH, store)
+
+
+def move_page(name: str, group_id: str) -> None:
+    """Put an Unsorted page in a stored group. LookupError if the page is not in
+    Unsorted, or the group does not list its own pages. A placed page stays put:
+    moving it would drop its marks from the group it is in now."""
+    vault, err = _require_vault()
+    if err:
+        raise LookupError(err["error"])
+    names = [f[: -len(".md")] for f in _list_wiki_pages(vault)["pages"]]
+
+    with locked(_STORE_PATH):
+        store = _load()
+        unsorted = next((g for g in _place(store["groups"], names) if g["id"] == UNSORTED_ID), None)
+        if unsorted is None or name not in unsorted["pages"]:
+            raise LookupError(f"'{name}' is not in Unsorted")
+        target = next((g for g in store["groups"] if g["id"] == group_id and "pages" in g), None)
+        if target is None:
+            raise LookupError(f"group '{group_id}' cannot take a page")
+        target["pages"].append(name)
+
+        # A tick on this page follows it. Losing a tick would quietly change the cut list.
+        mark = store["marks"].get(UNSORTED_ID)
+        override = mark["pages"].pop(name, None) if mark else None
+        if override:
+            store["marks"].setdefault(group_id, {"verdict": None, "pages": {}})["pages"][name] = override
         atomic_write_json(_STORE_PATH, store)

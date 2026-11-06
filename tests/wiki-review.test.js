@@ -81,6 +81,75 @@ describe("isCut and cutList", () => {
   });
 });
 
+describe("the Move menu", () => {
+  function unsorted() {
+    return payload({
+      groups: [
+        { id: "g1", family: "Topics", title: "First", line: "One.", pages: ["a", "b"] },
+        { id: "unsorted", family: "Not sorted yet", title: "Unsorted", line: "x", pages: ["c"] },
+      ],
+      move_to: [{ id: "g1", title: "First" }, { id: "g9", title: "<b>Ninth</b>" }],
+    });
+  }
+
+  // The server's answer after the move: c now sits in g1.
+  async function startAndMove(moveStatus) {
+    await start(unsorted());
+    const after = payload({
+      groups: [{ id: "g1", family: "Topics", title: "First", line: "One.", pages: ["a", "b", "c"] }],
+      move_to: unsorted().move_to,
+    });
+    const first = global.fetch;
+    global.fetch = jest.fn(async (url, opts) => {
+      if (opts && opts.method === "POST") return { ok: moveStatus < 400, status: moveStatus };
+      return moveStatus < 400 ? { ok: true, status: 200, json: async () => after } : first(url, opts);
+    });
+    document.querySelector('[data-more="unsorted"]').click();
+    const select = document.querySelector('select[data-move="c"]');
+    select.value = "g1";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    await flush();
+    await flush();
+  }
+
+  test("only an Unsorted page has the menu, and it lists move_to as text", async () => {
+    await start(unsorted());
+    document.querySelector('[data-more="g1"]').click();
+    document.querySelector('[data-more="unsorted"]').click();
+    const menus = document.querySelectorAll("select[data-move]");
+    expect(menus).toHaveLength(1);
+    expect(menus[0].dataset.move).toBe("c");
+    expect([...menus[0].options].map((o) => o.textContent)).toEqual(["Move to…", "First", "<b>Ninth</b>"]);
+  });
+
+  test("choosing a group sends the move and shows the new list", async () => {
+    await startAndMove(200);
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe("/api/wiki/review/move");
+    expect(JSON.parse(opts.body)).toEqual({ page: "c", group: "g1" });
+    expect(text("status")).toBe("Moved c to First.");
+    expect(text("t-groups")).toBe("1");
+    expect(document.querySelector("select[data-move]")).toBeNull();
+  });
+
+  test("a refused move says so and leaves the page in Unsorted", async () => {
+    await startAndMove(404);
+    expect(text("status")).toContain("did not finish");
+    expect(document.getElementById("status").className).toBe("err");
+    const select = document.querySelector('select[data-move="c"]');
+    expect(select.value).toBe("");
+  });
+
+  test("choosing the blank option sends nothing", async () => {
+    await start(unsorted());
+    document.querySelector('[data-more="unsorted"]').click();
+    const calls = global.fetch.mock.calls.length;
+    document.querySelector("select[data-move]").dispatchEvent(new Event("change", { bubbles: true }));
+    await flush();
+    expect(global.fetch.mock.calls).toHaveLength(calls);
+  });
+});
+
 describe("the page", () => {
   test("renders groups, counts and the sort date from the API", async () => {
     await start();

@@ -5,8 +5,8 @@ reading the vault lives in agent/tools/wiki.py, and the review's data lives in
 chat/wikireview.py; this module does auth, shapes, and status codes.
 
 The lint's `fix` endpoint is the one path here that writes to the vault, and it
-is a POST for that reason. (The review's PUT writes only its own store under
-config/.) It cannot take a target: it runs the sibling's apply_safe_fixes, whose
+is a POST for that reason. (The review's PUT and move write only its own store
+under config/.) It cannot take a target: it runs the sibling's apply_safe_fixes, whose
 whole contract is that it touches only the mechanical subset (self-links, dead
 index entries) and leaves every judgment call alone. Nothing the caller sends
 widens that.
@@ -96,6 +96,21 @@ def api_wiki_review_marks(group_id):
         wikireview.set_mark(group_id, body.get("verdict"), body.get("pages", {}))
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
+    except LookupError as e:
+        return jsonify({"error": str(e)}), 404
+    return jsonify({"ok": True})
+
+
+@wiki_bp.route("/api/wiki/review/move", methods=["POST"])
+def api_wiki_review_move():
+    """Put an Unsorted page in a group. Writes config/wiki_review.json, never the vault."""
+    if not _authenticated():
+        return jsonify({"error": "not authenticated"}), 401
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"error": "expected a JSON object"}), 400
+    try:
+        wikireview.move_page(body.get("page"), body.get("group"))
     except LookupError as e:
         return jsonify({"error": str(e)}), 404
     return jsonify({"ok": True})

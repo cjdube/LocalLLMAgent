@@ -168,3 +168,53 @@ def test_marks_never_touch_the_vault(vault, store):
     before = {p.name: p.read_bytes() for p in vault.iterdir()}
     wr.set_mark("tools", "cut", {})
     assert {p.name: p.read_bytes() for p in vault.iterdir()} == before
+
+
+def test_move_takes_a_page_out_of_unsorted_and_survives_a_read(vault, store):
+    wr.move_page("new-page", "tools")
+    groups = _by_id(wr.review())
+    assert "new-page" in groups["tools"]["pages"]
+    assert "unsorted" not in groups
+
+
+def test_move_into_a_group_with_no_pages_left_brings_it_back(vault, store):
+    wr.move_page("new-page", "empty")
+    assert _by_id(wr.review())["empty"]["pages"] == ["new-page"]
+
+
+def test_move_targets_leave_out_dated_groups(vault, store):
+    assert [t["id"] for t in wr.review()["move_to"]] == ["tools", "empty"]
+
+
+def test_move_refuses_a_dated_group(vault, store):
+    # The message matters: without the guard, the missing "pages" key is a KeyError,
+    # which is also a LookupError.
+    with pytest.raises(LookupError, match="cannot take a page"):
+        wr.move_page("new-page", "d-daily")
+
+
+def test_move_refuses_a_page_that_is_already_placed(vault, store):
+    with pytest.raises(LookupError):
+        wr.move_page("alpha", "empty")
+    assert _by_id(wr.review())["tools"]["pages"][0] == "alpha"
+
+
+def test_a_cut_tick_follows_the_page_so_the_cut_list_does_not_change(vault, store):
+    wr.set_mark("unsorted", None, {"new-page": "cut"})
+    wr.move_page("new-page", "tools")
+    marks = load_json(wr._STORE_PATH, {})["marks"]
+    assert marks["tools"] == {"verdict": None, "pages": {"new-page": "cut"}}
+    assert marks["unsorted"]["pages"] == {}
+
+
+def test_a_group_verdict_on_the_target_is_kept(vault, store):
+    wr.set_mark("tools", "keep", {})
+    wr.set_mark("unsorted", None, {"new-page": "cut"})
+    wr.move_page("new-page", "tools")
+    assert load_json(wr._STORE_PATH, {})["marks"]["tools"]["verdict"] == "keep"
+
+
+def test_move_never_touches_the_vault(vault, store):
+    before = {p.name: p.read_text() for p in vault.iterdir()}
+    wr.move_page("new-page", "tools")
+    assert {p.name: p.read_text() for p in vault.iterdir()} == before

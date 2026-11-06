@@ -861,9 +861,11 @@ the dashboard), the only way in: it has no menu item. The page shows every vault
 page sorted into plain-language groups. Mark a group Keep, Not sure or Don't
 care, or tick single pages to cut. Marks save as you go, and **Copy cut list**
 copies the page names. **It never writes to the vault.** A new page shows in
-Unsorted, because nothing sorts new pages yet.
+Unsorted, and stays there until you use its **Move to** menu, because no model
+sorts new pages.
 
-Backed by `GET /api/wiki/review` and `PUT /api/wiki/review/marks/<group_id>` in
+Backed by `GET /api/wiki/review`, `PUT /api/wiki/review/marks/<group_id>` and
+`POST /api/wiki/review/move` in
 `chat/routes_wiki.py`, over `chat/wikireview.py` and the gitignored
 `config/wiki_review.json`.
 See [docs/wiki-review.md](docs/wiki-review.md).
