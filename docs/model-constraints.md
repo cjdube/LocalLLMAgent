@@ -37,16 +37,16 @@ symptom points at parsing; the cause is budget.
 prompt already contains — `evaluate_app`, `daily_synthesis`. Measure even
 there.
 
-**What "measure even there" turned up.** `daily_synthesis` lost its output to
-this in **3 of its first 29 runs** (2026-08-02, -08-12, -08-14) — each time
-discarding candidates that had already matched. It isn't prompt size: the
-smallest of the three carried 15 signals, the largest 46. It is
-nondeterministic — 2026-08-14 returned nothing, then returned nudges on the
-next call with an identical prompt — so the fix there is
-`MAX_SYNTHESIS_ATTEMPTS = 2`, not `think=False`, which would trade an occasional
-empty answer for a permanently worse one. The retry warns even when it
-succeeds; a silent self-healing retry would hide the failure rate, which is the
-thing the section below exists to prevent.
+**What "measure even there" turned up.** `daily_synthesis` kept thinking on for
+one call over its whole shortlist, and a retry for the empty replies. Over 117
+runs it ran out of `num_predict` on 23% of first tries and gave up on 7; the
+retry failed 29% of the time, because the same prompt fails the same way. A
+replay with 8,192 tokens stopped on its own at 5,129 — honest redrafting, not a
+loop. The fix (2026-11-12) was to make the judgement a template: one call per
+candidate, `think=False`, a 0-10 score and one line. 135 of 135 live replies
+parsed, and the scores agreed with the old judge's picks. When a thinking call
+keeps running out, check whether it can be split into template calls before
+raising the budget. [daily-synthesis.md](daily-synthesis.md#why-one-call-per-candidate)
 
 **"Analysis" is not the test.** This is the part that gets rationalized away.
 `evaluate_against` writes a judgement, which sounds like reasoning — but it

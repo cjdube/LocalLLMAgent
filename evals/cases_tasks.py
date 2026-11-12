@@ -23,8 +23,8 @@ import json
 
 from agent.tools.research import RESEARCH_SYSTEM_PROMPT
 from tasks.daily_synthesis import (
-    SYNTHESIS_SYSTEM_PROMPT,
-    parse_nudges,
+    JUDGE_SYSTEM_PROMPT,
+    parse_verdict,
     render_candidates,
 )
 from tasks.opportunity_digest import (
@@ -193,17 +193,14 @@ CASES = [
     },
     {
         "id": "daily_synthesis",
-        # The one case that runs with thinking ON, because production does —
-        # this is where the empty-content risk lives, and where a reasoning-heavy
-        # candidate model is most likely to differ.
+        # One candidate per call, thinking OFF, as production does since
+        # 2026-11-12: a two-line SCORE/NUDGE template.
         "task": "daily_synthesis",
-        "system": SYNTHESIS_SYSTEM_PROMPT,
-        "user": render_candidates(_CANDIDATES),
-        "parse": parse_nudges,
-        "golden": "- You read about MLX and your serving note covers it.",
-        # Silence is a legitimate answer here (the model may judge nothing
-        # genuine), so this is scored on non-empty CONTENT, not on nudge count.
-        "expect_count": None,
-        "think": None,
+        "system": JUDGE_SYSTEM_PROMPT,
+        "user": render_candidates(_CANDIDATES[:1]),
+        "parse": lambda text: [v for v in [parse_verdict(text)] if v],
+        "golden": "SCORE: 8\nNUDGE: You read about MLX quantization — your 'Local model serving' note covers it.",
+        "expect_count": 1,
+        "think": False,
     },
 ]

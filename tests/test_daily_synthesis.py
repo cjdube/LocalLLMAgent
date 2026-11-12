@@ -54,7 +54,7 @@ def stub_sources(monkeypatch):
 
     def _model(**k):
         calls["model"] += 1
-        return "- You dug into DuckDB — it fits your 'duckdb-analytics' note; want a summary?"
+        return "SCORE: 8\nNUDGE: You dug into DuckDB — it fits your 'duckdb-analytics' note."
     monkeypatch.setattr(ds, "complete_text", _model)
     monkeypatch.setattr(ds, "notify",
                         lambda **k: calls["pushes"].append(k) or {"ok": True})
@@ -418,15 +418,16 @@ def test_candidate_pairs_empty_without_overlap():
     assert ds.candidate_pairs(signals, anchors) == []
 
 
-def test_parse_nudges_extracts_bullets_and_caps(monkeypatch):
-    monkeypatch.setattr(ds, "MAX_NUDGES", 2)
-    out = ds.parse_nudges("- one\n- two\n- three\nnot a bullet")
-    assert out == ["one", "two"]
+def test_parse_verdict_reads_both_lines():
+    assert ds.parse_verdict("SCORE: 8\nNUDGE: DuckDB fits your note.") == (8, "DuckDB fits your note.")
+    assert ds.parse_verdict("score: 12\nnudge: x") == (10, "x")   # clamped
 
 
-def test_parse_nudges_none_yields_nothing():
-    assert ds.parse_nudges("NONE") == []
-    assert ds.parse_nudges("") == []
+def test_parse_verdict_needs_both_lines():
+    assert ds.parse_verdict("SCORE: 8") is None
+    assert ds.parse_verdict("NUDGE: no score") is None
+    assert ds.parse_verdict("SCORE: 8\nNUDGE:   ") is None
+    assert ds.parse_verdict("") is None
 
 
 # --------------------------------------------------------------------------- #
@@ -669,7 +670,7 @@ def test_echo_across_channels_reaches_the_model(stub_sources, tmp_path, monkeypa
 
     def _capture(**kwargs):
         seen["prompt"] = kwargs["user_prompt"]
-        return "- Stripe archetypes came at you twice yesterday; worth a note?"
+        return "SCORE: 9\nNUDGE: Stripe archetypes came at you twice yesterday."
     monkeypatch.setattr(ds, "complete_text", _capture)
 
     assert ds.main() == 0
@@ -688,81 +689,67 @@ def one_candidate(monkeypatch):
                         lambda: {"pages": [{"name": "duckdb-analytics", "summary": ""}]})
 
 
-def test_model_says_none_pushes_nothing(stub_sources, one_candidate, monkeypatch, caplog):
-    monkeypatch.setattr(ds, "complete_text", lambda **k: "NONE")
+def test_a_low_score_pushes_nothing_and_stays_quiet(stub_sources, one_candidate,
+                                                   monkeypatch, caplog):
+    monkeypatch.setattr(ds, "complete_text", lambda **k: "SCORE: 2\nNUDGE: a coincidence.")
 
     with caplog.at_level(logging.WARNING):
         assert ds.main() == 0
     assert stub_sources["pushes"] == []
-    # The healthy silence path stays quiet: a WARNING here would cry wolf every
-    # ordinary day and get muted, taking the two real ones below with it.
+    # The healthy quiet day stays quiet: a WARNING here would cry wolf and get
+    # muted, taking the real one below with it.
     assert caplog.text == ""
 
 
-def test_empty_model_reply_warns_rather_than_reading_as_a_quiet_day(
-        stub_sources, one_candidate, monkeypatch, caplog):
-    # An empty reply is what a thinking model that spent num_predict on scratchpad
-    # returns. Without this it logged the same INFO as a genuine NONE, so a
-    # permanently broken run looked exactly like a healthy one for weeks.
+def test_the_threshold_keeps_seven_and_drops_six(stub_sources, monkeypatch):
+    assert ds.MIN_NUDGE_SCORE == 7
+    candidates = [{"kind": "anchor", "overlap": ["a"], "signal": {"kind": "browsed", "text": t},
+                   "anchor": {"kind": "company you track", "label": t}} for t in ("six", "seven")]
+    replies = iter(["SCORE: 6\nNUDGE: six.", "SCORE: 7\nNUDGE: seven."])
+    monkeypatch.setattr(ds, "complete_text", lambda **k: next(replies))
+    verdicts = ds.judge(candidates, _LOG, None)
+    assert [v for v in verdicts if v[0] >= ds.MIN_NUDGE_SCORE] == [
+        (7, "seven.", {**candidates[1], "judge_score": 7})]
+
+
+def test_each_candidate_is_its_own_call_with_thinking_off(monkeypatch):
+    calls = []
+
+    def _model(**k):
+        calls.append(k)
+        return f"SCORE: {len(calls) * 3}\nNUDGE: line {len(calls)}."
+    monkeypatch.setattr(ds, "complete_text", _model)
+    pairs = [{"kind": "anchor", "overlap": ["x"], "signal": {"kind": "browsed", "text": f"s{i}"},
+              "anchor": {"kind": "wiki page", "label": f"a{i}"}} for i in range(3)]
+
+    verdicts = ds.judge(pairs, _LOG, None)
+    assert len(calls) == 3 and all(k["think"] is False for k in calls)
+    assert all(k["user_prompt"].count("CONNECTION") == 1 for k in calls)
+    assert [v[0] for v in verdicts] == [9, 6, 3]          # best first
+    assert verdicts[0][2]["anchor"]["label"] == "a2"      # the pair travels with it
+
+
+def test_more_than_three_real_links_are_all_pushed(stub_sources, monkeypatch):
+    # No fixed cap: four pages that each match their own video make four nudges.
+    names = ["duckdb", "polars", "sqlite", "arrow"]
+    monkeypatch.setattr(ds, "fetch_liked_videos", lambda *a, **k: {"videos": [
+        {"title": f"{n} deep dive", "channel": "X"} for n in names]})
+    monkeypatch.setattr(ds, "page_summaries", lambda: {"pages": [
+        {"name": n, "summary": ""} for n in names]})
+
+    assert ds.main() == 0
+    assert stub_sources["pushes"][0]["message"].count("\n") == 3   # 4 numbered lines
+
+
+def test_an_unparsable_reply_warns_with_the_counts(stub_sources, one_candidate,
+                                                   monkeypatch, caplog):
+    # Thinking OFF can still ignore the format; that candidate is lost, so say so.
     monkeypatch.setattr(ds, "complete_text", lambda **k: "")
 
     with caplog.at_level(logging.WARNING):
         assert ds.main() == 0
     assert stub_sources["pushes"] == []
-    assert "EMPTY content" in caplog.text
-    assert "1 candidate(s)" in caplog.text
-
-
-def test_an_empty_reply_is_asked_again_and_the_retry_is_what_ships(
-        stub_sources, one_candidate, monkeypatch, caplog):
-    # The measured failure: thinking spends num_predict on scratchpad and the
-    # content comes back empty, discarding candidates that already matched. It's
-    # nondeterministic, so the same prompt asked twice gets an answer — without the
-    # retry, 3 of 29 real runs pushed nothing on a day that had something to say.
-    replies = iter(["", "- a real connection"])
-    monkeypatch.setattr(ds, "complete_text", lambda **k: next(replies))
-
-    with caplog.at_level(logging.WARNING):
-        assert ds.main() == 0
-    assert len(stub_sources["pushes"]) == 1
-    assert "a real connection" in stub_sources["pushes"][0]["message"]
-    # The recovered attempt is still worth a WARNING: it reached the log_inspector
-    # rollup, which is the only way a creeping failure rate gets noticed at all.
-    assert "attempt 1/2" in caplog.text
-
-
-def test_the_model_is_asked_exactly_twice_before_giving_up(
-        stub_sources, one_candidate, monkeypatch, caplog):
-    # Bounds the retry against the single Ollama slot: this runs at 5:45am and
-    # every extra attempt is ~35s that chat and the other jobs queue behind.
-    calls = []
-
-    def _empty(**k):
-        calls.append(k)
-        return ""
-
-    monkeypatch.setattr(ds, "complete_text", _empty)
-
-    with caplog.at_level(logging.WARNING):
-        assert ds.main() == 0
-    assert len(calls) == ds.MAX_SYNTHESIS_ATTEMPTS == 2
-    assert stub_sources["pushes"] == []
-    assert "on all 2 attempt(s)" in caplog.text
-
-
-def test_unparsable_model_reply_warns_with_the_counts(
-        stub_sources, one_candidate, monkeypatch, caplog):
-    # Non-empty, no "- " bullets, and no NONE: the model ignored the output format.
-    # Distinct from empty, so the warning names the char count that empty can't.
-    reply = "I found nothing of interest today."
-    monkeypatch.setattr(ds, "complete_text", lambda **k: reply)
-
-    with caplog.at_level(logging.WARNING):
-        assert ds.main() == 0
-    assert stub_sources["pushes"] == []
-    assert "no parsable" in caplog.text
-    assert f"{len(reply)} chars" in caplog.text
-    assert "1 candidate(s)" in caplog.text
+    assert "1 of 1 judge repl(ies) had no SCORE/NUDGE" in caplog.text
 
 
 def test_dead_source_degrades_and_still_runs(stub_sources, monkeypatch):
@@ -1092,36 +1079,27 @@ def test_yesterday_s_reading_reaches_a_parked_idea(stub_anchors, stub_projects,
 # nudge buttons — the [N] tag maps a nudge back to its candidate
 # --------------------------------------------------------------------------- #
 
-def test_render_candidates_says_what_each_button_does():
-    wiki = {"kind": "anchor", "overlap": ["duckdb"],
-            "signal": {"kind": "watched", "text": "DuckDB"},
-            "anchor": {"kind": "wiki page", "label": "duckdb"}}
-    company = {**wiki, "anchor": {"kind": "company you track", "label": "Acme"}}
-    out = ds.render_candidates([wiki, company])
-    assert "button: save the facts as a note for his wiki" in out
-    assert "button: none" in out
-
-
-def test_tag_nudges_maps_numbers_and_strips_the_tag(caplog):
-    pairs = [{"id": 1}, {"id": 2}]
-    logger = logging.getLogger("test_tag")
-    out = ds.tag_nudges(["[2] second", "[9] out of range", "no tag"], pairs, logger)
-    assert out == [("second", pairs[1]), ("out of range", None), ("no tag", None)]
-    assert "2 of 3 nudge(s) had no valid [N]" in caplog.text
+def test_with_question_asks_what_the_tap_does():
+    wiki = {"kind": "anchor", "anchor": {"kind": "wiki page", "label": "duckdb"}}
+    ticket = {"kind": "anchor", "anchor": {"kind": "idea you parked", "label": "x"}}
+    company = {"kind": "anchor", "anchor": {"kind": "company you track", "label": "Acme"}}
+    assert ds.with_question("DuckDB fits.", wiki) == "DuckDB fits. Save it to the wiki?"
+    assert ds.with_question("x.", ticket) == "x. Add it to the ticket?"
+    assert ds.with_question("Acme.", company) == "Acme."
 
 
 def test_tagged_nudge_gets_a_button_and_a_clean_archive(stub_sources, tmp_path, monkeypatch):
     monkeypatch.setenv("FLASK_SECRET_KEY", "test-secret")
     monkeypatch.setenv("WREN_PUBLIC_URL", "https://host")
     monkeypatch.setattr(ds, "complete_text",
-                        lambda **k: "- [1] DuckDB fits your 'duckdb-analytics' note; save it to the wiki?")
+                        lambda **k: "SCORE: 9\nNUDGE: DuckDB fits your 'duckdb-analytics' note.")
     monkeypatch.setattr(ds, "fetch_liked_videos",
                         lambda *a, **k: {"videos": [{"title": "DuckDB deep dive", "channel": "X"}]})
     monkeypatch.setattr(ds, "page_summaries", lambda: {"pages": [{"name": "duckdb-analytics", "summary": ""}]})
 
     assert ds.main() == 0
     push = stub_sources["pushes"][0]
-    assert push["message"].startswith("1. DuckDB fits")
+    assert push["message"] == "1. DuckDB fits your 'duckdb-analytics' note. Save it to the wiki?"
     assert [a["label"] for a in push["actions"]] == ["1 → wiki"]
     body = next(tmp_path.glob("Daily-Synthesis-*.md")).read_text()
     assert "- DuckDB fits" in body and "[1]" not in body

@@ -127,7 +127,7 @@ def test_missing_directory_is_an_error_not_an_exception(monkeypatch, tmp_path):
 
 
 def test_empty_archive_returns_no_nudges_not_an_error():
-    # Most days produce nothing at all, so an empty dir is the healthy case.
+    # A day with no real link produces nothing, so an empty dir is a healthy case.
     result = nudges_mod.list_nudges()
     assert result["nudges"] == [] and result["days"] == nudges_mod.DEFAULT_DAYS
     assert "normal" in result["summary"]
@@ -181,7 +181,7 @@ def test_tool_description_forbids_inventing_a_suggestion():
 
 def test_tool_description_says_silence_is_normal():
     # Without this the model reads an empty result as a fault and says something
-    # is broken; no nudges on a given day is the common case.
+    # is broken; a day with no nudges is normal.
     assert "normal" in nudges_mod.TOOL_SCHEMA["function"]["description"]
 
 

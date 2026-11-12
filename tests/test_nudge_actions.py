@@ -55,6 +55,17 @@ def test_record_keeps_the_match_that_made_the_candidate():
     assert row["overlap"] == ["duckdb"] and row["match_score"] == 0.33
 
 
+def test_record_stores_the_judge_score():
+    [row] = na.record(date(2026, 10, 30), [("a", {**_anchor_pair(), "judge_score": 8})])
+    assert row["score"] == 8
+
+
+def test_a_push_carries_at_most_three_buttons():
+    # ntfy rejects a fourth action; the rest are tapped on /nudges.
+    rows = na.record(date(2026, 10, 30), [(str(i), _anchor_pair()) for i in range(5)])
+    assert [a["label"] for a in na.buttons(rows)] == ["1 → wiki", "2 → wiki", "3 → wiki"]
+
+
 def test_a_nudge_with_no_action_gets_no_button():
     rows = na.record(date(2026, 10, 30), [
         ("a", _anchor_pair("company you track")), ("b", _anchor_pair())])

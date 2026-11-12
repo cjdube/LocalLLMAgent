@@ -111,8 +111,10 @@ unreachable and every model-using task is about to fail. Everything else is
 
 **Strain labels** name the two known model-struggle signals in the rollup —
 `reached num_ctx=` → *context overflow* (the prompt overflowed and the system
-prompt was truncated off the front), `reached num_predict=` → *repetition loop*
-(the generation hit the cap mid-loop). These labels are cosmetic, **not** the
+prompt was truncated off the front), `reached num_predict=` → *ran out of tokens*
+(the generation hit the cap — a repetition loop, or a thinking model that spent
+the budget reasoning; the line cannot tell them apart. Every such line from
+2026-10-01 to 2026-11-12 was `daily_synthesis` running out of thinking budget). These labels are cosmetic, **not** the
 filter; an unrecognised warning still reports, verbatim.
 
 **The noise denylist** (in `NOISE`) — benign lines that would drown the signal:
@@ -168,7 +170,7 @@ spends whatever room is left on the findings' own text:
 PUSH CHANNEL DOWN: ntfy unreachable: Connection refused
 2 failed: morning_brief, ai_chat_learnings
 1 didn't run: strava_download
-Model strain: 5x repetition loop, 1x context overflow
+Model strain: 5x ran out of tokens, 1x context overflow
 2 error lines: wren(2)
 - 03:14 wren: chat turn failed: HTTPConnectionPool(host='localhost', ...
 ```

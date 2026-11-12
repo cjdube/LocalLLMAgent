@@ -84,7 +84,7 @@ def _today() -> date:
 
 def _parse_file(path: Path) -> list[str]:
     """The `- ` bullet lines of one archive file. Same shape daily_synthesis
-    wrote (parse_nudges), so the `## Synthesis Suggestions` heading and any
+    wrote, so the `## Synthesis Suggestions` heading and any
     blank lines fall out naturally. An unreadable file contributes nothing."""
     try:
         text = path.read_text(encoding="utf-8")
@@ -108,8 +108,8 @@ def _render(rows: list, days: int, total: int = None) -> str:
     runs reproduced all 16 rows verbatim, the only difference being a curly
     apostrophe normalized to a straight one."""
     if not rows:
-        return (f"Nothing was suggested in the last {days} days. That is normal — "
-                "most days produce no nudge at all.")
+        return (f"Nothing was suggested in the last {days} days. That is "
+                "normal — a day with no real link produces no nudge.")
     lines = [f"- **{row['date']}** — {row['text']}" for row in rows]
     # `total` is the count before the max_rows slice; len(rows) alone would
     # state the shown count as the real one (see push_log._render).
@@ -202,7 +202,7 @@ TOOL_SCHEMA = {
             "every suggestion with its date. Do not retype the list yourself, do not "
             "shorten it, and do not describe what it was about; the suggestions ARE "
             "the answer. `summary` also carries the wording for an empty window, "
-            "which is normal — most days produce no nudge at all."
+            "which is normal — a day with no real link produces no nudge."
         ),
         "parameters": {
             "type": "object",

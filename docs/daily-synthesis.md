@@ -53,25 +53,23 @@ model told to "find connections across everything" manufactures them):
 3. **Match (Python)** — two kinds of candidate, each with its own cap so one can't
    crowd out the other. Tokens are lowercase, length ≥ 4, minus a small stopword
    list — enough to trim obvious noise; the model is the real filter.
-   - **CONNECTION** (`candidate_pairs`, cap `MAX_ANCHOR_CANDIDATES` = 5) — a signal
+   - **CONNECTION** (`candidate_pairs`, ceiling `MAX_ANCHOR_CANDIDATES` = 15) — a signal
      against an anchor.
-   - **ECHO** (`cross_channel_pairs`, cap `MAX_CROSS_CANDIDATES` = 3) — a signal
+   - **ECHO** (`cross_channel_pairs`, ceiling `MAX_CROSS_CANDIDATES` = 8) — a signal
      against a signal from a *different* channel: the same theme reaching him twice
      independently in one day, which no single-source pass can see.
 4. **Drop repeats** (`drop_repeats`, `RECENT_NUDGE_DAYS` = 7) — a candidate whose
    anchor was already named in a nudge in the last week is removed *before* the
-   model call, so the suppressed pair costs nothing and the model's three slots go
-   to what's actually new. See [Not saying it twice](#not-saying-it-twice).
-5. **Judge (one bounded model pass)** — the shortlist goes to the model, which
-   keeps only the genuine, non-obvious, actionable connections and writes one
-   nudge line each, at most `MAX_NUDGES` (3). A reply of `NONE`, or no bullet
-   lines, yields nothing. The rendered shortlist is logged alongside the model's
-   reply: a thin nudge is either a bad candidate or bad judgment, and the output
-   alone can't say which. Thinking is on for this call, so an **empty** reply
-   means the budget went to scratchpad rather than the answer; that gets one
-   retry (`MAX_SYNTHESIS_ATTEMPTS`), and warns even when the retry succeeds so
-   the rate stays visible in the 8am rollup. See
-   [model-constraints.md](model-constraints.md).
+   model call, so the suppressed pair costs nothing and the judge's time goes to
+   what's actually new. See [Not saying it twice](#not-saying-it-twice).
+5. **Judge (one call per candidate)** — `judge` sends each candidate alone to the
+   model, thinking **off**, and reads back two lines: `SCORE: 0-10` and
+   `NUDGE: <one line>`. Every candidate scoring `MIN_NUDGE_SCORE` (7) or more
+   becomes a nudge, best first — there is no fixed count. Python appends the
+   one-tap question ("Save it to the wiki?"). The shortlist and each reply are
+   logged: a thin nudge is either a bad candidate or bad judgment, and the output
+   alone can't say which. A reply without both lines drops that candidate and
+   warns with the count. See [Why one call per candidate](#why-one-call-per-candidate).
 6. **Push + archive** — if any nudges survive, one `notify()` with
    `email_fallback=True` (a one-shot alert nothing retries), **and** a durable
    copy written as `Daily-Synthesis-<date>.md` to `SYNTHESIS_DIR` (default
@@ -81,8 +79,32 @@ model told to "find connections across everything" manufactures them):
    2026-11-11 pushed.
 
 Each of the three quiet endings logs its own line — no overlap, all candidates
-were repeats, nothing genuine — because silence is this task's usual outcome and
-a single shared message would make a broken morning read like a quiet one.
+were repeats, nothing scored — so a broken morning never reads like a quiet one.
+
+## Why one call per candidate
+
+Until 2026-11-12 the whole shortlist went to **one** call with thinking on, which
+kept at most 3. Thinking tokens share `num_predict` (3,072), and that call ran out
+on 23% of first tries and gave up — no nudges — on 7 of 117 runs; the retry failed
+29% of the time, because the same prompt fails the same way. Replayed with 8,192
+tokens, a give-up day stopped on its own at 5,129: long drafting and redrafting,
+not a loop. So the budget was simply too small for one call over 8 candidates.
+
+One candidate is a two-line template, which AGENTS.md says runs thinking off.
+Measured on the live model, 2026-11-12, over 16 real days (7 of them give-ups):
+
+- 135 of 135 replies parsed; 0.7s a call (worst 1.6s), so a day takes seconds,
+  not 45-98s.
+- Scores split in two: 0-5 for coincidences ("level", "after week", a bus
+  company), 7-10 for real links, almost nothing at 6. 20 of the 21 nudges the
+  old judge kept scored 7+; the old judge also dropped many 8-10s only because
+  it could keep 3.
+- 24 candidates asked 3-4 times: none crossed the 7 line between asks.
+- About 4 nudges a day (1 to 9); every give-up day got some.
+
+The score is stored on the nudge row and shown on `/nudges`. A push carries at
+most 3 buttons (ntfy's limit), on the best-scored nudges; the rest are tapped on
+`/nudges`.
 
 ## Acting on a nudge
 
@@ -285,14 +307,13 @@ The practical consequence is a habit, not a setting: **write the description whe
 park something.** An item titled "better logging" gives the matcher nothing; the same
 item describing log rotation, launchd stderr and the 8 MB cap gives it plenty.
 
-Measured over seven real days after it shipped: 6–26 raw pairs a day involve a parked
-idea, of which one reaches the model's shortlist on three of the seven. It neither
-floods the shortlist nor never appears — which is what the two caps ahead of it
-(`_one_per_side`, then `MAX_ANCHOR_CANDIDATES`) are for.
+Measured over seven real days after it shipped (with the old ceiling of 5):
+6–26 raw pairs a day involve a parked idea, of which one reached the shortlist on
+three of the seven. `_one_per_side` is what stops it flooding the shortlist.
 
 ## Tuning
 
-- `MAX_ANCHOR_CANDIDATES` / `MAX_CROSS_CANDIDATES` / `MAX_NUDGES` /
+- `MIN_NUDGE_SCORE` / `MAX_ANCHOR_CANDIDATES` / `MAX_CROSS_CANDIDATES` /
   `MAX_AI_CHAT_BULLETS` / `MAX_ANCHOR_SUMMARY_CHARS` / `_MIN_TOKEN_LEN` /
   `_STOPWORDS` / `RECENT_NUDGE_DAYS`, plus the filters above, in
   `tasks/daily_synthesis.py`.

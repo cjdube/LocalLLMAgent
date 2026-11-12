@@ -130,6 +130,7 @@ function itemRow(n, state) {
   body.appendChild(target);
 
   const meta = el("div", "meta", fmtDay(n.day));
+  if (n.score != null) meta.appendChild(document.createTextNode(" · score " + n.score + "/10"));
   if ((n.overlap || []).length) meta.appendChild(document.createTextNode(" · matched on: " + n.overlap.join(", ")));
   if (state === "done") {
     meta.appendChild(document.createTextNode(" · done " + fmtDay(n.done.slice(0, 10)) + " · "));

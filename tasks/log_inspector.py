@@ -99,7 +99,8 @@ CRITICAL_WARNINGS = (
 # filter (see _classify) — an unrecognised warning still reports, verbatim.
 STRAIN_LABELS = (
     ("reached num_ctx=", "context overflow"),
-    ("reached num_predict=", "repetition loop"),
+    # A repetition loop or a thinking model out of budget; the line can't tell which.
+    ("reached num_predict=", "ran out of tokens"),
 )
 
 

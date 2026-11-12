@@ -294,18 +294,13 @@ tool-result problem. Their limits bound the **input** they compact into a prompt
 | Task | Constants |
 |---|---|
 | `agent/activity_log.py` | `MAX_CHROME_SITES` 40, `MAX_PAGES_PER_SITE` 6 |
-| `daily_synthesis` | `MAX_NUDGES` 3, `MAX_ANCHOR_CANDIDATES` 5, `MAX_CROSS_CANDIDATES` 3, `MAX_ANCHOR_SUMMARY_CHARS` 200, `MAX_PROJECT_ANCHOR_TOKENS` 40, `MAX_AI_CHAT_BULLETS` 20, `RECENT_NUDGE_DAYS` 7, `MAX_SYNTHESIS_ATTEMPTS` 2 |
+| `daily_synthesis` | `MAX_ANCHOR_CANDIDATES` 15, `MAX_CROSS_CANDIDATES` 8 (one ~1s judge call each — a bound on slot time, not on nudges), `MIN_NUDGE_SCORE` 7, `MAX_ANCHOR_SUMMARY_CHARS` 200, `MAX_PROJECT_ANCHOR_TOKENS` 40, `MAX_AI_CHAT_BULLETS` 20, `RECENT_NUDGE_DAYS` 7 |
 | `opportunity_digest` | `MAX_SCORE_ITEMS` 40 (batch size — one model call per batch), `_SNIPPET_CHARS` 300, `_EDGAR_MAX_PAGES` 3, `_HN_MAX_PAGES` 3, `_EDGAR_DEFAULT_LOOKBACK_DAYS` 7 |
 | `project_scan` | `MAX_TOPICS` 15, `MAX_SUMMARY_CHARS` 300 (kept under `daily_synthesis`'s own 200-char anchor cap so it doesn't waste prompt budget) |
 | `starred_blurbs` | `README_CHARS` 2000 |
 | `log_inspector` | `MAX_DETAIL_LINE` 150, and it fits its whole push inside `notify._MAX_MESSAGE_CHARS` |
 | `bg_worker` | `MAX_TRANSIENT_ATTEMPTS` 3 |
 | `build_worker` | `DEFAULT_TIMEOUT_S` 1800 (the whole Claude Code run, overridable with `WREN_BUILD_TIMEOUT_S`), `PYTEST_TIMEOUT_S` 600, `GIT_TIMEOUT_S` 60 — three separate bounds because a wedged test run and a wedged `git` fail differently, and neither should spend the build's whole budget |
-
-**`MAX_SYNTHESIS_ATTEMPTS = 2` is a different kind of limit** — it's a retry, not
-a cap. `daily_synthesis` keeps thinking **on** (it must reason past its prompt),
-and lost its output to an empty response in 3 of its first 29 runs. The retry
-warns even when it succeeds, so the failure rate stays visible.
 
 ### Layer E — a limit that isn't a number
 

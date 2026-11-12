@@ -116,9 +116,9 @@ What separated them was everything after the tool call:
   [model-constraints.md](model-constraints.md) already fixed at the tool
   boundary, re-entering through the prose. No tool contract prevents it.
 - **gemma4:26b is weak on `daily_synthesis`** — empty content on 2 of 3 single
-  calls, the one case that runs with thinking ON. Production's
-  `MAX_SYNTHESIS_ATTEMPTS = 2` absorbs part of that, so the effective rate is
-  lower than 2-in-3. qwen3.6 and gemma4:31b were 3 of 3.
+  calls, the one case that ran with thinking ON. qwen3.6 and gemma4:31b were 3
+  of 3. Since 2026-11-12 production runs one candidate per call with thinking
+  off, and the eval case does the same, so this finding is about the old call.
 
 `gemma4:31b-mlx` failed nothing at all and fixes the synthesis weakness, but
 costs 2.4x on chat latency (3.5s -> 8.5s median, 99s worst case), paid on every

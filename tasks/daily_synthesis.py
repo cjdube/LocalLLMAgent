@@ -9,9 +9,10 @@ the structure. It reads yesterday's browsing + YouTube Likes + AI-agent chats (t
 interesting companies (the "anchors"),
 and does the matching itself via token overlap — the model never rummages through
 everything looking for connections (a small model manufactures those). The model's
-only job is a bounded pass over a short, pre-matched candidate list: keep the
-genuine connections, drop the coincidental ones, write one line each. No overlap,
-or no genuine connection, means nothing is pushed — silence is the common case.
+only job is to judge a short, pre-matched candidate list, one candidate per call:
+score it 0-10 and write one line. Every candidate that scores MIN_NUDGE_SCORE or
+more becomes a nudge — no fixed count. No overlap, or no candidate that scores,
+means nothing is pushed; most days something does (98 of 120 runs to 2026-11-11).
 
 Two kinds of candidate go into that list:
 
@@ -48,7 +49,7 @@ from agent.tools.chrome_history import fetch_chrome_history
 from agent.tools.clickup import backlog_anchors
 from agent.tools.learnings_file import read_entry
 from agent.tools.notify import notify
-from agent.nudge_actions import DESCRIPTIONS, action_for, buttons, record
+from agent.nudge_actions import action_for, buttons, record
 from agent.tools.nudges import _synthesis_dir, list_nudges
 from agent.tools.opportunities import get_watchlist, list_opportunities
 from agent.tools.projects import load_registry
@@ -78,27 +79,25 @@ from agent.activity_log import (
 # that and drops the noise. This is the lever if the balance feels wrong.
 RECENT_NUDGE_DAYS = 7
 
-# How many pre-matched pairs of each kind the model judges, and how many nudges it
-# may emit. Kept small on purpose: the candidate list is context the small model
-# reasons over, and more than a couple of nudges a day is noise, not signal. The
-# two caps are separate so the echoes (usually few) can't be crowded out by a
-# browsing day that generates dozens of anchor matches, or vice versa.
-MAX_ANCHOR_CANDIDATES = 5
-MAX_CROSS_CANDIDATES = 3
-MAX_NUDGES = 3
+# How many pre-matched pairs of each kind are judged. This bounds time on the single
+# Ollama slot, NOT the number of nudges: each candidate is its own ~1s call (see
+# judge), so these sit well above a normal day's count. The two are separate so the
+# echoes (usually few) can't be crowded out by a browsing day that generates dozens
+# of anchor matches, or vice versa.
+MAX_ANCHOR_CANDIDATES = 15
+MAX_CROSS_CANDIDATES = 8
 
-# Thinking stays ON for the judgment call (AGENTS.md: this call has to reason past
-# what the prompt contains, unlike a template-filler), and the price is that its
-# tokens share num_predict — so a run that loops in scratchpad returns EMPTY
-# content rather than a truncated answer, and the day's already-matched candidates
-# are thrown away. Measured at 3 of 29 runs (2026-08-02, -08-12, -08-14), and not
-# a function of prompt size: the smallest of the three had 15 signals, the largest
-# 46. It's nondeterministic — 2026-08-14 produced nothing, then produced nudges on
-# the very next call with the identical prompt — so asking again fixes it where
-# turning thinking off would only trade this failure for worse judgment. One retry
-# takes a ~10% loss rate to ~1%; a second isn't worth another 35s of the single
-# Ollama slot at 5:45am.
-MAX_SYNTHESIS_ATTEMPTS = 2
+# The judge's 0-10 score a candidate needs to become a nudge. There is no cap on how
+# many pass: more real links make more nudges, none make none. Replayed 2026-11-12 on
+# 95 real candidates from 16 days: the scores split into 0-5 (29, coincidences such
+# as "level" or "after week") and 7-10 (66), with no 6; 20 of the 21 nudges the old
+# one-call judge kept scored 7 or more.
+MIN_NUDGE_SCORE = 7
+
+# What the one tap does, asked at the end of the nudge. Python adds it, not the
+# model: asked to end with the button's question, the model copied the button's
+# description instead ("save the facts as a note for his wiki").
+_QUESTIONS = {"wiki": "Save it to the wiki?", "ticket": "Add it to the ticket?"}
 
 # A wiki page's summary as shown to the model. One line in the vault, so this rarely
 # binds; it's here so one long summary can't dominate the shortlist's size.
@@ -173,30 +172,29 @@ _STOPWORDS = {
     "that", "what", "using", "about", "into", "over", "more", "have", "will",
 }
 
-SYNTHESIS_SYSTEM_PROMPT = f"""You are {prefs.user_name()}'s personal assistant. \
-Below is a shortlist of CANDIDATES, put together by a dumb keyword match. Your job \
-is to decide which are GENUINE, useful connections worth telling him about, and \
-which are coincidental. There are two kinds:
+JUDGE_SYSTEM_PROMPT = f"""You are {prefs.user_name()}'s personal assistant. \
+Below is ONE candidate connection, found by a dumb keyword match. It is one of two \
+kinds:
 
 - CONNECTION — something {prefs.user_name()} did yesterday (browsed a site, Liked a \
 video, worked through something with an AI agent) lines up with something already in \
-his world (a page in his notes wiki, or a company he tracks).
+his world (a page in his notes wiki, a project, a parked idea, or a company he tracks).
 - ECHO — the same theme reached him yesterday through two independent channels. The \
-repetition is the point: it says what he is actually chewing on. Say so plainly, e.g. \
-"Stripe's PM archetypes came at you twice yesterday — reading and video; worth a note?".
+repetition is the point: it says what he is actually chewing on.
 
-Keep ONLY the genuine, non-obvious, actionable ones. For each, write ONE short line \
-that names both sides and why they connect — phrased as a nudge he can act on. A \
-candidate's "button:" line says what his one tap will do; end the nudge with a \
-question that asks exactly that, e.g. "You dug into DuckDB yesterday — it fits your \
-'local-analytics' note; save it to the wiki?". With no button, ask nothing.
+Score how strongly the two sides are about the SAME topic in a way that is useful \
+for him to know:
+- 0-2: the shared words are a coincidence (a common word, a site name, a login page).
+- 3-5: same broad area, but nothing he would act on.
+- 6-8: clearly the same topic; worth a note or a comment.
+- 9-10: a strong, non-obvious link he would want to act on today.
 
-Output rules:
-- One nudge per line, each starting with "- " and then the candidate's number in \
-brackets, e.g. "- [2] ...".
-- At most {MAX_NUDGES} lines. Fewer is better. Quality over quantity.
-- If NONE of the candidates is a genuine, useful connection, output exactly: NONE
-- Output only the lines (or NONE) — no preamble, no headings, no explanation."""
+Reply in exactly two lines, nothing else:
+SCORE: <a whole number 0-10>
+NUDGE: <one short line to him that names both sides and why they connect, e.g. \
+"You dug into DuckDB yesterday — it fits your 'local-analytics' note." or \
+"Stripe's PM archetypes came at you twice yesterday — reading and video." Ask no \
+question.>"""
 
 
 # The AI-chat log's section headers ("**Learned**") and the two empty-section
@@ -685,40 +683,54 @@ def render_candidates(pairs: list) -> str:
                 + (f" — {summary}" if summary else "") + "\n"
                 f"   shared terms: {', '.join(p['overlap'])}"
             )
-        action = action_for(p)
-        lines.append(f"   button: {DESCRIPTIONS[action] if action else 'none'}")
     return "\n".join(lines)
 
 
-_TAG_RE = re.compile(r"^\[(\d+)\]\s*")
+_SCORE_RE = re.compile(r"^\s*SCORE:\s*(\d+)", re.M | re.I)
+_NUDGE_RE = re.compile(r"^\s*NUDGE:\s*(.+)$", re.M | re.I)
 
 
-def tag_nudges(nudges: list, candidates: list, logger) -> list:
-    """Map each "[N] text" nudge back to candidate N, as (text, pair) with the
-    tag stripped. The model copies a small number, never an id (AGENTS.md); a
-    missing or out-of-range number keeps the nudge with no button, logged at
-    WARNING because it silently costs a button."""
-    tagged = []
-    for nudge in nudges:
-        m = _TAG_RE.match(nudge)
-        n = int(m.group(1)) if m else 0
-        text = nudge[m.end():].strip() if m else nudge
-        pair = candidates[n - 1] if 1 <= n <= len(candidates) else None
-        tagged.append((text, pair))
-    untagged = sum(1 for _, pair in tagged if pair is None)
-    if untagged:
-        logger.warning(f"{untagged} of {len(nudges)} nudge(s) had no valid [N] "
-                       f"candidate tag; pushed without a button")
-    return tagged
+def parse_verdict(text: str) -> tuple | None:
+    """(score, line) from a judge reply, or None when either line is missing."""
+    score, nudge = _SCORE_RE.search(text or ""), _NUDGE_RE.search(text or "")
+    if not (score and nudge and nudge.group(1).strip()):
+        return None
+    return min(int(score.group(1)), 10), nudge.group(1).strip()
 
 
-def parse_nudges(text: str) -> list:
-    """Pull the "- " bullet lines the model emitted, capped at MAX_NUDGES. A
-    lone NONE (or no bullets) yields nothing — the silence path."""
-    nudges = [line.strip()[2:].strip()
-              for line in (text or "").splitlines()
-              if line.strip().startswith("- ") and line.strip()[2:].strip()]
-    return nudges[:MAX_NUDGES]
+def with_question(line: str, pair: dict) -> str:
+    """The nudge with its one-tap question appended in Python. A company has no
+    action, so it asks nothing."""
+    action = action_for(pair)
+    return f"{line} {_QUESTIONS[action]}" if action else line
+
+
+def judge(candidates: list, logger, backend) -> list:
+    """Score each candidate in its own tool-free call, thinking OFF; return
+    (score, line, pair) for every reply that parsed, best first.
+
+    One call per candidate replaced one thinking-ON call over the whole list. That
+    call ran out of num_predict on 23% of first tries and gave up on 7 of 117 runs:
+    a replay of a give-up day with 8192 tokens stopped on its own at 5,129 — long,
+    honest drafting and redrafting, not a loop — so the 3,072 budget was simply too
+    small. Thinking OFF, a single candidate is a two-line template: 95 of 95 real
+    candidates parsed, at 0.8s each (2026-11-12). Each pair also carries its score,
+    which record() stores for /nudges."""
+    verdicts = []
+    for i, pair in enumerate(candidates, 1):
+        raw = complete_text(system_prompt=JUDGE_SYSTEM_PROMPT,
+                            user_prompt=render_candidates([pair]),
+                            logger=logger, backend=backend, think=False)
+        logger.info(f"Judge [{i}]: {' | '.join((raw or '').strip().splitlines())}")
+        verdict = parse_verdict(raw)
+        if verdict:
+            score, line = verdict
+            verdicts.append((score, line, {**pair, "judge_score": score}))
+    if len(verdicts) < len(candidates):
+        logger.warning(f"{len(candidates) - len(verdicts)} of {len(candidates)} "
+                       "judge repl(ies) had no SCORE/NUDGE lines; those candidates "
+                       "were dropped")
+    return sorted(verdicts, key=lambda v: -v[0])
 
 
 def main() -> int:
@@ -748,7 +760,7 @@ def main() -> int:
 
         # Drop connections already made in the last fortnight — see drop_repeats.
         # Done before the model call, so a suppressed pair costs nothing and the
-        # model's three slots go to what's actually new.
+        # judge's time goes to what's actually new.
         matched = len(candidates)
         candidates = drop_repeats(candidates, recent_nudges(RECENT_NUDGE_DAYS, logger))
         if len(candidates) < matched:
@@ -771,48 +783,18 @@ def main() -> int:
 
         backend = resolve_backend("daily_synthesis")
         warm_model(logger=logger, backend=backend)
-        raw = ""
-        for attempt in range(1, MAX_SYNTHESIS_ATTEMPTS + 1):
-            raw = complete_text(system_prompt=SYNTHESIS_SYSTEM_PROMPT,
-                                user_prompt=prompt, logger=logger, backend=backend)
-            logger.info(f"Model output:\n{raw}")
-            if (raw or "").strip():
-                break
-            if attempt < MAX_SYNTHESIS_ATTEMPTS:
-                logger.warning(
-                    f"model returned EMPTY content on attempt {attempt}/"
-                    f"{MAX_SYNTHESIS_ATTEMPTS} for {len(candidates)} candidate(s) "
-                    "— asking again"
-                )
-
-        nudges = parse_nudges(raw)
-        if not nudges:
-            # Three different things end up here, and only one of them is healthy:
-            # the model judged nothing genuine (it says NONE), the model returned
-            # nothing at all, or it returned prose that held no "- " bullets. They
-            # used to share one INFO line, which made a broken run indistinguishable
-            # from a quiet one — and silence is this task's common case, so nobody
-            # would ever look. Per AGENTS.md, a task that silently produces LESS is
-            # worse than one that fails, because only the failure pushes an alert.
-            # These WARNINGs reach the 8am log_inspector; the INFO does not.
-            if not (raw or "").strip():
-                logger.warning(
-                    f"model returned EMPTY content on all {MAX_SYNTHESIS_ATTEMPTS} "
-                    f"attempt(s) for {len(candidates)} candidate(s) — thinking is ON "
-                    "for this call, so the budget may have gone to scratchpad; "
-                    "nothing pushed"
-                )
-            elif "NONE" not in raw:
-                logger.warning(
-                    f"model returned {len(raw)} chars but no parsable '- ' bullets "
-                    f"from {len(candidates)} candidate(s); nothing pushed"
-                )
-            else:
-                logger.info("No genuine connections; nothing to push")
+        verdicts = judge(candidates, logger, backend)
+        kept = [v for v in verdicts if v[0] >= MIN_NUDGE_SCORE]
+        logger.info(f"{len(kept)} of {len(candidates)} candidate(s) scored "
+                    f">= {MIN_NUDGE_SCORE}")
+        if not kept:
+            # The healthy quiet day: every candidate was judged and none was a real
+            # link. Unparsable replies already warned inside judge().
+            logger.info("No genuine connections; nothing to push")
             logger.info("Daily synthesis run complete")
             return 0
 
-        tagged = tag_nudges(nudges, candidates, logger)
+        tagged = [(with_question(line, pair), pair) for _, line, pair in kept]
         nudges = [text for text, _ in tagged]
         # Numbered, because each button is labelled with its nudge's number.
         message = "\n".join(f"{i}. {n}" for i, n in enumerate(nudges, 1))

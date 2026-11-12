@@ -61,13 +61,11 @@ _ANCHOR_ACTIONS = {
     "idea you parked": "ticket",
 }
 
-# The button's label and the words the model is told the button does, so the
-# question it writes matches what the tap will do.
+# The button's label in the push.
 LABELS = {"wiki": "wiki", "ticket": "ticket"}
-DESCRIPTIONS = {
-    "wiki": "save the facts as a note for his wiki",
-    "ticket": "add the facts as a comment on that ClickUp item",
-}
+
+# ntfy accepts at most three action buttons on one push.
+_MAX_BUTTONS = 3
 
 
 def action_for(pair: dict) -> str | None:
@@ -119,6 +117,8 @@ def record(day, tagged: list) -> list:
                 # score: a one-token anchor always scores 1.0.
                 "overlap": list(pair.get("overlap", [])),
                 "match_score": round(pair.get("score", 0), 2),
+                # The judge's 0-10 quality score (tasks/daily_synthesis.py:judge).
+                "score": pair.get("judge_score"),
                 "created": datetime.now().isoformat(timespec="seconds"),
                 "done": None,
                 "dismissed": None,
@@ -151,7 +151,7 @@ def read_token(token: str) -> str | None:
 
 def buttons(rows: list) -> list | None:
     """ntfy action buttons, one per nudge that has an action, labelled with the
-    nudge's number in the push. None when WREN_PUBLIC_URL is unset (the push
+    nudge's number in the push, at most _MAX_BUTTONS. None when WREN_PUBLIC_URL is unset (the push
     still goes, without buttons) or nothing has an action."""
     base = config.getenv("WREN_PUBLIC_URL", "").rstrip("/")
     if not base:
@@ -161,7 +161,7 @@ def buttons(rows: list) -> list | None:
          "url": f"{base}/api/nudges/act?token={make_token(row['id'])}",
          "method": "POST", "clear": False}
         for i, row in enumerate(rows, 1) if row and row["action"]
-    ]
+    ][:_MAX_BUTTONS]  # rows come best-scored first; the rest are tapped on /nudges
     return actions or None
 
 

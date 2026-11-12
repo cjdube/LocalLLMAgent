@@ -83,7 +83,7 @@ def test_strain_warnings_are_labelled_not_just_counted():
               "ollama generation (3072 tokens) reached num_predict=3072 and was cut off"),
     )
     labels = [f["label"] for f in log_inspector._scan_lines(NOW)]
-    assert labels == ["context overflow", "repetition loop"]
+    assert labels == ["context overflow", "ran out of tokens"]
 
 
 def test_unrecognised_warning_still_surfaces():
@@ -532,7 +532,7 @@ def test_strain_only_pushes_at_default_priority(pushes):
                      "ollama generation (3072 tokens) reached num_predict=3072 and was cut off"))
     assert log_inspector.main() == 0
     assert pushes[0]["priority"] == "default"
-    assert "Model strain: 1x repetition loop" in pushes[0]["message"]
+    assert "Model strain: 1x ran out of tokens" in pushes[0]["message"]
 
 
 def test_push_failure_does_not_fail_the_run(monkeypatch, pushes):
