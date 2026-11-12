@@ -88,11 +88,11 @@ matching anything:
   exception where code *was* the fix: `AgenticDevelopment` had `AGENTS.md` and
   nothing else, so the read list grew that spelling rather than the repo growing
   a duplicate README
-- a project whose `docs/` tree outgrew `MAX_DOC_TITLES` (40) is named with the
+- a project whose `docs/` tree outgrew `MAX_DOC_TITLES` (60) is named with the
   pre-cap count, since `_doc_titles` drops the alphabetical tail. The blurb still
   reads normally; it just stops reflecting part of what the project documents.
   LocalLLMAgent sat at exactly 20 when this was added, and tripped the cap again
-  at 21 and at 32 — each time the WARNING is what said so
+  at 21, at 32 and at 41 — each time the WARNING is what said so
 - a distillation returning fewer than 4 topics is named with counts
 
 The cap itself stays — a few dozen one-line titles is the right bound for a

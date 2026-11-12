@@ -61,9 +61,9 @@ DOC_CHARS = 2000
 
 # docs/ headings are one line each; this bounds a project with a big docs tree.
 # Raised from 20 when this repo's own docs/ reached 21 and started truncating,
-# then from 30 when it reached 32 — a title is one line, so headroom is cheap
-# next to the 2000-char README.
-MAX_DOC_TITLES = 40
+# then from 30 when it reached 32, then from 40 when it reached 41 — a title is
+# one line, so headroom is cheap next to the 2000-char README.
+MAX_DOC_TITLES = 60
 
 # Bound a hung git invocation so one wedged checkout can't stall the scan. Same
 # posture as tasks/starred_installed.py:_run_version_cmd — no shell, argv list.
