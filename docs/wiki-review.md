@@ -31,7 +31,7 @@ gitignored because it holds real page names.
 | Store field | Holds |
 | --- | --- |
 | `groups` | Each group's `id`, `family`, `title` and `line`, plus either a `pages` list or a dated `prefix` |
-| `marks` | Group id to `{verdict, pages}`, where `pages` holds the per-page overrides |
+| `marks` | Group id to `{verdict, pages, covers}`. `pages` holds the per-page overrides. `covers` lists the pages the group held when its verdict was set |
 | `sorted_at` | The date the group list was last sorted |
 
 The stored list and the vault are matched on each read:
@@ -43,6 +43,11 @@ The stored list and the vault are matched on each read:
   are not offered, because a prefix decides their pages. A tick on the page moves
   with it. A page already in a group has no menu, so its marks stay with its group.
 - A name that left the vault drops out. A group left with no pages is hidden.
+- A group's verdict covers only the pages it held when you set it. A page that
+  joins later (a new daily page, a new Unsorted page, a moved page) stays
+  unmarked, so it never reaches the cut list unseen. The group shows
+  "N new since marked". To cover them, tap the verdict off and on again. A tick
+  on one page does not change what the verdict covers.
 
 No model sorts new pages, because a local model failed that test: see below. To
 sort many at once, ask Claude Code to read the Unsorted pages and add each name to

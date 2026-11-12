@@ -119,6 +119,7 @@ def review() -> dict:
             marks[group["id"]] = {
                 "verdict": mark["verdict"],
                 "pages": {n: v for n, v in mark["pages"].items() if n in members},
+                "covers": [n for n in mark.get("covers", []) if n in members],
             }
     # Not read from `groups`: a stored group with no pages left can still take one,
     # and a dated group never can, because its prefix decides its pages.
@@ -152,7 +153,16 @@ def set_mark(group_id: str, verdict, pages) -> None:
         if verdict is None and not pages:
             store["marks"].pop(group_id, None)
         else:
-            store["marks"][group_id] = {"verdict": verdict, "pages": pages}
+            # A verdict covers the pages the user saw when they set it, never pages
+            # that join the group later. A tick alone keeps the old list.
+            old = store["marks"].get(group_id) or {}
+            if verdict is None:
+                covers = []
+            elif old.get("verdict") == verdict:
+                covers = old.get("covers", [])
+            else:
+                covers = group["pages"]
+            store["marks"][group_id] = {"verdict": verdict, "pages": pages, "covers": covers}
         atomic_write_json(_STORE_PATH, store)
 
 
@@ -179,5 +189,5 @@ def move_page(name: str, group_id: str) -> None:
         mark = store["marks"].get(UNSORTED_ID)
         override = mark["pages"].pop(name, None) if mark else None
         if override:
-            store["marks"].setdefault(group_id, {"verdict": None, "pages": {}})["pages"][name] = override
+            store["marks"].setdefault(group_id, {"verdict": None, "pages": {}, "covers": []})["pages"][name] = override
         atomic_write_json(_STORE_PATH, store)

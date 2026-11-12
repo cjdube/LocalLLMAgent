@@ -5,7 +5,7 @@
 // the API goes through esc() before it reaches innerHTML.
 (() => {
   const FAMILY_NOTES = {
-    "Dated logs": "A cut here removes old daily pages only. New pages still arrive each day.",
+    "Dated logs": "A mark covers the pages here when you set it. New daily pages stay unmarked until you mark the group again.",
     "Your own projects": "Pages here describe your own work. Other pages link to many of them, so look at the links number before you cut.",
   };
 
@@ -13,10 +13,13 @@
     { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const num = (n) => n.toLocaleString("en-US");
 
+  // The verdict reaches only the pages it covers: the ones in the group when it was set.
+  const groupCuts = (mark, name) => (mark || {}).verdict === "cut" && ((mark || {}).covers || []).includes(name);
+
   // A page override wins over its group's verdict.
   function isCut(mark, name) {
     const override = ((mark || {}).pages || {})[name];
-    return override ? override === "cut" : (mark || {}).verdict === "cut";
+    return override ? override === "cut" : groupCuts(mark, name);
   }
 
   function cutList(groups, marks) {
@@ -60,6 +63,7 @@
     const newest = g.pages.reduce((a, n) => (P[n][4] > a ? P[n][4] : a), "");
     const thin = g.family === "Dated logs" ? "" : `<span>${g.pages.filter(isThin).length} thin</span>`;
     const overrides = Object.keys(m.pages || {}).length;
+    const unmarked = m.verdict ? g.pages.filter((n) => !(m.covers || []).includes(n)).length : 0;
     const isOpen = open.has(g.id) || !!query;
     const v = (key, label) => `<button class="v ${key}" type="button" data-g="${esc(g.id)}" data-v="${key}" aria-pressed="${m.verdict === key}">${label}</button>`;
     return `<article class="group" data-group="${esc(g.id)}">
@@ -68,7 +72,7 @@
         <div class="votes" role="group" aria-label="Mark ${esc(g.title)}">${v("keep", "Keep")}${v("unsure", "Not sure")}${v("cut", "Don't care")}</div>
       </div>
       <div class="size" aria-hidden="true"><i style="width:${(g.pages.length / biggest * 100).toFixed(1)}%"></i></div>
-      <div class="meta"><span>${g.pages.length} pages</span><span>${num(words)} words</span>${thin}<span>newest ${esc(newest)}</span>${overrides ? `<span>${overrides} set by hand</span>` : ""}</div>
+      <div class="meta"><span>${g.pages.length} pages</span><span>${num(words)} words</span>${thin}<span>newest ${esc(newest)}</span>${overrides ? `<span>${overrides} set by hand</span>` : ""}${unmarked ? `<span>${unmarked} new since marked</span>` : ""}</div>
       <button class="more" type="button" data-more="${esc(g.id)}" aria-expanded="${isOpen}">${isOpen ? "Hide pages" : "Show pages"}</button>
       ${isOpen ? `<div class="pages">${shown.map((n) => pageRow(g, n)).join("")}</div>` : ""}
     </article>`;
@@ -131,7 +135,8 @@
 
   // One queue per group, so two quick taps on a group reach the server in order.
   function save(id) {
-    const body = JSON.stringify(mark(id));
+    const { verdict, pages } = mark(id);  // covers is the server's to set
+    const body = JSON.stringify({ verdict, pages });
     queues[id] = (queues[id] || Promise.resolve()).then(async () => {
       const resp = await fetch(`/api/wiki/review/marks/${encodeURIComponent(id)}`, {
         method: "PUT",
@@ -190,7 +195,10 @@
       rerender();
     } else if (b.dataset.v) {
       const id = b.dataset.g, m = mark(id);
-      marks[id] = { verdict: m.verdict === b.dataset.v ? null : b.dataset.v, pages: m.pages || {} };
+      const verdict = m.verdict === b.dataset.v ? null : b.dataset.v;
+      // Same rule as set_mark: a new verdict covers the group's pages as they are now.
+      const covers = verdict ? DATA.groups.find((g) => g.id === id).pages.slice() : [];
+      marks[id] = { verdict, pages: m.pages || {}, covers };
       rerender();
       save(id);
     }
@@ -206,9 +214,9 @@
     const id = box.dataset.g, name = box.dataset.p, m = mark(id);
     const pages = { ...(m.pages || {}) };
     // A tick that agrees with the group's verdict is no override at all.
-    if (box.checked === (m.verdict === "cut")) delete pages[name];
+    if (box.checked === groupCuts(m, name)) delete pages[name];
     else pages[name] = box.checked ? "cut" : "keep";
-    marks[id] = { verdict: m.verdict || null, pages };
+    marks[id] = { verdict: m.verdict || null, pages, covers: m.covers || [] };
     rerender();
     save(id);
   });

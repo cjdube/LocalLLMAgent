@@ -70,14 +70,49 @@ describe("isCut and cutList", () => {
     const { isCut } = window.WrenWikiReview;
     expect(isCut({ verdict: "cut", pages: { a: "keep" } }, "a")).toBe(false);
     expect(isCut({ verdict: "keep", pages: { a: "cut" } }, "a")).toBe(true);
-    expect(isCut({ verdict: "cut", pages: {} }, "b")).toBe(true);
+    expect(isCut({ verdict: "cut", pages: {}, covers: ["b"] }, "b")).toBe(true);
     expect(isCut(undefined, "a")).toBe(false);
   });
 
   test("cutList lists only the pages marked to cut", () => {
     const { groups } = payload();
-    const marks = { g1: { verdict: "cut", pages: { a: "keep" } }, g2: { verdict: "unsure", pages: {} } };
+    const marks = { g1: { verdict: "cut", pages: { a: "keep" }, covers: ["a", "b"] }, g2: { verdict: "unsure", pages: {} } };
     expect(window.WrenWikiReview.cutList(groups, marks)).toEqual(["b"]);
+  });
+
+  test("a cut verdict skips a page that joined the group after it was set", () => {
+    const { groups } = payload();
+    const marks = { g1: { verdict: "cut", pages: {}, covers: ["a"] } };
+    expect(window.WrenWikiReview.cutList(groups, marks)).toEqual(["a"]);
+  });
+});
+
+describe("pages that joined after the mark", () => {
+  test("the group says how many, and their boxes start unticked", async () => {
+    await start(payload({ marks: { g1: { verdict: "cut", pages: {}, covers: ["a"] } } }));
+    expect(document.querySelector('[data-group="g1"] .meta').textContent).toContain("1 new since marked");
+    document.querySelector('[data-more="g1"]').click();
+    expect(document.querySelector('input[data-p="b"]').checked).toBe(false);
+    expect(text("t-pages")).toBe("1");
+  });
+
+  test("marking the group again covers every page in it now", async () => {
+    await start(payload({ marks: { g1: { verdict: "cut", pages: {}, covers: ["a"] } } }));
+    vote("g1", "cut").click();   // clears
+    vote("g1", "cut").click();   // sets again
+    await flush();
+    expect(text("t-pages")).toBe("2");
+    expect(document.querySelector('[data-group="g1"] .meta').textContent).not.toContain("new since marked");
+  });
+
+  test("ticking a page the verdict does not cover saves a cut override", async () => {
+    await start(payload({ marks: { g1: { verdict: "cut", pages: {}, covers: ["a"] } } }));
+    document.querySelector('[data-more="g1"]').click();
+    const box = document.querySelector('input[data-p="b"]');
+    box.checked = true;
+    box.dispatchEvent(new Event("change", { bubbles: true }));
+    await flush();
+    expect(JSON.parse(global.fetch.mock.calls[1][1].body)).toEqual({ verdict: "cut", pages: { b: "cut" } });
   });
 });
 
@@ -161,7 +196,7 @@ describe("the page", () => {
   });
 
   test("saved marks show on load", async () => {
-    await start(payload({ marks: { g1: { verdict: "cut", pages: {} } } }));
+    await start(payload({ marks: { g1: { verdict: "cut", pages: {}, covers: ["a", "b"] } } }));
     expect(vote("g1", "cut").getAttribute("aria-pressed")).toBe("true");
     expect(text("t-marked")).toBe("1");
     expect(text("t-pages")).toBe("2");
@@ -217,7 +252,7 @@ describe("the page", () => {
   });
 
   test("unticking one page in a cut group saves a keep override", async () => {
-    await start(payload({ marks: { g1: { verdict: "cut", pages: {} } } }));
+    await start(payload({ marks: { g1: { verdict: "cut", pages: {}, covers: ["a", "b"] } } }));
     document.querySelector('[data-more="g1"]').click();
     const box = document.querySelector('input[data-p="a"]');
     box.checked = false;
@@ -229,7 +264,7 @@ describe("the page", () => {
   });
 
   test("ticking a page back removes the override", async () => {
-    await start(payload({ marks: { g1: { verdict: "cut", pages: { a: "keep" } } } }));
+    await start(payload({ marks: { g1: { verdict: "cut", pages: { a: "keep" }, covers: ["a", "b"] } } }));
     document.querySelector('[data-more="g1"]').click();
     const box = document.querySelector('input[data-p="a"]');
     box.checked = true;
@@ -239,7 +274,7 @@ describe("the page", () => {
   });
 
   test("the filter hides groups and leaves the copy button alone", async () => {
-    await start(payload({ marks: { g1: { verdict: "cut", pages: {} } } }));
+    await start(payload({ marks: { g1: { verdict: "cut", pages: {}, covers: ["a", "b"] } } }));
     document.querySelector('[data-f="cut"]').click();
     expect(document.querySelectorAll(".group")).toHaveLength(1);
     expect(document.getElementById("copyCut").hasAttribute("aria-pressed")).toBe(false);
@@ -248,7 +283,7 @@ describe("the page", () => {
   test("Copy cut list copies the names and sends nothing to the server", async () => {
     const writeText = jest.fn(async () => {});
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-    await start(payload({ marks: { g1: { verdict: "cut", pages: { a: "keep" } }, g2: { verdict: "cut", pages: {} } } }));
+    await start(payload({ marks: { g1: { verdict: "cut", pages: { a: "keep" }, covers: ["a", "b"] }, g2: { verdict: "cut", pages: {}, covers: ["c"] } } }));
     document.getElementById("copyCut").click();
     await flush();
     expect(writeText).toHaveBeenCalledWith("b\nc");
@@ -269,7 +304,7 @@ describe("the page", () => {
   test("a blocked copy says so", async () => {
     const writeText = jest.fn(async () => { throw new Error("denied"); });
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-    await start(payload({ marks: { g2: { verdict: "cut", pages: {} } } }));
+    await start(payload({ marks: { g2: { verdict: "cut", pages: {}, covers: ["c"] } } }));
     document.getElementById("copyCut").click();
     await flush();
     expect(document.getElementById("status").className).toBe("err");

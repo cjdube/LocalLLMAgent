@@ -120,7 +120,8 @@ def test_a_link_inside_a_code_span_does_not_count(vault, store):
 
 def test_mark_saves_and_reads_back(vault, store):
     wr.set_mark("tools", "cut", {"alpha": "keep"})
-    assert wr.review()["marks"]["tools"] == {"verdict": "cut", "pages": {"alpha": "keep"}}
+    assert wr.review()["marks"]["tools"] == {"verdict": "cut", "pages": {"alpha": "keep"},
+                                             "covers": ["alpha", "with space"]}
     assert load_json(wr._STORE_PATH, {})["groups"] == GROUPS     # the save keeps the rest
 
 
@@ -134,6 +135,33 @@ def test_a_mark_on_a_page_since_cut_is_not_reported(vault, store):
     wr.set_mark("tools", "cut", {"alpha": "keep", "with space": "cut"})
     (vault / "alpha.md").unlink()
     assert wr.review()["marks"]["tools"]["pages"] == {"with space": "cut"}
+
+
+@pytest.mark.parametrize("group_id, new_page", [
+    ("d-daily", "daily-note-2026-01-03"),   # a dated group gains each new daily page
+    (wr.UNSORTED_ID, "another-new-page"),   # Unsorted gains every new page
+])
+def test_a_verdict_does_not_cover_a_page_that_joins_later(vault, store, group_id, new_page):
+    wr.set_mark(group_id, "cut", {})
+    before = _by_id(wr.review())[group_id]["pages"]
+    (vault / f"{new_page}.md").write_text("# new\n", encoding="utf-8")
+    result = wr.review()
+    assert new_page in _by_id(result)[group_id]["pages"]
+    assert result["marks"][group_id]["covers"] == before
+
+
+def test_a_tick_keeps_the_covered_list_and_a_new_verdict_refreshes_it(vault, store):
+    wr.set_mark("d-daily", "cut", {})
+    (vault / "daily-note-2026-01-03.md").write_text("# new\n", encoding="utf-8")
+    wr.set_mark("d-daily", "cut", {"daily-note-2026-01-02": "keep"})
+    assert wr.review()["marks"]["d-daily"]["covers"] == ["daily-note-2026-01-02"]
+    wr.set_mark("d-daily", "unsure", {})
+    assert wr.review()["marks"]["d-daily"]["covers"] == ["daily-note-2026-01-02", "daily-note-2026-01-03"]
+
+
+def test_overrides_with_no_verdict_cover_nothing(vault, store):
+    wr.set_mark("tools", None, {"alpha": "cut"})
+    assert wr.review()["marks"]["tools"]["covers"] == []
 
 
 @pytest.mark.parametrize("verdict", ["maybe", 1, ["cut"]])
@@ -203,7 +231,7 @@ def test_a_cut_tick_follows_the_page_so_the_cut_list_does_not_change(vault, stor
     wr.set_mark("unsorted", None, {"new-page": "cut"})
     wr.move_page("new-page", "tools")
     marks = load_json(wr._STORE_PATH, {})["marks"]
-    assert marks["tools"] == {"verdict": None, "pages": {"new-page": "cut"}}
+    assert marks["tools"] == {"verdict": None, "pages": {"new-page": "cut"}, "covers": []}
     assert marks["unsorted"]["pages"] == {}
 
 

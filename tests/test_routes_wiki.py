@@ -142,8 +142,9 @@ def test_review_mark_survives_a_fresh_read(auth_client, vault):
     resp = auth_client.put("/api/wiki/review/marks/g",
                            json={"verdict": "cut", "pages": {"alpha": "keep"}})
     assert resp.status_code == 200
-    assert auth_client.get("/api/wiki/review").get_json()["marks"]["g"] == {
-        "verdict": "cut", "pages": {"alpha": "keep"}}
+    mark = auth_client.get("/api/wiki/review").get_json()["marks"]["g"]
+    assert (mark["verdict"], mark["pages"]) == ("cut", {"alpha": "keep"})
+    assert "alpha" in mark["covers"]
 
 
 @pytest.mark.parametrize("group, body, status", [
