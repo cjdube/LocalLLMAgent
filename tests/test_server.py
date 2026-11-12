@@ -136,7 +136,7 @@ _URL_ARGS = {
     "task_key": "morning_brief", "run_id": "someid", "item_id": "abc",
     "watch_id": "abc", "game_id": "weigh-anchor", "asset": "index.html",
     "rest": "ai/decide", "filename": "favicon.svg", "name": "some-page",
-    "group_id": "some-group",
+    "group_id": "some-group", "nudge_id": "abc",
 }
 
 

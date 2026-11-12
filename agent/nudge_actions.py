@@ -18,11 +18,15 @@ Python picks the action from the candidate's anchor kind when the nudge is
 pushed (action_for); the model only writes the line. The tap is the approval —
 the user read the nudge and chose it — so there is no second confirmation.
 
-Each pushed nudge is a row in config/nudge_actions.json, kept RETENTION_DAYS. A
-button's token names one row and is signed with the Flask secret, like the
-background approvals, but lives as long as the row: a 5:45 AM push read at
-lunch must still work. Single-use falls out of the row's `done` stamp. The
-`done` stamps are also the record of which nudges were acted on.
+Each pushed nudge is a row in config/nudge_actions.json, kept RETENTION_DAYS —
+including a nudge with no action (a company), so the /nudges page can show it.
+That page is the second way to say yes: it lists every row and calls perform()
+or dismiss() here, so a nudge not tapped on the day is not lost. A button's
+token names one row and is signed with the Flask secret, like the background
+approvals, and lives _TOKEN_MAX_AGE_S: a 5:45 AM push read at lunch must still
+work, and after a week the page is the way in. Single-use falls out of the
+row's `done` stamp. The `done` and `dismissed` stamps are also the record of
+which nudges were acted on.
 """
 
 import secrets
@@ -40,8 +44,9 @@ from agent.tools.web_fetch import fetch_webpage
 _ROOT = Path(__file__).resolve().parent.parent
 _STORE_PATH = _ROOT / "config" / "nudge_actions.json"
 
-RETENTION_DAYS = 7
-_TOKEN_MAX_AGE_S = RETENTION_DAYS * 86400
+# Long enough to review a backlog on /nudges; ~3 rows a day keeps the file small.
+RETENTION_DAYS = 90
+_TOKEN_MAX_AGE_S = 7 * 86400
 _TOKEN_SALT = "nudge-act"
 
 # Page text for a browsed page is a source excerpt, not the whole site. Bounds
@@ -89,17 +94,19 @@ def _evidence(pair: dict) -> list:
 
 
 def record(day, tagged: list) -> list:
-    """Store each (text, pair) nudge that has an action; return one row per
-    nudge in the same order — None where the nudge gets no button."""
+    """Store each (text, pair) nudge that maps to a candidate; return one row
+    per nudge in the same order — None where the nudge has no candidate. A row
+    with no action (a company) is still stored, for the /nudges page; buttons()
+    skips it."""
     rows = []
     with locked(_STORE_PATH):
         data = _load()
         _prune(data)
         for text, pair in tagged:
-            action = action_for(pair) if pair else None
-            if not action:
+            if not pair:
                 rows.append(None)
                 continue
+            action = action_for(pair)
             row = {
                 "id": secrets.token_urlsafe(8),
                 "day": f"{day:%Y-%m-%d}",
@@ -108,8 +115,13 @@ def record(day, tagged: list) -> list:
                 "target": pair["anchor"]["label"] if pair["kind"] == "anchor" else None,
                 "target_kind": pair["anchor"]["kind"] if pair["kind"] == "anchor" else None,
                 "evidence": _evidence(pair),
+                # The keyword match that made the candidate. Lexical, not a quality
+                # score: a one-token anchor always scores 1.0.
+                "overlap": list(pair.get("overlap", [])),
+                "match_score": round(pair.get("score", 0), 2),
                 "created": datetime.now().isoformat(timespec="seconds"),
                 "done": None,
+                "dismissed": None,
                 "result": None,
             }
             data["nudges"].append(row)
@@ -148,7 +160,7 @@ def buttons(rows: list) -> list | None:
         {"action": "http", "label": f"{i} → {LABELS[row['action']]}",
          "url": f"{base}/api/nudges/act?token={make_token(row['id'])}",
          "method": "POST", "clear": False}
-        for i, row in enumerate(rows, 1) if row
+        for i, row in enumerate(rows, 1) if row and row["action"]
     ]
     return actions or None
 
@@ -196,6 +208,8 @@ def perform(nudge_id: str) -> dict:
             return {"error": "that nudge has expired"}
         if row["done"]:
             return {"already": True, "row": row}
+        if not row["action"]:
+            return {"error": "this nudge has no action", "row": row}
         # Under the lock on purpose: a double tap must not write two notes.
         result = _do(row)
         if "error" in result:
@@ -204,3 +218,23 @@ def perform(nudge_id: str) -> dict:
         row["result"] = result
         atomic_write_json(_STORE_PATH, data)
     return {"done": True, "row": row}
+
+
+def dismiss(nudge_id: str) -> dict:
+    """Mark a nudge as not wanted, so /nudges moves it out of the open list.
+    A done nudge cannot be dismissed: the note or comment already exists."""
+    with locked(_STORE_PATH):
+        data = _load()
+        row = next((n for n in data["nudges"] if n["id"] == nudge_id), None)
+        if row is None:
+            return {"error": "that nudge has expired"}
+        if row["done"]:
+            return {"error": "that nudge was already acted on", "row": row}
+        row["dismissed"] = datetime.now().isoformat(timespec="seconds")
+        atomic_write_json(_STORE_PATH, data)
+    return {"dismissed": True, "row": row}
+
+
+def all_rows() -> list:
+    """Every stored nudge, newest first, for the /nudges page."""
+    return sorted(_load()["nudges"], key=lambda n: n.get("created", ""), reverse=True)

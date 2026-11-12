@@ -40,11 +40,54 @@ def test_action_follows_the_anchor_kind():
     assert na.action_for(_cross_pair()) == "wiki"
 
 
-def test_record_keeps_order_and_skips_nudges_with_no_action():
+def test_record_keeps_order_and_stores_a_nudge_with_no_action():
     rows = na.record(date(2026, 10, 30), [
         ("a", _anchor_pair()), ("b", None), ("c", _anchor_pair("company you track"))])
-    assert rows[0]["action"] == "wiki" and rows[1] is None and rows[2] is None
-    assert len(na._load()["nudges"]) == 1
+    assert rows[0]["action"] == "wiki" and rows[1] is None
+    # A company has no button, but the /nudges page still lists it.
+    assert rows[2]["action"] is None
+    assert [n["text"] for n in na._load()["nudges"]] == ["a", "c"]
+
+
+def test_record_keeps_the_match_that_made_the_candidate():
+    pair = {**_anchor_pair(), "overlap": ["duckdb"], "score": 0.3333}
+    [row] = na.record(date(2026, 10, 30), [("a", pair)])
+    assert row["overlap"] == ["duckdb"] and row["match_score"] == 0.33
+
+
+def test_a_nudge_with_no_action_gets_no_button():
+    rows = na.record(date(2026, 10, 30), [
+        ("a", _anchor_pair("company you track")), ("b", _anchor_pair())])
+    assert [a["label"] for a in na.buttons(rows)] == ["2 → wiki"]
+
+
+def test_a_nudge_with_no_action_cannot_be_performed():
+    [row] = na.record(date(2026, 10, 30), [("a", _anchor_pair("company you track"))])
+    assert na.perform(row["id"])["error"] == "this nudge has no action"
+
+
+def test_dismiss_marks_an_open_nudge_and_perform_still_works_after():
+    [row] = na.record(date(2026, 10, 30), [("a", _anchor_pair())])
+    assert na.dismiss(row["id"])["dismissed"]
+    assert na._load()["nudges"][0]["dismissed"]
+    assert na.perform(row["id"])["done"]  # changing your mind is allowed
+
+
+def test_a_done_nudge_cannot_be_dismissed():
+    [row] = na.record(date(2026, 10, 30), [("a", _anchor_pair())])
+    na.perform(row["id"])
+    assert "error" in na.dismiss(row["id"])
+    assert na._load()["nudges"][0]["dismissed"] is None
+    assert "error" in na.dismiss("nope")
+
+
+def test_all_rows_is_newest_first():
+    na.record(date(2026, 10, 29), [("old", _anchor_pair())])
+    data = na._load()
+    data["nudges"][0]["created"] = (datetime.now() - timedelta(days=1)).isoformat()
+    na.atomic_write_json(na._STORE_PATH, data)
+    na.record(date(2026, 10, 30), [("new", _anchor_pair())])
+    assert [n["text"] for n in na.all_rows()] == ["new", "old"]
 
 
 def test_buttons_are_numbered_by_the_nudge_they_belong_to():
@@ -127,7 +170,13 @@ def test_unknown_or_expired_nudge_is_an_error():
 def test_old_rows_are_pruned_on_write():
     [row] = na.record(date(2026, 10, 20), [("x", _anchor_pair())])
     data = na._load()
-    data["nudges"][0]["created"] = (datetime.now() - timedelta(days=8)).isoformat()
+    data["nudges"][0]["created"] = (
+        datetime.now() - timedelta(days=na.RETENTION_DAYS + 1)).isoformat()
     na.atomic_write_json(na._STORE_PATH, data)
     na.record(date(2026, 10, 30), [("y", _anchor_pair())])
     assert [n["text"] for n in na._load()["nudges"]] == ["y"]
+
+
+def test_a_week_old_row_outlives_its_button_token():
+    """The page is the way in after the phone's button expires."""
+    assert na.RETENTION_DAYS * 86400 > na._TOKEN_MAX_AGE_S

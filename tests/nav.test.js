@@ -15,7 +15,7 @@ const path = require("path");
 const NAV_SRC = fs.readFileSync(
   path.join(__dirname, "..", "chat", "static", "nav.js"), "utf8");
 
-const VIEWS = ["chat", "dashboard", "logs", "activity", "memories", "opportunities", "starred", "games", "wiki", "lint", "map", "settings"];
+const VIEWS = ["chat", "dashboard", "logs", "activity", "memories", "opportunities", "nudges", "starred", "games", "wiki", "lint", "map", "settings"];
 
 // Render the nav as if the page were served at `pathname`.
 function loadNavAt(pathname) {

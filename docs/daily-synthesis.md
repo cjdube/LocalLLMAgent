@@ -77,7 +77,8 @@ model told to "find connections across everything" manufactures them):
    copy written as `Daily-Synthesis-<date>.md` to `SYNTHESIS_DIR` (default
    `<vault>/nudges`) via `persist_or_email`. The push is the live channel; the
    file is the record the user scrolls back through later. No overlap, or nothing
-   genuine, means **no push and no file** — silence is the common case.
+   genuine, means **no push and no file**. That is the minority: 98 of 120 runs to
+   2026-11-11 pushed.
 
 Each of the three quiet endings logs its own line — no overlap, all candidates
 were repeats, nothing genuine — because silence is this task's usual outcome and
@@ -101,7 +102,8 @@ model decision (`agent/nudge_actions.py:action_for`):
 prompt tells the model to end its question with that offer, or ask nothing
 when there is none — so the question on the phone matches the button under it.
 
-The rows go to `config/nudge_actions.json` (kept 7 days). Each button is an ntfy
+The rows go to `config/nudge_actions.json` (kept 90 days; a company nudge is
+stored too, with no action). Each button is an ntfy
 `http` action that POSTs to `/api/nudges/act` with a signed token that names one
 row and lives 7 days ([security-model.md](security-model.md)). The tap runs in
 the chat server, in Python, with no model call. The row is stamped `done` under
@@ -111,6 +113,25 @@ for a retry. Either way a short push says what happened.
 No `WREN_PUBLIC_URL` means no buttons; the nudge still pushes. A line with no
 valid tag gets no button and logs a WARNING with the counts. Any error while
 building the buttons is logged and the push goes out without them.
+
+## The /nudges page
+
+A push that is not tapped on the day used to be lost: the row went after 7 days,
+and the archive keeps only the text, not the evidence a tap needs. `/nudges`
+lists every stored row in three groups — **Open**, **Done**, **Dismissed** —
+with what he did (the signal lines and their links), what it connects to, and
+the words the keyword match shared ("matched on: …"). **Save to wiki** / **Add to
+ticket** call the same `perform()` as the phone button, so the two cannot drift;
+**Dismiss** stamps `dismissed`, and a dismissed nudge can still be acted on later.
+A company nudge shows with Dismiss only.
+
+The row also stores `match_score` (shared tokens ÷ the smaller token set). The
+page does not show it: a one-token anchor always scores 1.0, so it is not a
+quality score. A model-given quality score belongs with the per-candidate judge
+step planned in the 2026-11-12 model-strain handoff.
+
+Backed by `GET /api/nudges`, `POST /api/nudges/<id>/act` and
+`POST /api/nudges/<id>/dismiss` in `chat/routes_nudges.py` (session auth).
 
 ## Reading them back
 

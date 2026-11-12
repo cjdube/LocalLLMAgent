@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wren Nudges</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="alternate icon" type="image/png" href="/static/favicon-32.png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="stylesheet" href="/static/nav.css">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    color: #1f2328;
+    background: #f4f4f5;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    background: #ffffff;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  header img.logo { height: 38px; width: 38px; border-radius: 9px; display: block; }
+  header h1 { font-size: 17px; margin: 0; }
+  header .sub { font-size: 13px; color: #9ca3af; }
+  header .spacer { flex: 1; }
+
+  main { max-width: 900px; margin: 0 auto; padding: 20px 18px 40px; display: flex; flex-direction: column; gap: 22px; }
+  .section-label { font-size: 13px; font-weight: 600; color: #6b7280; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: baseline; }
+  .section-label .hint { font-weight: 400; font-size: 12px; color: #9ca3af; }
+  details.section > summary { list-style: none; cursor: pointer; }
+  details.section > summary::-webkit-details-marker { display: none; }
+
+  .panel { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 6px 0; }
+  .empty { color: #9ca3af; font-size: 13px; padding: 10px 16px; }
+
+  .item { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 10px; padding: 12px 16px; border-top: 1px solid #f1f2f4; }
+  .item:first-child { border-top: none; }
+  .item .body { flex: 1 1 260px; min-width: 0; }
+  .item .text { font-size: 14px; line-height: 1.45; word-break: break-word; }
+  .item .target { font-size: 12.5px; color: #374151; margin-top: 4px; word-break: break-word; }
+  .item .target b { font-weight: 600; }
+  .item .meta { font-size: 11.5px; color: #9ca3af; margin-top: 4px; }
+  .item .meta a { color: #2563eb; text-decoration: none; }
+  .item .error { font-size: 12.5px; color: #b42318; margin-top: 4px; }
+
+  details.evidence { margin-top: 6px; }
+  details.evidence summary { font-size: 12.5px; font-weight: 600; color: #175cd3; cursor: pointer; }
+  details.evidence ul { margin: 6px 0 0; padding-left: 18px; font-size: 12.5px; color: #374151; }
+  details.evidence li { margin-bottom: 4px; word-break: break-word; }
+  details.evidence a { color: #2563eb; text-decoration: none; word-break: break-all; }
+
+  .badge { display: inline-flex; align-items: center; font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 20px; white-space: nowrap; background: #f2f4f7; color: #667085; }
+  .badge.wiki { background: #ecfdf3; color: #067647; }
+  .badge.ticket { background: #eff8ff; color: #175cd3; }
+
+  .actions { display: flex; gap: 8px; margin-left: auto; }
+  button { font-size: 13px; padding: 7px 14px; border-radius: 8px; border: 1px solid #d0d5dd; background: #ffffff; color: #344054; cursor: pointer; white-space: nowrap; }
+  button:hover { background: #f9fafb; }
+  button.primary { background: #1f2328; border-color: #1f2328; color: #ffffff; }
+  button.primary:hover { background: #333941; }
+  button:disabled { opacity: 0.5; cursor: default; }
+</style>
+</head>
+<body>
+  <header>
+    <img class="logo" src="/static/favicon.svg" alt="Wren">
+    <h1>Wren</h1>
+    <span class="sub">nudges</span>
+    <span class="spacer"></span>
+    <nav id="wren-nav" class="wren-nav"></nav>
+  </header>
+
+  <main>
+    <section>
+      <div class="section-label">Open <span id="openHint" class="hint"></span></div>
+      <div id="openWrap" class="panel">Loading…</div>
+    </section>
+    <section>
+      <div class="section-label">Done <span id="doneHint" class="hint"></span></div>
+      <div id="doneWrap" class="panel">Loading…</div>
+    </section>
+    <details class="section">
+      <summary class="section-label">Dismissed <span id="dismissedHint" class="hint"></span></summary>
+      <div id="dismissedWrap" class="panel">Loading…</div>
+    </details>
+  </main>
+
+<script>
+async function api(path, opts) { return (await fetch(path, opts)).json(); }
+function post(path) { return api(path, { method: "POST" }); }
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;  // textContent only — never innerHTML
+  return e;
+}
+function fmtDay(day) {
+  const d = new Date(day + "T12:00:00");
+  return isNaN(d) ? day : d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+}
+// Evidence URLs come from browsing history — only link http(s).
+function safeHref(url) { return /^https?:\/\//i.test(url || "") ? url : null; }
+function link(text, url) {
+  const href = safeHref(url);
+  if (!href) return el("span", null, text);
+  const a = el("a", null, text);
+  a.href = href; a.target = "_blank"; a.rel = "noopener noreferrer";
+  return a;
+}
+
+const ACTION_LABELS = { wiki: "Save to wiki", ticket: "Add to ticket" };
+
+function itemRow(n, state) {
+  const row = el("div", "item");
+  const body = el("div", "body");
+  body.appendChild(el("div", "text", n.text));
+
+  const target = el("div", "target");
+  if (n.target) {
+    target.appendChild(el("b", null, (n.target_kind || "connects to") + ": "));
+    target.appendChild(document.createTextNode(n.target));
+  } else {
+    target.textContent = "Echo: the same theme came through two channels.";
+  }
+  body.appendChild(target);
+
+  const meta = el("div", "meta", fmtDay(n.day));
+  if ((n.overlap || []).length) meta.appendChild(document.createTextNode(" · matched on: " + n.overlap.join(", ")));
+  if (state === "done") {
+    meta.appendChild(document.createTextNode(" · done " + fmtDay(n.done.slice(0, 10)) + " · "));
+    const r = n.result || {};
+    meta.appendChild(r.url ? link("open ticket", r.url)
+                           : el("span", null, n.action === "wiki" ? "queued for the wiki" : "done"));
+  }
+  body.appendChild(meta);
+
+  if ((n.evidence || []).length) {
+    const details = el("details", "evidence");
+    details.appendChild(el("summary", null, "What you did"));
+    const ul = el("ul");
+    n.evidence.forEach(e => {
+      const li = el("li", null, e.kind + ": " + e.text);
+      (e.urls || []).slice(0, 3).forEach(u => {
+        li.appendChild(el("br"));
+        li.appendChild(link(u, u));
+      });
+      ul.appendChild(li);
+    });
+    details.appendChild(ul);
+    body.appendChild(details);
+  }
+  const errBox = el("div", "error");
+  body.appendChild(errBox);
+  row.appendChild(body);
+
+  if (n.action) row.appendChild(el("span", "badge " + n.action, n.action));
+
+  if (state !== "done") {
+    const actions = el("div", "actions");
+    if (n.action) {
+      const b = el("button", "primary", ACTION_LABELS[n.action] || n.action);
+      b.onclick = async () => {
+        b.disabled = true; b.textContent = "Working…"; errBox.textContent = "";
+        const result = await post(`/api/nudges/${encodeURIComponent(n.id)}/act`);
+        if (result.error) { errBox.textContent = result.error; b.disabled = false; b.textContent = ACTION_LABELS[n.action]; }
+        else load();
+      };
+      actions.appendChild(b);
+    }
+    if (state === "open") {
+      const d = el("button", null, "Dismiss");
+      d.onclick = async () => {
+        d.disabled = true;
+        const result = await post(`/api/nudges/${encodeURIComponent(n.id)}/dismiss`);
+        if (result.error) { errBox.textContent = result.error; d.disabled = false; }
+        else load();
+      };
+      actions.appendChild(d);
+    }
+    row.appendChild(actions);
+  }
+  return row;
+}
+
+function render(items, state, emptyText) {
+  const wrap = document.getElementById(state + "Wrap");
+  document.getElementById(state + "Hint").textContent = `${items.length}`;
+  wrap.textContent = "";
+  if (!items.length) { wrap.appendChild(el("div", "empty", emptyText)); return; }
+  items.forEach(n => wrap.appendChild(itemRow(n, state)));
+}
+
+async function load() {
+  const nudges = (await api("/api/nudges")).nudges || [];
+  const state = n => n.done ? "done" : n.dismissed ? "dismissed" : "open";
+  render(nudges.filter(n => state(n) === "open"), "open",
+    "Nothing open. The daily synthesis adds nudges here each morning it finds a connection.");
+  render(nudges.filter(n => state(n) === "done"), "done", "Nothing acted on yet.");
+  render(nudges.filter(n => state(n) === "dismissed"), "dismissed", "Nothing dismissed.");
+}
+
+load();
+</script>
+<script src="/static/nav.js"></script>
+</body>
+</html>

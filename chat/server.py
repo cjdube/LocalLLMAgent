@@ -1238,6 +1238,7 @@ VIEW_PAGES = {
     "/memories": "memories.html",
     "/map": "map.html",
     "/opportunities": "opportunities.html",
+    "/nudges": "nudges.html",
     "/starred": "starred.html",
     "/logs": "logs.html",
     "/activity": "activity.html",

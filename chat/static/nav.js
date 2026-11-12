@@ -14,6 +14,7 @@
     { href: "/activity", label: "activity" },
     { href: "/memories", label: "memories" },
     { href: "/opportunities", label: "opportunities" },
+    { href: "/nudges", label: "nudges" },
     { href: "/starred", label: "starred" },
     { href: "/games", label: "games" },
     { href: "/wiki", label: "wiki" },
