@@ -947,6 +947,21 @@ def test_a_broken_pipe_reconnects_and_the_retry_succeeds(gmail, monkeypatch):
     assert "Broken pipe" in logger.warnings[0]
 
 
+def test_a_stale_address_after_a_network_change_also_reconnects(gmail, monkeypatch):
+    """"[Errno 49] Can't assign requested address" is an OSError but not a
+    ConnectionError; it failed two notifications on 2026-11-12 with no retry."""
+    gmail.history_errors = [OSError(49, "Can't assign requested address")]
+    gmail.history_pages = [{"history": [], "historyId": "500"}]
+    reconnects = []
+    monkeypatch.setattr(gmail_read, "_reconnect",
+                        lambda: (reconnects.append(1), gmail)[1])
+
+    result = gmail_read.list_history("100", logger=_Recorder())
+
+    assert reconnects == [1]
+    assert "error" not in result
+
+
 def test_a_second_broken_pipe_is_an_error_not_another_retry(gmail, monkeypatch):
     """One retry only. A fresh connection that also dies is a real outage, and
     retrying forever would hang the watcher's callback instead of reporting it.

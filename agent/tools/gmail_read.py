@@ -571,7 +571,11 @@ def list_history(start_history_id: str, watch_label_id=None,
             page = service.users().history().list(
                 **params, **({"pageToken": page_token} if page_token else {})
             ).execute()
-        except ConnectionError as e:
+        except OSError as e:
+            # OSError, not ConnectionError: after a network change the stale
+            # socket raises "[Errno 49] Can't assign requested address", which
+            # is not a ConnectionError and failed two notifications 2026-11-12.
+            #
             # "[Errno 32] Broken pipe", three times in two days. Only
             # tasks/mail_watcher.py sees this: it is a daemon, the Gmail client
             # is cached for the life of the process, and Google closes an idle
