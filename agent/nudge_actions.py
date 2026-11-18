@@ -1,7 +1,7 @@
 """The one-tap actions on a daily-synthesis nudge.
 
-tasks/daily_synthesis.py pushes up to three "these line up" nudges a morning,
-and almost every one ends in a question — "update the wiki?", "add it to the
+tasks/daily_synthesis.py pushes every "these line up" nudge that scores
+MIN_NUDGE_SCORE or more each morning (no fixed count), and almost every one ends in a question — "update the wiki?", "add it to the
 idea?". Until this module the only way to say yes was to open chat and type it.
 Now each nudge carries one ntfy button, and the tap does the action here, in
 Python, with no model call:

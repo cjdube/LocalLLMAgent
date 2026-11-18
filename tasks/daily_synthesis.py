@@ -758,7 +758,7 @@ def main() -> int:
             logger.info("Daily synthesis run complete")
             return 0
 
-        # Drop connections already made in the last fortnight — see drop_repeats.
+        # Drop connections already made in the last RECENT_NUDGE_DAYS days — see drop_repeats.
         # Done before the model call, so a suppressed pair costs nothing and the
         # judge's time goes to what's actually new.
         matched = len(candidates)

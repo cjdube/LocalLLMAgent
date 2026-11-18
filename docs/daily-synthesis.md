@@ -149,8 +149,7 @@ A company nudge shows with Dismiss only.
 
 The row also stores `match_score` (shared tokens ÷ the smaller token set). The
 page does not show it: a one-token anchor always scores 1.0, so it is not a
-quality score. A model-given quality score belongs with the per-candidate judge
-step planned in the 2026-11-12 model-strain handoff.
+quality score. The judge's 0-10 score is stored as `score` and shown on the page.
 
 Backed by `GET /api/nudges`, `POST /api/nudges/<id>/act` and
 `POST /api/nudges/<id>/dismiss` in `chat/routes_nudges.py` (session auth).
