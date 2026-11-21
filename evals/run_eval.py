@@ -206,7 +206,14 @@ def score_chat(case: dict, calls: list[dict], final: str,
     low = (final or "").lower()
     must = case.get("final_must_contain")
     forbid = case.get("final_must_not_contain")
-    score["final_ok"] = all(s.lower() in low for s in must) if must else None
+    # Regexes, for what a substring can't say: "$" plus a digit is a rate,
+    # "$X" is a placeholder that still contains "$".
+    patterns = case.get("final_must_match")
+    if must or patterns:
+        score["final_ok"] = (all(s.lower() in low for s in must or [])
+                             and all(re.search(p, final or "", re.I) for p in patterns or []))
+    else:
+        score["final_ok"] = None
     if forbid:
         hits = [s for s in forbid if s.lower() in low]
         score["no_fabrication_ok"] = not hits

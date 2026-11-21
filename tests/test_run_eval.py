@@ -98,6 +98,17 @@ def test_score_chat_flags_a_tool_called_when_none_was_wanted():
     assert quiet["called_expected"] is None and quiet["args_ok"] is None
 
 
+def test_score_chat_final_must_match_takes_a_regex():
+    """`consulting_rates_placeholder`: "$X" contains "$" but is not a rate, so
+    a substring check passed replies with no number in them."""
+    case = {"expect_tool": None, "final_must_match": [r"\$\s?\d"]}
+    assert run_eval.score_chat(case, [], "about $250/hour")["final_ok"] is True
+    assert run_eval.score_chat(case, [], "you commit $X amount")["final_ok"] is False
+    both = dict(case, final_must_contain=["retainer"])
+    assert run_eval.score_chat(both, [], "a $250 retainer")["final_ok"] is True
+    assert run_eval.score_chat(both, [], "a $250 fee")["final_ok"] is False
+
+
 def test_score_chat_checks_argument_values():
     """The weekday rule: the PHRASE goes to the tool, not a date the model
     worked out. A resolved date fails even when it is the right day."""

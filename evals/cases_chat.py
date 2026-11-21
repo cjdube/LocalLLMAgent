@@ -493,4 +493,33 @@ CASES = [
         "prompt": "Can you sort that out for me?",
         "expect_tool": None,
     },
+    # ---- reported by Craig ------------------------------------------------- #
+    {
+        # 2026-11-21: asked for rates to consider, got "$[Market Rate]" and
+        # "$[Lower Rate]" placeholders instead of numbers. Gemini, same prompt,
+        # gave real ranges ($3,500-$7,500 fixed, $250-$400/hour).
+        "id": "consulting_rates_placeholder",
+        "prompt": (
+            "I may have an opportunity to do some consulting. A former coworker is "
+            "interested in doing more with AI but not really sure where to start. "
+            "I've shown them what I've done, and they seem pretty impressed. They'd "
+            "like my assistance in helping out with something.\n\n"
+            "This is my first potential client, so I've never set a rate or "
+            "established a cost structure before. In truth, if the job is small "
+            "enough, I would value the ability to reference this person as a "
+            "customer and potential word of mouth more than I would any sort of "
+            "revenue or income that would come in. That said, I also don't want to "
+            "be giving away skills and knowledge for free when there's a premium to "
+            "be paid for most of this stuff.\n\n"
+            "I'd like your take on ways I could structure this initial arrangement, "
+            "rates that I might want to consider, or, I guess, other compensation "
+            "packages or solutions. Also, I'm going to need some assistance coming "
+            "up with some ways to actually structure contracts. What can you provide?"
+        ),
+        "expect_tool": None,
+        # A rate is "$" plus a digit. "$X" (seen in the first eval run) and
+        # "$[...]" are placeholders, not rates.
+        "final_must_match": [r"\$\s?\d"],
+        "final_must_not_contain": ["$[", "[market rate]", "[lower rate]"],
+    },
 ]
