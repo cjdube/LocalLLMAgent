@@ -62,6 +62,12 @@ the likeliest way a reasoning-first candidate model differs from an incumbent.
 mostly what this is for. `--path chat|tasks|both`, `--only <case ids>` and
 `--timeout` are the other flags.
 
+`evals.score --compare BEFORE.json AFTER.json` puts two runs of one model side
+by side — the live prompt, then a candidate prompt — as reps passed per case,
+compared as rates so the two runs may use different rep counts. Any drop prints
+`REGRESSED`. Scores are stored at run time, so a raw file made before a case's
+checks changed still carries the old verdicts; rerun it, don't compare it.
+
 Ollama serves **one request at a time** ([ollama-serving.md](ollama-serving.md)),
 so while this runs, chat stalls and scheduled tasks queue behind it. Run it
 overnight or over a long break. Budget 90 minutes to 2 hours per model.

@@ -151,12 +151,70 @@ def print_failures(records: list[dict], limit: int) -> None:
             print(f"    loop: {warning[:200]}")
 
 
+def _rep_passed(r: dict) -> bool:
+    """A rep that errored passes nothing, even if no check came back False."""
+    return (r.get("outcome") not in ("error", "unavailable")
+            and not any(v is False for v in r["score"].values()))
+
+
+def compare(before: list[dict], after: list[dict]) -> list[dict]:
+    """Per case run in both: reps passed before and after, and a verdict.
+
+    Compared as RATES, because the two runs may use different rep counts (the
+    loop reruns its target cases at 10). Any drop is REGRESSED — a 3/3 -> 2/3
+    may be noise, but a coach candidate has to earn its place, not be given
+    the benefit of the doubt."""
+    def tally(records):
+        out: dict = {}
+        for r in records:
+            passed, total = out.get(r["case"], (0, 0))
+            out[r["case"]] = (passed + _rep_passed(r), total + 1)
+        return out
+
+    a, b = tally(before), tally(after)
+    rows = []
+    for case in a:
+        if case not in b:
+            continue
+        (pa, na), (pb, nb) = a[case], b[case]
+        verdict = ("REGRESSED" if pb / nb < pa / na
+                   else "improved" if pb / nb > pa / na else "")
+        rows.append({"case": case, "before": f"{pa}/{na}", "after": f"{pb}/{nb}",
+                     "verdict": verdict})
+    return rows
+
+
+def print_compare(rows: list[dict], skipped: list[str]) -> None:
+    width = max((len(r["case"]) for r in rows), default=10)
+    print(f"\nCOMPARE — reps passed\n{'':<{width}}  {'before':>8}{'after':>8}")
+    for r in rows:
+        print(f"{r['case']:<{width}}  {r['before']:>8}{r['after']:>8}  {r['verdict']}")
+    improved = sum(r["verdict"] == "improved" for r in rows)
+    regressed = sum(r["verdict"] == "REGRESSED" for r in rows)
+    print(f"\n{improved} improved, {regressed} regressed, "
+          f"{len(rows) - improved - regressed} unchanged")
+    if skipped:
+        print(f"In only one run, not compared: {', '.join(skipped)}")
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("raw", nargs="?", type=Path, help="Raw JSON. Default: newest.")
     parser.add_argument("--failures", type=int, default=25,
                         help="How many failures to print in full.")
+    parser.add_argument("--compare", nargs=2, type=Path, metavar=("BEFORE", "AFTER"),
+                        help="Two raw files of one model: live prompt, then candidate.")
     args = parser.parse_args(argv)
+
+    if args.compare:
+        before, after = (json.loads(p.read_text()) for p in args.compare)
+        for p, records in zip(args.compare, (before, after)):
+            if len({r["model"] for r in records}) > 1:
+                sys.exit(f"{p} holds more than one model; compare needs one each.")
+        rows = compare(before, after)
+        cases = dict.fromkeys(r["case"] for r in before + after)
+        print_compare(rows, [c for c in cases if c not in {r["case"] for r in rows}])
+        return 0
 
     path = args.raw or latest_raw()
     records = json.loads(path.read_text())

@@ -109,3 +109,44 @@ def test_main_reads_a_raw_file_and_prints(tmp_path, capsys):
 
     out = capsys.readouterr().out
     assert "CHAT" in out and "SCHEDULED TASKS" in out and "PER-CASE" in out
+
+
+def test_compare_flags_a_fixed_case_and_a_regressed_one():
+    """The /improve-wren gate: the target case must improve AND nothing may get
+    worse. Rates, not counts — the after run uses 10 reps on its target."""
+    before = [_chat("m", "target", rep=i, final_ok=False) for i in (1, 2, 3)] + \
+             [_chat("m", "steady", rep=i, final_ok=True) for i in (1, 2, 3)] + \
+             [_chat("m", "same", rep=i, final_ok=i != 3) for i in (1, 2, 3)] + \
+             [_chat("m", "more_reps", rep=i, final_ok=True) for i in (1, 2, 3)]
+    after = [_chat("m", "target", rep=i, final_ok=i > 2) for i in range(1, 11)] + \
+            [_chat("m", "steady", rep=i, final_ok=i != 1) for i in (1, 2, 3)] + \
+            [_chat("m", "same", rep=i, final_ok=i != 1) for i in (1, 2, 3)] + \
+            [_chat("m", "more_reps", rep=i, final_ok=i != 1) for i in range(1, 11)]
+
+    rows = {r["case"]: r for r in score.compare(before, after)}
+
+    assert rows["target"] == {"case": "target", "before": "0/3", "after": "8/10",
+                              "verdict": "improved"}
+    assert rows["steady"]["verdict"] == "REGRESSED"
+    assert rows["same"]["verdict"] == ""
+    # 9 passes beat 3 as a count, but 9/10 is below 3/3.
+    assert rows["more_reps"]["verdict"] == "REGRESSED"
+
+
+def test_compare_counts_an_errored_rep_as_failed():
+    """An errored run can carry no False check at all; it still passed nothing."""
+    before = [_chat("m", "a", final_ok=True)]
+    crashed = dict(_chat("m", "a"), outcome="error")
+    assert score.compare(before, [crashed])[0]["verdict"] == "REGRESSED"
+
+
+def test_main_compare_names_cases_in_only_one_run(tmp_path, capsys):
+    a, b = tmp_path / "a.json", tmp_path / "b.json"
+    a.write_text(json.dumps([_chat("m", "x", final_ok=False), _chat("m", "old")]))
+    b.write_text(json.dumps([_chat("m", "x", final_ok=True), _chat("m", "new")]))
+
+    assert score.main(["--compare", str(a), str(b)]) == 0
+
+    out = capsys.readouterr().out
+    assert "1 improved, 0 regressed" in out
+    assert "not compared: old, new" in out
