@@ -550,9 +550,43 @@ def _writable(api_key: str):
     return token, team_id, _spaces(token, team_id), None
 
 
+def _resolve_fields(token: str, list_id: str, fields: dict) -> list:
+    """Turn {"Field name": "value"} into ClickUp's custom_fields payload, using
+    the List's own field definitions. A drop-down value is matched to its
+    option by name; a date is YYYY-MM-DD, sent as local midnight in ms.
+    Unknown fields, options and types refuse and name what exists."""
+    defs = {_slug(f.get("name", "")): f for f in _get(f"/list/{list_id}/field", token).get("fields", [])}
+    out = []
+    for name, value in fields.items():
+        f = defs.get(_slug(name))
+        if not f:
+            known = ", ".join(d["name"] for d in defs.values())
+            raise _ClickUpError(f"no custom field '{name}' on this List. Fields: {known}")
+        kind = f.get("type")
+        if kind == "drop_down":
+            opts = f.get("type_config", {}).get("options", [])
+            match = [o for o in opts if _slug(o.get("name", "")) == _slug(value)]
+            if not match:
+                known = ", ".join(o.get("name", "") for o in opts)
+                raise _ClickUpError(f"'{value}' is not an option of '{f['name']}'. Options: {known}")
+            out.append({"id": f["id"], "value": match[0]["id"]})
+        elif kind == "date":
+            try:
+                ms = int(datetime.strptime(value, "%Y-%m-%d").timestamp() * 1000)
+            except ValueError:
+                raise _ClickUpError(f"'{f['name']}' needs a date as YYYY-MM-DD, not '{value}'")
+            out.append({"id": f["id"], "value": ms, "value_options": {"time": False}})
+        elif kind in ("text", "short_text", "url", "email"):
+            out.append({"id": f["id"], "value": value})
+        else:
+            raise _ClickUpError(f"field '{f['name']}' is of type '{kind}', which this tool cannot set")
+    return out
+
+
 def add_clickup_task(title: str, space: str, list_name: str = None,
                      description: str = None, tags: list = None,
-                     priority: str = None, api_key: str = None) -> dict:
+                     priority: str = None, api_key: str = None,
+                     fields: dict = None) -> dict:
     """Create a Task on a List inside one Space.
 
     The status is NOT a parameter: a new Task starts at that Space's own first
@@ -593,6 +627,8 @@ def add_clickup_task(title: str, space: str, list_name: str = None,
             payload["tags"] = [t for t in tags if t and t.strip()]
         if priority:
             payload["priority"] = _resolve_priority(priority)
+        if fields:
+            payload["custom_fields"] = _resolve_fields(token, list_id, fields)
         created = _write("POST", f"/list/{list_id}/task", token, payload)
     except _ClickUpError as e:
         return {"error": str(e)}
@@ -1335,6 +1371,8 @@ def main() -> int:
     parser.add_argument("--tag", dest="tags", action="append", default=None)
     parser.add_argument("--priority", default=None)
     parser.add_argument("--comment", default=None)
+    parser.add_argument("--field", dest="fields", action="append", default=None,
+                        help='add: set a custom field, "Name=Value" (repeatable)')
     parser.add_argument("--api-key", dest="api_key", default=None)
     args = parser.parse_args()
 
@@ -1350,9 +1388,12 @@ def main() -> int:
     if args.command == "add":
         if not args.title or not args.space:
             parser.error("add needs --title and --space")
+        if any("=" not in f for f in args.fields or []):
+            parser.error('--field needs "Name=Value"')
+        fields = dict(f.split("=", 1) for f in args.fields or [])
         return print_result(add_clickup_task(args.title, args.space, args.list_name,
                                              args.description, args.tags,
-                                             args.priority, args.api_key))
+                                             args.priority, args.api_key, fields))
     if args.command == "move":
         if not args.title or not args.status:
             parser.error("move needs --title and --status")

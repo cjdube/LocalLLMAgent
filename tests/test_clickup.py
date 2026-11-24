@@ -86,6 +86,8 @@ def stub(monkeypatch):
             return routes.get("lists", {"lists": [{"id": "901419409898", "name": "Backlog"}]})
         if path.endswith("/folder"):
             return routes.get("folders", {"folders": []})
+        if path.endswith("/field"):
+            return routes.get("fields", {"fields": []})
         if "/comment" in path:
             return routes.get("comments", {"comments": []})
         if path.startswith("/task/"):
@@ -644,6 +646,42 @@ def test_add_clickup_task_sends_the_right_payload_to_the_right_list(stub):
     assert payload["name"] == "Better logging"
     assert payload["markdown_content"] == "Rotate the launchd logs."
     assert payload["tags"] == ["maintenance"]
+
+
+_BLOG_FIELDS = {"fields": [
+    {"id": "f-type", "name": "Blog Types", "type": "drop_down",
+     "type_config": {"options": [{"id": "o-art", "name": "Articles"},
+                                 {"id": "o-ps", "name": "Personal Stories"}]}},
+    {"id": "f-date", "name": "Publication Date", "type": "date"},
+    {"id": "f-media", "name": "Media File", "type": "attachment"},
+]}
+
+
+def test_add_clickup_task_sets_custom_fields_by_name(stub):
+    """Drop-downs go by option id and dates by local-midnight ms; the caller
+    only ever says names and YYYY-MM-DD."""
+    stub.routes["fields"] = _BLOG_FIELDS
+    clickup.add_clickup_task("Post", "wren", fields={
+        "blog types": "personal stories", "Publication Date": "2026-11-23"})
+    (_, _, payload), = stub.writes
+    midnight = int(datetime(2026, 11, 23).timestamp() * 1000)
+    assert payload["custom_fields"] == [
+        {"id": "f-type", "value": "o-ps"},
+        {"id": "f-date", "value": midnight, "value_options": {"time": False}},
+    ]
+
+
+@pytest.mark.parametrize("fields, said", [
+    ({"Author": "Craig"}, "Blog Types"),             # unknown field names the real ones
+    ({"Blog Types": "Poems"}, "Personal Stories"),   # unknown option names the real ones
+    ({"Publication Date": "11/23/26"}, "YYYY-MM-DD"),
+    ({"Media File": "x.png"}, "attachment"),         # a type it cannot set
+])
+def test_add_clickup_task_refuses_bad_fields_without_writing(stub, fields, said):
+    stub.routes["fields"] = _BLOG_FIELDS
+    out = clickup.add_clickup_task("Post", "wren", fields=fields)
+    assert said in out["error"]
+    assert stub.writes == []
 
 
 def test_add_clickup_task_sends_the_description_as_markdown_not_plain_text(stub):
