@@ -173,7 +173,7 @@ the true total, so a capped list never reads as the whole backlog.
 Three, all in `WRITE_TOOLS`, so each one pauses for a tap on the phone before it
 runs. Nothing below happens without that tap.
 
-### `add_clickup_task(title, space, list_name, description, tags, priority)`
+### `add_clickup_task(title, space, list_name, description, tags, priority, fields)`
 
 `space` is **required**. There is no safe default, and a Task filed in the wrong
 Space is worse than a question — it is invisible exactly where the user goes
@@ -198,6 +198,13 @@ with its own `>` showing — which is what `/clickup-ticket` produced until this
 was fixed. `markdown_content` is the same field parsed as Markdown, and plain
 prose parses to itself, so no caller loses anything. ClickUp ignores
 `description` outright when both are sent, so only one is ever sent.
+
+**Custom fields: `fields`, CLI only.** `--field "Name=Value"` (repeatable) on
+`add`. Field and option names match by `_slug`, so case and punctuation do not
+matter. Drop-down, date (`YYYY-MM-DD`, sent as local midnight) and text-like
+fields are supported. An unknown field, option or type is refused, with the real
+names listed, before the Task is created. `fields` is not in the model's
+`TOOL_SCHEMA`.
 
 ### `move_clickup_task(title, status)`
 
@@ -478,10 +485,12 @@ and says how much it left out.
   hours on the free plan without their AI add-on. The plain REST v2 API with a
   personal token is 100 requests per *minute*. Same lesson as the Composio →
   Strava-direct move.
-- **No custom fields.** The free plan caps them at roughly 60–100 uses a month
-  and every ClickUp guide tells you to build on them. Tags and the built-in
-  priority field carry the labelling instead. (Priority is inverted in the API:
-  1 = Urgent, 4 = Low.)
+- **Custom fields are CLI-only.** `add --field "Name=Value"` sets them (see
+  `add_clickup_task` above), for `/clickup-ticket` blog mode. They are not in the
+  model's schema: tags and the built-in priority field carry Wren's labelling.
+  The workspace is on the paid Core plan (unlimited custom fields), so the free
+  plan's monthly field-use cap no longer applies. (Priority is inverted in the
+  API: 1 = Urgent, 4 = Low.)
 
 ## Settled before the writes were built
 

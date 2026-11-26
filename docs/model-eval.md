@@ -329,7 +329,8 @@ back-to-back.
 
 Chat cases go in `evals/cases_chat.py`: a prompt, the expected tool (or `None`),
 optional `arg_checks` predicates, canned `tool_results`, and optional
-`final_must_contain` / `final_must_not_contain`. A test asserts the expected
+`final_must_contain` / `final_must_not_contain` (substrings, case-insensitive)
+and `final_must_match` (regexes, case-insensitive; all must match). A test asserts the expected
 tool is actually offered for that prompt under keyword pre-loading, so a case
 can't quietly end up measuring `GROUP_KEYWORDS` instead of the model.
 
