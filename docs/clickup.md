@@ -362,8 +362,8 @@ is excluded from the `/map` dashboard's run history on purpose and needs no
 
 ### The library functions
 
-`tagged_clickup_tasks()`, `remove_clickup_tag()`, `clickup_task_detail()`,
-`download_attachment()`, `find_task_id()` and `upload_attachment()` live in
+`tagged_clickup_tasks()`, `remove_clickup_tag()`, `clickup_task_detail()`
+and `download_attachment()` live in
 `agent/tools/clickup.py` but are **not** chat tools and have no schema. They are
 the only functions in that module that take a ClickUp **id** or a ClickUp URL,
 which is exactly why: an id must never reach the model
@@ -372,16 +372,6 @@ call takes a title.
 
 `tagged_clickup_tasks` sets `include_closed`: a tag on a shipped Task is still a
 request.
-
-`find_task_id` and `upload_attachment` exist for
-[filing a session as a Task](session-ticket.md). `add_clickup_task` does not
-return the id of what it created — its result goes to the model — so a caller
-that must then hang a file on that Task asks for the id separately, by the title
-it chose itself. `upload_attachment` is the one call in the module that goes
-through neither `_get` nor `_write`: ClickUp's attachment endpoint is multipart,
-and `_write` hardcodes JSON. That makes it a third HTTP door, so it is named in
-its own right in `tests/conftest.py:_block_clickup_egress` — a door not named
-there reaches the live API from a green test run.
 
 ### The tag name may not contain a slash
 
